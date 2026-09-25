@@ -75,22 +75,22 @@ For the 20 #153-owned rows:
 |---|---:|
 | `SUPPORTED_END_TO_END` | 0 |
 | `SUPPORTED_SEMANTICS` | 0 |
-| `PARSED_ONLY` | 19 |
-| `PARTIAL` | 1 |
+| `PARSED_ONLY` | 13 |
+| `PARTIAL` | 7 |
 | `UNSUPPORTED` | 0 |
 | `DEFERRED` | 0 |
 | `BLOCKED` | 0 |
 | `NOT_APPLICABLE` | 0 |
 | `UNKNOWN` | 0 |
 
-`PARSED_ONLY` is used deliberately. Arkst's generic frontend/IR path
-recognizes and source-preservingly retains unresolved calls, but no semantic
-implementation exists for those 19 names. A preserved `IrNode::FunctionCall`
-or inline directive is not a successful setter, typed node, state mutation,
-or renderer claim. `.captionposition` is `PARTIAL` because its evaluator and
-immutable IR semantics are implemented and independently evidenced, while
-caption output remains outside the current boundary. #166 now covers the
-source-backed raw-body fallback for the bounded `.captionposition` setter.
+`PARSED_ONLY` is used deliberately for the 13 rows that still have only
+recognition/source-retention evidence. A preserved `IrNode::FunctionCall` or
+inline directive is not a successful setter, typed node, state mutation, or
+renderer claim. Seven rows are conservatively `PARTIAL`: `.captionposition`,
+`.numbering`, `.nonumbering`, the bounded `.pageformat` alignment/geometry
+slice, `.autopagebreak`, `.noautopagebreak`, and the bounded `.slides`
+configuration/PDF slice. `PARTIAL` does not claim complete v2.5.1 output
+equivalence; each row retains the residual contract recorded below.
 
 ## 4. Pinned upstream semantic contracts
 
@@ -131,10 +131,17 @@ the supplied map is a complete replacement and omitted keys are disabled.
 
 There is no getter and no document content output. The mutation is
 document-scoped and must be atomic: map conversion and all format parsing must
-finish before `DocumentInfo.numbering` is replaced. Heading, figure, table,
-math, code, footnote, and custom-numbered output consumers are separate
-renderer/AST boundaries. Arkst has no binder, typed numbering model in
-`IrDocumentState`, or numbering-aware backend path; status is `PARSED_ONLY`.
+finish before publication. Arkst now implements a bounded evaluator/IR slice:
+shared binding plus body-compatible Dictionary conversion, parsed
+`IrNumberingFormat` tokens, typed built-in fields, the required duplicate
+`extra` storage for every input key, merge/replace mutation, `.nonumbering`
+as an empty replacement, failure rollback, serde-compatible state, and the
+document type in effect at commit time as the downstream default-numbering
+basis. It deliberately does not fabricate unresolved document-type default
+formats. Heading, figure, table, math, code, footnote, and custom-numbered
+output consumers remain separate renderer/AST boundaries. Status is
+`PARTIAL`; numbering-aware output and complete default resolution remain open
+under #175 and the applicable content owners.
 
 #### `.font`
 
@@ -214,11 +221,13 @@ borders, border color, background, and text alignment are typed layout
 domains. Plain and slides documents have documented renderer limitations, and
 page-format data is not itself a getter or output node.
 
-The state is genuinely document-scoped and would require backend-neutral
-`PageFormatInfo`, selector, size, color, closed enum, and merge representation;
-it must not contain Typst page objects. Arkst only has the existing
-component-oriented `IrSize` conversion and no page-format state, layer merge,
-or page backend; status is `PARSED_ONLY`.
+The state is genuinely document-scoped and must remain backend-neutral.
+Arkst now has a bounded `.pageformat` slice for explicit width+height geometry
+and document alignment, including current Typst/PDF consumers and row/column
+alignment inheritance. It does not yet implement selector/range, standard
+size/orientation, margins, border/background, columns, or complete layer
+precedence, and must not place Typst page objects in evaluator/IR state.
+Status is conservatively `PARTIAL` under #175.
 
 ### Caption state
 
@@ -345,9 +354,11 @@ option field starts at `1`; effective behavior is document-type/renderer
 dependent. A heading at depth less than or equal to the threshold can force a
 break. Negative values fail before mutation, while zero disables automatic
 breaks. `noautopagebreak()` is the zero-threshold shorthand. These are
-document/pipeline configuration, not component-local layout. Arkst has no
-option mutation, heading interaction, or renderer page-break consumption;
-status is `PARSED_ONLY` under #175.
+document/pipeline configuration, not component-local layout. Arkst now has a
+typed document-state threshold and bounded heading/page-break consumption in
+the current Typst path, including zero-disable behavior. Complete pinned-v2.5.1
+reconciliation across document types and all error/default cases remains open;
+both rows are `PARTIAL` under #175.
 
 ### Navigation, outline, and table of contents
 
@@ -399,14 +410,16 @@ is a closed `NONE`/`FADE`/`SLIDE`/`ZOOM` domain; speed is closed
 specified, because the upstream node constructs a transition only then.
 
 The configuration is document-wide presentation state, but upstream carries it
-as an ordered AST initializer rather than `DocumentInfo` metadata. Arkst
-has no document-type gate, typed transition domains, initializer IR, or slide
-backend. `.fragment` and `.speakernote` remain separate #154 content rows.
-Status is `PARSED_ONLY` under #178.
+as an ordered AST initializer rather than `DocumentInfo` metadata. Arkst now
+has a bounded slides state/PDF slice for the currently evidenced center/page
+geometry behavior. Controls, speaker notes, transition style/speed, complete
+v2.5.1 document-type gating/defaults, and the separate #154
+`.fragment`/`.speakernote` content rows remain open. Status is `PARTIAL`
+under #178.
 
 ## 5. Arkst pipeline and architecture boundary
 
-The current path for the 19 unresolved rows is:
+The current path for the 13 still-unresolved rows is:
 
 ```text
 source call with source span
@@ -428,25 +441,26 @@ separate: `IrComponent::Stacked`, `IrComponent::Container`, and
 not establish document-wide `.pageformat`, `.font`, `.paragraphstyle`, or
 `.slides` state.
 
-`DocumentState` at this base is evaluator-only and contains exactly the
-metadata/state families already owned by #152 plus the bounded caption state:
-name, description, document type, ordered authors, keywords, optional theme,
-optional locale, and `IrCaptionPositionInfo`. Callable child contexts share a
-reference-counted state handle; successful evaluation snapshots it into
-`IrDocumentState`. No new field is added by this audit.
+`DocumentState` remains evaluator-owned and shared by callable child contexts.
+In addition to the #152 metadata families and bounded caption state, current
+bounded implementations now carry numbering mutation state,
+automatic-page-break depth, page alignment/geometry, and bounded slides
+configuration. Successful evaluation snapshots those backend-neutral values
+into `IrDocumentState`.
 
-`IrDocumentState` is immutable, backend-neutral, serde-serializable data. Its
-caption fields use a closed enum and nullable per-kind overrides. It currently
-does not represent numbering, font layers, paragraph style, page-format
-selectors, TeX macros, page counters, navigation/TOC derived state, automatic
-page-break options, or slide transitions. None of those should be added merely
-because the audit found a gap; each requires a separate semantic contract and
-architecture review after #156.
+`IrDocumentState` remains immutable, backend-neutral, and serde-serializable.
+The numbering representation stores parsed tokens, source-order mutation
+intent, duplicate `extra` entries, and call-time document type without
+renderer objects. Font layers, paragraph style, full page-format
+selectors/layers, TeX macros, page counters, navigation/TOC derived state, and
+slide transition domains remain absent until their separately owned contracts
+are implemented.
 
-Typst lowering consumes normalized IR nodes/components, not evaluator calls,
-binding rules, runtime state, or unresolved calls. Existing Typst tests prove
-component behavior only. No #153-owned row has current Typst/PDF/HTML output
-equivalence, and `.captionposition` intentionally has no renderer consumer.
+Typst lowering consumes normalized IR/state, not unresolved evaluator calls.
+No #153-owned row has complete v2.5.1 output equivalence. Bounded output
+evidence does exist for current page geometry/alignment, automatic page breaks,
+and slides/PDF behavior; numbering and caption position intentionally have no
+numbering/caption renderer consumer in this slice.
 
 ### Binding, conversion, atomicity, scope, and precedence
 
@@ -463,12 +477,12 @@ equivalence, and `.captionposition` intentionally has no renderer consumer.
 - Stateful setters must validate/bind/convert all candidates before one
   commit. Nested evaluation that successfully mutates shared document state
   must use the post-evaluation state as its successful baseline; rollback must
-  restore the whole pre-call state on later failure. This is already evidenced
-  for `.captionposition` and is a requirement for future state work, not a new
-  production change here.
+  restore the whole pre-call state on later failure. This is evidenced for
+  `.captionposition` and the bounded numbering mutation state and remains a
+  requirement for later state work.
 - Source-defined shadowing remains the established local native-dispatch rule.
-  The audit does not add native names for #153 rows, so no precedence change is
-  made.
+  Native ownership is added only for bounded `PARTIAL` rows that have an actual
+  evaluator implementation; unresolved rows remain structurally preserved.
 - None/omission semantics are field-specific: they can preserve inherited
   values (`captionposition`, `paragraphstyle`, `pageformat` layers), select
   renderer defaults (`font`, slide fields), disable a numbering key (`none`),
@@ -477,16 +491,12 @@ equivalence, and `.captionposition` intentionally has no renderer consumer.
 
 ### Serde and WASM implications
 
-No serde format, IR field, production state structure, dependency, or
-WASM-sensitive code changes in this audit. Existing caption serde tests cover
-deterministic round trips and old IR defaulting. Future representation work
-must add `#[serde(default)]` for new optional state without invalidating old
-serialized documents, keep closed domains typed, and avoid font/resource/JVM,
-filesystem, process, or network dependencies in core/IR/evaluator code. Page
-geometry, typography, and slide configuration can be represented as
-backend-neutral data only after their upstream inheritance and output
-contracts are fixed; renderer handles and media storage must remain downstream
-or host-owned.
+New bounded state remains serde-compatible and WASM-safe: numbering state is
+backend-neutral, defaults when absent in old IR, and contains no filesystem,
+process, network, JVM, media-store, or renderer handles. Existing caption,
+page-geometry/alignment, automatic-page-break, and slides state follow the same
+boundary. Future font/resource and remaining layout representation must keep
+those host/backend concerns downstream.
 
 ## 6. Cross-audit reconciliation
 
@@ -522,7 +532,8 @@ Existing issues and evidence reused:
 | #156 | Required final reconciliation and dependency-aware implementation order |
 | #158, #160 | Raw/structured content prerequisites relevant to body fallback |
 
-New cohesive implementation follow-ups were created, but none was started:
+The cohesive implementation follow-ups below remain authoritative; several
+bounded slices have since started or landed and retain their residual scope:
 
 | Issue | Exact scope | Owner/layer | Prerequisites and order |
 |---|---|---|---|
@@ -541,9 +552,10 @@ follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 
 ## 8. Audit conclusion
 
-The canonical #153 result is a 20-row owned inventory with one bounded
-semantic/IR slice (`captionposition`) and 19 parser/structural-retention-only
-rows. The audit found no evidence supporting a document-wide generalized style
-system, no need to broaden `DocumentState` during this work, and no current
-output-equivalence claim for any #153-owned surface. Production semantic/state
-changes: **none**.
+The canonical #153 result remains a 20-row owned inventory. Current status is
+seven conservative `PARTIAL` rows (`captionposition`,
+`numbering`/`nonumbering`, bounded `pageformat`,
+`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 13
+`PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
+or justify a generalized document-wide style system. Residual ownership remains
+#175–#178 and the applicable #154 content/output consumers.
