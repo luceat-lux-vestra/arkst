@@ -3466,7 +3466,33 @@ mod tests {
                 page_alignment: None,
                 page_geometry: None,
                 slides: None,
-                numbering: None,
+                numbering: Some(IrDocumentNumbering {
+                    inherits_document_defaults: true,
+                    headings: Some(IrNumberingFormat {
+                        tokens: vec![
+                            IrNumberingToken::Decimal,
+                            IrNumberingToken::Literal(".".to_string()),
+                        ],
+                    }),
+                    extra: vec![
+                        IrNumberingEntry {
+                            name: "headings".to_string(),
+                            format: IrNumberingFormat {
+                                tokens: vec![
+                                    IrNumberingToken::Decimal,
+                                    IrNumberingToken::Literal(".".to_string()),
+                                ],
+                            },
+                        },
+                        IrNumberingEntry {
+                            name: "custom".to_string(),
+                            format: IrNumberingFormat {
+                                tokens: vec![IrNumberingToken::UpperAlpha],
+                            },
+                        },
+                    ],
+                    ..IrDocumentNumbering::default()
+                }),
             },
             ..IrMetadata::default()
         };
