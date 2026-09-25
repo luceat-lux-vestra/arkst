@@ -26283,4 +26283,179 @@ mod tests {
         assert!(numbering.extra.is_empty());
     }
 
+    fn numbering_dictionary(entries: Vec<(&str, IrValue)>, span: SourceSpan) -> IrValue {
+        IrValue::Dictionary(IrDictionary {
+            entries: entries
+                .into_iter()
+                .map(|(name, value)| IrPair {
+                    first: Box::new(IrValue::String(name.to_string())),
+                    second: Box::new(value),
+                    span,
+                })
+                .collect(),
+            span,
+        })
+    }
+
+    #[test]
+    fn issue_175_numbering_merge_and_replace_publish_atomically() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 40);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let outcome = evaluator.evaluate_call_value(
+            "numbering",
+            &[],
+            &[named_arg(
+                "formats",
+                numbering_dictionary(
+                    vec![
+                        ("headings", IrValue::String("1.".to_string())),
+                        ("custom", IrValue::String("A".to_string())),
+                    ],
+                    call_span,
+                ),
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::NoValue), "{outcome:?}");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let first = context
+            .document_state_snapshot()
+            .numbering
+            .expect("numbering state");
+        assert!(first.inherits_document_defaults);
+        assert!(first.headings.is_some());
+        assert_eq!(first.extra.len(), 2);
+        assert_eq!(first.extra[0].name, "headings");
+        assert_eq!(first.extra[1].name, "custom");
+
+        diagnostics.clear();
+        let outcome = evaluator.evaluate_call_value(
+            "numbering",
+            &[],
+            &[
+                named_arg("merge", IrValue::Boolean(false)),
+                named_arg(
+                    "formats",
+                    numbering_dictionary(
+                        vec![("tables", IrValue::String("a".to_string()))],
+                        call_span,
+                    ),
+                ),
+            ],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::NoValue), "{outcome:?}");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let replacement = context
+            .document_state_snapshot()
+            .numbering
+            .expect("replacement numbering state");
+        assert!(!replacement.inherits_document_defaults);
+        assert!(replacement.headings.is_none());
+        assert!(replacement.tables.is_some());
+        assert_eq!(replacement.extra.len(), 1);
+        assert_eq!(replacement.extra[0].name, "tables");
+    }
+
+    #[test]
+    fn issue_175_numbering_none_and_nonumbering_preserve_explicit_disable() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 30);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let outcome = evaluator.evaluate_call_value(
+            "numbering",
+            &[],
+            &[named_arg(
+                "formats",
+                numbering_dictionary(vec![("figures", IrValue::None)], call_span),
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::NoValue), "{outcome:?}");
+        let numbering = context
+            .document_state_snapshot()
+            .numbering
+            .expect("numbering state");
+        assert!(numbering.inherits_document_defaults);
+        assert_eq!(
+            numbering.figures.expect("explicit figures format").tokens,
+            Vec::<IrNumberingToken>::new()
+        );
+        assert_eq!(numbering.extra[0].name, "figures");
+        assert!(numbering.extra[0].format.tokens.is_empty());
+
+        diagnostics.clear();
+        let outcome = evaluator.evaluate_call_value(
+            "nonumbering",
+            &[],
+            &[],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::NoValue), "{outcome:?}");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            context.document_state_snapshot().numbering,
+            Some(IrDocumentNumbering::default())
+        );
+    }
+
+    #[test]
+    fn issue_175_numbering_invalid_format_rolls_back_existing_state() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 30);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_numbering_configuration(IrDocumentNumbering {
+            inherits_document_defaults: true,
+            headings: Some(parse_numbering_format("1").unwrap()),
+            ..IrDocumentNumbering::default()
+        });
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "numbering",
+            &[],
+            &[named_arg(
+                "formats",
+                numbering_dictionary(
+                    vec![("tables", IrValue::String("\\".to_string()))],
+                    call_span,
+                ),
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("escape character"));
+    }
+
 }
