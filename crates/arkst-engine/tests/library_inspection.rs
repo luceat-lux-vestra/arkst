@@ -116,13 +116,13 @@ fn evaluate_with_env(
 fn initial_registry_is_stdlib_only_and_unknowns_fail_closed() {
     let source_id = SourceId(1);
     let (result, diagnostics) = evaluate_plain(
-        ".libraries\n.libexists {stdlib}\n.libexists {missing}\n.functionexists {size}\n.functionexists {paragraphstyle}\n.libfunctions {missing}",
+        ".libraries\n.libexists {stdlib}\n.libexists {missing}\n.functionexists {size}\n.functionexists {paragraphstyle}\n.functionexists {font}\n.libfunctions {missing}",
         source_id,
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(
         paragraph_texts(&result),
-        vec!["stdlib", "true", "false", "true", "true"]
+        vec!["stdlib", "true", "false", "true", "true", "true"]
     );
 }
 
@@ -172,6 +172,7 @@ fn stdlib_enumeration_is_oracle_ordered_but_support_filtered() {
         "include",
         "code",
         "extend",
+        "font",
         "paragraphstyle",
         "pageformat",
     ] {
