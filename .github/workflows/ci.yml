@@ -13,6 +13,7 @@ env:
   RUSTUP_TOOLCHAIN: 1.98.0
 
 permissions:
+  checks: read # Needed to inspect prior exact-SHA check results for Fast evidence reuse.
   contents: read
 
 concurrency:
@@ -25,6 +26,48 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Resolve exact-SHA Fast evidence
+        id: fast-evidence
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_CHECK: fast
+          SAME_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$SAME_REPOSITORY" != "true" ]; then
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+            echo "Fork PR has no trusted base-repository branch Fast run; Final will execute the local checks."
+            exit 0
+          fi
+          for _ in $(seq 1 60); do
+            checks="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_SHA/check-runs?filter=all&per_page=100")"
+            latest="$(jq -c --arg name "$EXPECTED_CHECK" '
+              [.check_runs[]
+               | select(.name == $name and .app.slug == "github-actions")]
+              | if length == 0 then empty else max_by(.id) end
+            ' <<<"$checks")"
+            if [ -z "$latest" ]; then
+              sleep 5
+              continue
+            fi
+            status="$(jq -r '.status' <<<"$latest")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$latest")"
+            if [ "$status" != "completed" ]; then
+              sleep 5
+              continue
+            fi
+            if [ "$conclusion" != "success" ]; then
+              echo "::error::Latest Fast evidence for exact HEAD $EXPECTED_SHA concluded '$conclusion'; classify/remediate it instead of overwriting it in Final."
+              exit 1
+            fi
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing latest successful branch Fast evidence for exact HEAD $EXPECTED_SHA."
+            exit 0
+          done
+          echo "::error::Timed out waiting for exact-SHA Fast evidence at $EXPECTED_SHA; refusing duplicate fallback on a same-repository PR."
+          exit 1
       - name: Draft final-gate placeholder
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
         run: echo "full required-context validation is deferred until the pull request is ready for review"
@@ -33,12 +76,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && steps.fast-evidence.outputs.reuse != 'true' }}
         with:
           toolchain: 1.98.0
           components: rustfmt
       - run: cargo fmt --all --check
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && steps.fast-evidence.outputs.reuse != 'true' }}
       - name: Verify fail-closed distribution policy
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: |
@@ -126,22 +169,64 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Resolve exact-SHA Fast evidence
+        id: fast-evidence
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_CHECK: fast
+          SAME_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$SAME_REPOSITORY" != "true" ]; then
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+            echo "Fork PR has no trusted base-repository branch Fast run; Final will execute the local checks."
+            exit 0
+          fi
+          for _ in $(seq 1 60); do
+            checks="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_SHA/check-runs?filter=all&per_page=100")"
+            latest="$(jq -c --arg name "$EXPECTED_CHECK" '
+              [.check_runs[]
+               | select(.name == $name and .app.slug == "github-actions")]
+              | if length == 0 then empty else max_by(.id) end
+            ' <<<"$checks")"
+            if [ -z "$latest" ]; then
+              sleep 5
+              continue
+            fi
+            status="$(jq -r '.status' <<<"$latest")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$latest")"
+            if [ "$status" != "completed" ]; then
+              sleep 5
+              continue
+            fi
+            if [ "$conclusion" != "success" ]; then
+              echo "::error::Latest Fast evidence for exact HEAD $EXPECTED_SHA concluded '$conclusion'; classify/remediate it instead of overwriting it in Final."
+              exit 1
+            fi
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing latest successful branch Fast evidence for exact HEAD $EXPECTED_SHA."
+            exit 0
+          done
+          echo "::error::Timed out waiting for exact-SHA Fast evidence at $EXPECTED_SHA; refusing duplicate fallback on a same-repository PR."
+          exit 1
       - name: Draft final-gate placeholder
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
         run: echo "full required-context validation is deferred until the pull request is ready for review"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && steps.fast-evidence.outputs.reuse != 'true' }}
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && steps.fast-evidence.outputs.reuse != 'true' }}
         with:
           toolchain: 1.98.0
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && steps.fast-evidence.outputs.reuse != 'true' }}
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && steps.fast-evidence.outputs.reuse != 'true' }}
 
   test:
     name: test (${{ matrix.os }})
