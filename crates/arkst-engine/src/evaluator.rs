@@ -26423,6 +26423,56 @@ mod tests {
     }
 
     #[test]
+    fn issue_175_numbering_native_names_preserve_source_defined_shadowing() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 20);
+        for name in ["numbering", "nonumbering"] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            context.set_function(name.to_string(), Vec::new());
+
+            let outcome = evaluator.evaluate_call_value(
+                name,
+                &[],
+                &[],
+                None,
+                None,
+                &call_span,
+                &mut diagnostics,
+                &mut context,
+            );
+
+            assert!(matches!(outcome, CallOutcome::Value(IrValue::Unit)));
+            assert!(diagnostics.is_empty(), "{name}: {diagnostics:?}");
+            assert!(context.document_state_snapshot().numbering.is_none());
+        }
+    }
+
+    #[test]
+    fn issue_175_nonumbering_rejects_arguments_before_state_mutation() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 20);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "nonumbering",
+            &[IrValue::Boolean(true)],
+            &[],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    }
+
+    #[test]
     fn issue_175_numbering_invalid_format_rolls_back_existing_state() {
         let evaluator = Evaluator::new();
         let call_span = span(0, 30);
