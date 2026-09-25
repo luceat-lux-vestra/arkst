@@ -1,0 +1,47 @@
+schema = 1
+issue = 444
+
+[scan]
+protected_globs = [
+  "crates/**/src/**/*",
+  "crates/**/tests/**/*",
+  "tests/**/*",
+  "fixtures/**/*",
+  "examples/**/*",
+]
+forbidden_implementation_source_markers = [
+  "raw.githubusercontent.com/iamgio/quarkdown/",
+  "github.com/iamgio/quarkdown/blob/",
+  "github.com/iamgio/quarkdown/tree/",
+  "/src/main/kotlin/",
+  "/src/test/kotlin/",
+]
+
+[dependency]
+globs = [
+  "Cargo.toml",
+  "Cargo.lock",
+  ".gitmodules",
+  "crates/**/Cargo.toml",
+  "tools/**/Cargo.toml",
+]
+forbidden_markers = [
+  "iamgio/quarkdown",
+  "quarkdown-core",
+  "quarkdown-stdlib",
+  "quarkdown-wasm",
+]
+
+[fixtures]
+root = "fixtures/quarkdown-conformance/cases"
+
+[provenance]
+forbidden_absolute_claims = [
+  "All Quarkdown-compatible features are implemented based solely on:",
+  "No Quarkdown source code, internal AST structures, tests, themes, CSS,",
+]
+required_historical_markers = [
+  "historical implementation-source inspection",
+  "clean-room policy non-compliance",
+  "does not by itself establish GPL infringement",
+]

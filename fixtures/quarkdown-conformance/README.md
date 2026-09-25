@@ -1,9 +1,14 @@
 # Quarkdown Conformance Corpus
 
-This directory contains independently authored conformance cases for Arkst's
-Quarkdown compatibility implementation. The corpus is an executable compatibility
-claim: `arkst-test-support` loads every case from the workspace test suite and
+This directory contains Arkst's executable Quarkdown conformance cases.
+`arkst-test-support` loads every case from the workspace test suite and
 enforces the declared `compatibility_level`.
+
+Historical v2.5.1 cases are undergoing provenance re-audit under issue #444.
+Do not infer from a case's presence that its original input was independently
+authored. The machine-readable status of every case is tracked in
+`.github/license-provenance-audit.toml`; only cases marked `INDEPENDENT` or
+`REMEDIATED` are cleared for release provenance.
 
 The corpus is intentionally bounded. Its 20 core cases provide independent
 parser, evaluator, document-state, value, and IR evidence for the slices listed
@@ -107,11 +112,15 @@ the brittle message text:
 
 ## Clean-Room Policy
 
-All test inputs in this corpus are **independently authored** by Arkst contributors
-based on public specification documentation only. No inputs are copied from:
-- Quarkdown source code
-- Quarkdown test fixtures
-- Quarkdown documentation examples (verbatim)
-- quarkdown-wasm or related repositories
+New or re-certified fixture inputs must be independently authored from permitted
+public specification evidence and/or black-box observations. Do not copy inputs
+from Quarkdown implementation source, test fixtures, or documentation examples
+verbatim.
 
-See `docs/legal/CLEAN_ROOM_POLICY.md` for the full policy.
+Historical cases pre-dating the #444 provenance audit are explicitly tracked in
+`.github/license-provenance-audit.toml`. A `REVIEW_REQUIRED` status means the
+fixture must be rechecked or independently re-authored before release; it is not
+an infringement finding.
+
+See `docs/legal/CLEAN_ROOM_POLICY.md` and
+`docs/legal/LICENSE_PROVENANCE_AUDIT.md`.

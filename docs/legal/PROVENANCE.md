@@ -15,19 +15,36 @@ the source of exact target values; this document records the legal context.
 - **Source language:** Rust (independently authored)
 - **Compatibility targets:** Quarkdown-compatible syntax (independently reimplemented)
 
-## Clean-Room Policy
+## Compatibility provenance and historical source inspection
 
-All Quarkdown-compatible features are implemented based solely on:
+Arkst's clean-room policy has prohibited using Quarkdown implementation code as
+an implementation reference since the repository bootstrap on 2026-08-02.
+Historical v2.5.1 compatibility work nevertheless performed
+**historical implementation-source inspection**, including review of upstream
+implementation and test sources. That is **clean-room policy non-compliance**
+and means the former absolute claim that all compatibility work was derived
+solely from permitted clean-room evidence was inaccurate.
 
-- Publicly available user-facing syntax documentation
-- Publicly available CLI behavior
-- Publicly available input/output examples
-- Independently authored compatibility specifications
-- Black-box conformance observations
+The 2026-09-25 first-pass audit did not identify direct Quarkdown
+dependency/vendor inclusion, literal Quarkdown implementation-code copy, or a
+confirmed Kotlin-to-Rust translation in the sampled production slices. Source
+inspection alone **does not by itself establish GPL infringement**. Release
+clearance therefore distinguishes observable/functional compatibility and
+independently expressed source-influenced work from possible translation or
+literal copy.
 
-No Quarkdown source code, internal AST structures, tests, themes, CSS,
-templates, comments, error messages, or documentation text have been copied
-or translated. See `CLEAN_ROOM_POLICY.md` for detailed rules.
+The machine-readable audit ledger is
+[`.github/license-provenance-audit.toml`](../../.github/license-provenance-audit.toml),
+and the finite clearance procedure is documented in
+[`LICENSE_PROVENANCE_AUDIT.md`](LICENSE_PROVENANCE_AUDIT.md). Git history is
+preserved; historical records are not rewritten to manufacture a clean-room
+history.
+
+Future compatibility implementation remains subject to
+[`CLEAN_ROOM_POLICY.md`](CLEAN_ROOM_POLICY.md): use public user-facing
+documentation, independently authored specifications/fixtures, official binary
+black-box observations, and other explicitly permitted evidence only. Do not
+use Quarkdown implementation/test source as a new implementation reference.
 
 ## Third-Party Dependencies
 

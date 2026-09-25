@@ -85,7 +85,7 @@ job = "deny"
 classification = "required"
 contexts = ["license"]
 always_present = true
-rationale = "Authoritative unconditional full-graph cargo-deny gate covering advisories, licenses, bans, and sources."
+rationale = "Authoritative unconditional cargo-deny plus license/provenance engineering gate; covers dependency advisories/licenses/bans/sources and prevents new Quarkdown source-ingestion/provenance regressions."
 
 [[producer]]
 workflow = ".github/workflows/markdown-compat.yml"
