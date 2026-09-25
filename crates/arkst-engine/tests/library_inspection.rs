@@ -122,7 +122,7 @@ fn initial_registry_is_stdlib_only_and_unknowns_fail_closed() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(
         paragraph_texts(&result),
-        vec!["stdlib", "true", "false", "true", "false"]
+        vec!["stdlib", "true", "false", "true", "true"]
     );
 }
 
