@@ -3,11 +3,11 @@ issue = 444
 
 [scan]
 protected_globs = [
-  "crates/**/src/**",
-  "crates/**/tests/**",
-  "tests/**",
-  "fixtures/**",
-  "examples/**",
+  "crates/**/src/**/*",
+  "crates/**/tests/**/*",
+  "tests/**/*",
+  "fixtures/**/*",
+  "examples/**/*",
 ]
 forbidden_implementation_source_markers = [
   "raw.githubusercontent.com/iamgio/quarkdown/",

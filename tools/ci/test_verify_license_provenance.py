@@ -15,7 +15,7 @@ spec.loader.exec_module(verifier)
 POLICY = '''schema = 1
 issue = 444
 [scan]
-protected_globs = ["crates/**/src/**", "crates/**/tests/**", "fixtures/**", "examples/**"]
+protected_globs = ["crates/**/src/**/*", "crates/**/tests/**/*", "fixtures/**/*", "examples/**/*"]
 forbidden_implementation_source_markers = ["raw.githubusercontent.com/iamgio/quarkdown/", "/src/main/kotlin/", "/src/test/kotlin/"]
 [dependency]
 globs = ["Cargo.toml", "Cargo.lock", ".gitmodules", "crates/**/Cargo.toml"]
