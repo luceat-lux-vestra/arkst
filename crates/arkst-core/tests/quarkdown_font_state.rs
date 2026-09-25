@@ -66,7 +66,11 @@ fn font_family_arguments_fail_closed_without_publishing_ambiguous_state() {
         let result = compile_source(&source);
         assert!(!result.diagnostics.is_empty());
         let layers = &result.ir.metadata.document_state.font.layers;
-        assert_eq!(layers.len(), 1, "failed call mutated font state: {parameter}");
+        assert_eq!(
+            layers.len(),
+            1,
+            "failed call mutated font state: {parameter}"
+        );
     }
 }
 
@@ -99,7 +103,10 @@ fn font_mutation_is_shared_across_callable_scope() {
 fn font_rejects_unknown_arguments_and_block_bodies() {
     for source in [".font unknown:{1}\n", ".font\n    rejected body\n"] {
         let result = compile_source(source);
-        assert!(!result.diagnostics.is_empty(), "accepted invalid font call: {source}");
+        assert!(
+            !result.diagnostics.is_empty(),
+            "accepted invalid font call: {source}"
+        );
         assert!(result.ir.metadata.document_state.font.is_empty());
     }
 }

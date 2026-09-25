@@ -172,10 +172,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .expect("nonumbering row");
     assert_eq!(nonumbering[5], "PARTIAL");
 
-    let font = rows
-        .iter()
-        .find(|row| row[1] == "font")
-        .expect("font row");
+    let font = rows.iter().find(|row| row[1] == "font").expect("font row");
     assert_eq!(font[5], "PARTIAL");
     assert!(font[9].contains("IrFontState"));
     assert!(font[10].contains("size-only"));

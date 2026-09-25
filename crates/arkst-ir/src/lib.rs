@@ -3546,8 +3546,7 @@ mod tests {
         };
         let encoded = serde_json::to_value(&state).expect("font state serializes");
         assert_eq!(
-            serde_json::from_value::<IrDocumentState>(encoded)
-                .expect("font state deserializes"),
+            serde_json::from_value::<IrDocumentState>(encoded).expect("font state deserializes"),
             state
         );
 

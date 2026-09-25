@@ -62,10 +62,9 @@ use arkst_ir::{
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
     IrFontLayer, IrFontState, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
     IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry,
-    IrPair, IrParagraphStyleInfo,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
-    TargetSpecificContent,
+    IrPair, IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -7048,44 +7047,46 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
 
-            size = Some(match value_conversion::convert_domain_with_origin(
-                &value,
-                value_conversion::DomainTarget::Size,
-            ) {
-                Ok(value_conversion::DomainValue::Size(value)) => value,
-                Ok(_) => {
-                    diagnostics.push(conversion_failure_diagnostic(
-                        value_conversion::ConversionFailure::new(
-                            value_conversion::ConversionError::UnsupportedValue {
-                                target: value_conversion::ConversionTarget::Size,
-                            },
-                            Some(argument_span),
-                            Some(field_names[index]),
-                            parameters
-                                .get(index)
-                                .and_then(|parameter| parameter.name_span),
-                            *span,
-                        ),
-                        Some(".font"),
-                    ));
-                    return CallOutcome::Failed;
-                }
-                Err(error) => {
-                    diagnostics.push(conversion_failure_diagnostic(
-                        value_conversion::ConversionFailure::new(
-                            error,
-                            Some(argument_span),
-                            Some(field_names[index]),
-                            parameters
-                                .get(index)
-                                .and_then(|parameter| parameter.name_span),
-                            *span,
-                        ),
-                        Some(".font"),
-                    ));
-                    return CallOutcome::Failed;
-                }
-            });
+            size = Some(
+                match value_conversion::convert_domain_with_origin(
+                    &value,
+                    value_conversion::DomainTarget::Size,
+                ) {
+                    Ok(value_conversion::DomainValue::Size(value)) => value,
+                    Ok(_) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                value_conversion::ConversionError::UnsupportedValue {
+                                    target: value_conversion::ConversionTarget::Size,
+                                },
+                                Some(argument_span),
+                                Some(field_names[index]),
+                                parameters
+                                    .get(index)
+                                    .and_then(|parameter| parameter.name_span),
+                                *span,
+                            ),
+                            Some(".font"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some(field_names[index]),
+                                parameters
+                                    .get(index)
+                                    .and_then(|parameter| parameter.name_span),
+                                *span,
+                            ),
+                            Some(".font"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                },
+            );
         }
 
         context.publish_font_layer(IrFontLayer { size });
