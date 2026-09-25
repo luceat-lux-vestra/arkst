@@ -168,3 +168,14 @@ classification = "required"
 contexts = ["failure-triage"]
 always_present = true
 rationale = "Unprivileged exact-PR-revision declaration gate backed by the immutable central failure-declaration action; required context identity remains failure-triage."
+
+
+[[producer]]
+workflow = ".github/workflows/v251-v260-match-probe.yml"
+job = "probe"
+classification = "reference_generated_data_deep_check"
+contexts = ["probe (v2.5.1)", "probe (v2.6.0)"]
+always_present = false
+matrix_axis = "version"
+matrix_values = ["v2.5.1", "v2.6.0"]
+rationale = "Disposable clean-room black-box match evidence for #198; MUST NOT MERGE and close unmerged after evidence capture."

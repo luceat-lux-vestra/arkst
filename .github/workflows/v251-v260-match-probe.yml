@@ -1,0 +1,289 @@
+name: Quarkdown match clean-room probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: match-probe-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: probe (${{ matrix.version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [v2.5.1, v2.6.0]
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          case "$version" in
+            v2.5.1) expected='5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9' ;;
+            v2.6.0) expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4' ;;
+            *) echo "unexpected version: $version" >&2; exit 1 ;;
+          esac
+          archive="/tmp/quarkdown-$version.zip"
+          dist="/tmp/quarkdown-$version"
+          url="https://github.com/iamgio/quarkdown/releases/download/$version/quarkdown-linux-x64.zip"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$dist"
+          unzip -q "$archive" -d "$dist"
+          qd="$(find "$dist" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe public match behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/match-probe-${{ matrix.version }}"
+          rm -rf "$root"
+          mkdir -p "$root"
+
+          cat > "$root/sample.qd" <<'QD'
+          .match {Quarkdown takes its name from quarks} pattern:{[Qq]uark(down|s)?}
+              ***.1***
+          QD
+
+          cat > "$root/nested.qd" <<'QD'
+          .match {***alpha*** and [beta](https://example.com)} pattern:{a}
+              .1::uppercase
+          QD
+
+          cat > "$root/repeated.qd" <<'QD'
+          .match {a1 a2 a3} pattern:{a[0-9]}
+              **.1**
+          QD
+
+          cat > "$root/explicit-param.qd" <<'QD'
+          .match {alpha beta alpha} pattern:{alpha}
+              hit:
+              before-.hit-after
+          QD
+
+          cat > "$root/empty-pattern.qd" <<'QD'
+          .match {abc} pattern:{}
+              SHOULD_NOT_BE_ASSUMED_.1
+          QD
+
+          cat > "$root/no-match.qd" <<'QD'
+          .match {abc} pattern:{z+}
+              SHOULD_NOT_BE_ASSUMED_.1
+          QD
+
+          cat > "$root/lookaround.qd" <<'QD'
+          .match {wow! ok} pattern:{\w+(?=!)}
+              .1::uppercase
+          QD
+
+          cat > "$root/zero-width.qd" <<'QD'
+          .match {aba} pattern:{(?=a)}
+              X
+          QD
+
+          cat > "$root/code-span.qd" <<'QD'
+          .match {before `alpha` after alpha} pattern:{alpha}
+              **.1**
+          QD
+
+          cat > "$root/rich-owners.qd" <<'QD'
+          .match {*alpha* **alpha** ~~alpha~~ [alpha](https://example.com)} pattern:{alpha}
+              .1::uppercase
+          QD
+
+          cat > "$root/image-alt.qd" <<'QD'
+          .match {before ![alpha](https://example.com/image.png) after alpha} pattern:{alpha}
+              .1::uppercase
+          QD
+
+          cat > "$root/order.qd" <<'QD'
+          .match {a1 a2 a3} pattern:{a[0-9]}
+              .log {.1}
+              **.1**
+          QD
+
+          cat > "$root/invalid-context.qd" <<'QD'
+          outer-before
+          .match {abc} pattern:{(}
+              .1
+          outer-after
+          QD
+
+          cat > "$root/failing-context.qd" <<'QD'
+          outer-before
+          .match {abc} pattern:{a}
+              .sum {true} {2}
+          outer-after
+          QD
+
+          cat > "$root/partial-failure.qd" <<'QD'
+          outer-before
+          .match {a b} pattern:{[ab]}
+              .if {.1::equals {a}}
+                  **A**
+              .ifnot {.1::equals {a}}
+                  .sum {true} {2}
+          outer-after
+          QD
+
+          cat > "$root/invalid-regex.qd" <<'QD'
+          .match {abc} pattern:{(}
+              .1
+          QD
+
+          cat > "$root/failing-callback.qd" <<'QD'
+          .match {abc} pattern:{a}
+              .sum {true} {2}
+          QD
+
+          inspect_html() {
+            html="$1"
+            fixture="$2"
+            python3 - "$html" "$fixture" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import json
+          import sys
+
+          path = Path(sys.argv[1])
+          fixture = sys.argv[2]
+          raw = path.read_text(errors="replace")
+
+          class Probe(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.text = []
+                  self.hrefs = []
+                  self.img_alts = []
+                  self.tags = {}
+                  self.skip = 0
+
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  self.tags[tag] = self.tags.get(tag, 0) + 1
+                  if tag == "a" and attrs.get("href"):
+                      self.hrefs.append(attrs["href"])
+                  if tag == "img" and attrs.get("alt") is not None:
+                      self.img_alts.append(attrs["alt"])
+                  if tag in ("script", "style"):
+                      self.skip += 1
+
+              def handle_endtag(self, tag):
+                  if tag in ("script", "style") and self.skip:
+                      self.skip -= 1
+
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.text.append(data)
+
+          parser = Probe()
+          parser.feed(raw)
+          text = " ".join(" ".join(parser.text).split())
+          print(
+              "QD198-MATCH-HTML "
+              f"fixture={fixture} "
+              f"text={text!r} "
+              f"tags={json.dumps(parser.tags, sort_keys=True)} "
+              f"hrefs={json.dumps(parser.hrefs)} "
+              f"img_alts={json.dumps(parser.img_alts)}"
+          )
+          PY
+          }
+
+          run_case() {
+            fixture="$1"
+            out="$root/out-$fixture"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --out "$out" --out-name probe \
+              >"$root/$fixture.stdout" 2>"$root/$fixture.stderr"
+            rc=$?
+            set -e
+            printf '%s\n' "$rc" >"$root/$fixture.rc"
+
+            printf 'QD198-MATCH version=%s fixture=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$rc"
+            printf 'QD198-MATCH-STDOUT fixture=%s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stdout"
+            printf ']\n'
+            printf 'QD198-MATCH-STDERR fixture=%s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stderr"
+            printf ']\n'
+            printf 'QD198-MATCH-ARTIFACTS fixture=%s [' "$fixture"
+            find "$out" -type f -printf '%f|' 2>/dev/null || true
+            printf ']\n'
+
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              inspect_html "$html" "$fixture"
+            else
+              printf 'QD198-MATCH-HTML fixture=%s none\n' "$fixture"
+            fi
+          }
+
+          for fixture in \
+            sample nested repeated explicit-param empty-pattern no-match \
+            lookaround zero-width code-span rich-owners image-alt order \
+            invalid-regex failing-callback invalid-context failing-context partial-failure
+          do
+            run_case "$fixture"
+          done
+
+          run_strict_case() {
+            fixture="$1"
+            out="$root/out-$fixture-strict"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --out "$out" --out-name probe --strict               >"$root/$fixture-strict.stdout" 2>"$root/$fixture-strict.stderr"
+            rc=$?
+            set -e
+            printf '%s\n' "$rc" >"$root/$fixture-strict.rc"
+
+            printf 'QD198-MATCH-STRICT version=%s fixture=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$rc"
+            printf 'QD198-MATCH-STRICT-STDOUT fixture=%s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture-strict.stdout"
+            printf ']\n'
+            printf 'QD198-MATCH-STRICT-STDERR fixture=%s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture-strict.stderr"
+            printf ']\n'
+            printf 'QD198-MATCH-STRICT-ARTIFACTS fixture=%s [' "$fixture"
+            find "$out" -type f -printf '%f|' 2>/dev/null || true
+            printf ']\n'
+
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              inspect_html "$html" "$fixture-strict"
+            else
+              printf 'QD198-MATCH-HTML fixture=%s none\n' "$fixture-strict"
+            fi
+          }
+
+          for fixture in invalid-regex failing-callback partial-failure
+          do
+            run_strict_case "$fixture"
+          done
+
+          # The public documented sample is the harness control. Every other
+          # case remains observational until its captured result is reviewed.
+          test "$(cat "$root/sample.rc")" -eq 0
+          test -n "$(find "$root/out-sample" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qd198-match-${{ matrix.version }}-${{ github.run_id }}
+          path: /tmp/match-probe-${{ matrix.version }}
+          if-no-files-found: error
