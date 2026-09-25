@@ -1,11 +1,6 @@
 name: Docs Checks
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - "**/*.md"
   pull_request:
     paths:
       - "docs/**"
