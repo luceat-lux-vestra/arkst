@@ -78,8 +78,9 @@ counted as production translation candidates.
 
 ## CI semantics
 
-The required `license` PR context runs the license/provenance verifier in normal
-mode. It prevents regression by failing on:
+The required `license` PR context runs the verifier unit tests, normal PR mode,
+and the explicit `--release` mode. After #444 closure, both modes are required
+evidence on every PR. The gate prevents regression by failing on:
 
 - direct Quarkdown implementation-source references in production, test,
   fixture, or example paths;
@@ -94,11 +95,14 @@ historical debt so unrelated development is not frozen. Once the ledger is
 zero-blocker, and zero-`REVIEW_REQUIRED` invariants as release mode. A future
 PR therefore cannot silently reopen provenance debt after #444 closes.
 
-For release clearance run:
+The explicit release-clearance command is:
 
 ```text
 python3 tools/ci/verify_license_provenance.py --release
 ```
+
+It is also executed by the required PR-time `license` context, so the release
+invariant cannot drift separately from ordinary merge authority.
 
 Release mode additionally fails until:
 
