@@ -39,7 +39,7 @@ fn output_text(result: &arkst_core::CompileResult) -> String {
 #[test]
 fn paragraphstyle_merges_partial_numeric_state_without_output() {
     let result = compile_source(
-        ".paragraphstyle lineheight:{1.4} letterspacing:{0.02}\n.paragraphstyle spacing:{1.2}\n.paragraphstyle lineheight:{none} indent:{2}\n",
+        ".paragraphstyle lineheight:{1.4} letterspacing:{0.02}\n.paragraphstyle spacing:{1.2}\n.paragraphstyle lineheight:{.none} indent:{2}\n",
     );
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert!(result.ir.nodes.is_empty(), "{:?}", result.ir.nodes);
@@ -54,7 +54,7 @@ fn paragraphstyle_merges_partial_numeric_state_without_output() {
 #[test]
 fn paragraphstyle_positional_binding_and_none_preserve_existing_fields() {
     let result = compile_source(
-        ".paragraphstyle {1.25} {0.1} {1.5} {2}\n.paragraphstyle lineheight:{none} spacing:{3}\n",
+        ".paragraphstyle {1.25} {0.1} {1.5} {2}\n.paragraphstyle lineheight:{.none} spacing:{3}\n",
     );
     assert!(result.diagnostics.is_empty(), "{result:?}");
 
