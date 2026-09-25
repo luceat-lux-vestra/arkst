@@ -75,21 +75,21 @@ For the 20 #153-owned rows:
 |---|---:|
 | `SUPPORTED_END_TO_END` | 0 |
 | `SUPPORTED_SEMANTICS` | 0 |
-| `PARSED_ONLY` | 13 |
-| `PARTIAL` | 7 |
+| `PARSED_ONLY` | 12 |
+| `PARTIAL` | 8 |
 | `UNSUPPORTED` | 0 |
 | `DEFERRED` | 0 |
 | `BLOCKED` | 0 |
 | `NOT_APPLICABLE` | 0 |
 | `UNKNOWN` | 0 |
 
-`PARSED_ONLY` is used deliberately for the 13 rows that still have only
+`PARSED_ONLY` is used deliberately for the 12 rows that still have only
 recognition/source-retention evidence. A preserved `IrNode::FunctionCall` or
 inline directive is not a successful setter, typed node, state mutation, or
-renderer claim. Seven rows are conservatively `PARTIAL`: `.captionposition`,
-`.numbering`, `.nonumbering`, the bounded `.pageformat` alignment/geometry
-slice, `.autopagebreak`, `.noautopagebreak`, and the bounded `.slides`
-configuration/PDF slice. `PARTIAL` does not claim complete v2.5.1 output
+renderer claim. Eight rows are conservatively `PARTIAL`: `.captionposition`,
+`.numbering`, `.nonumbering`, `.paragraphstyle`, the bounded `.pageformat`
+alignment/geometry slice, `.autopagebreak`, `.noautopagebreak`, and the
+bounded `.slides` configuration/PDF slice. `PARTIAL` does not claim complete v2.5.1 output
 equivalence; each row retains the residual contract recorded below.
 
 ## 4. Pinned upstream semantic contracts
@@ -175,9 +175,14 @@ alter renderer defaults (for example, Chinese paragraph indentation).
 
 The setter returns no output and has no getter. All four numeric conversions
 must complete before the merged state is published. This is distinct from
-inline `.text` styling and from component-local spacing. Arkst has no
-paragraph document state, locale-aware paragraph renderer, or IR/backend
-consumer; status is `PARSED_ONLY`.
+inline `.text` styling and from component-local spacing. Arkst now implements
+a bounded evaluator/IR state slice: all four values use the shared numeric
+conversion boundary; omission and explicit `none` preserve the current field;
+successful calls merge atomically into serializable backend-neutral
+`IrParagraphStyleInfo`; nested failures roll back; callable scopes share the
+document state; and source-defined `.paragraphstyle` retains dispatch
+precedence. Locale-sensitive renderer defaults and Typst/HTML paragraph output
+remain downstream work, so status is conservatively `PARTIAL`.
 
 #### `.pageformat`
 

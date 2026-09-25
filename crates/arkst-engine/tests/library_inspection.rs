@@ -172,6 +172,7 @@ fn stdlib_enumeration_is_oracle_ordered_but_support_filtered() {
         "include",
         "code",
         "extend",
+        "paragraphstyle",
         "pageformat",
     ] {
         assert!(
@@ -179,7 +180,6 @@ fn stdlib_enumeration_is_oracle_ordered_but_support_filtered() {
             "missing {supported}: {names:?}"
         );
     }
-    assert!(!names.iter().any(|name| name == "paragraphstyle"));
     assert!(!names.iter().any(|name| name == "llmstxt"));
 
     let position = |needle: &str| {

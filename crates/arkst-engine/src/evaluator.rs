@@ -61,8 +61,9 @@ use arkst_ir::{
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
     IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry, IrPair, IrParameter, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
+    IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry, IrParagraphStyleInfo, IrPair,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration,
+    IrStackedComponent, IrStackedLayout,
     IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
@@ -571,6 +572,7 @@ struct DocumentState {
     locale: Option<arkst_ir::IrDocumentLocale>,
     caption_position: IrCaptionPositionInfo,
     numbering: IrNumberingState,
+    paragraph_style: IrParagraphStyleInfo,
     auto_page_break_max_depth: Option<u32>,
     page_alignment: Option<IrDocumentAlignment>,
     page_geometry: Option<IrPageGeometry>,
@@ -590,6 +592,7 @@ impl Default for DocumentState {
             locale: None,
             caption_position: Default::default(),
             numbering: Default::default(),
+            paragraph_style: Default::default(),
             auto_page_break_max_depth: None,
             page_alignment: None,
             page_geometry: None,
@@ -611,6 +614,7 @@ impl DocumentState {
             locale: snapshot.locale.clone(),
             caption_position: snapshot.caption_position,
             numbering: snapshot.numbering.clone(),
+            paragraph_style: snapshot.paragraph_style,
             auto_page_break_max_depth: snapshot.auto_page_break_max_depth,
             page_alignment: snapshot.page_alignment,
             page_geometry: snapshot.page_geometry.clone(),
@@ -630,6 +634,7 @@ impl DocumentState {
             locale: self.locale.clone(),
             caption_position: self.caption_position,
             numbering: self.numbering.clone(),
+            paragraph_style: self.paragraph_style,
             auto_page_break_max_depth: self.auto_page_break_max_depth,
             page_alignment: self.page_alignment,
             page_geometry: self.page_geometry.clone(),
@@ -1029,6 +1034,7 @@ enum DocumentStateField {
     Locale,
     CaptionPosition,
     Numbering,
+    ParagraphStyle,
     AutoPageBreakMaxDepth,
     PageAlignment,
     PageGeometry,
@@ -1046,6 +1052,7 @@ enum DocumentStateUndo {
     Locale(Option<arkst_ir::IrDocumentLocale>),
     CaptionPosition(IrCaptionPositionInfo),
     Numbering(IrNumberingState),
+    ParagraphStyle(IrParagraphStyleInfo),
     AutoPageBreakMaxDepth(Option<u32>),
     PageAlignment(Option<IrDocumentAlignment>),
     PageGeometry(Option<IrPageGeometry>),
@@ -2263,6 +2270,7 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::Locale(previous) => state.locale = previous,
             DocumentStateUndo::CaptionPosition(previous) => state.caption_position = previous,
             DocumentStateUndo::Numbering(previous) => state.numbering = previous,
+            DocumentStateUndo::ParagraphStyle(previous) => state.paragraph_style = previous,
             DocumentStateUndo::AutoPageBreakMaxDepth(previous) => {
                 state.auto_page_break_max_depth = previous
             }
@@ -2327,6 +2335,28 @@ impl<'a> EvaluationContext<'a> {
             state.numbering.layers.clear();
         }
         state.numbering.layers.push(layer);
+    }
+
+    fn merge_paragraph_style(&self, partial: IrParagraphStyleInfo) {
+        self.record_document_state_undo(DocumentStateField::ParagraphStyle, || {
+            (
+                DocumentStateUndo::ParagraphStyle(self.document_state.borrow().paragraph_style),
+                0,
+            )
+        });
+        let mut state = self.document_state.borrow_mut();
+        if let Some(value) = partial.line_height {
+            state.paragraph_style.line_height = Some(value);
+        }
+        if let Some(value) = partial.letter_spacing {
+            state.paragraph_style.letter_spacing = Some(value);
+        }
+        if let Some(value) = partial.spacing {
+            state.paragraph_style.spacing = Some(value);
+        }
+        if let Some(value) = partial.indent {
+            state.paragraph_style.indent = Some(value);
+        }
     }
 
     fn set_auto_page_break_max_depth(&self, value: Option<u32>) {
@@ -3849,6 +3879,7 @@ impl Evaluator {
             "captionposition"
                 | "numbering"
                 | "nonumbering"
+                | "paragraphstyle"
                 | "docauthor"
                 | "docauthors"
                 | "dockeywords"
@@ -4256,6 +4287,7 @@ impl Evaluator {
             "captionposition"
                 | "numbering"
                 | "nonumbering"
+                | "paragraphstyle"
                 | "docauthor"
                 | "docauthors"
                 | "dockeywords"
@@ -6925,6 +6957,101 @@ impl Evaluator {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn evaluate_paragraph_style_builtin(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let bound = match bind_evaluated_arguments(
+            binding_plan,
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+            None,
+            *span,
+        ) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let mut partial = IrParagraphStyleInfo::default();
+        let field_names = ["lineheight", "letterspacing", "spacing", "indent"];
+        for (index, slot) in bound.slots.into_iter().enumerate() {
+            let BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } = slot
+            else {
+                continue;
+            };
+            if matches!(value.value, IrValue::None) {
+                continue;
+            }
+            let number = match value_conversion::convert_scalar_with_origin(
+                &value,
+                ScalarTarget::Number,
+            ) {
+                Ok(ScalarValue::Number(value)) => value,
+                Ok(_) => unreachable!("Number conversion returned a non-Number value"),
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some(field_names[index]),
+                            bound
+                                .parameters
+                                .get(index)
+                                .and_then(|parameter| parameter.name_span),
+                            *span,
+                        ),
+                        Some("`.paragraphstyle`"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            };
+            match index {
+                0 => partial.line_height = Some(number),
+                1 => partial.letter_spacing = Some(number),
+                2 => partial.spacing = Some(number),
+                3 => partial.indent = Some(number),
+                _ => unreachable!("paragraphstyle binding has exactly four slots"),
+            }
+        }
+
+        context.merge_paragraph_style(partial);
+        CallOutcome::NoValue
+    }
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_document_state_builtin(
         &self,
         name: &str,
@@ -6938,6 +7065,18 @@ impl Evaluator {
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
+        if name == "paragraphstyle" {
+            return self.evaluate_paragraph_style_builtin(
+                positional_args,
+                named_args,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+                first_origin,
+            );
+        }
+
         if name == "numbering" {
             return self.evaluate_numbering_builtin(
                 positional_args,
@@ -14273,6 +14412,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "doctype",
     "numbering",
     "nonumbering",
+    "paragraphstyle",
     "autopagebreak",
     "noautopagebreak",
     "docauthor",
@@ -15706,6 +15846,15 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::defaulted("hgap"),
             ],
             BodyPolicy::AllowSeparate,
+        ),
+        "paragraphstyle" => (
+            vec![
+                ParameterMetadata::optional("lineheight"),
+                ParameterMetadata::optional("letterspacing"),
+                ParameterMetadata::optional("spacing"),
+                ParameterMetadata::optional("indent"),
+            ],
+            BodyPolicy::Reject,
         ),
         "captionposition" => (
             vec![

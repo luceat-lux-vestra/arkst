@@ -128,10 +128,10 @@ fn manifest_is_complete_and_machine_checkable() {
     assert_eq!(rows.len(), 47);
     assert_eq!(rows.iter().filter(|row| row[4] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[4] == "#154").count(), 27);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 7);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 8);
     assert_eq!(
         rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(),
-        13
+        12
     );
     assert!(MANIFEST.contains(BASE_SHA));
     assert!(MANIFEST.contains("captionposition\tcaptionPosition\tcode"));
@@ -143,7 +143,7 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(AUDIT.contains("A preserved `IrNode::FunctionCall`"));
     assert!(AUDIT.contains("is not a successful setter, typed node, state mutation"));
     assert!(AUDIT.contains("No #153-owned row has complete v2.5.1 output equivalence"));
-    assert!(AUDIT.contains("seven conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("eight conservative `PARTIAL` rows"));
 }
 
 #[test]
@@ -171,6 +171,14 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .find(|row| row[1] == "nonumbering")
         .expect("nonumbering row");
     assert_eq!(nonumbering[5], "PARTIAL");
+
+    let paragraphstyle = rows
+        .iter()
+        .find(|row| row[1] == "paragraphstyle")
+        .expect("paragraphstyle row");
+    assert_eq!(paragraphstyle[5], "PARTIAL");
+    assert!(paragraphstyle[9].contains("IrParagraphStyleInfo"));
+    assert!(paragraphstyle[10].contains("omission/none preservation"));
 
     let pageformat = rows
         .iter()
