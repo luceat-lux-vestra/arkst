@@ -3466,6 +3466,7 @@ mod tests {
                 page_alignment: None,
                 page_geometry: None,
                 slides: None,
+                numbering: None,
             },
             ..IrMetadata::default()
         };
@@ -3595,6 +3596,7 @@ mod tests {
             page_alignment: None,
             page_geometry: None,
             slides: None,
+            numbering: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
         assert_eq!(
