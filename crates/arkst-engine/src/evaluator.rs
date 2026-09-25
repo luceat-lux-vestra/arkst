@@ -577,6 +577,7 @@ struct DocumentState {
     auto_page_break_max_depth: Option<u32>,
     page_alignment: Option<IrDocumentAlignment>,
     page_geometry: Option<IrPageGeometry>,
+    page_columns: Option<u32>,
     slides: Option<IrSlidesConfiguration>,
     localization_tables: LocalizationTables,
 }
@@ -598,6 +599,7 @@ impl Default for DocumentState {
             auto_page_break_max_depth: None,
             page_alignment: None,
             page_geometry: None,
+            page_columns: None,
             slides: None,
             localization_tables: seeded_localization_tables(),
         }
@@ -621,6 +623,7 @@ impl DocumentState {
             auto_page_break_max_depth: snapshot.auto_page_break_max_depth,
             page_alignment: snapshot.page_alignment,
             page_geometry: snapshot.page_geometry.clone(),
+            page_columns: snapshot.page_columns,
             slides: snapshot.slides,
             localization_tables: seeded_localization_tables(),
         }
@@ -642,6 +645,7 @@ impl DocumentState {
             auto_page_break_max_depth: self.auto_page_break_max_depth,
             page_alignment: self.page_alignment,
             page_geometry: self.page_geometry.clone(),
+            page_columns: self.page_columns,
             slides: self.slides,
         }
     }
@@ -1043,6 +1047,7 @@ enum DocumentStateField {
     AutoPageBreakMaxDepth,
     PageAlignment,
     PageGeometry,
+    PageColumns,
     Slides,
     LocalizationTables,
 }
@@ -1062,6 +1067,7 @@ enum DocumentStateUndo {
     AutoPageBreakMaxDepth(Option<u32>),
     PageAlignment(Option<IrDocumentAlignment>),
     PageGeometry(Option<IrPageGeometry>),
+    PageColumns(Option<u32>),
     Slides(Option<IrSlidesConfiguration>),
     LocalizationTables(LocalizationTableUndo),
 }
@@ -2283,6 +2289,7 @@ impl<'a> EvaluationContext<'a> {
             }
             DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,
             DocumentStateUndo::PageGeometry(previous) => state.page_geometry = previous,
+            DocumentStateUndo::PageColumns(previous) => state.page_columns = previous,
             DocumentStateUndo::Slides(previous) => state.slides = previous,
             DocumentStateUndo::LocalizationTables(previous) => {
                 for (name, table) in previous {
@@ -2405,6 +2412,16 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().page_geometry = value;
+    }
+
+    fn set_page_columns(&self, value: Option<u32>) {
+        self.record_document_state_undo(DocumentStateField::PageColumns, || {
+            (
+                DocumentStateUndo::PageColumns(self.document_state.borrow().page_columns),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().page_columns = value;
     }
 
     fn set_slides_configuration(&self, value: Option<IrSlidesConfiguration>) {
@@ -6575,6 +6592,7 @@ impl Evaluator {
         let mut alignment = None;
         let mut width = None;
         let mut height = None;
+        let mut columns = None;
         for argument in evaluated_named {
             let candidate_span = argument.arg.span;
             let parameter = argument.arg.name.clone();
@@ -6644,6 +6662,29 @@ impl Evaluator {
                         height = Some(size);
                     }
                 }
+                "columns" => {
+                    columns = Some(if matches!(&value.value, IrValue::None) {
+                        None
+                    } else {
+                        let value = match value_conversion::convert_integer_with_origin(&value) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(candidate_span),
+                                        Some("columns"),
+                                        None,
+                                        *span,
+                                    ),
+                                    Some("`.pageformat`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        };
+                        (value > 0).then_some(value as u32)
+                    });
+                }
                 _ => unreachable!("bounded pageformat shape rejected unknown parameter"),
             }
         }
@@ -6656,6 +6697,9 @@ impl Evaluator {
         }
         if let (Some(width), Some(height)) = (width, height) {
             context.set_page_geometry(Some(IrPageGeometry { width, height }));
+        }
+        if let Some(Some(columns)) = columns {
+            context.set_page_columns(Some(columns));
         }
         CallOutcome::NoValue
     }
@@ -14909,19 +14953,23 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
     let mut width = false;
     let mut height = false;
     let mut alignment = false;
+    let mut columns = false;
     for argument in named_args {
         let seen = match argument.name.as_str() {
             "width" => &mut width,
             "height" => &mut height,
             "alignment" => &mut alignment,
+            "columns" => &mut columns,
             _ => return false,
         };
-        if *seen || matches!(&argument.value, IrValue::None) {
+        if *seen || (argument.name != "columns" && matches!(&argument.value, IrValue::None)) {
             return false;
         }
         *seen = true;
     }
-    (width && height) || (alignment && !width && !height)
+    (width && height && !columns)
+        || (alignment && !width && !height && !columns)
+        || (columns && !width && !height && !alignment)
 }
 
 fn convert_whitespace_size(

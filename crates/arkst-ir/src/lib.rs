@@ -486,6 +486,11 @@ pub struct IrDocumentState {
     /// width/height slice. `None` preserves document-type/backend defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_geometry: Option<IrPageGeometry>,
+    /// Explicit positive document-wide column count selected by the bounded
+    /// global `.pageformat columns:{...}` slice. `None` preserves the
+    /// document/backend default; non-positive inputs are discarded upstream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_columns: Option<u32>,
     /// Slides-specific document configuration. `None` means no `.slides` setter committed state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slides: Option<IrSlidesConfiguration>,
@@ -3641,6 +3646,7 @@ mod tests {
                 auto_page_break_max_depth: Some(2),
                 page_alignment: None,
                 page_geometry: None,
+                page_columns: None,
                 slides: None,
             },
             ..IrMetadata::default()
@@ -3773,6 +3779,7 @@ mod tests {
             auto_page_break_max_depth: None,
             page_alignment: None,
             page_geometry: None,
+            page_columns: None,
             slides: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");

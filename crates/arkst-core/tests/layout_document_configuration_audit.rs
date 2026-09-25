@@ -189,6 +189,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .iter()
         .find(|row| row[1] == "pageformat")
         .expect("pageformat row");
+    assert!(pageformat[9].contains("IrDocumentState::page_columns"));
+    assert!(pageformat[9].contains("quarkdown_pageformat_columns.rs"));
+    assert!(pageformat[10].contains("global positive columns state"));
+    assert!(pageformat[10].contains("selector-aware columns/layer precedence"));
     assert!(pageformat[10].contains("partial-side input zeroes omitted sides"));
     assert!(pageformat[10].contains("bordercolor-only"));
     assert!(pageformat[11].contains("border-side-zeroing"));
