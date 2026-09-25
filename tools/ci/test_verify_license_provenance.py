@@ -41,10 +41,12 @@ basis = "independent structure"
 [[fixture]]
 id = "one"
 status = "INDEPENDENT"
+basis = "independent test fixture"
 [[fixture]]
 id = "two"
 status = "REVIEW_REQUIRED"
 issue = 444
+basis = "pending fixture review"
 '''
 
 
@@ -82,6 +84,27 @@ class LicenseProvenanceVerifierTests(unittest.TestCase):
         self.assertTrue(any("coverage=COMPLETE" in item for item in findings))
         self.assertTrue(any("pending historical" in item for item in findings))
         self.assertTrue(any("REVIEW_REQUIRED" in item for item in findings))
+
+    def test_complete_coverage_locks_release_clearance_in_normal_pr_mode(self) -> None:
+        root = self.make_root()
+        audit_path = root / ".github/license-provenance-audit.toml"
+        audit_path.write_text(
+            AUDIT.replace('coverage = "INCOMPLETE"', 'coverage = "COMPLETE"'),
+            encoding="utf-8",
+        )
+        findings = verifier.verify(root)
+        self.assertTrue(any("pending historical" in item for item in findings))
+        self.assertTrue(any("REVIEW_REQUIRED" in item for item in findings))
+
+    def test_fixture_entries_require_audit_basis(self) -> None:
+        root = self.make_root()
+        audit_path = root / ".github/license-provenance-audit.toml"
+        audit_path.write_text(
+            AUDIT.replace('basis = "independent test fixture"\n', "", 1),
+            encoding="utf-8",
+        )
+        findings = verifier.verify(root)
+        self.assertTrue(any("fixture one requires non-empty basis" in item for item in findings))
 
     def test_protected_path_rejects_upstream_implementation_source_reference(self) -> None:
         root = self.make_root()

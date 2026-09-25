@@ -40,6 +40,13 @@ and the finite clearance procedure is documented in
 preserved; historical records are not rewritten to manufacture a clean-room
 history.
 
+The bounded historical production audit completed on 2026-09-25 with 27
+source-exposed production PRs classified and no remaining
+`POSSIBLE_TRANSLATION` or `LITERAL_COPY` finding. The conformance-fixture
+ledger likewise contains no `REVIEW_REQUIRED` entry after the identified
+transcendental fixture overlap was remediated. `coverage = "COMPLETE"` is a
+permanent CI invariant rather than a one-time release waiver.
+
 Future compatibility implementation remains subject to
 [`CLEAN_ROOM_POLICY.md`](CLEAN_ROOM_POLICY.md): use public user-facing
 documentation, independently authored specifications/fixtures, official binary

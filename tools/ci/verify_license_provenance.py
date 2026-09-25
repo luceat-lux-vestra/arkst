@@ -154,6 +154,8 @@ def verify_audit_ledger(root: Path, policy: dict, audit: dict, release: bool) ->
             findings.append(f"duplicate fixture entry {fixture}")
         if status not in FIXTURE_STATUSES:
             findings.append(f"fixture {fixture} has invalid status {status!r}")
+        if not str(entry.get("basis", "")).strip():
+            findings.append(f"fixture {fixture} requires non-empty basis")
         tracked[fixture] = str(status)
         if status == "REVIEW_REQUIRED":
             review_required.append(fixture)
@@ -169,7 +171,8 @@ def verify_audit_ledger(root: Path, policy: dict, audit: dict, release: bool) ->
     if coverage not in {"INCOMPLETE", "COMPLETE"}:
         findings.append("release_clearance.coverage must be INCOMPLETE or COMPLETE")
 
-    if release:
+    enforce_clearance = release or coverage == "COMPLETE"
+    if enforce_clearance:
         if coverage != "COMPLETE":
             findings.append("release clearance requires coverage=COMPLETE")
         if pending_prs:
