@@ -61,10 +61,10 @@ use arkst_ir::{
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
     IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry, IrParagraphStyleInfo, IrPair,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration,
-    IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry, IrPair, IrParagraphStyleInfo,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
+    TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -7016,29 +7016,27 @@ impl Evaluator {
             if matches!(value.value, IrValue::None) {
                 continue;
             }
-            let number = match value_conversion::convert_scalar_with_origin(
-                &value,
-                ScalarTarget::Number,
-            ) {
-                Ok(ScalarValue::Number(value)) => value,
-                Ok(_) => unreachable!("Number conversion returned a non-Number value"),
-                Err(error) => {
-                    diagnostics.push(conversion_failure_diagnostic(
-                        value_conversion::ConversionFailure::new(
-                            error,
-                            Some(argument_span),
-                            Some(field_names[index]),
-                            bound
-                                .parameters
-                                .get(index)
-                                .and_then(|parameter| parameter.name_span),
-                            *span,
-                        ),
-                        Some("`.paragraphstyle`"),
-                    ));
-                    return CallOutcome::Failed;
-                }
-            };
+            let number =
+                match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Number) {
+                    Ok(ScalarValue::Number(value)) => value,
+                    Ok(_) => unreachable!("Number conversion returned a non-Number value"),
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some(field_names[index]),
+                                bound
+                                    .parameters
+                                    .get(index)
+                                    .and_then(|parameter| parameter.name_span),
+                                *span,
+                            ),
+                            Some("`.paragraphstyle`"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
             match index {
                 0 => partial.line_height = Some(number),
                 1 => partial.letter_spacing = Some(number),
