@@ -6839,10 +6839,8 @@ impl Evaluator {
                     value,
                     span: argument_span,
                 },
-            )) => match value_conversion::convert_scalar_with_origin(
-                &value,
-                ScalarTarget::Boolean,
-            ) {
+            )) => match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Boolean)
+            {
                 Ok(ScalarValue::Boolean(value)) => value,
                 Ok(_) => {
                     diagnostics.push(document_state_conversion_error(
@@ -6984,10 +6982,12 @@ impl Evaluator {
         }
 
         let mut candidate = if merge {
-            context.numbering_snapshot().unwrap_or_else(|| IrDocumentNumbering {
-                inherits_document_defaults: true,
-                ..IrDocumentNumbering::default()
-            })
+            context
+                .numbering_snapshot()
+                .unwrap_or_else(|| IrDocumentNumbering {
+                    inherits_document_defaults: true,
+                    ..IrDocumentNumbering::default()
+                })
         } else {
             IrDocumentNumbering::default()
         };
@@ -26457,5 +26457,4 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert!(diagnostics[0].message.contains("escape character"));
     }
-
 }
