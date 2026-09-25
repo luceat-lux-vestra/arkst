@@ -44,27 +44,43 @@ not an infringement finding.
 The machine-readable source of truth is
 [`../../.github/license-provenance-audit.toml`](../../.github/license-provenance-audit.toml).
 
-## Current sampled findings
+## Completed 2026-09-25 audit
 
-The first pass reviewed the higher-risk production slices #206, #208, #219,
-#221, and #434. All five are currently classified
-`SOURCE_INFLUENCED_INDEPENDENT`: their compatibility requirements were
-source-influenced, but the sampled Rust implementation uses Arkst-specific
-scanner, binding-plan, typed-IR, ownership/transaction, or explicit-error
-structures rather than an identified literal/source-to-source translation.
+The bounded historical production audit is complete. The fail-closed inventory
+contains 27 production PRs whose implementation evidence chain included, or is
+conservatively treated as including, upstream implementation/test-source
+consultation:
 
-The audit also found a concrete fixture-provenance contradiction:
-`numeric-transcendental-family` includes short inputs that the repository itself
-records as cases observed in upstream `MathFunctionsTest.kt`, while the corpus
-README previously asserted that every fixture was independently authored.
-Rather than debating copyrightability of short functional expressions, the
-historical fixture corpus is now tracked explicitly and must be rechecked or
-re-authored before release clearance.
+`#83, #85, #86, #87, #88, #89, #91, #92, #93, #94, #103, #104, #105,
+#117, #129, #130, #136, #138, #140, #142, #144, #146, #206, #208, #219,
+#221, #434`.
+
+All 27 are classified `SOURCE_INFLUENCED_INDEPENDENT`. The audit found no
+`POSSIBLE_TRANSLATION` and no `LITERAL_COPY`. The reviewed implementation
+patterns consistently use Arkst-specific typed IR, evaluator, binding,
+ownership/transaction, document-state, resource, or diagnostic structures
+rather than an identified source-to-source translation.
+
+The original `numeric-transcendental-family` fixture reused exact
+`MathFunctionsTest.kt` expressions that Arkst's own historical records had
+identified. Issue #444 replaces those expressions with independently composed
+functional probes and marks the case `REMEDIATED`. Other historically
+source-adjacent fixtures were individually provenance-reviewed; source-free or
+later black-box-clean-room cases are `INDEPENDENT`, and source-adjacent cases
+whose current authored inputs were cleared without an identified copied
+upstream test input are recorded conservatively as `REMEDIATED`.
+
+The audit inventory was widened from the first-pass 24 PRs to 27 after
+fail-closed reconciliation identified #86, #117, and #138 as production work
+whose evidence chain also needed classification. Source-heavy documentation or
+audit-only PRs with no production semantic implementation are not falsely
+counted as production translation candidates.
 
 ## CI semantics
 
-The required `license` PR context runs the license/provenance verifier in normal
-mode. It prevents regression by failing on:
+The required `license` PR context runs the verifier unit tests, normal PR mode,
+and the explicit `--release` mode. After #444 closure, both modes are required
+evidence on every PR. The gate prevents regression by failing on:
 
 - direct Quarkdown implementation-source references in production, test,
   fixture, or example paths;
@@ -73,14 +89,20 @@ mode. It prevents regression by failing on:
 - an untracked conformance fixture; or
 - canonical legal provenance reverting to disproven absolute clean-room claims.
 
-Normal PR mode deliberately permits **tracked historical debt** so unrelated
-development is not frozen while #444 is completed.
+While coverage is `INCOMPLETE`, normal PR mode permits explicitly tracked
+historical debt so unrelated development is not frozen. Once the ledger is
+`COMPLETE`, normal PR mode permanently enforces the same zero-pending,
+zero-blocker, and zero-`REVIEW_REQUIRED` invariants as release mode. A future
+PR therefore cannot silently reopen provenance debt after #444 closes.
 
-For release clearance run:
+The explicit release-clearance command is:
 
 ```text
 python3 tools/ci/verify_license_provenance.py --release
 ```
+
+It is also executed by the required PR-time `license` context, so the release
+invariant cannot drift separately from ordinary merge authority.
 
 Release mode additionally fails until:
 
@@ -89,5 +111,7 @@ Release mode additionally fails until:
 3. `POSSIBLE_TRANSLATION` and `LITERAL_COPY` counts are zero; and
 4. no fixture remains `REVIEW_REQUIRED`.
 
-This is the finite unblock condition. Git history is preserved; history must
-not be rewritten to manufacture a clean-room record.
+This is the finite unblock condition. With the #444 ledger at
+`coverage = "COMPLETE"`, the required PR-time `license` context locks that
+clear state for future changes. Git history is preserved; history must not be
+rewritten to manufacture a clean-room record.

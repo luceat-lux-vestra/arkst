@@ -1,10 +1,10 @@
 .pi
-.pi::truncate {2}
+.truncate {.pi} decimals:{2}
 .logn {1}
-.sin {0}
-.cos {0}
-.tan {0}
-.cos {.pi}
-.pi::multiply {2}::cos
-.sum {.sin {0}} {.cos {0}}
-.sum {1} {1}::logn
+.sin {.subtract {2} {2}}
+.cos {.subtract {5} {5}}
+.tan {.subtract {8} {8}}
+.cos {.negate {.pi}}
+.cos {.sum {.pi} {.pi}}
+.sum {.sin {.subtract {1} {1}}} {.cos {.subtract {3} {3}}}
+.logn {.sum {1} {1}}

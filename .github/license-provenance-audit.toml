@@ -1,157 +1,263 @@
 schema = 1
 issue = 444
 audited_at = "2026-09-25"
-base_sha = "978c836d38514895e4459e3c7b193274df12bf69"
+base_sha = "2883f3154224014a6122b96cd2dcd84326db4168"
 
 [source_exposure]
-# Production PRs for which the implementation PR itself or its immediate
-# compatibility evidence records upstream implementation/test-source review.
-# Historical docs/audit-only PRs are intentionally excluded from this list.
+# Historical production PRs for which repository evidence establishes, or the
+# fail-closed audit conservatively treats, upstream implementation/test-source
+# consultation as part of the implementation evidence chain.
 production_prs = [
-  83, 85, 87, 88, 89, 91, 92, 93, 94, 103, 104, 105,
-  129, 130, 136, 140, 142, 144, 146, 206, 208, 219, 221, 434,
+  83, 85, 86, 87, 88, 89, 91, 92, 93, 94, 103, 104, 105, 117,
+  129, 130, 136, 138, 140, 142, 144, 146, 206, 208, 219, 221, 434,
 ]
-reviewed_prs = [206, 208, 219, 221, 434]
-pending_prs = [
-  83, 85, 87, 88, 89, 91, 92, 93, 94, 103, 104, 105,
-  129, 130, 136, 140, 142, 144, 146,
+reviewed_prs = [
+  83, 85, 86, 87, 88, 89, 91, 92, 93, 94, 103, 104, 105, 117,
+  129, 130, 136, 138, 140, 142, 144, 146, 206, 208, 219, 221, 434,
 ]
+pending_prs = []
 
 [release_clearance]
-# PR CI intentionally permits tracked historical debt while preventing new
-# ingestion/regression. --release fails until this is COMPLETE and all pending
-# entries/fixtures are resolved.
-coverage = "INCOMPLETE"
+# COMPLETE is a permanent fail-closed baseline: the PR verifier enforces the
+# same zero-blocker/zero-review-debt invariants on every future PR.
+coverage = "COMPLETE"
+
+[[implementation]]
+pr = 83
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Flow/Range/test evidence influenced foreach/repeat behavior, while Arkst implements it through its own typed IrRange/Collection, CallOutcome, iterable coercion, child-scope, allocation, and source-provenance machinery."
+
+[[implementation]]
+pr = 85
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Collection/value source evidence and black-box probes defined observable access semantics; the implementation reuses Arkst's typed iterable adaptation, one-based checked indexing, typed fallback, and evaluator error model."
+
+[[implementation]]
+pr = 86
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Range/Math/Collection/ValueFactory evidence and official-binary probes informed endpoint semantics; Arkst independently models signed IrRange endpoints, argument binding, checked materialization, source spans, and fail-closed endless-range handling."
+
+[[implementation]]
+pr = 87
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Lambda/sorting behavior influenced the contract, while first-class IrValue::Callable, capture/scoping, stable typed transforms, and Arkst-only map/filter extensions are independently structured."
+
+[[implementation]]
+pr = 88
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Collection-family source evidence informed function semantics; Arkst implements the operations over its shared typed iterable path with deterministic structural equality and typed recursive results."
+
+[[implementation]]
+pr = 89
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Logical/comparison source and tests informed behavior; the Rust implementation uses Arkst argument binding, typed values, and an IR-specific plain-text projection traversal rather than the upstream object structure."
+
+[[implementation]]
+pr = 91
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Math/conversion source evidence informed Float/Int observable boundaries; Arkst uses its own builtin dispatcher, typed binder, numeric_result normalization, and explicit Kotlin-compatible conversion helpers."
+
+[[implementation]]
+pr = 92
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Decimal Math/NumberValue behavior informed truncate/round contracts; the implementation is a bounded Rust numeric adapter integrated into Arkst's existing binding and typed-result path."
+
+[[implementation]]
+pr = 93
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Math/test source review informed transcendental contracts, but Arkst independently selected and pinned pure-Rust libm with an explicit f32/f64 determinism boundary rather than translating an upstream implementation."
+
+[[implementation]]
+pr = 94
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Strings/NodeUtils/ValueFactory review informed plaintext behavior; Arkst projects already-parsed IrValue::Content and IrInline recursively, with no source serialization/reparse or upstream node hierarchy."
+
+[[implementation]]
+pr = 103
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Data/Ecosystem/Markdown source evidence informed resource semantics; Arkst implements them through its independent VirtualProject, SourceId, logical-path sandbox, include stack, and backend-neutral resource model."
+
+[[implementation]]
+pr = 104
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Optionality/Lambda/Collection/Sorting review informed callback semantics; Arkst reuses its own IrCallable, child scopes, CallOutcome, rollback, and typed Boolean/None paths."
+
+[[implementation]]
+pr = 105
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Binder/DynamicValueConverter/ValueFactory review strongly influenced target conversion semantics, but Arkst introduced evaluator-local ValueOrigin, InvocationValue, ConversionTarget, and typed conversion boundaries; the current conversion path was subsequently reworked by #219."
+
+[[implementation]]
+pr = 117
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Same-period LineBreak/NodeUtils evidence informed .br/plaintext behavior; implementation maps the contract onto Arkst's pre-existing backend-neutral HardBreak IR and evaluator validation rather than reproducing an upstream node implementation."
+
+[[implementation]]
+pr = 129
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Flow variable-owner and Lambda scoping evidence informed reassignment behavior; Arkst implements owner metadata, caller relays, snapshots/rollback, and parameter shadowing within its own evaluator context model."
+
+[[implementation]]
+pr = 130
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Refiner/binder/lambda source evidence informed contextual inline-body semantics; Arkst introduced a distinct source-backed IrInlineBody carrier and resolves it through its own callee and IrCallable machinery."
+
+[[implementation]]
+pr = 136
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Document metadata source evidence informed docauthor semantics; implementation is a bounded extension of Arkst's shared DocumentState/IrDocumentState with ordered author records and validate-then-commit behavior."
+
+[[implementation]]
+pr = 138
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "The PR explicitly used source-level behavioral evidence for docauthors; Arkst represents authors as ordered backend-neutral records, validates nested typed dictionaries, and commits through its own shared document-state and rollback model."
+
+[[implementation]]
+pr = 140
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Document source evidence informed dockeywords semantics; Arkst implements typed iterable/list materialization, bounded scalar conversion, full-candidate validation, atomic replace, shadowing, and serde in its existing state system."
+
+[[implementation]]
+pr = 142
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "DocumentTheme/binder/refiner review informed nullable theme binding and replacement semantics; Arkst uses its own IrDocumentTheme, document-state transaction boundary, explicit deferred body handling, and backend-neutral representation."
+
+[[implementation]]
+pr = 144
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Document/Locale/JVM locale source review informed doclang behavior; runtime implementation uses deterministic checked-in pure-Rust locale data and Arkst document state without a JVM/OS locale dependency."
+
+[[implementation]]
+pr = 146
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Caption/binder/merge source evidence informed field and merge semantics; Arkst independently models closed IrCaptionPosition state, explicit binding locations, validate/convert/rollback, and post-evaluation merge through its document-state system."
 
 [[implementation]]
 pr = 206
 issue = 157
 classification = "SOURCE_INFLUENCED_INDEPENDENT"
-basis = "Pinned grammar behavior influenced the compatibility contract, but the sampled Rust scanner/parser diff is independently structured; no literal or source-to-source translation was identified."
+basis = "Pinned grammar behavior influenced the compatibility contract, but the reviewed Rust scanner/parser implementation is independently structured; no literal or source-to-source translation was identified."
 
 [[implementation]]
 pr = 208
 issue = 165
 classification = "SOURCE_INFLUENCED_INDEPENDENT"
-basis = "The shared binder derives requirements from the historical value/binding audit, while the sampled implementation uses Arkst-specific BindingPlan, BodyPolicy, source-span diagnostics, and two-phase planning rather than an identified Kotlin translation."
+basis = "Historical binding semantics influenced requirements, while the reviewed implementation uses Arkst-specific BindingPlan, Candidate, BodyPolicy, source-span diagnostics, and two-phase planning/binding."
 
 [[implementation]]
 pr = 219
 issue = 166
 classification = "SOURCE_INFLUENCED_INDEPENDENT"
-basis = "Historical DynamicValue/ValueFactory semantics influenced the target-conversion contract; sampled production code is organized around Arkst IR/RawMarkdownTarget boundaries and no literal Quarkdown implementation copy was identified."
+basis = "DynamicValue/ValueFactory semantics influenced target conversion, while the reviewed code is organized around Arkst IR and RawMarkdownTarget boundaries with independently implemented trim/line handling."
 
 [[implementation]]
 pr = 221
 issue = 169
 classification = "SOURCE_INFLUENCED_INDEPENDENT"
-basis = "FunctionExtension/Flow source review influenced observable extension semantics, while the sampled Rust implementation uses Arkst-specific Rc/Weak ownership, extension overlays, stable IDs, and transaction journaling rather than an identified source-to-source translation."
+basis = "FunctionExtension/Flow source review influenced observable extension semantics, while the implementation uses Arkst-specific Rc/Weak ownership, ExtensionOverlay, stable IDs, transaction journaling, and lifecycle cleanup."
 
 [[implementation]]
 pr = 434
 issue = 197
 classification = "SOURCE_INFLUENCED_INDEPENDENT"
-basis = "The PR explicitly used exact upstream source review to generalize recursive owner behavior, but the sampled implementation uses Arkst-specific explicit-error IR carriers and diagnostic/carrier pairing; literal or structural translation was not identified. Black-box re-certification remains the preferred evidence basis."
+basis = "Exact upstream source review influenced recursive error-owner semantics, while Arkst uses its own ExplicitError IR carriers and diagnostic/carrier traversal; no literal or structural translation was identified."
 
-# Until each historical v2.5.1 fixture has been rechecked against its creation
-# history, the ledger does not repeat the old blanket 'independently authored'
-# claim. REVIEW_REQUIRED is finite audit work, not an infringement finding.
 [[fixture]]
 id = "br-line-break-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created alongside source-influenced #117; current generic witness was reviewed against repository-recorded upstream examples and no copied upstream fixture/test input was identified."
 
 [[fixture]]
 id = "call-dot-prefixed-basic"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "INDEPENDENT"
+basis = "Seeded by #31, whose recorded safety statement explicitly says no upstream implementation source inspection; the fixture is an Arkst-authored parser witness."
 
 [[fixture]]
 id = "call-indented-body-basic"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "INDEPENDENT"
+basis = "Seeded by #31 under the explicit no-upstream-implementation-source-inspection boundary; the body text is an Arkst-authored parser witness."
 
 [[fixture]]
 id = "call-positional-basic"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Originally seeded source-free in #31 and later changed by source-influenced #86; the current range/size witness was provenance-reviewed and is not recorded as an upstream test/example input."
 
 [[fixture]]
 id = "captionposition-document-state"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #146; current multi-call state witness was reviewed as Arkst-authored evidence and no exact upstream fixture/test input is identified in repository provenance."
 
 [[fixture]]
 id = "dictionary-get-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created by bounded #266 after the compatibility audits; current dictionary names/values and chained/fallback witness are Arkst-authored and no exact upstream fixture/test input is identified."
 
 [[fixture]]
 id = "docauthor-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #136; the current Alice/Bob getter/append witness is a generic Arkst-authored state case with no repository evidence of copied upstream test input."
 
 [[fixture]]
 id = "docauthors-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #138, whose PR records this fixture as independently authored; current nested author metadata witness was re-reviewed with no exact upstream fixture/test input identified."
 
 [[fixture]]
 id = "dockeywords-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #140; current compiler/deterministic-output/replacement witness was re-reviewed and no exact upstream fixture/test input is identified."
 
 [[fixture]]
 id = "doclang-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Historical source-exposed doclang evidence was superseded by #322's v2.6.0 migration based on the official release and a clean-room black-box snapshot; current fixture is part of that migrated contract."
 
 [[fixture]]
 id = "doclang-locale-closure"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "#322 re-certified the locale closure from a 1,162-row independently observed v2.6.0 black-box snapshot without implementation-source inspection and migrated this fixture."
 
 [[fixture]]
 id = "dynamic-value-scalar-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #105 and later touched by #206; current variable-backed Number/Boolean/Range witness was provenance-reviewed and no exact upstream fixture/test input is identified."
 
 [[fixture]]
 id = "localization-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "INDEPENDENT"
+basis = "#269 explicitly records independently authored black-box probes/fixtures against the pinned release and states that no upstream implementation, test, fixture, or localization resource content was copied or translated."
 
 [[fixture]]
 id = "numeric-arithmetic-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #91; current mixed arithmetic/nested/conditional witness was reviewed against repository-recorded upstream examples and no exact copied test input is identified."
 
 [[fixture]]
 id = "numeric-decimal-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #92; unusual numeric literals were re-audited against the repository's retained source/test descriptions, which record behavior families but do not identify this exact fixture input as an upstream test copy."
 
 [[fixture]]
 id = "numeric-transcendental-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "The original #93 fixture reused exact MathFunctionsTest examples recorded in Arkst provenance. #444 replaces those expressions with independently composed equivalent semantic probes while retaining only the functional numeric contract."
 
 [[fixture]]
 id = "optionality-callback-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #104; current Quarkdown/4/5 callback composition was re-reviewed and no repository record identifies it as copied upstream fixture/test input."
 
 [[fixture]]
 id = "plaintext-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #94; current Markdown projection phrases/forms were re-reviewed as Arkst-authored witness material and no exact upstream fixture/test input is identified."
 
 [[fixture]]
 id = "string-scalar-family"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "INDEPENDENT"
+basis = "#90 records a bounded Arkst scalar-string implementation and fixture without implementation-source inspection evidence; the current scalar/chaining witness has no recorded upstream fixture/test origin."
 
 [[fixture]]
 id = "theme-document-state"
-status = "REVIEW_REQUIRED"
-issue = 444
+status = "REMEDIATED"
+basis = "Created in source-exposed #142; current mixed-case synthetic theme/layout names and replacement sequence were re-reviewed and no exact upstream fixture/test input is identified."
