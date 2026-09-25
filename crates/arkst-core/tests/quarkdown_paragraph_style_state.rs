@@ -83,9 +83,8 @@ fn failed_conversion_rolls_back_nested_paragraphstyle_mutation() {
 
 #[test]
 fn source_defined_paragraphstyle_shadows_native_setter() {
-    let result = compile_source(
-        ".function {paragraphstyle}\n    shadow paragraph style\n.paragraphstyle\n",
-    );
+    let result =
+        compile_source(".function {paragraphstyle}\n    shadow paragraph style\n.paragraphstyle\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(output_text(&result), "shadow paragraph style");
     assert!(result.ir.metadata.document_state.paragraph_style.is_empty());
