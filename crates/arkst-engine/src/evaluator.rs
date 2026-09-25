@@ -59,9 +59,10 @@ use arkst_ir::{
     IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext,
     IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
-    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
-    IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrPageGeometry, IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrDocumentAlignment, IrDocumentAuthor, IrDocumentNumbering, IrDocumentTheme, IrEnumValue,
+    IrExplicitErrorComponent, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
+    IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingEntry, IrNumberingFormat, IrNumberingToken,
+    IrPageGeometry, IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
     IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
     IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
@@ -574,6 +575,7 @@ struct DocumentState {
     page_alignment: Option<IrDocumentAlignment>,
     page_geometry: Option<IrPageGeometry>,
     slides: Option<IrSlidesConfiguration>,
+    numbering: Option<IrDocumentNumbering>,
     localization_tables: LocalizationTables,
 }
 
@@ -592,6 +594,7 @@ impl Default for DocumentState {
             page_alignment: None,
             page_geometry: None,
             slides: None,
+            numbering: None,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -612,6 +615,7 @@ impl DocumentState {
             page_alignment: snapshot.page_alignment,
             page_geometry: snapshot.page_geometry.clone(),
             slides: snapshot.slides,
+            numbering: snapshot.numbering.clone(),
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -630,6 +634,7 @@ impl DocumentState {
             page_alignment: self.page_alignment,
             page_geometry: self.page_geometry.clone(),
             slides: self.slides,
+            numbering: self.numbering.clone(),
         }
     }
 }
@@ -1028,6 +1033,7 @@ enum DocumentStateField {
     PageAlignment,
     PageGeometry,
     Slides,
+    Numbering,
     LocalizationTables,
 }
 
@@ -1044,6 +1050,7 @@ enum DocumentStateUndo {
     PageAlignment(Option<IrDocumentAlignment>),
     PageGeometry(Option<IrPageGeometry>),
     Slides(Option<IrSlidesConfiguration>),
+    Numbering(Option<IrDocumentNumbering>),
     LocalizationTables(LocalizationTableUndo),
 }
 
@@ -2262,6 +2269,7 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,
             DocumentStateUndo::PageGeometry(previous) => state.page_geometry = previous,
             DocumentStateUndo::Slides(previous) => state.slides = previous,
+            DocumentStateUndo::Numbering(previous) => state.numbering = previous,
             DocumentStateUndo::LocalizationTables(previous) => {
                 for (name, table) in previous {
                     match table {
@@ -2349,6 +2357,22 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().slides = value;
+    }
+
+    fn numbering_snapshot(&self) -> Option<IrDocumentNumbering> {
+        self.document_state.borrow().numbering.clone()
+    }
+
+    fn set_numbering_configuration(&self, value: IrDocumentNumbering) {
+        self.record_document_state_undo(DocumentStateField::Numbering, || {
+            let previous = self.document_state.borrow().numbering.clone();
+            let copied_units = previous
+                .as_ref()
+                .map(|numbering| numbering.extra.len())
+                .unwrap_or_default();
+            (DocumentStateUndo::Numbering(previous), copied_units)
+        });
+        self.document_state.borrow_mut().numbering = Some(value);
     }
 
     fn append_document_author(&self, name: String) {
@@ -3827,6 +3851,8 @@ impl Evaluator {
         let state_shadowed = matches!(
             name,
             "captionposition"
+                | "numbering"
+                | "nonumbering"
                 | "docauthor"
                 | "docauthors"
                 | "dockeywords"
@@ -4232,6 +4258,8 @@ impl Evaluator {
         let source_defined_shadowable_document_state = matches!(
             name,
             "captionposition"
+                | "numbering"
+                | "nonumbering"
                 | "docauthor"
                 | "docauthors"
                 | "dockeywords"
@@ -6727,6 +6755,250 @@ impl Evaluator {
         }
     }
 
+    /// Implements the bounded #175 numbering document-state slice.
+    ///
+    /// The IR keeps document-type defaults as an explicit inherited layer
+    /// rather than copying backend-owned default format strings into core.
+    /// All dictionary conversion and format parsing completes before the
+    /// single document-state publication.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_numbering_builtin(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+
+        if name == "nonumbering" {
+            context.set_numbering_configuration(IrDocumentNumbering::default());
+            return CallOutcome::NoValue;
+        }
+
+        let body_candidate = if body.is_some() {
+            match source_backed_body_candidate(
+                body.as_ref()
+                    .map(|body| call_body_source_span(*body, *span)),
+                raw_body,
+                ".numbering",
+                diagnostics,
+            ) {
+                Ok(candidate) => candidate,
+                Err(outcome) => return outcome,
+            }
+        } else {
+            None
+        };
+
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let candidates = invocation_candidates(
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+        );
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter().enumerate();
+
+        let merge = match slots.next() {
+            Some((
+                index,
+                BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                },
+            )) => match value_conversion::convert_scalar_with_origin(
+                &value,
+                ScalarTarget::Boolean,
+            ) {
+                Ok(ScalarValue::Boolean(value)) => value,
+                Ok(_) => {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.numbering` merge must be Boolean".to_string(),
+                        argument_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("merge"),
+                            parameters
+                                .get(index)
+                                .and_then(|parameter| parameter.name_span),
+                            *span,
+                        ),
+                        Some("`.numbering`"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            Some((_, BoundSlot::Defaulted | BoundSlot::Omitted)) | None => true,
+        };
+
+        let Some((
+            formats_index,
+            BoundSlot::Explicit {
+                value: formats,
+                span: formats_span,
+            },
+        )) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+
+        let dictionary = match value_conversion::convert_target_with_origin(
+            &formats,
+            value_conversion::ConversionTarget::Dictionary,
+            formats_span,
+        ) {
+            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(dictionary))) => dictionary,
+            Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
+                let nodes = match self.parse_dynamic_markdown_content(
+                    &text,
+                    formats_span,
+                    value_conversion::RawMarkdownTarget::Dictionary,
+                    diagnostics,
+                ) {
+                    Ok(nodes) => nodes,
+                    Err(outcome) => return outcome,
+                };
+                let entries = match self.evaluate_dictionary_entries(
+                    &nodes,
+                    formats_span,
+                    diagnostics,
+                    context,
+                    ".numbering",
+                ) {
+                    Ok(entries) => entries,
+                    Err(outcome) => return outcome,
+                };
+                IrDictionary {
+                    entries,
+                    span: formats_span,
+                }
+            }
+            Ok(value_conversion::TargetValue::Value(_)) => {
+                diagnostics.push(document_state_conversion_error(
+                    "`.numbering` formats must be a Dictionary".to_string(),
+                    formats_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(formats_span),
+                        Some("formats"),
+                        parameters
+                            .get(formats_index)
+                            .and_then(|parameter| parameter.name_span),
+                        *span,
+                    ),
+                    Some("`.numbering`"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let mut parsed = Vec::with_capacity(dictionary.entries.len());
+        for pair in dictionary.entries {
+            let pair_span = pair.span;
+            let IrValue::String(key) = *pair.first else {
+                diagnostics.push(document_state_conversion_error(
+                    "`.numbering` format keys must be strings".to_string(),
+                    pair_span,
+                ));
+                return CallOutcome::Failed;
+            };
+            let format = match *pair.second {
+                IrValue::None => IrNumberingFormat::default(),
+                value => {
+                    let value = InvocationValue {
+                        value,
+                        origin: ValueOrigin::Static,
+                    };
+                    let text = match builtins::scalar_string_conversion(&value) {
+                        Ok(text) => text,
+                        Err(error) => {
+                            diagnostics.push(conversion_failure_diagnostic(
+                                value_conversion::ConversionFailure::new(
+                                    error,
+                                    Some(pair_span),
+                                    Some("formats"),
+                                    parameters
+                                        .get(formats_index)
+                                        .and_then(|parameter| parameter.name_span),
+                                    *span,
+                                ),
+                                Some("`.numbering`"),
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    };
+                    match parse_numbering_format(&text) {
+                        Ok(format) => format,
+                        Err(message) => {
+                            diagnostics.push(document_state_conversion_error(message, pair_span));
+                            return CallOutcome::Failed;
+                        }
+                    }
+                }
+            };
+            parsed.push((key, format));
+        }
+
+        let mut candidate = if merge {
+            context.numbering_snapshot().unwrap_or_else(|| IrDocumentNumbering {
+                inherits_document_defaults: true,
+                ..IrDocumentNumbering::default()
+            })
+        } else {
+            IrDocumentNumbering::default()
+        };
+
+        for (name, format) in parsed {
+            apply_numbering_format(&mut candidate, name, format);
+        }
+        context.set_numbering_configuration(candidate);
+        CallOutcome::NoValue
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn evaluate_document_state_builtin(
         &self,
@@ -6741,6 +7013,21 @@ impl Evaluator {
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
+        if matches!(name, "numbering" | "nonumbering") {
+            return self.evaluate_numbering_builtin(
+                name,
+                positional_args,
+                named_args,
+                body,
+                raw_body,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+                first_origin,
+            );
+        }
+
         if name == "docauthors" {
             return self.evaluate_document_authors_builtin(
                 positional_args,
@@ -14050,6 +14337,8 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "docname",
     "docdescription",
     "doctype",
+    "numbering",
+    "nonumbering",
     "autopagebreak",
     "noautopagebreak",
     "docauthor",
@@ -14392,6 +14681,51 @@ fn bind_whitespace_arguments(
         width: slots.next().and_then(to_argument),
         height: slots.next().and_then(to_argument),
     })
+}
+
+fn parse_numbering_format(text: &str) -> Result<IrNumberingFormat, String> {
+    let mut tokens = Vec::new();
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        let token = match ch {
+            '1' => IrNumberingToken::Decimal,
+            'a' => IrNumberingToken::LowerAlpha,
+            'A' => IrNumberingToken::UpperAlpha,
+            'i' => IrNumberingToken::LowerRoman,
+            'I' => IrNumberingToken::UpperRoman,
+            '\\' => {
+                let Some(escaped) = chars.next() else {
+                    return Err("Numbering format cannot end with an escape character".to_string());
+                };
+                IrNumberingToken::Literal(escaped.to_string())
+            }
+            literal => IrNumberingToken::Literal(literal.to_string()),
+        };
+        tokens.push(token);
+    }
+    Ok(IrNumberingFormat { tokens })
+}
+
+fn apply_numbering_format(
+    numbering: &mut IrDocumentNumbering,
+    name: String,
+    format: IrNumberingFormat,
+) {
+    match name.as_str() {
+        "headings" => numbering.headings = Some(format.clone()),
+        "figures" => numbering.figures = Some(format.clone()),
+        "tables" => numbering.tables = Some(format.clone()),
+        "equations" => numbering.equations = Some(format.clone()),
+        "code" => numbering.code = Some(format.clone()),
+        "footnotes" => numbering.footnotes = Some(format.clone()),
+        _ => {}
+    }
+
+    if let Some(entry) = numbering.extra.iter_mut().find(|entry| entry.name == name) {
+        entry.format = format;
+    } else {
+        numbering.extra.push(IrNumberingEntry { name, format });
+    }
 }
 
 fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
@@ -15361,6 +15695,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
     const CALLBACK_ALIASES: &[&str] = &["by"];
 
     let signature = match name {
+        "numbering" => (
+            vec![
+                ParameterMetadata::defaulted("merge"),
+                ParameterMetadata::required("formats"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "nonumbering" => (Vec::new(), BodyPolicy::Reject),
         "autopagebreak" => (
             vec![ParameterMetadata::required("maxdepth")],
             BodyPolicy::BindFinal,
@@ -25887,4 +26229,58 @@ mod tests {
         assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
         assert_eq!((candidate_start, candidate_end), (11, 27));
     }
+    #[test]
+    fn issue_175_numbering_format_parser_preserves_tokens_and_escapes() {
+        let format = parse_numbering_format("1.a\\I-A").expect("valid numbering format");
+        assert_eq!(
+            format.tokens,
+            vec![
+                IrNumberingToken::Decimal,
+                IrNumberingToken::Literal(".".to_string()),
+                IrNumberingToken::LowerAlpha,
+                IrNumberingToken::Literal("I".to_string()),
+                IrNumberingToken::Literal("-".to_string()),
+                IrNumberingToken::UpperAlpha,
+            ]
+        );
+        assert!(parse_numbering_format("\\").is_err());
+    }
+
+    #[test]
+    fn issue_175_numbering_merge_model_preserves_default_inheritance_and_extra() {
+        let mut numbering = IrDocumentNumbering {
+            inherits_document_defaults: true,
+            ..IrDocumentNumbering::default()
+        };
+        apply_numbering_format(
+            &mut numbering,
+            "headings".to_string(),
+            parse_numbering_format("1.").unwrap(),
+        );
+        apply_numbering_format(
+            &mut numbering,
+            "custom".to_string(),
+            parse_numbering_format("A").unwrap(),
+        );
+
+        assert!(numbering.inherits_document_defaults);
+        assert_eq!(numbering.headings.as_ref().unwrap().tokens.len(), 2);
+        assert_eq!(numbering.extra.len(), 2);
+        assert_eq!(numbering.extra[0].name, "headings");
+        assert_eq!(numbering.extra[1].name, "custom");
+    }
+
+    #[test]
+    fn issue_175_nonumbering_is_complete_replacement_with_no_formats() {
+        let numbering = IrDocumentNumbering::default();
+        assert!(!numbering.inherits_document_defaults);
+        assert!(numbering.headings.is_none());
+        assert!(numbering.figures.is_none());
+        assert!(numbering.tables.is_none());
+        assert!(numbering.equations.is_none());
+        assert!(numbering.code.is_none());
+        assert!(numbering.footnotes.is_none());
+        assert!(numbering.extra.is_empty());
+    }
+
 }
