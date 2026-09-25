@@ -19,7 +19,7 @@ vulnerabilities (report to Typst GmbH).
 | T7 | Exponential expansion       | CPU / Memory         | Malicious doc     | Evaluator      | Per-operation materialization bound; aggregate output remains deferred | Medium |
 | T8 | Infinite recursion          | CPU / Stack          | Malicious doc     | Evaluator      | Scoped active evaluator-depth bound | Low           |
 | T9 | Large loop count            | CPU                  | Malicious doc     | Evaluator      | Per-operation materialized-element bound | Low           |
-| T10 | Hostile regex               | CPU                  | Malicious doc     | Evaluator      | No user-provided regex in core      | Low           |
+| T10 | Hostile regex               | CPU                  | Malicious doc     | Evaluator      | `.match` uses an explicit 1,000,000-attempt fancy-regex backtrack limit; compile/match budget errors fail closed | Medium |
 | T11 | Environment leakage         | Secrets              | Malicious doc     | Evaluator      | Denied by default; only explicit immutable `EnvironmentInputs` are visible; no ambient `std::env` lookup | Low |
 | T12 | Arbitrary shell execution   | System               | Malicious doc     | Evaluator      | No shell execution                  | None (blocked) |
 | T13 | Network access              | Network              | Malicious doc     | Evaluator / native backend | Core evaluator has no network capability; InProcess World denies it; subprocess CLI resolver is not hard-isolated by syntax preflight | Medium for subprocess |

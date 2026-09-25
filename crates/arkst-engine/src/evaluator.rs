@@ -68,6 +68,7 @@ use arkst_ir::{
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
 use arkst_source::{SourceId, SourceSpan};
+use fancy_regex::{Regex, RegexBuilder};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -4407,6 +4408,26 @@ impl Evaluator {
                 diagnostics,
                 context,
                 native_binding_plan.as_ref(),
+            );
+        }
+
+        if is_match_transform(name)
+            && context.get_function(name).is_none()
+            && !is_variable_reference_call(name, positional_args, named_args, body, context)
+            && !is_variable_reassignment_call(name, positional_args, named_args, body, context)
+        {
+            return self.evaluate_match_transform(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -10297,6 +10318,488 @@ impl Evaluator {
         )
     }
 
+    /// Evaluates Quarkdown `.match` as a structural inline transform.
+    ///
+    /// The upstream v2.5.1/v2.6.0 implementation rewrites only text leaves,
+    /// preserves the surrounding inline owners, invokes the replacement lambda
+    /// once per non-overlapping match, and recursively traverses text-bearing
+    /// inline wrappers without an owner-depth counter.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_match_transform(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+
+        let body_candidate = match body {
+            Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
+                value: InvocationValue::static_value(IrValue::Callable(self.make_callable(
+                    lambda_parameters,
+                    nodes,
+                    *span,
+                    context,
+                ))),
+                span: call_body_source_span(CallBody::Block(nodes), *span),
+            }),
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(match_transform_error(
+                    "`.match` replacement body must be a block lambda".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => None,
+        };
+
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter().enumerate();
+
+        let Some((
+            content_index,
+            BoundSlot::Explicit {
+                value: content_argument,
+                span: content_span,
+            },
+        )) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let Some((
+            pattern_index,
+            BoundSlot::Explicit {
+                value: pattern_argument,
+                span: pattern_span,
+            },
+        )) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let Some((
+            replacement_index,
+            BoundSlot::Explicit {
+                value: replacement_argument,
+                span: replacement_span,
+            },
+        )) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+
+        let converted_content = match value_conversion::convert_target_with_origin(
+            &content_argument,
+            value_conversion::ConversionTarget::InlineContent,
+            content_span,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(content_span),
+                        Some("content"),
+                        parameters
+                            .get(content_index)
+                            .and_then(|parameter| parameter.name_span),
+                        *span,
+                    ),
+                    Some("`.match` content"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let content_value = match self.resolve_target_value(
+            converted_content,
+            content_span,
+            *span,
+            diagnostics,
+            context,
+        ) {
+            Ok(value) => value,
+            Err(outcome) => return outcome,
+        };
+        let IrValue::Content(nodes) = content_value else {
+            diagnostics.push(match_transform_error(
+                "`.match` content must resolve to inline Markdown content".to_string(),
+                content_span,
+            ));
+            return CallOutcome::Failed;
+        };
+
+        let pattern = match builtins::scalar_string_conversion(&pattern_argument) {
+            Ok(pattern) => pattern,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(pattern_span),
+                        Some("pattern"),
+                        parameters
+                            .get(pattern_index)
+                            .and_then(|parameter| parameter.name_span),
+                        *span,
+                    ),
+                    Some("`.match` pattern"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let replacement = match value_conversion::convert_target_with_origin(
+            &replacement_argument,
+            value_conversion::ConversionTarget::Callable,
+            replacement_span,
+        ) {
+            Ok(value_conversion::TargetValue::Value(IrValue::Callable(callable))) => callable,
+            Ok(_) => {
+                diagnostics.push(match_transform_error(
+                    "`.match` replacement must resolve to a callable".to_string(),
+                    replacement_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(replacement_span),
+                        Some("replacement"),
+                        parameters
+                            .get(replacement_index)
+                            .and_then(|parameter| parameter.name_span),
+                        *span,
+                    ),
+                    Some("`.match` replacement"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        // Upstream compiles the regex first, then treats an empty source
+        // pattern as a semantic no-op that never invokes the replacement.
+        let regex = match RegexBuilder::new(&pattern)
+            .backtrack_limit(MATCH_REGEX_BACKTRACK_LIMIT)
+            .build()
+        {
+            Ok(regex) => regex,
+            Err(error) => {
+                diagnostics.push(match_transform_error(
+                    format!("Invalid regular expression: {pattern} ({error})"),
+                    pattern_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        if pattern.is_empty() {
+            return CallOutcome::Value(IrValue::Content(nodes));
+        }
+
+        let mut nodes = nodes.into_iter();
+        let Some(node) = nodes.next() else {
+            return CallOutcome::Value(IrValue::Content(Vec::new()));
+        };
+        if nodes.next().is_some() {
+            diagnostics.push(match_transform_error(
+                "`.match` accepts inline content, not multiple block nodes".to_string(),
+                content_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        match node {
+            IrNode::Paragraph {
+                content,
+                span: paragraph_span,
+            } => {
+                let transformed = match self.replace_matches_in_inline_content(
+                    content,
+                    &regex,
+                    &replacement,
+                    *span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(content) => content,
+                    Err(outcome) => return outcome,
+                };
+                CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
+                    content: transformed,
+                    span: paragraph_span,
+                }]))
+            }
+            // Opaque target-specific inline content contains no traversable
+            // Markdown text leaf in the backend-neutral IR.
+            IrNode::TargetSpecificContent { content } => {
+                CallOutcome::Value(IrValue::Content(vec![IrNode::TargetSpecificContent {
+                    content,
+                }]))
+            }
+            other => {
+                diagnostics.push(match_transform_error(
+                    format!("`.match` requires inline content, got {other:?}"),
+                    content_span,
+                ));
+                CallOutcome::Failed
+            }
+        }
+    }
+
+    fn replace_matches_in_inline_content(
+        &self,
+        content: Vec<IrInline>,
+        regex: &Regex,
+        replacement: &IrCallable,
+        call_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        let mut output = Vec::new();
+        for inline in content {
+            let mut replaced = self.replace_matches_in_inline(
+                inline,
+                regex,
+                replacement,
+                call_span,
+                diagnostics,
+                context,
+            )?;
+            output.append(&mut replaced);
+        }
+        self.check_materialized_elements_len(output.len(), call_span, diagnostics)?;
+        Ok(output)
+    }
+
+    fn replace_matches_in_inline(
+        &self,
+        inline: IrInline,
+        regex: &Regex,
+        replacement: &IrCallable,
+        call_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        match inline {
+            IrInline::Text { content, span } => self.replace_matches_in_text(
+                content,
+                span,
+                regex,
+                replacement,
+                call_span,
+                diagnostics,
+                context,
+            ),
+            IrInline::Emphasis { content, span } => Ok(vec![IrInline::Emphasis {
+                content: self.replace_matches_in_inline_content(
+                    content,
+                    regex,
+                    replacement,
+                    call_span,
+                    diagnostics,
+                    context,
+                )?,
+                span,
+            }]),
+            IrInline::Strong { content, span } => Ok(vec![IrInline::Strong {
+                content: self.replace_matches_in_inline_content(
+                    content,
+                    regex,
+                    replacement,
+                    call_span,
+                    diagnostics,
+                    context,
+                )?,
+                span,
+            }]),
+            IrInline::Strikethrough { content, span } => Ok(vec![IrInline::Strikethrough {
+                content: self.replace_matches_in_inline_content(
+                    content,
+                    regex,
+                    replacement,
+                    call_span,
+                    diagnostics,
+                    context,
+                )?,
+                span,
+            }]),
+            IrInline::Link {
+                content,
+                destination,
+                title,
+                span,
+            } => Ok(vec![IrInline::Link {
+                content: self.replace_matches_in_inline_content(
+                    content,
+                    regex,
+                    replacement,
+                    call_span,
+                    diagnostics,
+                    context,
+                )?,
+                destination,
+                title,
+                span,
+            }]),
+            // Code spans and media/opaque inline nodes are not upstream TextNode
+            // owners for RegexMatch traversal; keep them semantically opaque.
+            other => Ok(vec![other]),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn replace_matches_in_text(
+        &self,
+        content: String,
+        span: SourceSpan,
+        regex: &Regex,
+        replacement: &IrCallable,
+        call_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        let mut output = Vec::new();
+        let mut cursor = 0usize;
+
+        for found in regex.find_iter(&content) {
+            let found = match found {
+                Ok(found) => found,
+                Err(error) => {
+                    diagnostics.push(match_transform_error(
+                        format!("`.match` regular expression evaluation failed: {error}"),
+                        span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+            };
+            if found.start() > cursor {
+                output.push(IrInline::Text {
+                    content: content[cursor..found.start()].to_string(),
+                    span,
+                });
+            }
+
+            let mut replacement_content = self.evaluate_match_replacement(
+                replacement,
+                found.as_str(),
+                span,
+                call_span,
+                diagnostics,
+                context,
+            )?;
+            output.append(&mut replacement_content);
+            cursor = found.end();
+        }
+
+        if cursor < content.len() {
+            output.push(IrInline::Text {
+                content: content[cursor..].to_string(),
+                span,
+            });
+        }
+        self.check_materialized_elements_len(output.len(), span, diagnostics)?;
+        Ok(output)
+    }
+
+    fn evaluate_match_replacement(
+        &self,
+        replacement: &IrCallable,
+        matched: &str,
+        source_span: SourceSpan,
+        call_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        let value = match self.invoke_callable(
+            replacement,
+            vec![IrValue::String(matched.to_string())],
+            IterationOptions {
+                span: source_span,
+                allow_destructuring: false,
+            },
+            diagnostics,
+            context,
+        ) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::NoValue => {
+                diagnostics.push(match_transform_error(
+                    "`.match` replacement produced no value".to_string(),
+                    source_span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            CallOutcome::Failed => return Err(CallOutcome::Failed),
+            CallOutcome::Unresolved => {
+                diagnostics.push(match_transform_error(
+                    "`.match` replacement did not resolve to inline content".to_string(),
+                    source_span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+        };
+
+        let argument = InvocationValue::dynamic_value(value.clone());
+        let converted = match value_conversion::convert_target_with_origin(
+            &argument,
+            value_conversion::ConversionTarget::InlineContent,
+            source_span,
+        ) {
+            Ok(converted) => converted,
+            Err(_) => {
+                let text = scalar_to_text(&value, source_span, diagnostics)?;
+                value_conversion::TargetValue::RawMarkdown {
+                    target: value_conversion::RawMarkdownTarget::Inline,
+                    text,
+                }
+            }
+        };
+        let resolved =
+            self.resolve_target_value(converted, source_span, call_span, diagnostics, context)?;
+        let IrValue::Content(nodes) = resolved else {
+            diagnostics.push(match_transform_error(
+                "`.match` replacement must produce inline Markdown content".to_string(),
+                source_span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        let before = diagnostics.len();
+        let inline = self.materialize_inline_content(nodes, &source_span, diagnostics);
+        if diagnostics.len() != before {
+            return Err(CallOutcome::Failed);
+        }
+        Ok(inline)
+    }
+
     /// Evaluates `.map`, `.filter`, and `.sorted` through the same typed
     /// iterable and callable machinery used by `.foreach`.
     #[allow(clippy::too_many_arguments)]
@@ -14034,6 +14537,7 @@ pub(crate) enum NativeDispatchOwner {
     DictionaryLookup,
     CollectionAccess,
     CollectionTransform,
+    MatchTransform,
     LibraryInspection,
     Logger,
     Environment,
@@ -14106,6 +14610,8 @@ const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "appended",
 ];
 const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] = &["map", "filter", "sorted"];
+const MATCH_TRANSFORM_NATIVE_NAMES: &[&str] = &["match"];
+const MATCH_REGEX_BACKTRACK_LIMIT: usize = 1_000_000;
 const LIBRARY_INSPECTION_NATIVE_NAMES: &[&str] =
     &["libexists", "functionexists", "libraries", "libfunctions"];
 const LOGGER_NATIVE_NAMES: &[&str] = &["log", "debug", "error"];
@@ -14212,6 +14718,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::CollectionTransform,
         names: COLLECTION_TRANSFORM_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::MatchTransform,
+        names: MATCH_TRANSFORM_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::LibraryInspection,
@@ -15307,6 +15817,10 @@ fn is_collection_transform(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::CollectionTransform)
 }
 
+fn is_match_transform(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::MatchTransform)
+}
+
 fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'static>>, BodyPolicy)> {
     if name == "libraries" {
         return Some((Vec::new(), BodyPolicy::Reject));
@@ -15581,6 +16095,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("height"),
             ],
             BodyPolicy::Reject,
+        ),
+        "match" => (
+            vec![
+                ParameterMetadata::required("content"),
+                ParameterMetadata::required("pattern"),
+                ParameterMetadata::required("replacement"),
+            ],
+            BodyPolicy::BindFinal,
         ),
         "map" | "filter" | "sorted" => (
             vec![
@@ -18420,6 +18942,20 @@ fn no_value_required(span: SourceSpan) -> Diagnostic {
         "Call produced no value where a value is required for semantic composition".to_string(),
         span,
     )
+}
+
+fn match_transform_error(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Quarkdown match preserves inline structure and requires a valid regex plus an inline-producing replacement callback."
+                .to_string(),
+        ],
+    }
 }
 
 fn iteration_error(message: String, span: SourceSpan) -> Diagnostic {
