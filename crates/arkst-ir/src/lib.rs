@@ -721,6 +721,26 @@ pub struct IrPageFormatState {
     pub layers: Vec<IrPageFormatLayer>,
 }
 
+impl IrPageRange {
+    fn contains(&self, page_number: i32) -> bool {
+        page_number >= self.start && page_number <= self.end
+    }
+}
+
+impl IrPageFormatSelector {
+    fn matches_page(&self, page_number: i32, side: IrPageSide) -> bool {
+        let side_matches = match self.side {
+            None => true,
+            Some(expected) => expected == side,
+        };
+        let page_matches = match self.pages {
+            None => true,
+            Some(range) => range.contains(page_number),
+        };
+        side_matches && page_matches
+    }
+}
+
 impl IrPageFormatLayer {
     fn overlay_non_null_from(&mut self, later: &Self) {
         debug_assert_eq!(self.selector, later.selector);
@@ -758,6 +778,30 @@ impl IrPageFormatLayer {
 impl IrPageFormatState {
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
+    }
+
+    /// Return source-ordered layers whose selectors admit one explicit page.
+    ///
+    /// The caller supplies the already-resolved page side. This helper does
+    /// not infer left/right from page parity, merge applicable layers, choose
+    /// cross-selector precedence, or widen renderer support. Non-positive
+    /// page numbers fail closed.
+    pub fn applicable_layers_for_page(
+        &self,
+        page_number: i32,
+        side: IrPageSide,
+    ) -> Vec<&IrPageFormatLayer> {
+        if page_number <= 0 {
+            return Vec::new();
+        }
+
+        self.layers
+            .iter()
+            .filter(|layer| match layer.selector {
+                None => true,
+                Some(selector) => selector.matches_page(page_number, side),
+            })
+            .collect()
     }
 
     /// Fold only layers with exactly the requested selector identity.

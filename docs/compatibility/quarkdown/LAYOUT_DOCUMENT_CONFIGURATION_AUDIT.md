@@ -297,7 +297,13 @@ a bounded exact-selector resolver that folds only layers with identical selector
 identity in source order: later non-null fields replace earlier values while
 omitted fields inherit. Distinct selector groups remain uncombined, so this does
 not claim cross-selector precedence, selector-aware output, or size-versus-geometry
-resolution. Cross-selector precedence/output, width/height override composition, remaining
+resolution. A second bounded IR-only helper filters the source-ordered layer list
+for one positive page number plus a caller-supplied typed page side. Global,
+side-only, finite-range-only, and combined selectors are included only when they
+admit that explicit page. The helper preserves original source order and does
+not infer page side from parity, merge applicable layers, or choose precedence.
+Non-positive page numbers fail closed. Cross-selector precedence/output,
+width/height override composition, remaining
 selector-aware geometry/size/margin/decoration layering, selector/columns
 interaction, the remaining page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption
