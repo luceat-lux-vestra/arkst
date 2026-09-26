@@ -72,6 +72,10 @@ fn document_prelude(doc: &IrDocument) -> String {
     if let Some(columns) = state.page_columns {
         prelude.push_str(&format!("#set page(columns: {columns})\n"));
     }
+    if let Some(background) = state.page_background.as_ref() {
+        let fill = lowering_base::lower_color(background);
+        prelude.push_str(&format!("#set page(fill: {fill})\n"));
+    }
     if state.document_type == IrDocumentType::Slides {
         match state.slides.and_then(|slides| slides.center) {
             Some(true) => prelude.push_str("#set align(horizon)\n"),
@@ -159,7 +163,9 @@ fn render_focus_prelude(kind: FocusDocumentKind, paperwhite: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkst_ir::{IrDocumentTheme, IrMetadata, IrNode, IrPageMargins, IrSize, IrSizeUnit};
+    use arkst_ir::{
+        IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageMargins, IrSize, IrSizeUnit,
+    };
     use arkst_source::{SourceId, SourceSpan};
 
     fn document(
@@ -193,6 +199,23 @@ mod tests {
 
         let code = lower_to_typst_code(&doc);
         assert!(code.starts_with("#set page(columns: 3)\n"), "{code}");
+    }
+
+    #[test]
+    fn global_page_background_emits_typed_typst_page_fill() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_background = Some(IrColor {
+            red: 1,
+            green: 2,
+            blue: 3,
+            alpha: 0.5,
+        });
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(fill: rgb(1, 2, 3, 50%))\n"),
+            "{code}"
+        );
     }
 
     #[test]

@@ -4,10 +4,11 @@
 //! records source map entries as it generates code.
 
 use arkst_ir::{
-    IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-    IrDocument, IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrInline,
-    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+    IrCallSegment, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
+    IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
+    IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrSize,
+    IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+    IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -1308,6 +1309,14 @@ impl LoweringContext {
             _ => self.lower_node(node),
         }
     }
+}
+
+pub(crate) fn lower_color(color: &IrColor) -> String {
+    let alpha = format_number(color.alpha * 100.0);
+    format!(
+        "rgb({}, {}, {}, {alpha}%)",
+        color.red, color.green, color.blue
+    )
 }
 
 pub(crate) fn lower_size(size: &IrSize) -> String {
