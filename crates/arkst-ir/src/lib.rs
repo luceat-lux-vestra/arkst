@@ -512,6 +512,11 @@ pub struct IrDocumentState {
     /// `.pageformat` decoration slice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_background: Option<IrColor>,
+    /// Ordered selector-aware `.pageformat` mutations. This bounded state
+    /// initially retains only selector + explicit width/height/alignment
+    /// fields; global flattened compatibility views remain separate.
+    #[serde(default, skip_serializing_if = "IrPageFormatState::is_empty")]
+    pub page_formats: IrPageFormatState,
     /// Slides-specific document configuration. `None` means no `.slides` setter committed state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slides: Option<IrSlidesConfiguration>,
@@ -704,6 +709,64 @@ pub struct IrPageBorderWidths {
     pub right: IrSize,
     pub bottom: IrSize,
     pub left: IrSize,
+}
+
+/// Closed page side used by selector-aware `.pageformat` layers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrPageSide {
+    Left,
+    Right,
+}
+
+/// Finite, one-based page-range selector retained by `.pageformat`.
+///
+/// An omitted start preserves the existing open-start Range representation;
+/// the evaluator rejects non-positive bounds and an open end before this IR
+/// boundary is reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrPageRange {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<i32>,
+    pub end: i32,
+}
+
+/// Optional selector attached to one page-format layer.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrPageFormatSelector {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<IrPageSide>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages: Option<IrPageRange>,
+}
+
+/// One backend-neutral selector-aware page-format mutation in source order.
+///
+/// This first selector slice intentionally owns only width, height, and text
+/// alignment. Size/orientation, columns, decoration, margins, and renderer
+/// consumption remain explicit #175 residuals.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrPageFormatLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<IrPageFormatSelector>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_width: Option<IrSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_height: Option<IrSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<IrDocumentAlignment>,
+}
+
+/// Ordered selector-aware page-format state.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrPageFormatState {
+    #[serde(default)]
+    pub layers: Vec<IrPageFormatLayer>,
+}
+
+impl IrPageFormatState {
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
 }
 
 /// Backend-neutral slides document configuration.
@@ -3735,6 +3798,7 @@ mod tests {
                 page_border_widths: None,
                 page_border_color: None,
                 page_background: None,
+                page_formats: Default::default(),
                 slides: None,
             },
             ..IrMetadata::default()
@@ -3872,6 +3936,7 @@ mod tests {
             page_border_widths: None,
             page_border_color: None,
             page_background: None,
+            page_formats: Default::default(),
             slides: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
