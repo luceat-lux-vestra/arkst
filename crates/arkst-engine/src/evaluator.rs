@@ -62,10 +62,10 @@ use arkst_ir::{
     IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageGeometry, IrPageOrientation, IrPageSizeFormat,
-    IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize,
-    IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment,
-    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrNumberingState, IrPageBorderWidths, IrPageGeometry, IrPageMargins, IrPageOrientation,
+    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
+    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -580,6 +580,7 @@ struct DocumentState {
     page_geometry: Option<IrPageGeometry>,
     page_columns: Option<u32>,
     page_size: Option<IrPageSizeSelection>,
+    page_margin: Option<IrPageMargins>,
     page_border_widths: Option<IrPageBorderWidths>,
     page_border_color: Option<IrColor>,
     page_background: Option<IrColor>,
@@ -606,6 +607,7 @@ impl Default for DocumentState {
             page_geometry: None,
             page_columns: None,
             page_size: None,
+            page_margin: None,
             page_border_widths: None,
             page_border_color: None,
             page_background: None,
@@ -634,6 +636,7 @@ impl DocumentState {
             page_geometry: snapshot.page_geometry.clone(),
             page_columns: snapshot.page_columns,
             page_size: snapshot.page_size,
+            page_margin: snapshot.page_margin.clone(),
             page_border_widths: snapshot.page_border_widths.clone(),
             page_border_color: snapshot.page_border_color.clone(),
             page_background: snapshot.page_background.clone(),
@@ -660,6 +663,7 @@ impl DocumentState {
             page_geometry: self.page_geometry.clone(),
             page_columns: self.page_columns,
             page_size: self.page_size,
+            page_margin: self.page_margin.clone(),
             page_border_widths: self.page_border_widths.clone(),
             page_border_color: self.page_border_color.clone(),
             page_background: self.page_background.clone(),
@@ -1066,6 +1070,7 @@ enum DocumentStateField {
     PageGeometry,
     PageColumns,
     PageSize,
+    PageMargin,
     PageBorderWidths,
     PageBorderColor,
     PageBackground,
@@ -1090,6 +1095,7 @@ enum DocumentStateUndo {
     PageGeometry(Option<IrPageGeometry>),
     PageColumns(Option<u32>),
     PageSize(Option<IrPageSizeSelection>),
+    PageMargin(Option<IrPageMargins>),
     PageBorderWidths(Option<IrPageBorderWidths>),
     PageBorderColor(Option<IrColor>),
     PageBackground(Option<IrColor>),
@@ -2316,6 +2322,7 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::PageGeometry(previous) => state.page_geometry = previous,
             DocumentStateUndo::PageColumns(previous) => state.page_columns = previous,
             DocumentStateUndo::PageSize(previous) => state.page_size = previous,
+            DocumentStateUndo::PageMargin(previous) => state.page_margin = previous,
             DocumentStateUndo::PageBorderWidths(previous) => state.page_border_widths = previous,
             DocumentStateUndo::PageBorderColor(previous) => state.page_border_color = previous,
             DocumentStateUndo::PageBackground(previous) => state.page_background = previous,
@@ -2461,6 +2468,16 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().page_size = Some(value);
+    }
+
+    fn set_page_margin(&self, value: IrPageMargins) {
+        self.record_document_state_undo(DocumentStateField::PageMargin, || {
+            (
+                DocumentStateUndo::PageMargin(self.document_state.borrow().page_margin.clone()),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().page_margin = Some(value);
     }
 
     fn set_page_border_widths(&self, value: IrPageBorderWidths) {
@@ -6671,6 +6688,7 @@ impl Evaluator {
         let mut columns = None;
         let mut page_size_format = None;
         let mut page_orientation = None;
+        let mut margin = None;
         let mut border_top = None;
         let mut border_right = None;
         let mut border_bottom = None;
@@ -6792,6 +6810,28 @@ impl Evaluator {
                         (value > 0).then_some(value as u32)
                     });
                 }
+                "margin" => {
+                    margin = Some(if matches!(&value.value, IrValue::None) {
+                        None
+                    } else {
+                        Some(match convert_pageformat_margin(&value) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(candidate_span),
+                                        Some("margin"),
+                                        None,
+                                        *span,
+                                    ),
+                                    Some("`.pageformat`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        })
+                    });
+                }
                 "bordertop" | "borderright" | "borderbottom" | "borderleft" => {
                     if matches!(&value.value, IrValue::None) {
                         continue;
@@ -6869,6 +6909,9 @@ impl Evaluator {
                 orientation: page_orientation,
                 document_type,
             });
+        }
+        if let Some(Some(margin)) = margin {
+            context.set_page_margin(margin);
         }
         if border_top.is_some()
             || border_right.is_some()
@@ -15143,6 +15186,7 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
     let mut columns = false;
     let mut page_size = false;
     let mut orientation = false;
+    let mut margin = false;
     let mut decorations = BTreeSet::new();
 
     for argument in named_args {
@@ -15164,10 +15208,11 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
             "columns" => &mut columns,
             "size" => &mut page_size,
             "orientation" => &mut orientation,
+            "margin" => &mut margin,
             _ => return false,
         };
         if *seen
-            || (!matches!(argument.name.as_str(), "columns" | "size")
+            || (!matches!(argument.name.as_str(), "columns" | "size" | "margin")
                 && matches!(&argument.value, IrValue::None))
         {
             return false;
@@ -15176,13 +15221,20 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
     }
 
     if !decorations.is_empty() {
-        return !width && !height && !alignment && !columns && !page_size && !orientation;
+        return !width
+            && !height
+            && !alignment
+            && !columns
+            && !page_size
+            && !orientation
+            && !margin;
     }
 
-    (page_size && !width && !height && !alignment && !columns)
-        || (width && height && !columns && !page_size && !orientation)
-        || (alignment && !width && !height && !columns && !page_size && !orientation)
-        || (columns && !width && !height && !alignment && !page_size && !orientation)
+    (page_size && !width && !height && !alignment && !columns && !margin)
+        || (width && height && !columns && !page_size && !orientation && !margin)
+        || (alignment && !width && !height && !columns && !page_size && !orientation && !margin)
+        || (columns && !width && !height && !alignment && !page_size && !orientation && !margin)
+        || (margin && !width && !height && !alignment && !columns && !page_size && !orientation)
 }
 
 fn convert_pageformat_size_format(
@@ -15229,6 +15281,95 @@ fn convert_pageformat_size(
             target: value_conversion::ConversionTarget::Size,
         }),
     }
+}
+
+fn convert_pageformat_margin(
+    argument: &InvocationValue,
+) -> Result<IrPageMargins, value_conversion::ConversionError> {
+    if let Ok(size) = convert_pageformat_size(argument) {
+        return Ok(IrPageMargins {
+            top: size.clone(),
+            right: size.clone(),
+            bottom: size.clone(),
+            left: size,
+        });
+    }
+
+    // A multi-value Quarkdown `Sizes` argument such as `{1cm 2cm}`
+    // reaches value evaluation as one plain content paragraph rather than a
+    // scalar String. Preserve that typed boundary instead of widening generic
+    // String conversion: only a paragraph made of Text/Whitespace is accepted.
+    let raw = match (&argument.value, argument.origin) {
+        (IrValue::String(value) | IrValue::Identifier(value), ValueOrigin::Dynamic) => {
+            value.clone()
+        }
+        (IrValue::Content(_), _) => pageformat_margin_plain_text(&argument.value).ok_or(
+            value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Size,
+            },
+        )?,
+        _ => {
+            return Err(value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Size,
+            })
+        }
+    };
+    let parts = raw.split_whitespace().collect::<Vec<_>>();
+    let parse = |value: &str| {
+        convert_pageformat_size(&InvocationValue::dynamic_value(IrValue::String(
+            value.to_string(),
+        )))
+    };
+
+    match parts.as_slice() {
+        [all] => {
+            let all = parse(all)?;
+            Ok(IrPageMargins {
+                top: all.clone(),
+                right: all.clone(),
+                bottom: all.clone(),
+                left: all,
+            })
+        }
+        [vertical, horizontal] => {
+            let vertical = parse(vertical)?;
+            let horizontal = parse(horizontal)?;
+            Ok(IrPageMargins {
+                top: vertical.clone(),
+                right: horizontal.clone(),
+                bottom: vertical,
+                left: horizontal,
+            })
+        }
+        [top, right, bottom, left] => Ok(IrPageMargins {
+            top: parse(top)?,
+            right: parse(right)?,
+            bottom: parse(bottom)?,
+            left: parse(left)?,
+        }),
+        _ => Err(value_conversion::ConversionError::InvalidText {
+            target: value_conversion::ConversionTarget::Size,
+        }),
+    }
+}
+
+fn pageformat_margin_plain_text(value: &IrValue) -> Option<String> {
+    let IrValue::Content(nodes) = value else {
+        return None;
+    };
+    let [IrNode::Paragraph { content, .. }] = nodes.as_slice() else {
+        return None;
+    };
+
+    let mut output = String::new();
+    for inline in content {
+        match inline {
+            IrInline::Text { content, .. } => output.push_str(content),
+            IrInline::Whitespace { .. } => output.push(' '),
+            _ => return None,
+        }
+    }
+    Some(output)
 }
 
 fn convert_pageformat_color(

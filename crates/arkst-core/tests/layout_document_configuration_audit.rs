@@ -195,15 +195,20 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("quarkdown_pageformat_decorations.rs"));
     assert!(pageformat[9].contains("IrDocumentState::page_size"));
     assert!(pageformat[9].contains("quarkdown_pageformat_size_state.rs"));
+    assert!(pageformat[9].contains("IrDocumentState::page_margin"));
+    assert!(pageformat[9].contains("quarkdown_pageformat_margin.rs"));
     assert!(pageformat[10].contains("global positive columns"));
     assert!(pageformat[10].contains("typed standard size/orientation"));
     assert!(pageformat[10].contains("named size binding"));
+    assert!(pageformat[10].contains("selector-free global margin"));
+    assert!(pageformat[10].contains("1/2/4-value Sizes shorthand"));
     assert!(pageformat[10].contains("selector-free global border/background"));
     assert!(pageformat[10].contains("partial-side zeroing"));
     assert!(pageformat[10].contains("bordercolor-only width inheritance/no-fabrication"));
-    assert!(pageformat[10].contains("selector-aware decoration/columns precedence"));
+    assert!(pageformat[10].contains("selector-aware margin/decoration/columns precedence"));
     assert!(pageformat[10].contains("standard-size dimension resolution"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
+    assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
     assert!(pageformat[11].contains("selector-aware-layering"));
 }

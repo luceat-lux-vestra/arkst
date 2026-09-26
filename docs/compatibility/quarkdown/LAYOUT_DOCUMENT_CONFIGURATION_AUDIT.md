@@ -239,24 +239,30 @@ page-format data is not itself a getter or output node.
 The state is genuinely document-scoped and must remain backend-neutral.
 Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
 document alignment, a global positive column count, selector-free global
-border/background decoration state, and typed selector-free standard
-size/orientation selection. Geometry/alignment retain their current Typst/PDF
-consumers and row/column alignment inheritance; columns, decorations, and the
-standard-size selection remain backend-neutral state only. The size slice
-preserves the closed standard-format domain, named size binding, and an explicit portrait/landscape orientation when supplied; when
-orientation is omitted it records the document
-type in effect at commit time as the downstream preferred-orientation basis
-rather than inventing a concrete default. Non-positive or semantic-None column
-inputs are discarded without replacing an earlier positive global value. The
-decoration slice preserves the pinned cross-field border rule: once any
-non-null border side is supplied, omitted/null sides become explicit zero;
-color-only input updates border color without fabricating a border width and
-therefore preserves any previously committed width structure. Semantic-None
-border/color/background inputs preserve prior effective state. Selector/range,
-standard-size dimension resolution and width/height override composition,
-margins, selector-aware geometry/decoration/column layering, and complete
-output consumption remain open, and Typst page objects must not enter
-evaluator/IR state. Status is conservatively `PARTIAL` under #175.
+border/background decoration state, selector-free global margin state, and
+typed selector-free standard size/orientation selection. Geometry/alignment
+retain their current Typst/PDF consumers and row/column alignment inheritance;
+columns, decorations, margins, and the standard-size selection remain
+backend-neutral state only. The size slice preserves the closed standard-format
+domain, named size binding, and an explicit portrait/landscape orientation when
+supplied; when orientation is omitted it records the document type in effect
+at commit time as the downstream preferred-orientation basis rather than
+inventing a concrete default. The margin slice expands the documented
+`Sizes` shorthand into explicit top/right/bottom/left state: one value applies
+to every side, two values map vertical/horizontal, and four values map TRBL.
+Three-value or otherwise malformed groups fail closed, and semantic `None`
+preserves the previously committed effective global margin. Non-positive or
+semantic-None column inputs are discarded without replacing an earlier
+positive global value. The decoration slice preserves the pinned cross-field
+border rule: once any non-null border side is supplied, omitted/null sides
+become explicit zero; color-only input updates border color without fabricating
+a border width and therefore preserves any previously committed width
+structure. Semantic-None border/color/background inputs preserve prior
+effective state. Selector/range, standard-size dimension resolution and
+width/height override composition, selector-aware geometry/margin/decoration/
+column layering, and complete output consumption remain open, and Typst page
+objects must not enter evaluator/IR state. Status is conservatively `PARTIAL`
+under #175.
 
 ### Caption state
 

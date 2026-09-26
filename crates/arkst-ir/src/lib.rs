@@ -498,6 +498,12 @@ pub struct IrDocumentState {
     /// basis instead of fabricating a concrete orientation in evaluator state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_size: Option<IrPageSizeSelection>,
+    /// Global page margins selected by the bounded selector-free
+    /// `.pageformat margin:{...}` slice. The four sides are fully expanded
+    /// from the documented 1/2/4-value Sizes syntax. `None` preserves the
+    /// document/backend default or a previously committed effective value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_margin: Option<IrPageMargins>,
     /// Global page border widths selected by the bounded selector-free
     /// `.pageformat` decoration slice. A present value is complete: when any
     /// border side is supplied, omitted sides are materialized as semantic
@@ -690,6 +696,19 @@ pub struct IrPageSizeSelection {
 pub struct IrPageGeometry {
     pub width: IrSize,
     pub height: IrSize,
+}
+
+/// Backend-neutral complete page margins for one selector-free
+/// `.pageformat margin:{...}` state update.
+///
+/// The evaluator expands the documented Sizes shorthand into an explicit
+/// top/right/bottom/left value before this state crosses the IR boundary.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrPageMargins {
+    pub top: IrSize,
+    pub right: IrSize,
+    pub bottom: IrSize,
+    pub left: IrSize,
 }
 
 /// Backend-neutral complete page border widths for one selector-free
@@ -3732,6 +3751,7 @@ mod tests {
                 page_geometry: None,
                 page_columns: None,
                 page_size: None,
+                page_margin: None,
                 page_border_widths: None,
                 page_border_color: None,
                 page_background: None,
@@ -3869,6 +3889,7 @@ mod tests {
             page_geometry: None,
             page_columns: None,
             page_size: None,
+            page_margin: None,
             page_border_widths: None,
             page_border_color: None,
             page_background: None,
