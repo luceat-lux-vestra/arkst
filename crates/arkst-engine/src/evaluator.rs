@@ -64,10 +64,9 @@ use arkst_ir::{
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
     IrNumberingState, IrPageBorderWidths, IrPageFormatLayer, IrPageFormatSelector,
     IrPageFormatState, IrPageGeometry, IrPageMargins, IrPageOrientation, IrPageRange, IrPageSide,
-    IrPageSizeFormat, IrPageSizeSelection, IrPair,
-    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
-    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
+    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -15343,13 +15342,7 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
     }
 
     let payload_supported = if !decorations.is_empty() {
-        !width
-            && !height
-            && !alignment
-            && !columns
-            && !page_size
-            && !orientation
-            && !margin
+        !width && !height && !alignment && !columns && !page_size && !orientation && !margin
     } else {
         (page_size && !width && !height && !alignment && !columns && !margin)
             || (width && height && !columns && !page_size && !orientation && !margin)
@@ -15360,20 +15353,8 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
                 && !page_size
                 && !orientation
                 && !margin)
-            || (columns
-                && !width
-                && !height
-                && !alignment
-                && !page_size
-                && !orientation
-                && !margin)
-            || (margin
-                && !width
-                && !height
-                && !alignment
-                && !columns
-                && !page_size
-                && !orientation)
+            || (columns && !width && !height && !alignment && !page_size && !orientation && !margin)
+            || (margin && !width && !height && !alignment && !columns && !page_size && !orientation)
     };
 
     // Columns remain the existing document-wide bounded surface. Do not

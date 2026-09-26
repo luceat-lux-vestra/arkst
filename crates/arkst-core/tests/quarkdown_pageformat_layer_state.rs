@@ -151,7 +151,12 @@ fn selector_scoped_size_is_retained_without_replacing_flattened_global_size() {
 
 #[test]
 fn invalid_or_unbounded_page_selectors_fail_before_layer_publication() {
-    for invalid_selector in ["pages:{2..}", "pages:{..2}", "pages:{0..2}", "side:{diagonal}"] {
+    for invalid_selector in [
+        "pages:{2..}",
+        "pages:{..2}",
+        "pages:{0..2}",
+        "side:{diagonal}",
+    ] {
         let result = compile_source(&format!(
             ".pageformat margin:{{1cm}}\n.pageformat {invalid_selector} margin:{{2cm}}\n"
         ));
@@ -215,8 +220,7 @@ fn pageformat_layer_wire_defaults_for_old_ir_and_roundtrips_when_present() {
         serde_json::from_value(legacy_shape).expect("deserialize legacy-shaped state");
     assert!(restored.page_format.layers.is_empty());
 
-    let compiled =
-        compile_source(".pageformat side:{left} pages:{2..3} margin:{1cm}\n");
+    let compiled = compile_source(".pageformat side:{left} pages:{2..3} margin:{1cm}\n");
     assert!(compiled.diagnostics.is_empty(), "{compiled:?}");
     let explicit = compiled.ir.metadata.document_state;
     let value = serde_json::to_value(&explicit).expect("serialize pageformat state");
