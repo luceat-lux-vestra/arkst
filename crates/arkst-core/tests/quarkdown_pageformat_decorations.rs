@@ -86,8 +86,7 @@ fn bordercolor_only_preserves_existing_widths_and_never_fabricates_new_widths() 
     let color_only = compile_source(".pageformat bordercolor:{blue}\n");
     assert!(color_only.diagnostics.is_empty(), "{color_only:?}");
     assert_eq!(
-        color_only.ir.metadata.document_state.page_border_widths,
-        None,
+        color_only.ir.metadata.document_state.page_border_widths, None,
         "color-only input must not invent a default border width"
     );
     assert_eq!(
