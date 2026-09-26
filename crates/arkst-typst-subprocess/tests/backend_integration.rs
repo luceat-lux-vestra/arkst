@@ -313,6 +313,44 @@ fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf() {
+    let source =
+        ".doctype {paged}\n.pageformat size:{a4} orientation:{landscape}\nStandard size output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-standard-size.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-standard-size.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat standard-size diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(width: 297mm, height: 210mm)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-standard-size", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-standard-size.qd".to_string(),
+            })
+            .expect("pageformat standard size Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_background_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat background:{blue}\nBackground output\n";
     let project = VirtualProjectBuilder::new()

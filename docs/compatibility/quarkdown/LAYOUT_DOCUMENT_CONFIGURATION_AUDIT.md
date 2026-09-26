@@ -241,14 +241,23 @@ Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
 document alignment, a global positive column count, selector-free global
 border/background decoration state, selector-free global margin state, and
 typed selector-free standard size/orientation selection. Geometry/alignment,
-selector-free global margins, global positive columns, and selector-free global
-background have current Typst/PDF consumers, while row/column alignment
-inheritance remains unchanged; page-border decorations and the standard-size
-selection remain backend-neutral state only. The size slice preserves the closed standard-format
-domain, named size binding, and an explicit portrait/landscape orientation when
-supplied; when orientation is omitted it records the document type in effect
-at commit time as the downstream preferred-orientation basis rather than
-inventing a concrete default. The margin slice expands the documented
+selector-free global margins, global positive columns, selector-free global
+background, and the bounded standard-size selection have current Typst/PDF
+consumers, while row/column alignment inheritance remains unchanged;
+page-border decorations remain backend-neutral state only. The size slice
+preserves the closed standard-format domain, named size binding, and an
+explicit portrait/landscape orientation when supplied; when orientation is
+omitted it records the document type in effect at commit time as the downstream
+preferred-orientation basis. The selected Typst/PDF backend applies standard size only when the final output
+document type supports it (`paged` or `slides`), resolves the closed format to
+explicit physical millimeter bounds including B0, and rotates those bounds for
+the effective orientation. When orientation was omitted, the call-time
+document-type snapshot remains the default-orientation basis instead of a later
+`.doctype` mutation. An omitted-orientation layer captured under `docs` remains
+fail-closed because the pinned public contract does not define that cross-doctype
+default. Explicit complete page geometry keeps its existing output precedence
+while cross-layer size/width/height composition remains unresolved until
+selector/layer ordering is represented. The margin slice expands the documented
 `Sizes` shorthand into explicit top/right/bottom/left state: one value applies
 to every side, two values map vertical/horizontal, and four values map TRBL.
 Three-value or otherwise malformed groups fail closed, and semantic `None`
@@ -265,10 +274,10 @@ a border width and therefore preserves any previously committed width
 structure. Semantic-None border/color/background inputs preserve prior
 effective state. The current Typst/PDF background consumer maps the committed
 typed RGB/alpha color directly to page fill without changing border state.
-Selector/range, standard-size dimension resolution and width/height override
-composition, selector-aware geometry/margin/decoration/column layering,
-page-border output, and the remaining output consumption stay open, and Typst
-page objects must not enter evaluator/IR state. Status is conservatively `PARTIAL`
+Selector/range, width/height override composition, selector-aware
+geometry/size/margin/decoration/column layering, page-border output, and the
+remaining output consumption stay open, and Typst page objects must not enter
+evaluator/IR state. Status is conservatively `PARTIAL`
 under #175.
 
 ### Caption state
