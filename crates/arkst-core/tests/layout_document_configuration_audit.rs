@@ -203,6 +203,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     );
     assert!(pageformat[9]
         .contains("integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9]
+        .contains("integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[10].contains("global positive columns"));
     assert!(pageformat[10].contains("selector-free global background"));
     assert!(pageformat[10].contains("Typst/PDF columns consumer"));
@@ -214,11 +216,13 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("partial-side zeroing"));
     assert!(pageformat[10].contains("bordercolor-only width inheritance/no-fabrication"));
     assert!(pageformat[10].contains("Typst/PDF background consumer"));
+    assert!(pageformat[10].contains("explicit margin + committed widths + explicit color"));
+    assert!(pageformat[10].contains("without fabricating renderer defaults"));
     assert!(pageformat[10].contains("gates standard-size output on the final paged/slides"));
     assert!(pageformat[10].contains("explicit physical millimeter bounds"));
     assert!(pageformat[10].contains("omitted-orientation basis"));
     assert!(pageformat[10].contains("omitted docs basis remains fail-closed"));
-    assert!(pageformat[10].contains("page-border output"));
+    assert!(pageformat[10].contains("remaining page-border output"));
     assert!(pageformat[10]
         .contains("selector-aware geometry/size/margin/decoration/columns precedence"));
     assert!(pageformat[10].contains("width/height override composition"));

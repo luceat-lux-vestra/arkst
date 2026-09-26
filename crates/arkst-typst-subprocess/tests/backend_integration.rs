@@ -351,6 +351,54 @@ fn integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf() {
+    let source = ".doctype {paged}\n\
+.pageformat margin:{1cm 2cm 3cm 4cm}\n\
+.pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
+Border output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-border.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-border.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat border diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(foreground: place("),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("width: (100% - 4cm - 2cm)"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("top: (paint: rgb(255, 0, 0, 100%), thickness: 1pt)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-border", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-border.qd".to_string(),
+            })
+            .expect("pageformat border Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_background_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat background:{blue}\nBackground output\n";
     let project = VirtualProjectBuilder::new()

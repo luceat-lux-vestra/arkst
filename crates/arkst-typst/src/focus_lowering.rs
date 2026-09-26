@@ -101,6 +101,51 @@ fn standard_page_dimensions_mm(
     })
 }
 
+fn page_border_foreground(doc: &IrDocument) -> Option<String> {
+    let state = &doc.metadata.document_state;
+    if state.document_type != IrDocumentType::Paged {
+        return None;
+    }
+
+    // Typst's page element has no stroke parameter. The bounded selector-free
+    // border path therefore uses page foreground coordinates, but only when
+    // every value needed to locate and paint the content-area rectangle is
+    // explicit. Missing margin, width, or color stays fail-closed rather than
+    // inventing renderer defaults.
+    let margin = state.page_margin.as_ref()?;
+    let widths = state.page_border_widths.as_ref()?;
+    let color = state.page_border_color.as_ref()?;
+
+    let margin_top = lowering_base::lower_size(&margin.top);
+    let margin_right = lowering_base::lower_size(&margin.right);
+    let margin_bottom = lowering_base::lower_size(&margin.bottom);
+    let margin_left = lowering_base::lower_size(&margin.left);
+    let border_top = lowering_base::lower_size(&widths.top);
+    let border_right = lowering_base::lower_size(&widths.right);
+    let border_bottom = lowering_base::lower_size(&widths.bottom);
+    let border_left = lowering_base::lower_size(&widths.left);
+    let paint = lowering_base::lower_color(color);
+
+    Some(format!(
+        "#set page(foreground: place(\n\
+  top + left,\n\
+  dx: {margin_left},\n\
+  dy: {margin_top},\n\
+  rect(\n\
+    width: (100% - {margin_left} - {margin_right}),\n\
+    height: (100% - {margin_top} - {margin_bottom}),\n\
+    stroke: (\n\
+      top: (paint: {paint}, thickness: {border_top}),\n\
+      right: (paint: {paint}, thickness: {border_right}),\n\
+      bottom: (paint: {paint}, thickness: {border_bottom}),\n\
+      left: (paint: {paint}, thickness: {border_left}),\n\
+    ),\n\
+    inset: 0pt,\n\
+  ),\n\
+))\n"
+    ))
+}
+
 fn document_prelude(doc: &IrDocument) -> String {
     let state = &doc.metadata.document_state;
     let mut prelude = String::new();
@@ -128,6 +173,9 @@ fn document_prelude(doc: &IrDocument) -> String {
         prelude.push_str(&format!(
             "#set page(margin: (top: {top}, right: {right}, bottom: {bottom}, left: {left}))\n"
         ));
+    }
+    if let Some(border) = page_border_foreground(doc) {
+        prelude.push_str(&border);
     }
     if let Some(columns) = state.page_columns {
         prelude.push_str(&format!("#set page(columns: {columns})\n"));
@@ -224,8 +272,9 @@ fn render_focus_prelude(kind: FocusDocumentKind, paperwhite: bool) -> String {
 mod tests {
     use super::*;
     use arkst_ir::{
-        IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageGeometry, IrPageMargins,
-        IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection, IrSize, IrSizeUnit,
+        IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageBorderWidths, IrPageGeometry,
+        IrPageMargins, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection, IrSize,
+        IrSizeUnit,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -393,6 +442,131 @@ mod tests {
 
         let code = lower_to_typst_code(&doc);
         assert!(code.starts_with("#set page(columns: 3)\n"), "{code}");
+    }
+
+    #[test]
+    fn explicit_paged_border_emits_content_area_foreground() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_margin = Some(IrPageMargins {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 2.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 3.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 4.0,
+                unit: IrSizeUnit::Pt,
+            },
+        });
+        doc.metadata.document_state.page_border_widths = Some(IrPageBorderWidths {
+            top: IrSize {
+                value: 5.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 6.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 7.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 8.0,
+                unit: IrSizeUnit::Pt,
+            },
+        });
+        doc.metadata.document_state.page_border_color = Some(IrColor {
+            red: 10,
+            green: 20,
+            blue: 30,
+            alpha: 0.5,
+        });
+
+        let code = lower_to_typst_code(&doc);
+        assert!(code.contains("#set page(foreground: place("), "{code}");
+        assert!(code.contains("dx: 4pt"), "{code}");
+        assert!(code.contains("dy: 1pt"), "{code}");
+        assert!(code.contains("width: (100% - 4pt - 2pt)"), "{code}");
+        assert!(code.contains("height: (100% - 1pt - 3pt)"), "{code}");
+        assert!(
+            code.contains("top: (paint: rgb(10, 20, 30, 50%), thickness: 5pt)"),
+            "{code}"
+        );
+        assert!(
+            code.contains("left: (paint: rgb(10, 20, 30, 50%), thickness: 8pt)"),
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn page_border_output_keeps_unresolved_defaults_fail_closed() {
+        let margins = IrPageMargins {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+        };
+        let widths = IrPageBorderWidths {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+        };
+        let color = IrColor {
+            red: 255,
+            green: 0,
+            blue: 0,
+            alpha: 1.0,
+        };
+
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_margin = Some(margins.clone());
+        doc.metadata.document_state.page_border_widths = Some(widths.clone());
+        assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
+
+        doc.metadata.document_state.page_border_widths = None;
+        doc.metadata.document_state.page_border_color = Some(color.clone());
+        assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
+
+        doc.metadata.document_state.page_margin = None;
+        doc.metadata.document_state.page_border_widths = Some(widths.clone());
+        assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
+
+        doc.metadata.document_state.page_margin = Some(margins);
+        doc.metadata.document_state.document_type = IrDocumentType::Slides;
+        assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
     }
 
     #[test]

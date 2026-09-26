@@ -244,7 +244,11 @@ typed selector-free standard size/orientation selection. Geometry/alignment,
 selector-free global margins, global positive columns, selector-free global
 background, and the bounded standard-size selection have current Typst/PDF
 consumers, while row/column alignment inheritance remains unchanged;
-page-border decorations remain backend-neutral state only. The size slice
+page-border decoration state now has one bounded Typst/PDF consumer when the
+final document is `paged` and explicit margin, committed border widths, and
+explicit border color are all present; implicit-margin, width-only,
+color-only, slides/plain/docs, and selector-aware border output remain
+fail-closed. The size slice
 preserves the closed standard-format domain, named size binding, and an
 explicit portrait/landscape orientation when supplied; when orientation is
 omitted it records the document type in effect at commit time as the downstream
@@ -274,9 +278,14 @@ a border width and therefore preserves any previously committed width
 structure. Semantic-None border/color/background inputs preserve prior
 effective state. The current Typst/PDF background consumer maps the committed
 typed RGB/alpha color directly to page fill without changing border state.
+The bounded Typst/PDF border consumer uses page foreground coordinates to draw
+the explicit content-area rectangle only when all of margin, border widths, and
+border color are committed. It preserves four independent side widths and does
+not fabricate a renderer-default margin, width, or color.
 Selector/range, width/height override composition, selector-aware
-geometry/size/margin/decoration/column layering, page-border output, and the
-remaining output consumption stay open, and Typst page objects must not enter
+geometry/size/margin/decoration/column layering, the remaining page-border
+output outside the explicit-margin/width/color paged subset, and the remaining
+output consumption stay open, and Typst page objects must not enter
 evaluator/IR state. Status is conservatively `PARTIAL`
 under #175.
 
