@@ -67,9 +67,7 @@ fn later_partial_border_replaces_previous_width_structure_and_zeroes_omitted_sid
 
 #[test]
 fn bordercolor_only_preserves_existing_widths_and_never_fabricates_new_widths() {
-    let with_width = compile_source(
-        ".pageformat bordertop:{1px}\n.pageformat bordercolor:{red}\n",
-    );
+    let with_width = compile_source(".pageformat bordertop:{1px}\n.pageformat bordercolor:{red}\n");
     assert!(with_width.diagnostics.is_empty(), "{with_width:?}");
     assert_eq!(
         with_width.ir.metadata.document_state.page_border_widths,
