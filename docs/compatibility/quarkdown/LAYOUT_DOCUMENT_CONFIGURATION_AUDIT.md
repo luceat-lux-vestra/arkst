@@ -240,10 +240,10 @@ The state is genuinely document-scoped and must remain backend-neutral.
 Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
 document alignment, a global positive column count, selector-free global
 border/background decoration state, selector-free global margin state, and
-typed selector-free standard size/orientation selection. Geometry/alignment
-and selector-free global margins have current Typst/PDF consumers, while
-row/column alignment inheritance remains unchanged; columns, decorations, and
-the standard-size selection remain backend-neutral state only. The size slice preserves the closed standard-format
+typed selector-free standard size/orientation selection. Geometry/alignment,
+selector-free global margins, and global positive columns have current Typst/PDF
+consumers, while row/column alignment inheritance remains unchanged;
+decorations and the standard-size selection remain backend-neutral state only. The size slice preserves the closed standard-format
 domain, named size binding, and an explicit portrait/landscape orientation when
 supplied; when orientation is omitted it records the document type in effect
 at commit time as the downstream preferred-orientation basis rather than
@@ -255,7 +255,9 @@ preserves the previously committed effective global margin. The current Typst
 consumer lowers those four explicit sides through the shared size conversion
 boundary, with real pinned-backend PDF integration coverage. Non-positive or
 semantic-None column inputs are discarded without replacing an earlier
-positive global value. The decoration slice preserves the pinned cross-field
+positive global value. The current Typst consumer maps the committed positive
+column count directly to the page column configuration, with real
+pinned-backend PDF integration coverage. The decoration slice preserves the pinned cross-field
 border rule: once any non-null border side is supplied, omitted/null sides
 become explicit zero; color-only input updates border color without fabricating
 a border width and therefore preserves any previously committed width
