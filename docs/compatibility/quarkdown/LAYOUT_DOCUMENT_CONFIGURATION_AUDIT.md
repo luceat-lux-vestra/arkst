@@ -242,8 +242,7 @@ document alignment, a global positive column count, selector-free global
 border/background decoration state, selector-free global margin state, typed
 selector-free standard size/orientation selection, and an ordered
 page-format layer snapshot that preserves successful bounded mutations in
-source order. The snapshot now carries a bounded selector identity for typed
-`left`/`right` page-side selectors and finite 1-based inclusive page ranges
+source order. The snapshot now carries a bounded selector identity for typed `left`/`right` page-side selectors and finite 1-based inclusive page ranges
 when both endpoints are explicit; the two selector dimensions may be combined.
 Scoped selector layers are state-only and must not leak into the flattened
 global fields consumed by current renderers. Geometry/alignment,
