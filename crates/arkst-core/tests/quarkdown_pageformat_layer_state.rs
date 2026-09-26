@@ -2,7 +2,8 @@
 //! `.pageformat` layer/selector-state slice.
 
 use arkst_core::ir::{
-    IrDocumentState, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrSizeUnit,
+    IrDocumentState, IrDocumentType, IrPageFormatLayer, IrPageFormatState, IrPageOrientation,
+    IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrSize, IrSizeUnit,
 };
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
@@ -368,6 +369,96 @@ fn page_field_merge_uses_source_order_across_selector_scopes() {
             .document_state
             .page_format
             .merge_applicable_fields_for_page(0, IrPageSide::Left)
+            .is_none(),
+        "non-positive page numbers must fail closed"
+    );
+}
+
+#[test]
+fn page_dimension_composition_respects_layer_order_and_per_axis_overrides() {
+    // Use only currently bounded source-level shapes here: standard-size-only
+    // layers and complete explicit width+height pairs.
+    let result = compile_source(
+        ".pageformat width:{10in} height:{5in}\n\
+         .pageformat pages:{2..4} size:{a4}\n\
+         .pageformat side:{left} pages:{2..4} width:{8in} height:{4in}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let left = result
+        .ir
+        .metadata
+        .document_state
+        .page_format
+        .compose_applicable_page_dimensions(3, IrPageSide::Left)
+        .expect("left page dimensions");
+    assert_eq!(
+        left.size.expect("range size base").format,
+        IrPageSizeFormat::A4
+    );
+    let width = left.width.as_ref().expect("explicit width");
+    let height = left.height.as_ref().expect("explicit height");
+    assert_eq!((width.value, width.unit), (8.0, IrSizeUnit::In));
+    assert_eq!((height.value, height.unit), (4.0, IrSizeUnit::In));
+
+    let right = result
+        .ir
+        .metadata
+        .document_state
+        .page_format
+        .compose_applicable_page_dimensions(3, IrPageSide::Right)
+        .expect("right page dimensions");
+    assert_eq!(
+        right.size.expect("later range size").format,
+        IrPageSizeFormat::A4
+    );
+    assert!(
+        right.width.is_none() && right.height.is_none(),
+        "later size must replace both earlier explicit axes before downstream physical resolution"
+    );
+
+    // The IR composition helper is intentionally a little more general than
+    // the current source-level bounded shape. Prove the per-axis rule directly
+    // without claiming that mixed size+axis or single-axis source calls are
+    // newly accepted by the evaluator.
+    let ir_only = IrPageFormatState {
+        layers: vec![
+            IrPageFormatLayer {
+                size: Some(IrPageSizeSelection {
+                    format: IrPageSizeFormat::Letter,
+                    orientation: None,
+                    document_type: IrDocumentType::Plain,
+                }),
+                width: Some(IrSize {
+                    value: 7.0,
+                    unit: IrSizeUnit::In,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                height: Some(IrSize {
+                    value: 4.0,
+                    unit: IrSizeUnit::In,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+        ],
+    };
+    let dimensions = ir_only
+        .compose_applicable_page_dimensions(1, IrPageSide::Right)
+        .expect("IR-only composed dimensions");
+    assert_eq!(
+        dimensions.size.expect("standard base").format,
+        IrPageSizeFormat::Letter
+    );
+    let width = dimensions.width.as_ref().expect("width override");
+    let height = dimensions.height.as_ref().expect("height override");
+    assert_eq!((width.value, width.unit), (7.0, IrSizeUnit::In));
+    assert_eq!((height.value, height.unit), (4.0, IrSizeUnit::In));
+
+    assert!(
+        ir_only
+            .compose_applicable_page_dimensions(0, IrPageSide::Right)
             .is_none(),
         "non-positive page numbers must fail closed"
     );

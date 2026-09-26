@@ -305,11 +305,17 @@ not infer page side from parity, merge applicable layers, or choose precedence.
 Non-positive page numbers fail closed. A bounded transient field resolver now
 folds those applicable layers in original source order: later non-null fields
 replace earlier values while omitted fields inherit, including when a later
-global layer follows an earlier scoped layer. The merged value carries no
-selector identity and deliberately leaves cross-field rules such as standard
-size versus explicit width/height unresolved. Selector-aware output,
-width/height override composition, remaining
-selector-aware geometry/size/margin/decoration layering, selector/columns
+global layer follows an earlier scoped layer. The merged value carries no selector identity. A second bounded IR-only
+`compose_applicable_page_dimensions` helper consumes the same applicable source
+order for page dimensions: when a layer supplies a standard size, it replaces
+both previously composed page axes, then explicit width and height from that
+same layer override only their respective axes. This closes the backend-neutral per-layer
+size/width/height composition rule without resolving physical dimensions or widening
+renderer support. The current bounded evaluator source surface still admits
+standard-size-only layers or complete width+height pairs; mixed size+axis and
+single-axis source calls remain deliberately unclaimed in this slice, so the
+per-axis rule is additionally pinned directly at the IR boundary. Selector-aware output, remaining
+selector-aware geometry/size/margin/decoration/columns output, selector/columns
 interaction, the remaining page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption
 stay open, and Typst page objects must not enter evaluator/IR state. Status is

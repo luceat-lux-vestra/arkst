@@ -739,6 +739,35 @@ pub struct IrMergedPageFormatFields {
     pub background: Option<IrColor>,
 }
 
+/// Transient backend-neutral dimension composition for one explicit page.
+///
+/// `size` is the current standard-size base. Explicit `width` / `height`
+/// override only their respective axes. When a later layer supplies a new
+/// standard size, both earlier explicit-axis overrides are cleared before
+/// that same layer's explicit width/height are applied.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct IrComposedPageDimensions {
+    pub size: Option<IrPageSizeSelection>,
+    pub width: Option<IrSize>,
+    pub height: Option<IrSize>,
+}
+
+impl IrComposedPageDimensions {
+    fn overlay_layer(&mut self, later: &IrPageFormatLayer) {
+        if let Some(value) = &later.size {
+            self.size = Some(*value);
+            self.width = None;
+            self.height = None;
+        }
+        if let Some(value) = &later.width {
+            self.width = Some(value.clone());
+        }
+        if let Some(value) = &later.height {
+            self.height = Some(value.clone());
+        }
+    }
+}
+
 impl IrMergedPageFormatFields {
     fn overlay_non_null_from(&mut self, later: &IrPageFormatLayer) {
         if let Some(value) = &later.alignment {
@@ -876,6 +905,30 @@ impl IrPageFormatState {
             merged.overlay_non_null_from(layer);
         }
         Some(merged)
+    }
+
+    /// Compose page-size and explicit-axis fields for one explicit page.
+    ///
+    /// Each applicable layer first applies its standard size, if any, as the
+    /// two-axis base and then applies explicit width/height as per-axis
+    /// overrides. A later standard-size layer therefore replaces both earlier
+    /// axes before its own explicit overrides are considered. Physical page
+    /// dimensions and renderer applicability remain downstream-owned.
+    pub fn compose_applicable_page_dimensions(
+        &self,
+        page_number: i32,
+        side: IrPageSide,
+    ) -> Option<IrComposedPageDimensions> {
+        let applicable = self.applicable_layers_for_page(page_number, side);
+        if applicable.is_empty() {
+            return None;
+        }
+
+        let mut dimensions = IrComposedPageDimensions::default();
+        for layer in applicable {
+            dimensions.overlay_layer(layer);
+        }
+        Some(dimensions)
     }
 
     /// Fold only layers with exactly the requested selector identity.
