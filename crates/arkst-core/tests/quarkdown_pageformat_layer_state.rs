@@ -237,10 +237,7 @@ fn exact_selector_resolution_merges_non_null_fields_without_cross_selector_prece
         .resolve_exact_selector(right_selector)
         .expect("right selector group");
     assert_eq!(right.selector, right_selector);
-    assert_eq!(
-        right.margin.as_ref().expect("right margin").top.value,
-        9.0
-    );
+    assert_eq!(right.margin.as_ref().expect("right margin").top.value, 9.0);
     assert!(right.border_widths.is_none());
     assert!(right.border_color.is_none());
 }

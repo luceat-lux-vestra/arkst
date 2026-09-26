@@ -772,7 +772,11 @@ impl IrPageFormatState {
     ) -> Option<IrPageFormatLayer> {
         let mut resolved: Option<IrPageFormatLayer> = None;
 
-        for layer in self.layers.iter().filter(|layer| layer.selector == selector) {
+        for layer in self
+            .layers
+            .iter()
+            .filter(|layer| layer.selector == selector)
+        {
             if let Some(current) = resolved.as_mut() {
                 current.overlay_non_null_from(layer);
             } else {
