@@ -106,11 +106,7 @@ fn semantic_none_is_retained_as_an_ordered_noop_layer() {
 #[test]
 fn failed_pageformat_conversion_rolls_back_ordered_layer_publication() {
     let result = compile_source(
-        ".pageformat size:{a4}\n\
-         .function {badsize}\n\
-             .pageformat margin:{1cm}\n\
-             not-a-paper\n\n\
-         .pageformat size:{.badsize}\n",
+        ".pageformat size:{a4}\n.function {badsize}\n    .pageformat margin:{1cm}\n    not-a-paper\n\n.pageformat size:{.badsize}\n",
     );
     assert!(!result.diagnostics.is_empty(), "invalid size must fail");
 
