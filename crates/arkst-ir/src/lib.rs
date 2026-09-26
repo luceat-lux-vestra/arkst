@@ -491,6 +491,20 @@ pub struct IrDocumentState {
     /// document/backend default; non-positive inputs are discarded upstream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_columns: Option<u32>,
+    /// Global page border widths selected by the bounded selector-free
+    /// `.pageformat` decoration slice. A present value is complete: when any
+    /// border side is supplied, omitted sides are materialized as semantic
+    /// zero rather than inherited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_border_widths: Option<IrPageBorderWidths>,
+    /// Global page border color. Color-only updates deliberately do not
+    /// fabricate border widths; an existing width state remains independent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_border_color: Option<IrColor>,
+    /// Global page background color selected by the bounded selector-free
+    /// `.pageformat` decoration slice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_background: Option<IrColor>,
     /// Slides-specific document configuration. `None` means no `.slides` setter committed state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slides: Option<IrSlidesConfiguration>,
@@ -622,6 +636,20 @@ impl IrParagraphStyleInfo {
 pub struct IrPageGeometry {
     pub width: IrSize,
     pub height: IrSize,
+}
+
+/// Backend-neutral complete page border widths for one selector-free
+/// `.pageformat` state update.
+///
+/// This representation intentionally stores all four sides once any border
+/// side is present. It preserves the v2.5.1 contract where omitted sides are
+/// explicit zero rather than inherited from an earlier layer.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrPageBorderWidths {
+    pub top: IrSize,
+    pub right: IrSize,
+    pub bottom: IrSize,
+    pub left: IrSize,
 }
 
 /// Backend-neutral slides document configuration.
@@ -3647,6 +3675,9 @@ mod tests {
                 page_alignment: None,
                 page_geometry: None,
                 page_columns: None,
+                page_border_widths: None,
+                page_border_color: None,
+                page_background: None,
                 slides: None,
             },
             ..IrMetadata::default()
@@ -3780,6 +3811,9 @@ mod tests {
             page_alignment: None,
             page_geometry: None,
             page_columns: None,
+            page_border_widths: None,
+            page_border_color: None,
+            page_background: None,
             slides: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");

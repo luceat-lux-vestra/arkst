@@ -238,15 +238,19 @@ page-format data is not itself a getter or output node.
 
 The state is genuinely document-scoped and must remain backend-neutral.
 Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
-document alignment, and a global positive column count. Geometry/alignment
-retain their current Typst/PDF consumers and row/column alignment inheritance;
-the column count is backend-neutral state only. Non-positive or semantic-None
+document alignment, a global positive column count, and selector-free global
+border/background decoration state. Geometry/alignment retain their current
+Typst/PDF consumers and row/column alignment inheritance; columns and
+decorations are backend-neutral state only. Non-positive or semantic-None
 column inputs are discarded without replacing an earlier positive global
-value, matching the nullable upstream layer field at this bounded effective
-state boundary. Selector/range, standard size/orientation, margins,
-border/background, selector-aware column/layer precedence, and complete
-layer merging remain open, and Typst page objects must not enter evaluator/IR
-state. Status is conservatively `PARTIAL` under #175.
+value. The decoration slice preserves the pinned cross-field border rule: once
+any non-null border side is supplied, omitted/null sides become explicit zero;
+color-only input updates border color without fabricating a border width and
+therefore preserves any previously committed width structure. Semantic-None
+border/color/background inputs preserve prior effective state. Selector/range,
+standard size/orientation, margins, selector-aware decoration/column layering,
+and complete output consumption remain open, and Typst page objects must not
+enter evaluator/IR state. Status is conservatively `PARTIAL` under #175.
 
 ### Caption state
 

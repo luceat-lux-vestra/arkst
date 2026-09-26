@@ -57,14 +57,15 @@ use crate::{
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
     IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext,
-    IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,
-    IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
-    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
-    IrFontLayer, IrFontState, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
-    IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry,
-    IrPair, IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
-    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrColor,
+    IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
+    IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
+    IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
+    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
+    IrNumberingState, IrPageBorderWidths, IrPageGeometry, IrPair, IrParagraphStyleInfo,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
+    TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -578,6 +579,9 @@ struct DocumentState {
     page_alignment: Option<IrDocumentAlignment>,
     page_geometry: Option<IrPageGeometry>,
     page_columns: Option<u32>,
+    page_border_widths: Option<IrPageBorderWidths>,
+    page_border_color: Option<IrColor>,
+    page_background: Option<IrColor>,
     slides: Option<IrSlidesConfiguration>,
     localization_tables: LocalizationTables,
 }
@@ -600,6 +604,9 @@ impl Default for DocumentState {
             page_alignment: None,
             page_geometry: None,
             page_columns: None,
+            page_border_widths: None,
+            page_border_color: None,
+            page_background: None,
             slides: None,
             localization_tables: seeded_localization_tables(),
         }
@@ -624,6 +631,9 @@ impl DocumentState {
             page_alignment: snapshot.page_alignment,
             page_geometry: snapshot.page_geometry.clone(),
             page_columns: snapshot.page_columns,
+            page_border_widths: snapshot.page_border_widths.clone(),
+            page_border_color: snapshot.page_border_color.clone(),
+            page_background: snapshot.page_background.clone(),
             slides: snapshot.slides,
             localization_tables: seeded_localization_tables(),
         }
@@ -646,6 +656,9 @@ impl DocumentState {
             page_alignment: self.page_alignment,
             page_geometry: self.page_geometry.clone(),
             page_columns: self.page_columns,
+            page_border_widths: self.page_border_widths.clone(),
+            page_border_color: self.page_border_color.clone(),
+            page_background: self.page_background.clone(),
             slides: self.slides,
         }
     }
@@ -1048,6 +1061,9 @@ enum DocumentStateField {
     PageAlignment,
     PageGeometry,
     PageColumns,
+    PageBorderWidths,
+    PageBorderColor,
+    PageBackground,
     Slides,
     LocalizationTables,
 }
@@ -1068,6 +1084,9 @@ enum DocumentStateUndo {
     PageAlignment(Option<IrDocumentAlignment>),
     PageGeometry(Option<IrPageGeometry>),
     PageColumns(Option<u32>),
+    PageBorderWidths(Option<IrPageBorderWidths>),
+    PageBorderColor(Option<IrColor>),
+    PageBackground(Option<IrColor>),
     Slides(Option<IrSlidesConfiguration>),
     LocalizationTables(LocalizationTableUndo),
 }
@@ -2290,6 +2309,9 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,
             DocumentStateUndo::PageGeometry(previous) => state.page_geometry = previous,
             DocumentStateUndo::PageColumns(previous) => state.page_columns = previous,
+            DocumentStateUndo::PageBorderWidths(previous) => state.page_border_widths = previous,
+            DocumentStateUndo::PageBorderColor(previous) => state.page_border_color = previous,
+            DocumentStateUndo::PageBackground(previous) => state.page_background = previous,
             DocumentStateUndo::Slides(previous) => state.slides = previous,
             DocumentStateUndo::LocalizationTables(previous) => {
                 for (name, table) in previous {
@@ -2422,6 +2444,42 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().page_columns = value;
+    }
+
+    fn set_page_border_widths(&self, value: IrPageBorderWidths) {
+        self.record_document_state_undo(DocumentStateField::PageBorderWidths, || {
+            (
+                DocumentStateUndo::PageBorderWidths(
+                    self.document_state.borrow().page_border_widths.clone(),
+                ),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().page_border_widths = Some(value);
+    }
+
+    fn set_page_border_color(&self, value: IrColor) {
+        self.record_document_state_undo(DocumentStateField::PageBorderColor, || {
+            (
+                DocumentStateUndo::PageBorderColor(
+                    self.document_state.borrow().page_border_color.clone(),
+                ),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().page_border_color = Some(value);
+    }
+
+    fn set_page_background(&self, value: IrColor) {
+        self.record_document_state_undo(DocumentStateField::PageBackground, || {
+            (
+                DocumentStateUndo::PageBackground(
+                    self.document_state.borrow().page_background.clone(),
+                ),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().page_background = Some(value);
     }
 
     fn set_slides_configuration(&self, value: Option<IrSlidesConfiguration>) {
@@ -6593,6 +6651,13 @@ impl Evaluator {
         let mut width = None;
         let mut height = None;
         let mut columns = None;
+        let mut border_top = None;
+        let mut border_right = None;
+        let mut border_bottom = None;
+        let mut border_left = None;
+        let mut border_color = None;
+        let mut background = None;
+
         for argument in evaluated_named {
             let candidate_span = argument.arg.span;
             let parameter = argument.arg.name.clone();
@@ -6622,26 +6687,8 @@ impl Evaluator {
                     );
                 }
                 "width" | "height" => {
-                    let size = match value_conversion::convert_domain_with_origin(
-                        &value,
-                        value_conversion::DomainTarget::Size,
-                    ) {
-                        Ok(value_conversion::DomainValue::Size(value)) => value,
-                        Ok(_) => {
-                            diagnostics.push(conversion_failure_diagnostic(
-                                value_conversion::ConversionFailure::new(
-                                    value_conversion::ConversionError::UnsupportedValue {
-                                        target: value_conversion::ConversionTarget::Size,
-                                    },
-                                    Some(candidate_span),
-                                    Some(parameter.clone()),
-                                    None,
-                                    *span,
-                                ),
-                                Some("`.pageformat`"),
-                            ));
-                            return CallOutcome::Failed;
-                        }
+                    let size = match convert_pageformat_size(&value) {
+                        Ok(value) => value,
                         Err(error) => {
                             diagnostics.push(conversion_failure_diagnostic(
                                 value_conversion::ConversionFailure::new(
@@ -6685,13 +6732,67 @@ impl Evaluator {
                         (value > 0).then_some(value as u32)
                     });
                 }
+                "bordertop" | "borderright" | "borderbottom" | "borderleft" => {
+                    if matches!(&value.value, IrValue::None) {
+                        continue;
+                    }
+                    let size = match convert_pageformat_size(&value) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            diagnostics.push(conversion_failure_diagnostic(
+                                value_conversion::ConversionFailure::new(
+                                    error,
+                                    Some(candidate_span),
+                                    Some(parameter.clone()),
+                                    None,
+                                    *span,
+                                ),
+                                Some("`.pageformat`"),
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    };
+                    match parameter.as_str() {
+                        "bordertop" => border_top = Some(size),
+                        "borderright" => border_right = Some(size),
+                        "borderbottom" => border_bottom = Some(size),
+                        "borderleft" => border_left = Some(size),
+                        _ => unreachable!(),
+                    }
+                }
+                "bordercolor" | "background" => {
+                    if matches!(&value.value, IrValue::None) {
+                        continue;
+                    }
+                    let color = match convert_pageformat_color(&value) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            diagnostics.push(conversion_failure_diagnostic(
+                                value_conversion::ConversionFailure::new(
+                                    error,
+                                    Some(candidate_span),
+                                    Some(parameter.clone()),
+                                    None,
+                                    *span,
+                                ),
+                                Some("`.pageformat`"),
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    };
+                    if parameter == "bordercolor" {
+                        border_color = Some(color);
+                    } else {
+                        background = Some(color);
+                    }
+                }
                 _ => unreachable!("bounded pageformat shape rejected unknown parameter"),
             }
         }
 
-        // Candidate evaluation and conversion complete before either bounded
-        // state slot is published. The outer invocation transaction restores
-        // nested document-state writes on any failure.
+        // Candidate evaluation and conversion complete before bounded state is
+        // published. The outer invocation transaction restores nested
+        // document-state writes if any conversion fails.
         if let Some(alignment) = alignment {
             context.set_page_alignment(Some(alignment));
         }
@@ -6700,6 +6801,24 @@ impl Evaluator {
         }
         if let Some(Some(columns)) = columns {
             context.set_page_columns(Some(columns));
+        }
+        if border_top.is_some()
+            || border_right.is_some()
+            || border_bottom.is_some()
+            || border_left.is_some()
+        {
+            context.set_page_border_widths(IrPageBorderWidths {
+                top: border_top.unwrap_or_else(zero_pageformat_size),
+                right: border_right.unwrap_or_else(zero_pageformat_size),
+                bottom: border_bottom.unwrap_or_else(zero_pageformat_size),
+                left: border_left.unwrap_or_else(zero_pageformat_size),
+            });
+        }
+        if let Some(color) = border_color {
+            context.set_page_border_color(color);
+        }
+        if let Some(color) = background {
+            context.set_page_background(color);
         }
         CallOutcome::NoValue
     }
@@ -14954,7 +15073,20 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
     let mut height = false;
     let mut alignment = false;
     let mut columns = false;
+    let mut decorations = BTreeSet::new();
+
     for argument in named_args {
+        match argument.name.as_str() {
+            "bordertop" | "borderright" | "borderbottom" | "borderleft" | "bordercolor"
+            | "background" => {
+                if !decorations.insert(argument.name.as_str()) {
+                    return false;
+                }
+                continue;
+            }
+            _ => {}
+        }
+
         let seen = match argument.name.as_str() {
             "width" => &mut width,
             "height" => &mut height,
@@ -14967,9 +15099,49 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
         }
         *seen = true;
     }
+
+    if !decorations.is_empty() {
+        return !width && !height && !alignment && !columns;
+    }
+
     (width && height && !columns)
         || (alignment && !width && !height && !columns)
         || (columns && !width && !height && !alignment)
+}
+
+fn convert_pageformat_size(
+    argument: &InvocationValue,
+) -> Result<IrSize, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::Size,
+    )? {
+        value_conversion::DomainValue::Size(value) => Ok(value),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Size,
+        }),
+    }
+}
+
+fn convert_pageformat_color(
+    argument: &InvocationValue,
+) -> Result<IrColor, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::Color,
+    )? {
+        value_conversion::DomainValue::Color(value) => Ok(value),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Color,
+        }),
+    }
+}
+
+fn zero_pageformat_size() -> IrSize {
+    IrSize {
+        value: 0.0,
+        unit: IrSizeUnit::Px,
+    }
 }
 
 fn convert_whitespace_size(
