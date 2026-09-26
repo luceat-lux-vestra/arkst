@@ -721,6 +721,56 @@ pub struct IrPageFormatState {
     pub layers: Vec<IrPageFormatLayer>,
 }
 
+/// Transient backend-neutral field merge for one explicit page.
+///
+/// This value intentionally carries no selector identity because it may combine
+/// global, side, range, and combined selector layers. It also does not resolve
+/// cross-field rules such as standard size versus explicit width/height.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct IrMergedPageFormatFields {
+    pub alignment: Option<IrDocumentAlignment>,
+    pub width: Option<IrSize>,
+    pub height: Option<IrSize>,
+    pub columns: Option<u32>,
+    pub size: Option<IrPageSizeSelection>,
+    pub margin: Option<IrPageMargins>,
+    pub border_widths: Option<IrPageBorderWidths>,
+    pub border_color: Option<IrColor>,
+    pub background: Option<IrColor>,
+}
+
+impl IrMergedPageFormatFields {
+    fn overlay_non_null_from(&mut self, later: &IrPageFormatLayer) {
+        if let Some(value) = &later.alignment {
+            self.alignment = Some(*value);
+        }
+        if let Some(value) = &later.width {
+            self.width = Some(value.clone());
+        }
+        if let Some(value) = &later.height {
+            self.height = Some(value.clone());
+        }
+        if let Some(value) = &later.columns {
+            self.columns = Some(*value);
+        }
+        if let Some(value) = &later.size {
+            self.size = Some(*value);
+        }
+        if let Some(value) = &later.margin {
+            self.margin = Some(value.clone());
+        }
+        if let Some(value) = &later.border_widths {
+            self.border_widths = Some(value.clone());
+        }
+        if let Some(value) = &later.border_color {
+            self.border_color = Some(value.clone());
+        }
+        if let Some(value) = &later.background {
+            self.background = Some(value.clone());
+        }
+    }
+}
+
 impl IrPageRange {
     fn contains(&self, page_number: i32) -> bool {
         page_number >= self.start && page_number <= self.end
@@ -802,6 +852,30 @@ impl IrPageFormatState {
                 Some(selector) => selector.matches_page(page_number, side),
             })
             .collect()
+    }
+
+    /// Merge non-null fields from all layers applicable to one explicit page.
+    ///
+    /// Applicable layers are folded in original source order, so later
+    /// non-null fields replace earlier values while omitted fields inherit.
+    /// This establishes only cross-selector field precedence. It does not
+    /// resolve cross-field composition such as size versus width/height and
+    /// does not widen renderer support.
+    pub fn merge_applicable_fields_for_page(
+        &self,
+        page_number: i32,
+        side: IrPageSide,
+    ) -> Option<IrMergedPageFormatFields> {
+        let applicable = self.applicable_layers_for_page(page_number, side);
+        if applicable.is_empty() {
+            return None;
+        }
+
+        let mut merged = IrMergedPageFormatFields::default();
+        for layer in applicable {
+            merged.overlay_non_null_from(layer);
+        }
+        Some(merged)
     }
 
     /// Fold only layers with exactly the requested selector identity.

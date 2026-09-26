@@ -299,6 +299,81 @@ fn page_applicability_filters_selectors_in_source_order_without_merging() {
 }
 
 #[test]
+fn page_field_merge_uses_source_order_across_selector_scopes() {
+    let scoped = compile_source(
+        ".pageformat size:{a4}\n\
+         .pageformat margin:{1cm}\n\
+         .pageformat side:{left} margin:{2cm}\n\
+         .pageformat pages:{2..4} margin:{3cm}\n\
+         .pageformat side:{left} pages:{2..4} margin:{4cm}\n",
+    );
+    assert!(scoped.diagnostics.is_empty(), "{scoped:?}");
+
+    let scoped_fields = scoped
+        .ir
+        .metadata
+        .document_state
+        .page_format
+        .merge_applicable_fields_for_page(3, IrPageSide::Left)
+        .expect("left page fields");
+    assert_eq!(
+        scoped_fields.margin.as_ref().expect("margin").top.value,
+        4.0,
+        "latest applicable scoped margin must win"
+    );
+    assert_eq!(
+        scoped_fields.size.expect("global size must inherit").format,
+        IrPageSizeFormat::A4
+    );
+
+    let later_global = compile_source(
+        ".pageformat size:{a4}\n\
+         .pageformat margin:{1cm}\n\
+         .pageformat side:{left} margin:{2cm}\n\
+         .pageformat pages:{2..4} margin:{3cm}\n\
+         .pageformat side:{left} pages:{2..4} margin:{4cm}\n\
+         .pageformat margin:{6cm}\n",
+    );
+    assert!(later_global.diagnostics.is_empty(), "{later_global:?}");
+
+    let later_global_fields = later_global
+        .ir
+        .metadata
+        .document_state
+        .page_format
+        .merge_applicable_fields_for_page(3, IrPageSide::Left)
+        .expect("left page fields");
+    assert_eq!(
+        later_global_fields
+            .margin
+            .as_ref()
+            .expect("margin")
+            .top
+            .value,
+        6.0,
+        "later global layer must override an earlier matching scoped layer"
+    );
+    assert_eq!(
+        later_global_fields
+            .size
+            .expect("omitted size must inherit")
+            .format,
+        IrPageSizeFormat::A4
+    );
+
+    assert!(
+        later_global
+            .ir
+            .metadata
+            .document_state
+            .page_format
+            .merge_applicable_fields_for_page(0, IrPageSide::Left)
+            .is_none(),
+        "non-positive page numbers must fail closed"
+    );
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
