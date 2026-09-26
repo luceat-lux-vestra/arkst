@@ -156,6 +156,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(AUDIT.contains("`contentBorderWidth` is null"));
     assert!(AUDIT.contains("`bordercolor` is independent from that `hasBorder` calculation"));
     assert!(AUDIT.contains("`--qd-page-content-border-width` remains at its renderer/CSS default"));
+    assert!(AUDIT.contains("typed `left`/`right` page-side selectors"));
+    assert!(AUDIT.contains("must not leak into the flattened global fields"));
 
     let rows = rows();
     let numbering = rows
@@ -228,7 +230,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10]
         .contains("selector-aware geometry/size/margin/decoration/columns precedence"));
     assert!(pageformat[10].contains("ordered layer snapshot"));
-    assert!(pageformat[10].contains("prerequisite evidence only"));
+    assert!(pageformat[10].contains("typed left/right page-side selectors"));
+    assert!(pageformat[10].contains("finite 1-based page ranges"));
+    assert!(pageformat[10].contains("must not mutate flattened global state"));
+    assert!(pageformat[10].contains("state-only prerequisite evidence"));
     assert!(pageformat[10].contains("width/height override composition"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));

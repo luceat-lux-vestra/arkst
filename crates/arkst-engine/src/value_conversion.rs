@@ -9,7 +9,8 @@
 use arkst_ir::{
     IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
     IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrPageOrientation, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrValue,
+    IrNode, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize,
+    IrSizeUnit, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
@@ -246,6 +247,7 @@ pub(crate) enum ClosedEnumTarget {
     DocumentType,
     PageSizeFormat,
     PageOrientation,
+    PageSide,
     CaptionPosition,
     StackedMainAxisAlignment,
     StackedCrossAxisAlignment,
@@ -412,6 +414,19 @@ static PAGE_ORIENTATION_SPEC: ClosedEnumSpec<'static, IrPageOrientation> = Close
         ClosedEnumVariant {
             declaration_name: "LANDSCAPE",
             value: IrPageOrientation::Landscape,
+        },
+    ],
+};
+
+static PAGE_SIDE_SPEC: ClosedEnumSpec<'static, IrPageSide> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "LEFT",
+            value: IrPageSide::Left,
+        },
+        ClosedEnumVariant {
+            declaration_name: "RIGHT",
+            value: IrPageSide::Right,
         },
     ],
 };
@@ -978,6 +993,24 @@ pub(crate) fn convert_domain_with_origin(
                     PAGE_ORIENTATION_SPEC
                         .value_for(value)
                         .map(|value| DomainValue::Enum(IrEnumValue::PageOrientation(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::PageSide => match &argument.value {
+                IrValue::Enum(IrEnumValue::PageSide(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::PageSide(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    PAGE_SIDE_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::PageSide(value)))
                         .ok_or(ConversionError::InvalidText {
                             target: ConversionTarget::Enum,
                         })
