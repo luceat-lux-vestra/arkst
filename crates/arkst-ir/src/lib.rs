@@ -518,6 +518,14 @@ pub struct IrDocumentState {
     /// `.pageformat` decoration slice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_background: Option<IrColor>,
+    /// Ordered selector-free `.pageformat` mutations retained in source order.
+    ///
+    /// Existing flattened fields above remain the current bounded consumer
+    /// compatibility surface. This ordered state records the layer information
+    /// needed by later selector/precedence work without introducing backend
+    /// objects or widening renderer support.
+    #[serde(default, skip_serializing_if = "IrPageFormatState::is_empty")]
+    pub page_format: IrPageFormatState,
     /// Slides-specific document configuration. `None` means no `.slides` setter committed state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slides: Option<IrSlidesConfiguration>,
@@ -638,6 +646,54 @@ impl IrParagraphStyleInfo {
             && self.letter_spacing.is_none()
             && self.spacing.is_none()
             && self.indent.is_none()
+    }
+}
+
+/// One ordered selector-free `.pageformat` mutation.
+///
+/// Every field is backend-neutral and optional so omission remains distinct
+/// from an explicit value. The evaluator records successful bounded calls in
+/// source order while the existing flattened document fields continue to
+/// serve current consumers. Selector/range identity is intentionally absent
+/// from this first layer-state slice; only the already-bounded global shape is
+/// recorded.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrPageFormatLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<IrDocumentAlignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<IrSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<IrSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub columns: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<IrPageSizeSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<IrPageMargins>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_widths: Option<IrPageBorderWidths>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_color: Option<IrColor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<IrColor>,
+}
+
+/// Ordered selector-free page-format state.
+///
+/// The vector is deliberately append-only at the IR boundary because source
+/// order is required to reconstruct later same-selector merge/override
+/// semantics. Empty state is omitted from serialized IR for backward
+/// compatibility.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrPageFormatState {
+    #[serde(default)]
+    pub layers: Vec<IrPageFormatLayer>,
+}
+
+impl IrPageFormatState {
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
     }
 }
 
