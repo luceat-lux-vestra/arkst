@@ -374,6 +374,63 @@ fn page_field_merge_uses_source_order_across_selector_scopes() {
 }
 
 #[test]
+fn page_dimension_composition_respects_layer_order_and_per_axis_overrides() {
+    let result = compile_source(
+        ".pageformat width:{10in} height:{5in}\n\
+         .pageformat pages:{2..4} size:{a4}\n\
+         .pageformat side:{left} pages:{2..4} width:{8in}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let dimensions = result
+        .ir
+        .metadata
+        .document_state
+        .page_format
+        .compose_applicable_page_dimensions(3, IrPageSide::Left)
+        .expect("left page dimensions");
+
+    assert_eq!(
+        dimensions.size.expect("range size base").format,
+        IrPageSizeFormat::A4
+    );
+    let width = dimensions.width.as_ref().expect("explicit width");
+    assert_eq!((width.value, width.unit), (8.0, IrSizeUnit::In));
+    assert!(
+        dimensions.height.is_none(),
+        "later size must clear the earlier explicit height so its standard height can apply downstream"
+    );
+
+    let same_layer = compile_source(".pageformat size:{letter} width:{7in}\n");
+    assert!(same_layer.diagnostics.is_empty(), "{same_layer:?}");
+    let dimensions = same_layer
+        .ir
+        .metadata
+        .document_state
+        .page_format
+        .compose_applicable_page_dimensions(1, IrPageSide::Right)
+        .expect("global dimensions");
+    assert_eq!(
+        dimensions.size.expect("standard base").format,
+        IrPageSizeFormat::Letter
+    );
+    let width = dimensions.width.as_ref().expect("width override");
+    assert_eq!((width.value, width.unit), (7.0, IrSizeUnit::In));
+    assert!(dimensions.height.is_none());
+
+    assert!(
+        same_layer
+            .ir
+            .metadata
+            .document_state
+            .page_format
+            .compose_applicable_page_dimensions(0, IrPageSide::Right)
+            .is_none(),
+        "non-positive page numbers must fail closed"
+    );
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
