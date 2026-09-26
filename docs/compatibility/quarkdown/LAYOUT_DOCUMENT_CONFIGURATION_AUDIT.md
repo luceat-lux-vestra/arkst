@@ -315,7 +315,9 @@ renderer support. The bounded evaluator now also admits selector-scoped mixed si
 single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
 mixed size+axis and single-axis source calls remain deliberately unclaimed, so
-current global output behavior is not silently widened. Selector-aware output, remaining
+current global output behavior is not silently widened; the existing
+`unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
+regression continues to pin that selector-free boundary. Selector-aware output, remaining
 selector-aware geometry/size/margin/decoration/columns output, selector/columns
 interaction, the remaining page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption
