@@ -191,12 +191,12 @@ fn failed_selector_conversion_rolls_back_nested_document_state_writes() {
         "outer pageformat failure leaked nested document-state mutation"
     );
     assert!(result
-                .ir
-                .metadata
-                .document_state
-                .page_formats
-                .layers
-                .is_empty());
+        .ir
+        .metadata
+        .document_state
+        .page_formats
+        .layers
+        .is_empty());
 }
 
 #[test]
@@ -206,12 +206,12 @@ fn source_defined_pageformat_shadows_selector_builtin() {
     );
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert!(result
-                .ir
-                .metadata
-                .document_state
-                .page_formats
-                .layers
-                .is_empty());
+        .ir
+        .metadata
+        .document_state
+        .page_formats
+        .layers
+        .is_empty());
     assert!(
         format!("{:?}", result.ir).contains("SHADOW-PAGEFORMAT-SELECTOR"),
         "source-defined function must retain ownership"
