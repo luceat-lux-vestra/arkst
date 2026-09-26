@@ -131,7 +131,13 @@ fn invalid_side_and_invalid_page_ranges_fail_without_publishing_a_layer() {
             "invalid selector unexpectedly succeeded: {source}"
         );
         assert!(
-            result.ir.metadata.document_state.page_formats.layers.is_empty(),
+            result
+                .ir
+                .metadata
+                .document_state
+                .page_formats
+                .layers
+                .is_empty(),
             "invalid selector published state: {source}: {:?}",
             result.ir.metadata.document_state.page_formats
         );
@@ -148,7 +154,13 @@ fn selector_slice_does_not_claim_columns_size_or_decoration_combinations() {
     ] {
         let result = compile_source(source);
         assert!(
-            result.ir.metadata.document_state.page_formats.layers.is_empty(),
+            result
+                .ir
+                .metadata
+                .document_state
+                .page_formats
+                .layers
+                .is_empty(),
             "unsupported selector combination published selector state: {source}: {:?}",
             result.ir.metadata.document_state.page_formats
         );
@@ -178,7 +190,13 @@ fn failed_selector_conversion_rolls_back_nested_document_state_writes() {
         Some(3),
         "outer pageformat failure leaked nested document-state mutation"
     );
-    assert!(result.ir.metadata.document_state.page_formats.layers.is_empty());
+    assert!(result
+                .ir
+                .metadata
+                .document_state
+                .page_formats
+                .layers
+                .is_empty());
 }
 
 #[test]
@@ -187,7 +205,13 @@ fn source_defined_pageformat_shadows_selector_builtin() {
         ".function {pageformat}\n    side:\n    SHADOW-PAGEFORMAT-SELECTOR\n\n.pageformat side:{left} alignment:{center}\n",
     );
     assert!(result.diagnostics.is_empty(), "{result:?}");
-    assert!(result.ir.metadata.document_state.page_formats.layers.is_empty());
+    assert!(result
+                .ir
+                .metadata
+                .document_state
+                .page_formats
+                .layers
+                .is_empty());
     assert!(
         format!("{:?}", result.ir).contains("SHADOW-PAGEFORMAT-SELECTOR"),
         "source-defined function must retain ownership"
