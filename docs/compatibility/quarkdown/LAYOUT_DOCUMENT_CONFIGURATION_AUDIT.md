@@ -309,9 +309,12 @@ global layer follows an earlier scoped layer. The merged value carries no select
 `compose_applicable_page_dimensions` helper consumes the same applicable source
 order for page dimensions: when a layer supplies a standard size, it replaces
 both previously composed page axes, then explicit width and height from that
-same layer override only their respective axes. This closes per-layer
-size/width/height composition without resolving physical dimensions or widening
-renderer support. Selector-aware output, remaining
+same layer override only their respective axes. This closes the backend-neutral per-layer
+size/width/height composition rule without resolving physical dimensions or widening
+renderer support. The current bounded evaluator source surface still admits
+standard-size-only layers or complete width+height pairs; mixed size+axis and
+single-axis source calls remain deliberately unclaimed in this slice, so the
+per-axis rule is additionally pinned directly at the IR boundary. Selector-aware output, remaining
 selector-aware geometry/size/margin/decoration/columns output, selector/columns
 interaction, the remaining page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption
