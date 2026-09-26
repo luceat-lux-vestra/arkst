@@ -297,9 +297,7 @@ fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
 
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(
-        typst_code.contains(
-            "#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))"
-        ),
+        typst_code.contains("#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))"),
         "{typst_code}"
     );
 
