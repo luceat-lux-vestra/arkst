@@ -191,12 +191,15 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .expect("pageformat row");
     assert!(pageformat[9].contains("IrDocumentState::page_columns"));
     assert!(pageformat[9].contains("quarkdown_pageformat_columns.rs"));
-    assert!(pageformat[10].contains("global positive columns state"));
-    assert!(pageformat[10].contains("selector-aware columns/layer precedence"));
-    assert!(pageformat[10].contains("partial-side input zeroes omitted sides"));
-    assert!(pageformat[10].contains("bordercolor-only"));
-    assert!(pageformat[11].contains("border-side-zeroing"));
-    assert!(pageformat[11].contains("bordercolor-only-width-inheritance"));
+    assert!(pageformat[9].contains("IrDocumentState::page_border_widths"));
+    assert!(pageformat[9].contains("quarkdown_pageformat_decorations.rs"));
+    assert!(pageformat[10].contains("global positive columns"));
+    assert!(pageformat[10].contains("selector-free global border/background"));
+    assert!(pageformat[10].contains("partial-side zeroing"));
+    assert!(pageformat[10].contains("bordercolor-only width inheritance/no-fabrication"));
+    assert!(pageformat[10].contains("selector-aware decoration/columns precedence"));
+    assert!(pageformat[11].contains("bounded-global-decoration-state"));
+    assert!(pageformat[11].contains("selector-aware-layering"));
 }
 
 #[test]
