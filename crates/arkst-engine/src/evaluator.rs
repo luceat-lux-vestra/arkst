@@ -6950,30 +6950,33 @@ impl Evaluator {
             match parameter.as_str() {
                 "side" => {
                     if !matches!(&value.value, IrValue::None) {
-                        side = Some(match value_conversion::convert_page_side_with_origin(&value) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                diagnostics.push(conversion_failure_diagnostic(
-                                    value_conversion::ConversionFailure::new(
-                                        error,
-                                        Some(candidate_span),
-                                        Some("side"),
-                                        None,
-                                        *span,
-                                    ),
-                                    Some("`.pageformat`"),
-                                ));
-                                return CallOutcome::Failed;
-                            }
-                        });
+                        side = Some(
+                            match value_conversion::convert_page_side_with_origin(&value) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    diagnostics.push(conversion_failure_diagnostic(
+                                        value_conversion::ConversionFailure::new(
+                                            error,
+                                            Some(candidate_span),
+                                            Some("side"),
+                                            None,
+                                            *span,
+                                        ),
+                                        Some("`.pageformat`"),
+                                    ));
+                                    return CallOutcome::Failed;
+                                }
+                            },
+                        );
                     }
                 }
                 "pages" => {
                     if !matches!(&value.value, IrValue::None) {
-                        let range =
-                            match value_conversion::convert_range_with_origin(&value, candidate_span)
-                            {
-                                Ok(value) => value,
+                        let range = match value_conversion::convert_range_with_origin(
+                            &value,
+                            candidate_span,
+                        ) {
+                            Ok(value) => value,
                                 Err(error) => {
                                     diagnostics.push(conversion_failure_diagnostic(
                                         value_conversion::ConversionFailure::new(
