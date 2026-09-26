@@ -9,7 +9,8 @@
 use arkst_ir::{
     IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
     IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrPageOrientation, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrValue,
+    IrNode, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
@@ -446,6 +447,19 @@ static DOCUMENT_ALIGNMENT_SPEC: ClosedEnumSpec<'static, IrDocumentAlignment> = C
         ClosedEnumVariant {
             declaration_name: "JUSTIFY",
             value: IrDocumentAlignment::Justify,
+        },
+    ],
+};
+
+static PAGE_SIDE_SPEC: ClosedEnumSpec<'static, IrPageSide> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "LEFT",
+            value: IrPageSide::Left,
+        },
+        ClosedEnumVariant {
+            declaration_name: "RIGHT",
+            value: IrPageSide::Right,
         },
     ],
 };
@@ -1079,6 +1093,26 @@ pub(crate) fn convert_document_alignment_with_origin(
             if argument.origin == ValueOrigin::Dynamic =>
         {
             DOCUMENT_ALIGNMENT_SPEC
+                .value_for(value)
+                .ok_or(ConversionError::InvalidText {
+                    target: ConversionTarget::Enum,
+                })
+        }
+        _ => Err(ConversionError::UnsupportedValue {
+            target: ConversionTarget::Enum,
+        }),
+    }
+}
+
+/// Converts the selector-aware `.pageformat side` domain.
+pub(crate) fn convert_page_side_with_origin(
+    argument: &InvocationValue,
+) -> Result<IrPageSide, ConversionError> {
+    match &argument.value {
+        IrValue::String(value) | IrValue::Identifier(value)
+            if argument.origin == ValueOrigin::Dynamic =>
+        {
+            PAGE_SIDE_SPEC
                 .value_for(value)
                 .ok_or(ConversionError::InvalidText {
                     target: ConversionTarget::Enum,
