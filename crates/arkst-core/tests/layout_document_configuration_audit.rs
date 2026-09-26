@@ -235,6 +235,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("must not mutate flattened global state"));
     assert!(pageformat[10].contains("state-only prerequisite evidence"));
     assert!(pageformat[10].contains("compose_applicable_page_dimensions"));
+    assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
