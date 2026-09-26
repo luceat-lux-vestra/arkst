@@ -296,10 +296,7 @@ fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
     );
 
     let typst_code = lower_to_typst_code(&result.ir);
-    assert!(
-        typst_code.contains("#set page(columns: 2)"),
-        "{typst_code}"
-    );
+    assert!(typst_code.contains("#set page(columns: 2)"), "{typst_code}");
 
     with_typst("pageformat-columns", |backend| {
         let output = backend
