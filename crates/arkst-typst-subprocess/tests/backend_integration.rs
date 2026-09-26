@@ -279,6 +279,45 @@ fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
+    let source = ".pageformat margin:{1cm 2mm 3pt 8px}\nMargin output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-margin.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-margin.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat margin diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains(
+            "#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-margin", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-margin.qd".to_string(),
+            })
+            .expect("pageformat margin Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_v260_omitted_stack_alignment_uses_final_page_state() {
     let source =
         ".row\n    A\n\n    B\n\n.pageformat alignment:{center}\n.column\n    C\n\n    D\n";
