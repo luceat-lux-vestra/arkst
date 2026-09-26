@@ -311,10 +311,11 @@ order for page dimensions: when a layer supplies a standard size, it replaces
 both previously composed page axes, then explicit width and height from that
 same layer override only their respective axes. This closes the backend-neutral per-layer
 size/width/height composition rule without resolving physical dimensions or widening
-renderer support. The current bounded evaluator source surface still admits
-standard-size-only layers or complete width+height pairs; mixed size+axis and
-single-axis source calls remain deliberately unclaimed in this slice, so the
-per-axis rule is additionally pinned directly at the IR boundary. Selector-aware output, remaining
+renderer support. The bounded evaluator now also admits selector-scoped mixed size+axis and
+single-axis width/height layers as state-only evidence; those calls return
+before the legacy flattened global renderer fields are mutated. Selector-free
+mixed size+axis and single-axis source calls remain deliberately unclaimed, so
+current global output behavior is not silently widened. Selector-aware output, remaining
 selector-aware geometry/size/margin/decoration/columns output, selector/columns
 interaction, the remaining page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption
