@@ -62,10 +62,11 @@ use arkst_ir::{
     IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageGeometry, IrPageMargins, IrPageOrientation,
-    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrNumberingState, IrPageBorderWidths, IrPageFormatLayer, IrPageFormatState, IrPageGeometry,
+    IrPageMargins, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection, IrPair,
+    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -584,6 +585,7 @@ struct DocumentState {
     page_border_widths: Option<IrPageBorderWidths>,
     page_border_color: Option<IrColor>,
     page_background: Option<IrColor>,
+    page_format: IrPageFormatState,
     slides: Option<IrSlidesConfiguration>,
     localization_tables: LocalizationTables,
 }
@@ -611,6 +613,7 @@ impl Default for DocumentState {
             page_border_widths: None,
             page_border_color: None,
             page_background: None,
+            page_format: Default::default(),
             slides: None,
             localization_tables: seeded_localization_tables(),
         }
@@ -640,6 +643,7 @@ impl DocumentState {
             page_border_widths: snapshot.page_border_widths.clone(),
             page_border_color: snapshot.page_border_color.clone(),
             page_background: snapshot.page_background.clone(),
+            page_format: snapshot.page_format.clone(),
             slides: snapshot.slides,
             localization_tables: seeded_localization_tables(),
         }
@@ -667,6 +671,7 @@ impl DocumentState {
             page_border_widths: self.page_border_widths.clone(),
             page_border_color: self.page_border_color.clone(),
             page_background: self.page_background.clone(),
+            page_format: self.page_format.clone(),
             slides: self.slides,
         }
     }
@@ -1074,6 +1079,7 @@ enum DocumentStateField {
     PageBorderWidths,
     PageBorderColor,
     PageBackground,
+    PageFormat,
     Slides,
     LocalizationTables,
 }
@@ -1099,6 +1105,7 @@ enum DocumentStateUndo {
     PageBorderWidths(Option<IrPageBorderWidths>),
     PageBorderColor(Option<IrColor>),
     PageBackground(Option<IrColor>),
+    PageFormat(IrPageFormatState),
     Slides(Option<IrSlidesConfiguration>),
     LocalizationTables(LocalizationTableUndo),
 }
@@ -2326,6 +2333,7 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::PageBorderWidths(previous) => state.page_border_widths = previous,
             DocumentStateUndo::PageBorderColor(previous) => state.page_border_color = previous,
             DocumentStateUndo::PageBackground(previous) => state.page_background = previous,
+            DocumentStateUndo::PageFormat(previous) => state.page_format = previous,
             DocumentStateUndo::Slides(previous) => state.slides = previous,
             DocumentStateUndo::LocalizationTables(previous) => {
                 for (name, table) in previous {
@@ -2514,6 +2522,19 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().page_background = Some(value);
+    }
+
+    fn publish_page_format_layer(&self, layer: IrPageFormatLayer) {
+        self.record_document_state_undo(DocumentStateField::PageFormat, || {
+            let previous = self.document_state.borrow().page_format.clone();
+            let copied_units = previous.layers.len();
+            (DocumentStateUndo::PageFormat(previous), copied_units)
+        });
+        self.document_state
+            .borrow_mut()
+            .page_format
+            .layers
+            .push(layer);
     }
 
     fn set_slides_configuration(&self, value: Option<IrSlidesConfiguration>) {
@@ -6893,6 +6914,46 @@ impl Evaluator {
         // Candidate evaluation and conversion complete before bounded state is
         // published. The outer invocation transaction restores nested
         // document-state writes if any conversion fails.
+        let document_type = context.document_state.borrow().document_type;
+        let page_size = page_size_format
+            .flatten()
+            .map(|format| IrPageSizeSelection {
+                format,
+                orientation: page_orientation,
+                document_type,
+            });
+        let border_widths = if border_top.is_some()
+            || border_right.is_some()
+            || border_bottom.is_some()
+            || border_left.is_some()
+        {
+            Some(IrPageBorderWidths {
+                top: border_top.unwrap_or_else(zero_pageformat_size),
+                right: border_right.unwrap_or_else(zero_pageformat_size),
+                bottom: border_bottom.unwrap_or_else(zero_pageformat_size),
+                left: border_left.unwrap_or_else(zero_pageformat_size),
+            })
+        } else {
+            None
+        };
+
+        // Preserve the successful selector-free mutation in source order
+        // before updating the existing flattened compatibility fields. This
+        // layer state is intentionally not consumed by renderers yet; it is
+        // the backend-neutral prerequisite for later selector and precedence
+        // resolution.
+        context.publish_page_format_layer(IrPageFormatLayer {
+            alignment,
+            width: width.clone(),
+            height: height.clone(),
+            columns: columns.flatten(),
+            size: page_size,
+            margin: margin.clone().flatten(),
+            border_widths: border_widths.clone(),
+            border_color: border_color.clone(),
+            background: background.clone(),
+        });
+
         if let Some(alignment) = alignment {
             context.set_page_alignment(Some(alignment));
         }
@@ -6902,28 +6963,14 @@ impl Evaluator {
         if let Some(Some(columns)) = columns {
             context.set_page_columns(Some(columns));
         }
-        if let Some(Some(format)) = page_size_format {
-            let document_type = context.document_state.borrow().document_type;
-            context.set_page_size(IrPageSizeSelection {
-                format,
-                orientation: page_orientation,
-                document_type,
-            });
+        if let Some(page_size) = page_size {
+            context.set_page_size(page_size);
         }
         if let Some(Some(margin)) = margin {
             context.set_page_margin(margin);
         }
-        if border_top.is_some()
-            || border_right.is_some()
-            || border_bottom.is_some()
-            || border_left.is_some()
-        {
-            context.set_page_border_widths(IrPageBorderWidths {
-                top: border_top.unwrap_or_else(zero_pageformat_size),
-                right: border_right.unwrap_or_else(zero_pageformat_size),
-                bottom: border_bottom.unwrap_or_else(zero_pageformat_size),
-                left: border_left.unwrap_or_else(zero_pageformat_size),
-            });
+        if let Some(border_widths) = border_widths {
+            context.set_page_border_widths(border_widths);
         }
         if let Some(color) = border_color {
             context.set_page_border_color(color);

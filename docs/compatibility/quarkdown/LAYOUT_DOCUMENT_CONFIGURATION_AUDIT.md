@@ -239,8 +239,10 @@ page-format data is not itself a getter or output node.
 The state is genuinely document-scoped and must remain backend-neutral.
 Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
 document alignment, a global positive column count, selector-free global
-border/background decoration state, selector-free global margin state, and
-typed selector-free standard size/orientation selection. Geometry/alignment,
+border/background decoration state, selector-free global margin state, typed
+selector-free standard size/orientation selection, and an ordered
+selector-free page-format layer snapshot that preserves successful bounded
+mutations in source order without changing current renderer consumers. Geometry/alignment,
 selector-free global margins, global positive columns, selector-free global
 background, and the bounded standard-size selection have current Typst/PDF
 consumers, while row/column alignment inheritance remains unchanged;
@@ -282,11 +284,13 @@ The bounded Typst/PDF border consumer uses page foreground coordinates to draw
 the explicit content-area rectangle only when all of margin, border widths, and
 border color are committed. It preserves four independent side widths and does
 not fabricate a renderer-default margin, width, or color.
-Selector/range, width/height override composition, selector-aware
-geometry/size/margin/decoration/column layering, the remaining page-border
-output outside the explicit-margin/width/color paged subset, and the remaining
-output consumption stay open, and Typst page objects must not enter
-evaluator/IR state. Status is conservatively `PARTIAL`
+The ordered layer snapshot is a prerequisite only: current flattened fields
+remain the bounded renderer compatibility surface and no new output claim is
+made by recording layer order. Selector/range, width/height override
+composition, selector-aware geometry/size/margin/decoration/column layering,
+the remaining page-border output outside the explicit-margin/width/color paged
+subset, and the remaining output consumption stay open, and Typst page objects
+must not enter evaluator/IR state. Status is conservatively `PARTIAL`
 under #175.
 
 ### Caption state

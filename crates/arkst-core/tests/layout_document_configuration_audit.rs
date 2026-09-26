@@ -197,6 +197,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("quarkdown_pageformat_size_state.rs"));
     assert!(pageformat[9].contains("IrDocumentState::page_margin"));
     assert!(pageformat[9].contains("quarkdown_pageformat_margin.rs"));
+    assert!(pageformat[9].contains("IrDocumentState::page_format"));
+    assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(
         pageformat[9].contains("integration_pageformat_background_lowers_to_valid_typst_and_pdf")
@@ -225,6 +227,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("remaining page-border output"));
     assert!(pageformat[10]
         .contains("selector-aware geometry/size/margin/decoration/columns precedence"));
+    assert!(pageformat[10].contains("ordered layer snapshot"));
+    assert!(pageformat[10].contains("prerequisite evidence only"));
     assert!(pageformat[10].contains("width/height override composition"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
