@@ -5,7 +5,9 @@
 //! by the clean-room v2.6 `focus` oracle in #328, then shifts the existing
 //! source-map ranges by the generated prelude length.
 
-use arkst_ir::{IrDocument, IrDocumentType};
+use arkst_ir::{
+    IrDocument, IrDocumentType, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection,
+};
 use arkst_source::SourceMapEntry;
 
 use crate::lowering_base;
@@ -48,6 +50,57 @@ pub fn lower_to_typst_code(doc: &IrDocument) -> String {
 const SLIDES_PAGE_WIDTH_PT: f64 = 749.04;
 const SLIDES_PAGE_HEIGHT_PT: f64 = 546.0;
 
+fn standard_page_dimensions_mm(
+    selection: IrPageSizeSelection,
+    output_document_type: IrDocumentType,
+) -> Option<(&'static str, &'static str)> {
+    if !matches!(
+        output_document_type,
+        IrDocumentType::Paged | IrDocumentType::Slides
+    ) {
+        return None;
+    }
+
+    // Resolve the closed Quarkdown standard-size domain to physical bounds at
+    // the backend boundary. Keeping the dimensions explicit also covers B0,
+    // which has no Typst paper-name alias.
+    let portrait = match selection.format {
+        IrPageSizeFormat::A0 => ("841", "1189"),
+        IrPageSizeFormat::A1 => ("594", "841"),
+        IrPageSizeFormat::A2 => ("420", "594"),
+        IrPageSizeFormat::A3 => ("297", "420"),
+        IrPageSizeFormat::A4 => ("210", "297"),
+        IrPageSizeFormat::A5 => ("148", "210"),
+        IrPageSizeFormat::A6 => ("105", "148"),
+        IrPageSizeFormat::A7 => ("74", "105"),
+        IrPageSizeFormat::A8 => ("52", "74"),
+        IrPageSizeFormat::A9 => ("37", "52"),
+        IrPageSizeFormat::A10 => ("26", "37"),
+        IrPageSizeFormat::B0 => ("1000", "1414"),
+        IrPageSizeFormat::B1 => ("707", "1000"),
+        IrPageSizeFormat::B2 => ("500", "707"),
+        IrPageSizeFormat::B3 => ("353", "500"),
+        IrPageSizeFormat::B4 => ("250", "353"),
+        IrPageSizeFormat::B5 => ("176", "250"),
+        IrPageSizeFormat::Letter => ("215.9", "279.4"),
+        IrPageSizeFormat::Legal => ("215.9", "355.6"),
+        IrPageSizeFormat::Ledger => ("279.4", "431.8"),
+    };
+    let orientation = match selection.orientation {
+        Some(orientation) => orientation,
+        None => match selection.document_type {
+            IrDocumentType::Slides => IrPageOrientation::Landscape,
+            IrDocumentType::Plain | IrDocumentType::Paged => IrPageOrientation::Portrait,
+            IrDocumentType::Docs => return None,
+        },
+    };
+
+    Some(match orientation {
+        IrPageOrientation::Portrait => portrait,
+        IrPageOrientation::Landscape => (portrait.1, portrait.0),
+    })
+}
+
 fn document_prelude(doc: &IrDocument) -> String {
     let state = &doc.metadata.document_state;
     let mut prelude = String::new();
@@ -55,6 +108,13 @@ fn document_prelude(doc: &IrDocument) -> String {
         let width = lowering_base::lower_size(&geometry.width);
         let height = lowering_base::lower_size(&geometry.height);
         prelude.push_str(&format!("#set page(width: {width}, height: {height})\n"));
+    } else if let Some((width, height)) = state
+        .page_size
+        .and_then(|selection| standard_page_dimensions_mm(selection, state.document_type))
+    {
+        prelude.push_str(&format!(
+            "#set page(width: {width}mm, height: {height}mm)\n"
+        ));
     } else if state.document_type == IrDocumentType::Slides {
         prelude.push_str(&format!(
             "#set page(width: {SLIDES_PAGE_WIDTH_PT}pt, height: {SLIDES_PAGE_HEIGHT_PT}pt)\n"
@@ -164,7 +224,8 @@ fn render_focus_prelude(kind: FocusDocumentKind, paperwhite: bool) -> String {
 mod tests {
     use super::*;
     use arkst_ir::{
-        IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageMargins, IrSize, IrSizeUnit,
+        IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageGeometry, IrPageMargins,
+        IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection, IrSize, IrSizeUnit,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -190,6 +251,139 @@ mod tests {
             }],
             metadata,
         }
+    }
+
+    #[test]
+    fn standard_page_formats_resolve_to_expected_portrait_dimensions() {
+        let cases = [
+            (IrPageSizeFormat::A0, ("841", "1189")),
+            (IrPageSizeFormat::A1, ("594", "841")),
+            (IrPageSizeFormat::A2, ("420", "594")),
+            (IrPageSizeFormat::A3, ("297", "420")),
+            (IrPageSizeFormat::A4, ("210", "297")),
+            (IrPageSizeFormat::A5, ("148", "210")),
+            (IrPageSizeFormat::A6, ("105", "148")),
+            (IrPageSizeFormat::A7, ("74", "105")),
+            (IrPageSizeFormat::A8, ("52", "74")),
+            (IrPageSizeFormat::A9, ("37", "52")),
+            (IrPageSizeFormat::A10, ("26", "37")),
+            (IrPageSizeFormat::B0, ("1000", "1414")),
+            (IrPageSizeFormat::B1, ("707", "1000")),
+            (IrPageSizeFormat::B2, ("500", "707")),
+            (IrPageSizeFormat::B3, ("353", "500")),
+            (IrPageSizeFormat::B4, ("250", "353")),
+            (IrPageSizeFormat::B5, ("176", "250")),
+            (IrPageSizeFormat::Letter, ("215.9", "279.4")),
+            (IrPageSizeFormat::Legal, ("215.9", "355.6")),
+            (IrPageSizeFormat::Ledger, ("279.4", "431.8")),
+        ];
+
+        for (format, expected) in cases {
+            assert_eq!(
+                standard_page_dimensions_mm(
+                    IrPageSizeSelection {
+                        format,
+                        orientation: Some(IrPageOrientation::Portrait),
+                        document_type: IrDocumentType::Paged,
+                    },
+                    IrDocumentType::Paged,
+                ),
+                Some(expected),
+                "{format:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn global_standard_page_size_emits_oriented_physical_typst_dimensions() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_size = Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Landscape),
+            document_type: IrDocumentType::Paged,
+        });
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(width: 297mm, height: 210mm)\n"),
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn standard_size_applicability_uses_output_type_but_default_orientation_uses_call_time_basis() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_size = Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: None,
+            document_type: IrDocumentType::Plain,
+        });
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(width: 210mm, height: 297mm)\n"),
+            "{code}"
+        );
+
+        doc.metadata.document_state.document_type = IrDocumentType::Slides;
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(width: 210mm, height: 297mm)\n"),
+            "captured plain orientation basis must remain portrait after later doctype mutation: {code}"
+        );
+
+        doc.metadata.document_state.document_type = IrDocumentType::Plain;
+        doc.metadata.document_state.page_size = Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Landscape),
+            document_type: IrDocumentType::Paged,
+        });
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            !code.starts_with("#set page(width: 297mm, height: 210mm)\n"),
+            "standard size must not apply to a final plain document: {code}"
+        );
+    }
+
+    #[test]
+    fn omitted_docs_orientation_basis_remains_fail_closed() {
+        let selection = IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: None,
+            document_type: IrDocumentType::Docs,
+        };
+        assert_eq!(
+            standard_page_dimensions_mm(selection, IrDocumentType::Paged),
+            None,
+            "public evidence does not define an omitted docs orientation for this cross-doctype edge"
+        );
+    }
+
+    #[test]
+    fn explicit_geometry_keeps_precedence_until_layer_ordering_is_represented() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_geometry = Some(IrPageGeometry {
+            width: IrSize {
+                value: 10.0,
+                unit: IrSizeUnit::In,
+            },
+            height: IrSize {
+                value: 5.0,
+                unit: IrSizeUnit::In,
+            },
+        });
+        doc.metadata.document_state.page_size = Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Landscape),
+            document_type: IrDocumentType::Paged,
+        });
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(width: 10in, height: 5in)\n"),
+            "{code}"
+        );
+        assert!(!code.contains("297mm"), "{code}");
     }
 
     #[test]
