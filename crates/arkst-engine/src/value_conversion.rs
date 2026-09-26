@@ -9,8 +9,8 @@
 use arkst_ir::{
     IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
     IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit,
-    IrValue,
+    IrNode, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize,
+    IrSizeUnit, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
