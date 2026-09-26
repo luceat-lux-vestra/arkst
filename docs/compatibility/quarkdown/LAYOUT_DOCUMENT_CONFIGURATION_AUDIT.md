@@ -241,8 +241,12 @@ Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
 document alignment, a global positive column count, selector-free global
 border/background decoration state, selector-free global margin state, typed
 selector-free standard size/orientation selection, and an ordered
-selector-free page-format layer snapshot that preserves successful bounded
-mutations in source order without changing current renderer consumers. Geometry/alignment,
+page-format layer snapshot that preserves successful bounded mutations in
+source order. The snapshot now carries a bounded selector identity for typed
+`left`/`right` page-side selectors and finite 1-based inclusive page ranges
+when both endpoints are explicit; the two selector dimensions may be combined.
+Scoped selector layers are state-only and must not leak into the flattened
+global fields consumed by current renderers. Geometry/alignment,
 selector-free global margins, global positive columns, selector-free global
 background, and the bounded standard-size selection have current Typst/PDF
 consumers, while row/column alignment inheritance remains unchanged;
@@ -286,11 +290,17 @@ border color are committed. It preserves four independent side widths and does
 not fabricate a renderer-default margin, width, or color.
 The ordered layer snapshot is a prerequisite only: current flattened fields
 remain the bounded renderer compatibility surface and no new output claim is
-made by recording layer order. Selector/range, width/height override
-composition, selector-aware geometry/size/margin/decoration/column layering,
-the remaining page-border output outside the explicit-margin/width/color paged
-subset, and the remaining output consumption stay open, and Typst page objects
-must not enter evaluator/IR state. Status is conservatively `PARTIAL`
+made by recording layer order or selector identity. The bounded selector slice
+accepts typed `left`/`right` and explicit finite positive page ranges, and it
+fails before publication for an open end, an open start, page zero, or an
+invalid side. The open-end failure follows the pinned contract; open-start
+semantics remain deliberately unclaimed rather than inferred. Selector-aware
+merge resolution/output, width/height override composition, remaining
+selector-aware geometry/size/margin/decoration layering, selector/columns
+interaction, the remaining page-border output outside the
+explicit-margin/width/color paged subset, and the remaining output consumption
+stay open, and Typst page objects must not enter evaluator/IR state. Status is
+conservatively `PARTIAL`
 under #175.
 
 ### Caption state
