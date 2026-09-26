@@ -62,10 +62,10 @@ use arkst_ir::{
     IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageGeometry, IrPair, IrParagraphStyleInfo,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
-    TargetSpecificContent,
+    IrNumberingState, IrPageBorderWidths, IrPageGeometry, IrPageOrientation, IrPageSizeFormat,
+    IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize,
+    IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -579,6 +579,7 @@ struct DocumentState {
     page_alignment: Option<IrDocumentAlignment>,
     page_geometry: Option<IrPageGeometry>,
     page_columns: Option<u32>,
+    page_size: Option<IrPageSizeSelection>,
     page_border_widths: Option<IrPageBorderWidths>,
     page_border_color: Option<IrColor>,
     page_background: Option<IrColor>,
@@ -604,6 +605,7 @@ impl Default for DocumentState {
             page_alignment: None,
             page_geometry: None,
             page_columns: None,
+            page_size: None,
             page_border_widths: None,
             page_border_color: None,
             page_background: None,
@@ -631,6 +633,7 @@ impl DocumentState {
             page_alignment: snapshot.page_alignment,
             page_geometry: snapshot.page_geometry.clone(),
             page_columns: snapshot.page_columns,
+            page_size: snapshot.page_size,
             page_border_widths: snapshot.page_border_widths.clone(),
             page_border_color: snapshot.page_border_color.clone(),
             page_background: snapshot.page_background.clone(),
@@ -656,6 +659,7 @@ impl DocumentState {
             page_alignment: self.page_alignment,
             page_geometry: self.page_geometry.clone(),
             page_columns: self.page_columns,
+            page_size: self.page_size,
             page_border_widths: self.page_border_widths.clone(),
             page_border_color: self.page_border_color.clone(),
             page_background: self.page_background.clone(),
@@ -1061,6 +1065,7 @@ enum DocumentStateField {
     PageAlignment,
     PageGeometry,
     PageColumns,
+    PageSize,
     PageBorderWidths,
     PageBorderColor,
     PageBackground,
@@ -1084,6 +1089,7 @@ enum DocumentStateUndo {
     PageAlignment(Option<IrDocumentAlignment>),
     PageGeometry(Option<IrPageGeometry>),
     PageColumns(Option<u32>),
+    PageSize(Option<IrPageSizeSelection>),
     PageBorderWidths(Option<IrPageBorderWidths>),
     PageBorderColor(Option<IrColor>),
     PageBackground(Option<IrColor>),
@@ -2309,6 +2315,7 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,
             DocumentStateUndo::PageGeometry(previous) => state.page_geometry = previous,
             DocumentStateUndo::PageColumns(previous) => state.page_columns = previous,
+            DocumentStateUndo::PageSize(previous) => state.page_size = previous,
             DocumentStateUndo::PageBorderWidths(previous) => state.page_border_widths = previous,
             DocumentStateUndo::PageBorderColor(previous) => state.page_border_color = previous,
             DocumentStateUndo::PageBackground(previous) => state.page_background = previous,
@@ -2444,6 +2451,16 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().page_columns = value;
+    }
+
+    fn set_page_size(&self, value: IrPageSizeSelection) {
+        self.record_document_state_undo(DocumentStateField::PageSize, || {
+            (
+                DocumentStateUndo::PageSize(self.document_state.borrow().page_size),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().page_size = Some(value);
     }
 
     fn set_page_border_widths(&self, value: IrPageBorderWidths) {
@@ -4263,11 +4280,12 @@ impl Evaluator {
 
         if name == "pageformat"
             && context.get_function(name).is_none()
-            && positional_args.is_empty()
-            && bounded_pageformat_shape(named_args)
             && body.is_none()
             && raw_body.is_none()
             && lambda_parameters.is_none()
+            && implicit_argument.is_none()
+            && positional_args.is_empty()
+            && bounded_pageformat_shape(named_args)
         {
             return self.evaluate_page_format_builtin(named_args, span, diagnostics, context);
         }
@@ -6651,6 +6669,8 @@ impl Evaluator {
         let mut width = None;
         let mut height = None;
         let mut columns = None;
+        let mut page_size_format = None;
+        let mut page_orientation = None;
         let mut border_top = None;
         let mut border_right = None;
         let mut border_bottom = None;
@@ -6685,6 +6705,46 @@ impl Evaluator {
                             }
                         },
                     );
+                }
+                "size" => {
+                    page_size_format = Some(if matches!(&value.value, IrValue::None) {
+                        None
+                    } else {
+                        Some(match convert_pageformat_size_format(&value) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(candidate_span),
+                                        Some("size"),
+                                        None,
+                                        *span,
+                                    ),
+                                    Some("`.pageformat`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        })
+                    });
+                }
+                "orientation" => {
+                    page_orientation = Some(match convert_pageformat_orientation(&value) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            diagnostics.push(conversion_failure_diagnostic(
+                                value_conversion::ConversionFailure::new(
+                                    error,
+                                    Some(candidate_span),
+                                    Some("orientation"),
+                                    None,
+                                    *span,
+                                ),
+                                Some("`.pageformat`"),
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    });
                 }
                 "width" | "height" => {
                     let size = match convert_pageformat_size(&value) {
@@ -6801,6 +6861,14 @@ impl Evaluator {
         }
         if let Some(Some(columns)) = columns {
             context.set_page_columns(Some(columns));
+        }
+        if let Some(Some(format)) = page_size_format {
+            let document_type = context.document_state.borrow().document_type;
+            context.set_page_size(IrPageSizeSelection {
+                format,
+                orientation: page_orientation,
+                document_type,
+            });
         }
         if border_top.is_some()
             || border_right.is_some()
@@ -15073,6 +15141,8 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
     let mut height = false;
     let mut alignment = false;
     let mut columns = false;
+    let mut page_size = false;
+    let mut orientation = false;
     let mut decorations = BTreeSet::new();
 
     for argument in named_args {
@@ -15092,21 +15162,59 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
             "height" => &mut height,
             "alignment" => &mut alignment,
             "columns" => &mut columns,
+            "size" => &mut page_size,
+            "orientation" => &mut orientation,
             _ => return false,
         };
-        if *seen || (argument.name != "columns" && matches!(&argument.value, IrValue::None)) {
+        if *seen
+            || (!matches!(argument.name.as_str(), "columns" | "size")
+                && matches!(&argument.value, IrValue::None))
+        {
             return false;
         }
         *seen = true;
     }
 
     if !decorations.is_empty() {
-        return !width && !height && !alignment && !columns;
+        return !width && !height && !alignment && !columns && !page_size && !orientation;
     }
 
-    (width && height && !columns)
-        || (alignment && !width && !height && !columns)
-        || (columns && !width && !height && !alignment)
+    (page_size && !width && !height && !alignment && !columns)
+        || (width && height && !columns && !page_size && !orientation)
+        || (alignment && !width && !height && !columns && !page_size && !orientation)
+        || (columns && !width && !height && !alignment && !page_size && !orientation)
+}
+
+fn convert_pageformat_size_format(
+    argument: &InvocationValue,
+) -> Result<IrPageSizeFormat, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::ClosedEnum(
+            value_conversion::ClosedEnumTarget::PageSizeFormat,
+        ),
+    )? {
+        value_conversion::DomainValue::Enum(IrEnumValue::PageSizeFormat(value)) => Ok(value),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Enum,
+        }),
+    }
+}
+
+fn convert_pageformat_orientation(
+    argument: &InvocationValue,
+) -> Result<IrPageOrientation, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::ClosedEnum(
+            value_conversion::ClosedEnumTarget::PageOrientation,
+        ),
+    )? {
+        value_conversion::DomainValue::Enum(IrEnumValue::PageOrientation(value)) => Ok(value),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Enum,
+        }),
+    }
 }
 
 fn convert_pageformat_size(

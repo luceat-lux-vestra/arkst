@@ -491,6 +491,13 @@ pub struct IrDocumentState {
     /// document/backend default; non-positive inputs are discarded upstream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_columns: Option<u32>,
+    /// Standard page-size selection from the bounded selector-free
+    /// `.pageformat size:{...} orientation:{...}` slice. The format and
+    /// explicit orientation are typed; when orientation is omitted, the
+    /// document type captured at commit time remains the downstream default
+    /// basis instead of fabricating a concrete orientation in evaluator state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_size: Option<IrPageSizeSelection>,
     /// Global page border widths selected by the bounded selector-free
     /// `.pageformat` decoration slice. A present value is complete: when any
     /// border side is supplied, omitted sides are materialized as semantic
@@ -626,6 +633,53 @@ impl IrParagraphStyleInfo {
             && self.spacing.is_none()
             && self.indent.is_none()
     }
+}
+
+/// Closed standard paper/page formats accepted by `.pageformat size:{...}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrPageSizeFormat {
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
+    A8,
+    A9,
+    A10,
+    B0,
+    B1,
+    B2,
+    B3,
+    B4,
+    B5,
+    Letter,
+    Legal,
+    Ledger,
+}
+
+/// Closed orientation domain used only when a standard page size is selected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrPageOrientation {
+    Portrait,
+    Landscape,
+}
+
+/// Backend-neutral standard page-size selection.
+///
+/// `orientation: None` means the source omitted the orientation argument.
+/// `document_type` freezes the preferred-orientation basis that was current
+/// when this layer committed; downstream consumers may resolve that default
+/// without consulting a later `.doctype` mutation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrPageSizeSelection {
+    pub format: IrPageSizeFormat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<IrPageOrientation>,
+    #[serde(default)]
+    pub document_type: IrDocumentType,
 }
 
 /// Backend-neutral complete page geometry.
@@ -901,6 +955,8 @@ pub enum IrCrossAxisAlignment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrEnumValue {
     DocumentType(IrDocumentType),
+    PageSizeFormat(IrPageSizeFormat),
+    PageOrientation(IrPageOrientation),
     CaptionPosition(IrCaptionPosition),
     StackedMainAxisAlignment(IrMainAxisAlignment),
     StackedCrossAxisAlignment(IrCrossAxisAlignment),
@@ -3675,6 +3731,7 @@ mod tests {
                 page_alignment: None,
                 page_geometry: None,
                 page_columns: None,
+                page_size: None,
                 page_border_widths: None,
                 page_border_color: None,
                 page_background: None,
@@ -3811,6 +3868,7 @@ mod tests {
             page_alignment: None,
             page_geometry: None,
             page_columns: None,
+            page_size: None,
             page_border_widths: None,
             page_border_color: None,
             page_background: None,
