@@ -292,8 +292,12 @@ made by recording layer order or selector identity. The bounded selector slice
 accepts typed `left`/`right` and explicit finite positive page ranges, and it
 fails before publication for an open end, an open start, page zero, or an
 invalid side. The open-end failure follows the pinned contract; open-start
-semantics remain deliberately unclaimed rather than inferred. Selector-aware
-merge resolution/output, width/height override composition, remaining
+semantics remain deliberately unclaimed rather than inferred. The IR now exposes
+a bounded exact-selector resolver that folds only layers with identical selector
+identity in source order: later non-null fields replace earlier values while
+omitted fields inherit. Distinct selector groups remain uncombined, so this does
+not claim cross-selector precedence, selector-aware output, or size-versus-geometry
+resolution. Cross-selector precedence/output, width/height override composition, remaining
 selector-aware geometry/size/margin/decoration layering, selector/columns
 interaction, the remaining page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption

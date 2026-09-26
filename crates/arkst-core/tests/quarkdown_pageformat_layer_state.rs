@@ -177,6 +177,75 @@ fn invalid_or_unbounded_page_selectors_fail_before_layer_publication() {
 }
 
 #[test]
+fn exact_selector_resolution_merges_non_null_fields_without_cross_selector_precedence() {
+    let result = compile_source(
+        ".pageformat margin:{4cm}\n\
+         .pageformat side:{left} pages:{2..5} margin:{1cm}\n\
+         .pageformat side:{right} pages:{2..5} margin:{9cm}\n\
+         .pageformat side:{left} pages:{2..5} bordertop:{2pt}\n\
+         .pageformat side:{left} pages:{2..5} bordercolor:{red}\n\
+         .pageformat side:{left} pages:{2..5} margin:{3cm}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_format.layers.len(), 6);
+
+    let global = state
+        .page_format
+        .resolve_exact_selector(None)
+        .expect("global selector group");
+    assert_eq!(
+        global.margin.as_ref().expect("global margin").top.value,
+        4.0
+    );
+    assert!(global.border_widths.is_none());
+
+    let left_selector = state.page_format.layers[1].selector;
+    let right_selector = state.page_format.layers[2].selector;
+    assert_eq!(
+        left_selector.expect("left selector").side,
+        Some(IrPageSide::Left)
+    );
+    assert_eq!(
+        right_selector.expect("right selector").side,
+        Some(IrPageSide::Right)
+    );
+
+    let left = state
+        .page_format
+        .resolve_exact_selector(left_selector)
+        .expect("left selector group");
+    assert_eq!(left.selector, left_selector);
+    assert_eq!(
+        left.margin.as_ref().expect("left margin").top.value,
+        3.0,
+        "later non-null margin must replace the earlier same-selector value"
+    );
+    let widths = left.border_widths.as_ref().expect("left border widths");
+    assert_eq!((widths.top.value, widths.top.unit), (2.0, IrSizeUnit::Pt));
+    assert_eq!(widths.right.value, 0.0);
+    assert_eq!(widths.bottom.value, 0.0);
+    assert_eq!(widths.left.value, 0.0);
+    assert!(
+        left.border_color.is_some(),
+        "color-only later layer must inherit the same-selector widths"
+    );
+
+    let right = state
+        .page_format
+        .resolve_exact_selector(right_selector)
+        .expect("right selector group");
+    assert_eq!(right.selector, right_selector);
+    assert_eq!(
+        right.margin.as_ref().expect("right margin").top.value,
+        9.0
+    );
+    assert!(right.border_widths.is_none());
+    assert!(right.border_color.is_none());
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");

@@ -721,9 +721,66 @@ pub struct IrPageFormatState {
     pub layers: Vec<IrPageFormatLayer>,
 }
 
+impl IrPageFormatLayer {
+    fn overlay_non_null_from(&mut self, later: &Self) {
+        debug_assert_eq!(self.selector, later.selector);
+
+        if let Some(value) = &later.alignment {
+            self.alignment = Some(value.clone());
+        }
+        if let Some(value) = &later.width {
+            self.width = Some(value.clone());
+        }
+        if let Some(value) = &later.height {
+            self.height = Some(value.clone());
+        }
+        if let Some(value) = &later.columns {
+            self.columns = Some(value.clone());
+        }
+        if let Some(value) = &later.size {
+            self.size = Some(value.clone());
+        }
+        if let Some(value) = &later.margin {
+            self.margin = Some(value.clone());
+        }
+        if let Some(value) = &later.border_widths {
+            self.border_widths = Some(value.clone());
+        }
+        if let Some(value) = &later.border_color {
+            self.border_color = Some(value.clone());
+        }
+        if let Some(value) = &later.background {
+            self.background = Some(value.clone());
+        }
+    }
+}
+
 impl IrPageFormatState {
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
+    }
+
+    /// Fold only layers with exactly the requested selector identity.
+    ///
+    /// Matching layers are applied in source order. Later non-null fields
+    /// replace earlier values while omitted fields inherit. Distinct selector
+    /// groups are deliberately left uncombined so this helper does not invent
+    /// cross-selector precedence or renderer behavior.
+    pub fn resolve_exact_selector(
+        &self,
+        selector: Option<IrPageFormatSelector>,
+    ) -> Option<IrPageFormatLayer> {
+        let mut resolved: Option<IrPageFormatLayer> = None;
+
+        for layer in self.layers.iter().filter(|layer| layer.selector == selector) {
+            if let Some(current) = resolved.as_mut() {
+                current.overlay_non_null_from(layer);
+            } else {
+                resolved = Some(layer.clone());
+            }
+        }
+
+        resolved
     }
 }
 
