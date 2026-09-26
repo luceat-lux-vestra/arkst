@@ -1,7 +1,9 @@
-//! Regression coverage for the bounded #175 ordered selector-free
-//! `.pageformat` layer-state slice.
+//! Regression coverage for the bounded #175 ordered
+//! `.pageformat` layer/selector-state slice.
 
-use arkst_core::ir::{IrDocumentState, IrPageOrientation, IrPageSizeFormat, IrSizeUnit};
+use arkst_core::ir::{
+    IrDocumentState, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrSizeUnit,
+};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -92,6 +94,89 @@ fn ordered_layers_expose_size_vs_geometry_order_without_changing_flat_consumers(
 }
 
 #[test]
+fn selector_scoped_margin_retains_side_and_pages_without_flattening_global_state() {
+    let result = compile_source(
+        ".pageformat margin:{1cm}\n\
+         .pageformat side:{LEFT} pages:{2..5} margin:{2cm}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_format.layers.len(), 2);
+
+    let scoped = &state.page_format.layers[1];
+    let selector = scoped.selector.expect("selector");
+    assert_eq!(selector.side, Some(IrPageSide::Left));
+    let pages = selector.pages.expect("finite page range");
+    assert_eq!((pages.start, pages.end), (2, 5));
+
+    let scoped_margin = scoped.margin.as_ref().expect("scoped margin");
+    assert_eq!(
+        (scoped_margin.top.value, scoped_margin.top.unit),
+        (2.0, IrSizeUnit::Cm)
+    );
+
+    let global_margin = state.page_margin.as_ref().expect("global margin");
+    assert_eq!(
+        (global_margin.top.value, global_margin.top.unit),
+        (1.0, IrSizeUnit::Cm)
+    );
+}
+
+#[test]
+fn selector_scoped_size_is_retained_without_replacing_flattened_global_size() {
+    let result = compile_source(
+        ".pageformat size:{a4}\n\
+         .pageformat side:{right} size:{legal} orientation:{landscape}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_format.layers.len(), 2);
+    let scoped = &state.page_format.layers[1];
+    assert_eq!(
+        scoped.selector.expect("selector").side,
+        Some(IrPageSide::Right)
+    );
+    assert_eq!(
+        scoped.size.expect("scoped size").format,
+        IrPageSizeFormat::Legal
+    );
+    assert_eq!(
+        state.page_size.expect("global size").format,
+        IrPageSizeFormat::A4,
+        "selector-scoped size must not leak into the current global consumer"
+    );
+}
+
+#[test]
+fn invalid_or_unbounded_page_selectors_fail_before_layer_publication() {
+    for invalid_selector in [
+        "pages:{2..}",
+        "pages:{..2}",
+        "pages:{0..2}",
+        "side:{diagonal}",
+    ] {
+        let result = compile_source(&format!(
+            ".pageformat margin:{{1cm}}\n.pageformat {invalid_selector} margin:{{2cm}}\n"
+        ));
+        assert!(
+            !result.diagnostics.is_empty(),
+            "{invalid_selector} must fail closed"
+        );
+
+        let state = &result.ir.metadata.document_state;
+        assert_eq!(
+            state.page_format.layers.len(),
+            1,
+            "{invalid_selector} published a selector layer"
+        );
+        let global_margin = state.page_margin.as_ref().expect("global margin");
+        assert_eq!(global_margin.top.value, 1.0);
+    }
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
@@ -135,7 +220,7 @@ fn pageformat_layer_wire_defaults_for_old_ir_and_roundtrips_when_present() {
         serde_json::from_value(legacy_shape).expect("deserialize legacy-shaped state");
     assert!(restored.page_format.layers.is_empty());
 
-    let compiled = compile_source(".pageformat size:{letter}\n");
+    let compiled = compile_source(".pageformat side:{left} pages:{2..3} margin:{1cm}\n");
     assert!(compiled.diagnostics.is_empty(), "{compiled:?}");
     let explicit = compiled.ir.metadata.document_state;
     let value = serde_json::to_value(&explicit).expect("serialize pageformat state");

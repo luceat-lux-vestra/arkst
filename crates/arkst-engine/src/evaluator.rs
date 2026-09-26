@@ -62,11 +62,11 @@ use arkst_ir::{
     IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageFormatLayer, IrPageFormatState, IrPageGeometry,
-    IrPageMargins, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection, IrPair,
-    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
-    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrNumberingState, IrPageBorderWidths, IrPageFormatLayer, IrPageFormatSelector,
+    IrPageFormatState, IrPageGeometry, IrPageMargins, IrPageOrientation, IrPageRange, IrPageSide,
+    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
+    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -6703,6 +6703,8 @@ impl Evaluator {
                 Err(outcome) => return outcome,
             };
 
+        let mut page_side = None;
+        let mut page_range = None;
         let mut alignment = None;
         let mut width = None;
         let mut height = None;
@@ -6725,6 +6727,46 @@ impl Evaluator {
                 origin: argument.origin,
             };
             match parameter.as_str() {
+                "side" => {
+                    if !matches!(&value.value, IrValue::None) {
+                        page_side = Some(match convert_pageformat_side(&value) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(candidate_span),
+                                        Some("side"),
+                                        None,
+                                        *span,
+                                    ),
+                                    Some("`.pageformat`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        });
+                    }
+                }
+                "pages" => {
+                    if !matches!(&value.value, IrValue::None) {
+                        page_range = Some(match convert_pageformat_pages(&value, candidate_span) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(candidate_span),
+                                        Some("pages"),
+                                        None,
+                                        *span,
+                                    ),
+                                    Some("`.pageformat`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        });
+                    }
+                }
                 "alignment" => {
                     alignment = Some(
                         match value_conversion::convert_document_alignment_with_origin(&value) {
@@ -6914,6 +6956,14 @@ impl Evaluator {
         // Candidate evaluation and conversion complete before bounded state is
         // published. The outer invocation transaction restores nested
         // document-state writes if any conversion fails.
+        let selector = if page_side.is_some() || page_range.is_some() {
+            Some(IrPageFormatSelector {
+                side: page_side,
+                pages: page_range,
+            })
+        } else {
+            None
+        };
         let document_type = context.document_state.borrow().document_type;
         let page_size = page_size_format
             .flatten()
@@ -6943,6 +6993,7 @@ impl Evaluator {
         // the backend-neutral prerequisite for later selector and precedence
         // resolution.
         context.publish_page_format_layer(IrPageFormatLayer {
+            selector,
             alignment,
             width: width.clone(),
             height: height.clone(),
@@ -6953,6 +7004,13 @@ impl Evaluator {
             border_color: border_color.clone(),
             background: background.clone(),
         });
+
+        // Selector-scoped layers are retained for later same-selector merge
+        // and renderer work. They must not leak into the legacy flattened
+        // global fields consumed by current Typst/PDF paths.
+        if selector.is_some() {
+            return CallOutcome::NoValue;
+        }
 
         if let Some(alignment) = alignment {
             context.set_page_alignment(Some(alignment));
@@ -15227,6 +15285,8 @@ fn bind_whitespace_arguments(
 }
 
 fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
+    let mut side = false;
+    let mut pages = false;
     let mut width = false;
     let mut height = false;
     let mut alignment = false;
@@ -15238,6 +15298,20 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
 
     for argument in named_args {
         match argument.name.as_str() {
+            "side" => {
+                if side {
+                    return false;
+                }
+                side = true;
+                continue;
+            }
+            "pages" => {
+                if pages {
+                    return false;
+                }
+                pages = true;
+                continue;
+            }
             "bordertop" | "borderright" | "borderbottom" | "borderleft" | "bordercolor"
             | "background" => {
                 if !decorations.insert(argument.name.as_str()) {
@@ -15267,21 +15341,47 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
         *seen = true;
     }
 
-    if !decorations.is_empty() {
-        return !width
-            && !height
-            && !alignment
-            && !columns
-            && !page_size
-            && !orientation
-            && !margin;
-    }
+    let payload_supported = if !decorations.is_empty() {
+        !width && !height && !alignment && !columns && !page_size && !orientation && !margin
+    } else {
+        (page_size && !width && !height && !alignment && !columns && !margin)
+            || (width && height && !columns && !page_size && !orientation && !margin)
+            || (alignment && !width && !height && !columns && !page_size && !orientation && !margin)
+            || (columns && !width && !height && !alignment && !page_size && !orientation && !margin)
+            || (margin && !width && !height && !alignment && !columns && !page_size && !orientation)
+    };
 
-    (page_size && !width && !height && !alignment && !columns && !margin)
-        || (width && height && !columns && !page_size && !orientation && !margin)
-        || (alignment && !width && !height && !columns && !page_size && !orientation && !margin)
-        || (columns && !width && !height && !alignment && !page_size && !orientation && !margin)
-        || (margin && !width && !height && !alignment && !columns && !page_size && !orientation)
+    // Columns remain the existing document-wide bounded surface. Do not
+    // pretend that a page selector scopes them until that contract is
+    // independently implemented.
+    payload_supported && (!(side || pages) || !columns)
+}
+
+fn convert_pageformat_side(
+    argument: &InvocationValue,
+) -> Result<IrPageSide, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::ClosedEnum(value_conversion::ClosedEnumTarget::PageSide),
+    )? {
+        value_conversion::DomainValue::Enum(IrEnumValue::PageSide(value)) => Ok(value),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Enum,
+        }),
+    }
+}
+
+fn convert_pageformat_pages(
+    argument: &InvocationValue,
+    span: SourceSpan,
+) -> Result<IrPageRange, value_conversion::ConversionError> {
+    let range = value_conversion::convert_range_with_origin(argument, span)?;
+    match (range.start, range.end) {
+        (Some(start), Some(end)) if start >= 1 && end >= 1 => Ok(IrPageRange { start, end }),
+        _ => Err(value_conversion::ConversionError::InvalidText {
+            target: value_conversion::ConversionTarget::Range,
+        }),
+    }
 }
 
 fn convert_pageformat_size_format(

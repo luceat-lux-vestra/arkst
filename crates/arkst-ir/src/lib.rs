@@ -649,16 +649,46 @@ impl IrParagraphStyleInfo {
     }
 }
 
-/// One ordered selector-free `.pageformat` mutation.
+/// Closed page-side selector accepted by bounded `.pageformat side:{...}` state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrPageSide {
+    Left,
+    Right,
+}
+
+/// One validated finite, 1-based inclusive page range used by a page-format selector.
+///
+/// Source provenance stays on the evaluator-owned `IrRange`; document configuration
+/// retains only the semantic endpoints required by later selector resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrPageRange {
+    pub start: i32,
+    pub end: i32,
+}
+
+/// Backend-neutral selector identity for one ordered page-format layer.
+///
+/// `None` on either dimension means that dimension is unfiltered. The enclosing
+/// layer stores `selector: None` for the global case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrPageFormatSelector {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<IrPageSide>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages: Option<IrPageRange>,
+}
+
+/// One ordered `.pageformat` mutation.
 ///
 /// Every field is backend-neutral and optional so omission remains distinct
 /// from an explicit value. The evaluator records successful bounded calls in
-/// source order while the existing flattened document fields continue to
-/// serve current consumers. Selector/range identity is intentionally absent
-/// from this first layer-state slice; only the already-bounded global shape is
-/// recorded.
+/// source order while existing flattened document fields continue to serve
+/// only global consumers. Bounded scoped calls carry selector identity here
+/// without being flattened into global renderer state.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct IrPageFormatLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<IrPageFormatSelector>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alignment: Option<IrDocumentAlignment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -679,12 +709,12 @@ pub struct IrPageFormatLayer {
     pub background: Option<IrColor>,
 }
 
-/// Ordered selector-free page-format state.
+/// Ordered page-format state.
 ///
 /// The vector is deliberately append-only at the IR boundary because source
-/// order is required to reconstruct later same-selector merge/override
-/// semantics. Empty state is omitted from serialized IR for backward
-/// compatibility.
+/// order and selector identity are required to reconstruct later same-selector
+/// merge/override semantics. Empty state is omitted from serialized IR for
+/// backward compatibility.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct IrPageFormatState {
     #[serde(default)]
@@ -1032,6 +1062,7 @@ pub enum IrEnumValue {
     DocumentType(IrDocumentType),
     PageSizeFormat(IrPageSizeFormat),
     PageOrientation(IrPageOrientation),
+    PageSide(IrPageSide),
     CaptionPosition(IrCaptionPosition),
     StackedMainAxisAlignment(IrMainAxisAlignment),
     StackedCrossAxisAlignment(IrCrossAxisAlignment),
