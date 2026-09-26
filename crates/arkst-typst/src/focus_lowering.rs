@@ -60,6 +60,15 @@ fn document_prelude(doc: &IrDocument) -> String {
             "#set page(width: {SLIDES_PAGE_WIDTH_PT}pt, height: {SLIDES_PAGE_HEIGHT_PT}pt)\n"
         ));
     }
+    if let Some(margin) = state.page_margin.as_ref() {
+        let top = lowering_base::lower_size(&margin.top);
+        let right = lowering_base::lower_size(&margin.right);
+        let bottom = lowering_base::lower_size(&margin.bottom);
+        let left = lowering_base::lower_size(&margin.left);
+        prelude.push_str(&format!(
+            "#set page(margin: (top: {top}, right: {right}, bottom: {bottom}, left: {left}))\n"
+        ));
+    }
     if state.document_type == IrDocumentType::Slides {
         match state.slides.and_then(|slides| slides.center) {
             Some(true) => prelude.push_str("#set align(horizon)\n"),
@@ -147,7 +156,7 @@ fn render_focus_prelude(kind: FocusDocumentKind, paperwhite: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkst_ir::{IrDocumentTheme, IrMetadata, IrNode};
+    use arkst_ir::{IrDocumentTheme, IrMetadata, IrNode, IrPageMargins, IrSize, IrSizeUnit};
     use arkst_source::{SourceId, SourceSpan};
 
     fn document(
@@ -172,6 +181,35 @@ mod tests {
             }],
             metadata,
         }
+    }
+
+    #[test]
+    fn global_page_margin_emits_typed_typst_page_prelude() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_margin = Some(IrPageMargins {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Cm,
+            },
+            right: IrSize {
+                value: 2.0,
+                unit: IrSizeUnit::Mm,
+            },
+            bottom: IrSize {
+                value: 3.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 8.0,
+                unit: IrSizeUnit::Px,
+            },
+        });
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))\n"),
+            "{code}"
+        );
     }
 
     #[test]
