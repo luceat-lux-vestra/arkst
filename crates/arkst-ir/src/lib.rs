@@ -3811,7 +3811,7 @@ mod tests {
                 page_border_widths: None,
                 page_border_color: None,
                 page_background: None,
-                page_format: IrPageFormatState::default(),
+                page_format: Default::default(),
                 slides: None,
             },
             ..IrMetadata::default()
@@ -3950,7 +3950,7 @@ mod tests {
             page_border_widths: None,
             page_border_color: None,
             page_background: None,
-            page_format: IrPageFormatState::default(),
+            page_format: Default::default(),
             slides: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
