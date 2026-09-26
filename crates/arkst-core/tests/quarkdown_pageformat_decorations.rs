@@ -150,11 +150,7 @@ fn later_background_and_border_color_replace_only_their_own_global_fields() {
 #[test]
 fn failed_decoration_conversion_rolls_back_nested_document_state_writes() {
     let result = compile_source(
-        ".autopagebreak maxdepth:{3}\n\
-         .function {badcolor}\n\
-             .autopagebreak maxdepth:{1}\n\
-             notacolor\n\n\
-         .pageformat background:{.badcolor}\n",
+        ".autopagebreak maxdepth:{3}\n.function {badcolor}\n    .autopagebreak maxdepth:{1}\n    notacolor\n\n.pageformat background:{.badcolor}\n",
     );
     assert!(!result.diagnostics.is_empty(), "invalid color must fail");
     assert_eq!(
