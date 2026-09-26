@@ -6977,20 +6977,20 @@ impl Evaluator {
                             candidate_span,
                         ) {
                             Ok(value) => value,
-                                Err(error) => {
-                                    diagnostics.push(conversion_failure_diagnostic(
-                                        value_conversion::ConversionFailure::new(
-                                            error,
-                                            Some(candidate_span),
-                                            Some("pages"),
-                                            None,
-                                            *span,
-                                        ),
-                                        Some("`.pageformat`"),
-                                    ));
-                                    return CallOutcome::Failed;
-                                }
-                            };
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(candidate_span),
+                                        Some("pages"),
+                                        None,
+                                        *span,
+                                    ),
+                                    Some("`.pageformat`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        };
                         let Some(end) = range.end else {
                             diagnostics.push(pageformat_selector_error(
                                 "`.pageformat pages` requires a finite range end",
