@@ -1,9 +1,7 @@
 //! Regression coverage for the bounded #175 ordered selector-free
 //! `.pageformat` layer-state slice.
 
-use arkst_core::ir::{
-    IrDocumentState, IrPageOrientation, IrPageSizeFormat, IrSizeUnit,
-};
+use arkst_core::ir::{IrDocumentState, IrPageOrientation, IrPageSizeFormat, IrSizeUnit};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -44,8 +42,14 @@ fn ordered_pageformat_layers_preserve_supported_global_source_order() {
 
     let margin = layers[2].margin.as_ref().expect("margin");
     assert_eq!((margin.top.value, margin.top.unit), (1.0, IrSizeUnit::Cm));
-    assert_eq!((margin.right.value, margin.right.unit), (2.0, IrSizeUnit::Cm));
-    assert_eq!((margin.bottom.value, margin.bottom.unit), (1.0, IrSizeUnit::Cm));
+    assert_eq!(
+        (margin.right.value, margin.right.unit),
+        (2.0, IrSizeUnit::Cm)
+    );
+    assert_eq!(
+        (margin.bottom.value, margin.bottom.unit),
+        (1.0, IrSizeUnit::Cm)
+    );
     assert_eq!((margin.left.value, margin.left.unit), (2.0, IrSizeUnit::Cm));
 
     let widths = layers[3].border_widths.as_ref().expect("border widths");
@@ -89,8 +93,7 @@ fn ordered_layers_expose_size_vs_geometry_order_without_changing_flat_consumers(
 
 #[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
-    let result =
-        compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
+    let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
 
     let state = &result.ir.metadata.document_state;
