@@ -15346,13 +15346,7 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
     } else {
         (page_size && !width && !height && !alignment && !columns && !margin)
             || (width && height && !columns && !page_size && !orientation && !margin)
-            || (alignment
-                && !width
-                && !height
-                && !columns
-                && !page_size
-                && !orientation
-                && !margin)
+            || (alignment && !width && !height && !columns && !page_size && !orientation && !margin)
             || (columns && !width && !height && !alignment && !page_size && !orientation && !margin)
             || (margin && !width && !height && !alignment && !columns && !page_size && !orientation)
     };

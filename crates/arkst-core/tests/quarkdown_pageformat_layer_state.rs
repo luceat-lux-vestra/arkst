@@ -1,5 +1,5 @@
-//! Regression coverage for the bounded #175 ordered selector-free
-//! `.pageformat` layer-state slice.
+//! Regression coverage for the bounded #175 ordered
+//! `.pageformat` layer/selector-state slice.
 
 use arkst_core::ir::{
     IrDocumentState, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrSizeUnit,
