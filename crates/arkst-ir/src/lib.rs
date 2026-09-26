@@ -726,7 +726,7 @@ impl IrPageFormatLayer {
         debug_assert_eq!(self.selector, later.selector);
 
         if let Some(value) = &later.alignment {
-            self.alignment = Some(value.clone());
+            self.alignment = Some(*value);
         }
         if let Some(value) = &later.width {
             self.width = Some(value.clone());
@@ -735,10 +735,10 @@ impl IrPageFormatLayer {
             self.height = Some(value.clone());
         }
         if let Some(value) = &later.columns {
-            self.columns = Some(value.clone());
+            self.columns = Some(*value);
         }
         if let Some(value) = &later.size {
-            self.size = Some(value.clone());
+            self.size = Some(*value);
         }
         if let Some(value) = &later.margin {
             self.margin = Some(value.clone());
