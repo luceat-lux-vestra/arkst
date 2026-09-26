@@ -64,9 +64,9 @@ use arkst_ir::{
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
     IrNumberingState, IrPageBorderWidths, IrPageFormatLayer, IrPageFormatState, IrPageGeometry,
     IrPageMargins, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection, IrPair,
-    IrParagraphStyleInfo, IrParameter, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -6915,11 +6915,13 @@ impl Evaluator {
         // published. The outer invocation transaction restores nested
         // document-state writes if any conversion fails.
         let document_type = context.document_state.borrow().document_type;
-        let page_size = page_size_format.flatten().map(|format| IrPageSizeSelection {
-            format,
-            orientation: page_orientation,
-            document_type,
-        });
+        let page_size = page_size_format
+            .flatten()
+            .map(|format| IrPageSizeSelection {
+                format,
+                orientation: page_orientation,
+                document_type,
+            });
         let border_widths = if border_top.is_some()
             || border_right.is_some()
             || border_bottom.is_some()
