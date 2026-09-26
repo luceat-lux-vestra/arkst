@@ -375,6 +375,93 @@ fn page_field_merge_uses_source_order_across_selector_scopes() {
 }
 
 #[test]
+fn selector_scoped_mixed_and_single_axis_dimensions_publish_state_only() {
+    let result = compile_source(
+        ".pageformat size:{a4}\n\
+         .pageformat width:{10in} height:{5in}\n\
+         .pageformat side:{left} pages:{2..4} size:{letter} orientation:{landscape} width:{8in}\n\
+         .pageformat side:{right} height:{6in}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_format.layers.len(), 4);
+
+    let mixed = &state.page_format.layers[2];
+    let mixed_selector = mixed.selector.expect("mixed selector");
+    assert_eq!(mixed_selector.side, Some(IrPageSide::Left));
+    assert_eq!(
+        mixed_selector
+            .pages
+            .expect("mixed finite range")
+            .start,
+        2
+    );
+    assert_eq!(
+        mixed_selector
+            .pages
+            .expect("mixed finite range")
+            .end,
+        4
+    );
+    let mixed_size = mixed.size.expect("mixed size");
+    assert_eq!(mixed_size.format, IrPageSizeFormat::Letter);
+    assert_eq!(mixed_size.orientation, Some(IrPageOrientation::Landscape));
+    let mixed_width = mixed.width.as_ref().expect("mixed width");
+    assert_eq!((mixed_width.value, mixed_width.unit), (8.0, IrSizeUnit::In));
+    assert!(mixed.height.is_none());
+
+    let partial = &state.page_format.layers[3];
+    assert_eq!(
+        partial.selector.expect("partial selector").side,
+        Some(IrPageSide::Right)
+    );
+    assert!(partial.width.is_none());
+    let partial_height = partial.height.as_ref().expect("partial height");
+    assert_eq!(
+        (partial_height.value, partial_height.unit),
+        (6.0, IrSizeUnit::In)
+    );
+
+    assert_eq!(
+        state.page_size.expect("flattened global size").format,
+        IrPageSizeFormat::A4,
+        "selector-scoped mixed dimensions must not leak into flattened page size"
+    );
+    let geometry = state.page_geometry.as_ref().expect("flattened global geometry");
+    assert_eq!((geometry.width.value, geometry.width.unit), (10.0, IrSizeUnit::In));
+    assert_eq!((geometry.height.value, geometry.height.unit), (5.0, IrSizeUnit::In));
+
+    let left = state
+        .page_format
+        .compose_applicable_page_dimensions(3, IrPageSide::Left)
+        .expect("left page dimensions");
+    assert_eq!(
+        left.size.expect("mixed standard base").format,
+        IrPageSizeFormat::Letter
+    );
+    let left_width = left.width.as_ref().expect("mixed width override");
+    assert_eq!((left_width.value, left_width.unit), (8.0, IrSizeUnit::In));
+    assert!(
+        left.height.is_none(),
+        "mixed size must clear the earlier global explicit height"
+    );
+
+    let right = state
+        .page_format
+        .compose_applicable_page_dimensions(1, IrPageSide::Right)
+        .expect("right page dimensions");
+    assert_eq!(
+        right.size.expect("inherited global size").format,
+        IrPageSizeFormat::A4
+    );
+    let right_width = right.width.as_ref().expect("inherited global width");
+    let right_height = right.height.as_ref().expect("scoped height override");
+    assert_eq!((right_width.value, right_width.unit), (10.0, IrSizeUnit::In));
+    assert_eq!((right_height.value, right_height.unit), (6.0, IrSizeUnit::In));
+}
+
+#[test]
 fn page_dimension_composition_respects_layer_order_and_per_axis_overrides() {
     // Use only currently bounded source-level shapes here: standard-size-only
     // layers and complete explicit width+height pairs.
