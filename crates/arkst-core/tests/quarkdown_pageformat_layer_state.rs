@@ -243,6 +243,62 @@ fn exact_selector_resolution_merges_non_null_fields_without_cross_selector_prece
 }
 
 #[test]
+fn page_applicability_filters_selectors_in_source_order_without_merging() {
+    let result = compile_source(
+        ".pageformat margin:{1cm}\n\
+         .pageformat side:{left} margin:{2cm}\n\
+         .pageformat pages:{2..4} margin:{3cm}\n\
+         .pageformat side:{left} pages:{2..4} margin:{4cm}\n\
+         .pageformat side:{right} pages:{2..4} margin:{5cm}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_format.layers.len(), 5);
+
+    let left_page_three = state
+        .page_format
+        .applicable_layers_for_page(3, IrPageSide::Left);
+    assert_eq!(
+        left_page_three
+            .iter()
+            .map(|layer| layer.margin.as_ref().expect("margin").top.value)
+            .collect::<Vec<_>>(),
+        vec![1.0, 2.0, 3.0, 4.0]
+    );
+
+    let right_page_three = state
+        .page_format
+        .applicable_layers_for_page(3, IrPageSide::Right);
+    assert_eq!(
+        right_page_three
+            .iter()
+            .map(|layer| layer.margin.as_ref().expect("margin").top.value)
+            .collect::<Vec<_>>(),
+        vec![1.0, 3.0, 5.0]
+    );
+
+    let left_page_five = state
+        .page_format
+        .applicable_layers_for_page(5, IrPageSide::Left);
+    assert_eq!(
+        left_page_five
+            .iter()
+            .map(|layer| layer.margin.as_ref().expect("margin").top.value)
+            .collect::<Vec<_>>(),
+        vec![1.0, 2.0]
+    );
+
+    assert!(
+        state
+            .page_format
+            .applicable_layers_for_page(0, IrPageSide::Left)
+            .is_empty(),
+        "non-positive page numbers must fail closed"
+    );
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
