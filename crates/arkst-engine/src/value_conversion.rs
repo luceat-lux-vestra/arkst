@@ -9,7 +9,7 @@
 use arkst_ir::{
     IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
     IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrRange, IrRawBody, IrSize, IrSizeUnit, IrValue,
+    IrNode, IrPageOrientation, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
@@ -244,6 +244,8 @@ pub(crate) enum ScalarValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClosedEnumTarget {
     DocumentType,
+    PageSizeFormat,
+    PageOrientation,
     CaptionPosition,
     StackedMainAxisAlignment,
     StackedCrossAxisAlignment,
@@ -312,6 +314,104 @@ static DOCUMENT_TYPE_SPEC: ClosedEnumSpec<'static, IrDocumentType> = ClosedEnumS
         ClosedEnumVariant {
             declaration_name: "DOCS",
             value: IrDocumentType::Docs,
+        },
+    ],
+};
+
+static PAGE_SIZE_FORMAT_SPEC: ClosedEnumSpec<'static, IrPageSizeFormat> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "A0",
+            value: IrPageSizeFormat::A0,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A1",
+            value: IrPageSizeFormat::A1,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A2",
+            value: IrPageSizeFormat::A2,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A3",
+            value: IrPageSizeFormat::A3,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A4",
+            value: IrPageSizeFormat::A4,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A5",
+            value: IrPageSizeFormat::A5,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A6",
+            value: IrPageSizeFormat::A6,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A7",
+            value: IrPageSizeFormat::A7,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A8",
+            value: IrPageSizeFormat::A8,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A9",
+            value: IrPageSizeFormat::A9,
+        },
+        ClosedEnumVariant {
+            declaration_name: "A10",
+            value: IrPageSizeFormat::A10,
+        },
+        ClosedEnumVariant {
+            declaration_name: "B0",
+            value: IrPageSizeFormat::B0,
+        },
+        ClosedEnumVariant {
+            declaration_name: "B1",
+            value: IrPageSizeFormat::B1,
+        },
+        ClosedEnumVariant {
+            declaration_name: "B2",
+            value: IrPageSizeFormat::B2,
+        },
+        ClosedEnumVariant {
+            declaration_name: "B3",
+            value: IrPageSizeFormat::B3,
+        },
+        ClosedEnumVariant {
+            declaration_name: "B4",
+            value: IrPageSizeFormat::B4,
+        },
+        ClosedEnumVariant {
+            declaration_name: "B5",
+            value: IrPageSizeFormat::B5,
+        },
+        ClosedEnumVariant {
+            declaration_name: "LETTER",
+            value: IrPageSizeFormat::Letter,
+        },
+        ClosedEnumVariant {
+            declaration_name: "LEGAL",
+            value: IrPageSizeFormat::Legal,
+        },
+        ClosedEnumVariant {
+            declaration_name: "LEDGER",
+            value: IrPageSizeFormat::Ledger,
+        },
+    ],
+};
+
+static PAGE_ORIENTATION_SPEC: ClosedEnumSpec<'static, IrPageOrientation> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "PORTRAIT",
+            value: IrPageOrientation::Portrait,
+        },
+        ClosedEnumVariant {
+            declaration_name: "LANDSCAPE",
+            value: IrPageOrientation::Landscape,
         },
     ],
 };
@@ -842,6 +942,42 @@ pub(crate) fn convert_domain_with_origin(
                 {
                     parse_document_type(value)
                         .map(|value| DomainValue::Enum(IrEnumValue::DocumentType(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::PageSizeFormat => match &argument.value {
+                IrValue::Enum(IrEnumValue::PageSizeFormat(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::PageSizeFormat(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    PAGE_SIZE_FORMAT_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::PageSizeFormat(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::PageOrientation => match &argument.value {
+                IrValue::Enum(IrEnumValue::PageOrientation(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::PageOrientation(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    PAGE_ORIENTATION_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::PageOrientation(value)))
                         .ok_or(ConversionError::InvalidText {
                             target: ConversionTarget::Enum,
                         })
