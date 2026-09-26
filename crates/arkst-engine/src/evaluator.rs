@@ -15341,7 +15341,7 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
         *seen = true;
     }
 
-    let payload_supported = if !decorations.is_empty() {
+    let base_payload_supported = if !decorations.is_empty() {
         !width && !height && !alignment && !columns && !page_size && !orientation && !margin
     } else {
         (page_size && !width && !height && !alignment && !columns && !margin)
@@ -15350,6 +15350,20 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
             || (columns && !width && !height && !alignment && !page_size && !orientation && !margin)
             || (margin && !width && !height && !alignment && !columns && !page_size && !orientation)
     };
+
+    // Selector-scoped layers return before any legacy flattened renderer
+    // field is mutated. That makes it safe to retain the public dimension
+    // combinations needed by the ordered layer model without silently
+    // widening current global Typst/PDF output. Keep unrelated payload
+    // families out of this bounded slice.
+    let selector_scoped_dimension_payload = (side || pages)
+        && decorations.is_empty()
+        && !alignment
+        && !columns
+        && !margin
+        && (width || height)
+        && (!orientation || page_size);
+    let payload_supported = base_payload_supported || selector_scoped_dimension_payload;
 
     // Columns remain the existing document-wide bounded surface. Do not
     // pretend that a page selector scopes them until that contract is
