@@ -69,6 +69,9 @@ fn document_prelude(doc: &IrDocument) -> String {
             "#set page(margin: (top: {top}, right: {right}, bottom: {bottom}, left: {left}))\n"
         ));
     }
+    if let Some(columns) = state.page_columns {
+        prelude.push_str(&format!("#set page(columns: {columns})\n"));
+    }
     if state.document_type == IrDocumentType::Slides {
         match state.slides.and_then(|slides| slides.center) {
             Some(true) => prelude.push_str("#set align(horizon)\n"),
@@ -181,6 +184,15 @@ mod tests {
             }],
             metadata,
         }
+    }
+
+    #[test]
+    fn global_page_columns_emit_typed_typst_page_prelude() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_columns = Some(3);
+
+        let code = lower_to_typst_code(&doc);
+        assert!(code.starts_with("#set page(columns: 3)\n"), "{code}");
     }
 
     #[test]

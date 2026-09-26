@@ -197,7 +197,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("quarkdown_pageformat_size_state.rs"));
     assert!(pageformat[9].contains("IrDocumentState::page_margin"));
     assert!(pageformat[9].contains("quarkdown_pageformat_margin.rs"));
+    assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[10].contains("global positive columns"));
+    assert!(pageformat[10].contains("Typst/PDF columns consumer"));
     assert!(pageformat[10].contains("typed standard size/orientation"));
     assert!(pageformat[10].contains("named size binding"));
     assert!(pageformat[10].contains("selector-free global margin"));

@@ -279,6 +279,40 @@ fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
+    let source = ".pageformat columns:{2}\nColumn output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-columns.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-columns.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat columns diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("#set page(columns: 2)"), "{typst_code}");
+
+    with_typst("pageformat-columns", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-columns.qd".to_string(),
+            })
+            .expect("pageformat columns Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat margin:{1cm 2mm 3pt 8px}\nMargin output\n";
     let project = VirtualProjectBuilder::new()
