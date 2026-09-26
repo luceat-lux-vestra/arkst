@@ -241,9 +241,9 @@ Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
 document alignment, a global positive column count, selector-free global
 border/background decoration state, selector-free global margin state, and
 typed selector-free standard size/orientation selection. Geometry/alignment
-retain their current Typst/PDF consumers and row/column alignment inheritance;
-columns, decorations, margins, and the standard-size selection remain
-backend-neutral state only. The size slice preserves the closed standard-format
+and selector-free global margins have current Typst/PDF consumers, while
+row/column alignment inheritance remains unchanged; columns, decorations, and
+the standard-size selection remain backend-neutral state only. The size slice preserves the closed standard-format
 domain, named size binding, and an explicit portrait/landscape orientation when
 supplied; when orientation is omitted it records the document type in effect
 at commit time as the downstream preferred-orientation basis rather than
@@ -251,7 +251,9 @@ inventing a concrete default. The margin slice expands the documented
 `Sizes` shorthand into explicit top/right/bottom/left state: one value applies
 to every side, two values map vertical/horizontal, and four values map TRBL.
 Three-value or otherwise malformed groups fail closed, and semantic `None`
-preserves the previously committed effective global margin. Non-positive or
+preserves the previously committed effective global margin. The current Typst
+consumer lowers those four explicit sides through the shared size conversion
+boundary, with real pinned-backend PDF integration coverage. Non-positive or
 semantic-None column inputs are discarded without replacing an earlier
 positive global value. The decoration slice preserves the pinned cross-field
 border rule: once any non-null border side is supplied, omitted/null sides
