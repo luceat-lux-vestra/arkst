@@ -313,6 +313,43 @@ fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_pageformat_background_lowers_to_valid_typst_and_pdf() {
+    let source = ".pageformat background:{blue}\nBackground output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-background.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-background.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat background diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(fill: rgb(0, 0, 255, 100%))"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-background", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-background.qd".to_string(),
+            })
+            .expect("pageformat background Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat margin:{1cm 2mm 3pt 8px}\nMargin output\n";
     let project = VirtualProjectBuilder::new()

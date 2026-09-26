@@ -241,9 +241,10 @@ Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
 document alignment, a global positive column count, selector-free global
 border/background decoration state, selector-free global margin state, and
 typed selector-free standard size/orientation selection. Geometry/alignment,
-selector-free global margins, and global positive columns have current Typst/PDF
-consumers, while row/column alignment inheritance remains unchanged;
-decorations and the standard-size selection remain backend-neutral state only. The size slice preserves the closed standard-format
+selector-free global margins, global positive columns, and selector-free global
+background have current Typst/PDF consumers, while row/column alignment
+inheritance remains unchanged; page-border decorations and the standard-size
+selection remain backend-neutral state only. The size slice preserves the closed standard-format
 domain, named size binding, and an explicit portrait/landscape orientation when
 supplied; when orientation is omitted it records the document type in effect
 at commit time as the downstream preferred-orientation basis rather than
@@ -262,10 +263,12 @@ border rule: once any non-null border side is supplied, omitted/null sides
 become explicit zero; color-only input updates border color without fabricating
 a border width and therefore preserves any previously committed width
 structure. Semantic-None border/color/background inputs preserve prior
-effective state. Selector/range, standard-size dimension resolution and
-width/height override composition, selector-aware geometry/margin/decoration/
-column layering, and complete output consumption remain open, and Typst page
-objects must not enter evaluator/IR state. Status is conservatively `PARTIAL`
+effective state. The current Typst/PDF background consumer maps the committed
+typed RGB/alpha color directly to page fill without changing border state.
+Selector/range, standard-size dimension resolution and width/height override
+composition, selector-aware geometry/margin/decoration/column layering,
+page-border output, and the remaining output consumption stay open, and Typst
+page objects must not enter evaluator/IR state. Status is conservatively `PARTIAL`
 under #175.
 
 ### Caption state
