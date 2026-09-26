@@ -156,9 +156,7 @@ fn render_focus_prelude(kind: FocusDocumentKind, paperwhite: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkst_ir::{
-        IrDocumentTheme, IrMetadata, IrNode, IrPageMargins, IrSize, IrSizeUnit,
-    };
+    use arkst_ir::{IrDocumentTheme, IrMetadata, IrNode, IrPageMargins, IrSize, IrSizeUnit};
     use arkst_source::{SourceId, SourceSpan};
 
     fn document(
@@ -209,9 +207,7 @@ mod tests {
 
         let code = lower_to_typst_code(&doc);
         assert!(
-            code.starts_with(
-                "#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))\n"
-            ),
+            code.starts_with("#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))\n"),
             "{code}"
         );
     }
