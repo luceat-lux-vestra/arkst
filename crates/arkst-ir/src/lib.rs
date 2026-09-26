@@ -498,6 +498,15 @@ pub struct IrDocumentState {
     /// basis instead of fabricating a concrete orientation in evaluator state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_size: Option<IrPageSizeSelection>,
+    /// Ordered selector-free page-dimension mutations. This bounded ordering
+    /// bridge records only standard-size and complete explicit-geometry calls;
+    /// selector-aware and partial-field layering remain downstream work.
+    ///
+    /// The legacy flat `page_size` and `page_geometry` fields stay populated
+    /// for wire compatibility. Consumers should prefer this list when it is
+    /// non-empty because source order is semantically relevant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub page_dimension_layers: Vec<IrPageDimensionLayer>,
     /// Global page margins selected by the bounded selector-free
     /// `.pageformat margin:{...}` slice. The four sides are fully expanded
     /// from the documented 1/2/4-value Sizes syntax. `None` preserves the
@@ -696,6 +705,19 @@ pub struct IrPageSizeSelection {
 pub struct IrPageGeometry {
     pub width: IrSize,
     pub height: IrSize,
+}
+
+/// One bounded selector-free page-dimension mutation in source order.
+///
+/// This is intentionally not the complete `.pageformat` layer model. It
+/// exists to preserve precedence between already-supported standard sizes and
+/// complete explicit width/height geometry without inventing selector or
+/// partial-field semantics.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IrPageDimensionLayer {
+    StandardSize(IrPageSizeSelection),
+    ExplicitGeometry(IrPageGeometry),
 }
 
 /// Backend-neutral complete page margins for one selector-free
@@ -3751,6 +3773,7 @@ mod tests {
                 page_geometry: None,
                 page_columns: None,
                 page_size: None,
+                page_dimension_layers: Vec::new(),
                 page_margin: None,
                 page_border_widths: None,
                 page_border_color: None,
@@ -3889,6 +3912,7 @@ mod tests {
             page_geometry: None,
             page_columns: None,
             page_size: None,
+            page_dimension_layers: Vec::new(),
             page_margin: None,
             page_border_widths: None,
             page_border_color: None,

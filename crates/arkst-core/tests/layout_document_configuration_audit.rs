@@ -195,6 +195,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("quarkdown_pageformat_decorations.rs"));
     assert!(pageformat[9].contains("IrDocumentState::page_size"));
     assert!(pageformat[9].contains("quarkdown_pageformat_size_state.rs"));
+    assert!(pageformat[9].contains("IrDocumentState::page_dimension_layers"));
+    assert!(pageformat[9].contains("quarkdown_pageformat_dimension_order.rs"));
     assert!(pageformat[9].contains("IrDocumentState::page_margin"));
     assert!(pageformat[9].contains("quarkdown_pageformat_margin.rs"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
@@ -203,6 +205,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     );
     assert!(pageformat[9]
         .contains("integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9].contains(
+        "integration_pageformat_dimension_order_lowers_latest_layer_to_valid_typst_and_pdf"
+    ));
     assert!(pageformat[9]
         .contains("integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[10].contains("global positive columns"));
@@ -222,11 +227,15 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("explicit physical millimeter bounds"));
     assert!(pageformat[10].contains("omitted-orientation basis"));
     assert!(pageformat[10].contains("omitted docs basis remains fail-closed"));
+    assert!(pageformat[10].contains("ordered selector-free dimension layers"));
+    assert!(pageformat[10].contains("latest recorded dimension layer"));
+    assert!(pageformat[10].contains("legacy flat-state"));
     assert!(pageformat[10].contains("remaining page-border output"));
     assert!(pageformat[10]
         .contains("selector-aware geometry/size/margin/decoration/columns precedence"));
     assert!(pageformat[10].contains("width/height override composition"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
+    assert!(pageformat[11].contains("bounded-dimension-ordering"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
     assert!(pageformat[11].contains("selector-aware-layering"));

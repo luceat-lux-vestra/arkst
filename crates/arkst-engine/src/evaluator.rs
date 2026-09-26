@@ -62,10 +62,11 @@ use arkst_ir::{
     IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageGeometry, IrPageMargins, IrPageOrientation,
-    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrNumberingState, IrPageBorderWidths, IrPageDimensionLayer, IrPageGeometry, IrPageMargins,
+    IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
+    TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -580,6 +581,7 @@ struct DocumentState {
     page_geometry: Option<IrPageGeometry>,
     page_columns: Option<u32>,
     page_size: Option<IrPageSizeSelection>,
+    page_dimension_layers: Vec<IrPageDimensionLayer>,
     page_margin: Option<IrPageMargins>,
     page_border_widths: Option<IrPageBorderWidths>,
     page_border_color: Option<IrColor>,
@@ -607,6 +609,7 @@ impl Default for DocumentState {
             page_geometry: None,
             page_columns: None,
             page_size: None,
+            page_dimension_layers: Vec::new(),
             page_margin: None,
             page_border_widths: None,
             page_border_color: None,
@@ -636,6 +639,7 @@ impl DocumentState {
             page_geometry: snapshot.page_geometry.clone(),
             page_columns: snapshot.page_columns,
             page_size: snapshot.page_size,
+            page_dimension_layers: snapshot.page_dimension_layers.clone(),
             page_margin: snapshot.page_margin.clone(),
             page_border_widths: snapshot.page_border_widths.clone(),
             page_border_color: snapshot.page_border_color.clone(),
@@ -663,6 +667,7 @@ impl DocumentState {
             page_geometry: self.page_geometry.clone(),
             page_columns: self.page_columns,
             page_size: self.page_size,
+            page_dimension_layers: self.page_dimension_layers.clone(),
             page_margin: self.page_margin.clone(),
             page_border_widths: self.page_border_widths.clone(),
             page_border_color: self.page_border_color.clone(),
@@ -1070,6 +1075,7 @@ enum DocumentStateField {
     PageGeometry,
     PageColumns,
     PageSize,
+    PageDimensionLayers,
     PageMargin,
     PageBorderWidths,
     PageBorderColor,
@@ -1095,6 +1101,7 @@ enum DocumentStateUndo {
     PageGeometry(Option<IrPageGeometry>),
     PageColumns(Option<u32>),
     PageSize(Option<IrPageSizeSelection>),
+    PageDimensionLayersLen(usize),
     PageMargin(Option<IrPageMargins>),
     PageBorderWidths(Option<IrPageBorderWidths>),
     PageBorderColor(Option<IrColor>),
@@ -2322,6 +2329,9 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::PageGeometry(previous) => state.page_geometry = previous,
             DocumentStateUndo::PageColumns(previous) => state.page_columns = previous,
             DocumentStateUndo::PageSize(previous) => state.page_size = previous,
+            DocumentStateUndo::PageDimensionLayersLen(previous_len) => {
+                state.page_dimension_layers.truncate(previous_len);
+            }
             DocumentStateUndo::PageMargin(previous) => state.page_margin = previous,
             DocumentStateUndo::PageBorderWidths(previous) => state.page_border_widths = previous,
             DocumentStateUndo::PageBorderColor(previous) => state.page_border_color = previous,
@@ -2468,6 +2478,21 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().page_size = Some(value);
+    }
+
+    fn append_page_dimension_layer(&self, value: IrPageDimensionLayer) {
+        self.record_document_state_undo(DocumentStateField::PageDimensionLayers, || {
+            (
+                DocumentStateUndo::PageDimensionLayersLen(
+                    self.document_state.borrow().page_dimension_layers.len(),
+                ),
+                0,
+            )
+        });
+        self.document_state
+            .borrow_mut()
+            .page_dimension_layers
+            .push(value);
     }
 
     fn set_page_margin(&self, value: IrPageMargins) {
@@ -6897,18 +6922,22 @@ impl Evaluator {
             context.set_page_alignment(Some(alignment));
         }
         if let (Some(width), Some(height)) = (width, height) {
-            context.set_page_geometry(Some(IrPageGeometry { width, height }));
+            let geometry = IrPageGeometry { width, height };
+            context.set_page_geometry(Some(geometry.clone()));
+            context.append_page_dimension_layer(IrPageDimensionLayer::ExplicitGeometry(geometry));
         }
         if let Some(Some(columns)) = columns {
             context.set_page_columns(Some(columns));
         }
         if let Some(Some(format)) = page_size_format {
             let document_type = context.document_state.borrow().document_type;
-            context.set_page_size(IrPageSizeSelection {
+            let selection = IrPageSizeSelection {
                 format,
                 orientation: page_orientation,
                 document_type,
-            });
+            };
+            context.set_page_size(selection);
+            context.append_page_dimension_layer(IrPageDimensionLayer::StandardSize(selection));
         }
         if let Some(Some(margin)) = margin {
             context.set_page_margin(margin);

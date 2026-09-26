@@ -259,9 +259,15 @@ the effective orientation. When orientation was omitted, the call-time
 document-type snapshot remains the default-orientation basis instead of a later
 `.doctype` mutation. An omitted-orientation layer captured under `docs` remains
 fail-closed because the pinned public contract does not define that cross-doctype
-default. Explicit complete page geometry keeps its existing output precedence
-while cross-layer size/width/height composition remains unresolved until
-selector/layer ordering is represented. The margin slice expands the documented
+default. Arkst now records source order for the bounded selector-free
+dimension-producing subset (standard `size` and complete explicit
+`width + height`) as ordered `IrPageDimensionLayer` entries while retaining
+the legacy flat fields for wire compatibility. The Typst/PDF consumer uses the
+latest recorded dimension layer, so a later standard size can supersede earlier
+explicit geometry and vice versa. Legacy IR without ordered layers keeps the
+historical geometry-first fallback. This does not yet represent selectors,
+partial width/height, or same-call standard-size plus explicit-dimension
+composition. The margin slice expands the documented
 `Sizes` shorthand into explicit top/right/bottom/left state: one value applies
 to every side, two values map vertical/horizontal, and four values map TRBL.
 Three-value or otherwise malformed groups fail closed, and semantic `None`
@@ -282,10 +288,10 @@ The bounded Typst/PDF border consumer uses page foreground coordinates to draw
 the explicit content-area rectangle only when all of margin, border widths, and
 border color are committed. It preserves four independent side widths and does
 not fabricate a renderer-default margin, width, or color.
-Selector/range, width/height override composition, selector-aware
-geometry/size/margin/decoration/column layering, the remaining page-border
-output outside the explicit-margin/width/color paged subset, and the remaining
-output consumption stay open, and Typst page objects must not enter
+Selector/range, partial or same-call size+width/height override composition,
+selector-aware geometry/size/margin/decoration/column layering, the remaining
+page-border output outside the explicit-margin/width/color paged subset, and
+the remaining output consumption stay open, and Typst page objects must not enter
 evaluator/IR state. Status is conservatively `PARTIAL`
 under #175.
 

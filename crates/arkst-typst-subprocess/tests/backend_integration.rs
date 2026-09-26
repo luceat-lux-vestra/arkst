@@ -351,6 +351,50 @@ fn integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_pageformat_dimension_order_lowers_latest_layer_to_valid_typst_and_pdf() {
+    let source = ".doctype {paged}\n\
+.pageformat width:{10in} height:{5in}\n\
+.pageformat size:{a4} orientation:{landscape}\n\
+Dimension order output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-dimension-order.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-dimension-order.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat dimension-order diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(width: 297mm, height: 210mm)"),
+        "{typst_code}"
+    );
+    assert!(
+        !typst_code.contains("#set page(width: 10in, height: 5in)"),
+        "later standard-size layer must supersede earlier explicit geometry: {typst_code}"
+    );
+
+    with_typst("pageformat-dimension-order", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-dimension-order.qd".to_string(),
+            })
+            .expect("ordered pageformat dimensions must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf() {
     let source = ".doctype {paged}\n\
 .pageformat margin:{1cm 2cm 3cm 4cm}\n\

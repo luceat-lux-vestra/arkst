@@ -6,7 +6,8 @@
 //! source-map ranges by the generated prelude length.
 
 use arkst_ir::{
-    IrDocument, IrDocumentType, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection,
+    IrDocument, IrDocumentState, IrDocumentType, IrPageDimensionLayer, IrPageOrientation,
+    IrPageSizeFormat, IrPageSizeSelection,
 };
 use arkst_source::SourceMapEntry;
 
@@ -146,20 +147,42 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     ))
 }
 
-fn document_prelude(doc: &IrDocument) -> String {
-    let state = &doc.metadata.document_state;
-    let mut prelude = String::new();
+fn explicit_page_dimensions_prelude(state: &IrDocumentState) -> Option<String> {
+    if let Some(layer) = state.page_dimension_layers.last() {
+        return match layer {
+            IrPageDimensionLayer::ExplicitGeometry(geometry) => {
+                let width = lowering_base::lower_size(&geometry.width);
+                let height = lowering_base::lower_size(&geometry.height);
+                Some(format!("#set page(width: {width}, height: {height})\n"))
+            }
+            IrPageDimensionLayer::StandardSize(selection) => {
+                standard_page_dimensions_mm(*selection, state.document_type).map(
+                    |(width, height)| format!("#set page(width: {width}mm, height: {height}mm)\n"),
+                )
+            }
+        };
+    }
+
+    // Backward compatibility for IR serialized before ordered dimension layers
+    // existed. The legacy flat representation keeps its historical
+    // geometry-first precedence only when no ordered layer is available.
     if let Some(geometry) = state.page_geometry.as_ref() {
         let width = lowering_base::lower_size(&geometry.width);
         let height = lowering_base::lower_size(&geometry.height);
-        prelude.push_str(&format!("#set page(width: {width}, height: {height})\n"));
-    } else if let Some((width, height)) = state
+        return Some(format!("#set page(width: {width}, height: {height})\n"));
+    }
+
+    state
         .page_size
         .and_then(|selection| standard_page_dimensions_mm(selection, state.document_type))
-    {
-        prelude.push_str(&format!(
-            "#set page(width: {width}mm, height: {height}mm)\n"
-        ));
+        .map(|(width, height)| format!("#set page(width: {width}mm, height: {height}mm)\n"))
+}
+
+fn document_prelude(doc: &IrDocument) -> String {
+    let state = &doc.metadata.document_state;
+    let mut prelude = String::new();
+    if let Some(dimensions) = explicit_page_dimensions_prelude(state) {
+        prelude.push_str(&dimensions);
     } else if state.document_type == IrDocumentType::Slides {
         prelude.push_str(&format!(
             "#set page(width: {SLIDES_PAGE_WIDTH_PT}pt, height: {SLIDES_PAGE_HEIGHT_PT}pt)\n"
@@ -272,9 +295,9 @@ fn render_focus_prelude(kind: FocusDocumentKind, paperwhite: bool) -> String {
 mod tests {
     use super::*;
     use arkst_ir::{
-        IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageBorderWidths, IrPageGeometry,
-        IrPageMargins, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection, IrSize,
-        IrSizeUnit,
+        IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageBorderWidths, IrPageDimensionLayer,
+        IrPageGeometry, IrPageMargins, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection,
+        IrSize, IrSizeUnit,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -409,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_geometry_keeps_precedence_until_layer_ordering_is_represented() {
+    fn legacy_flat_geometry_keeps_backward_compatible_precedence() {
         let mut doc = document(IrDocumentType::Paged, None, None);
         doc.metadata.document_state.page_geometry = Some(IrPageGeometry {
             width: IrSize {
@@ -430,6 +453,72 @@ mod tests {
         let code = lower_to_typst_code(&doc);
         assert!(
             code.starts_with("#set page(width: 10in, height: 5in)\n"),
+            "{code}"
+        );
+        assert!(!code.contains("297mm"), "{code}");
+    }
+
+    #[test]
+    fn latest_ordered_standard_size_overrides_earlier_explicit_geometry() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        let geometry = IrPageGeometry {
+            width: IrSize {
+                value: 10.0,
+                unit: IrSizeUnit::In,
+            },
+            height: IrSize {
+                value: 5.0,
+                unit: IrSizeUnit::In,
+            },
+        };
+        let selection = IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Landscape),
+            document_type: IrDocumentType::Paged,
+        };
+        doc.metadata.document_state.page_geometry = Some(geometry.clone());
+        doc.metadata.document_state.page_size = Some(selection);
+        doc.metadata.document_state.page_dimension_layers = vec![
+            IrPageDimensionLayer::ExplicitGeometry(geometry),
+            IrPageDimensionLayer::StandardSize(selection),
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(width: 297mm, height: 210mm)\n"),
+            "{code}"
+        );
+        assert!(!code.contains("10in"), "{code}");
+    }
+
+    #[test]
+    fn latest_ordered_explicit_geometry_overrides_earlier_standard_size() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        let geometry = IrPageGeometry {
+            width: IrSize {
+                value: 8.0,
+                unit: IrSizeUnit::In,
+            },
+            height: IrSize {
+                value: 4.0,
+                unit: IrSizeUnit::In,
+            },
+        };
+        let selection = IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Landscape),
+            document_type: IrDocumentType::Paged,
+        };
+        doc.metadata.document_state.page_geometry = Some(geometry.clone());
+        doc.metadata.document_state.page_size = Some(selection);
+        doc.metadata.document_state.page_dimension_layers = vec![
+            IrPageDimensionLayer::StandardSize(selection),
+            IrPageDimensionLayer::ExplicitGeometry(geometry),
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(width: 8in, height: 4in)\n"),
             "{code}"
         );
         assert!(!code.contains("297mm"), "{code}");
