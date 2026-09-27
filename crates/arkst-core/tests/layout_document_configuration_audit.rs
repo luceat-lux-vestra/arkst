@@ -242,6 +242,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("compose_applicable_page_dimensions"));
     assert!(pageformat[10].contains("resolve_applicable_page_format"));
     assert!(pageformat[10].contains("resolved explicit-page snapshot"));
+    assert!(pageformat[9].contains("resolve_concrete_page_geometry"));
+    assert!(pageformat[10].contains("resolve_concrete_page_geometry"));
+    assert!(pageformat[10].contains("complete explicit axes remain valid for any output type"));
+    assert!(pageformat[10].contains("current Typst/PDF global dimension path reuses this helper"));
     assert!(pageformat[10].contains("compose_global_page_dimensions"));
     assert!(pageformat[10].contains("prior ordered global state"));
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
