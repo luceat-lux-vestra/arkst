@@ -580,6 +580,65 @@ Second page\n";
 }
 
 #[test]
+fn integration_pageformat_range_border_lowers_to_valid_typst_and_pdf() {
+    let source = ".doctype {paged}\n\
+.pageformat margin:{1cm}\n\
+.pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{blue}\n\
+.pageformat pages:{2..2} bordercolor:{red}\n\
+First page\n\
+\n\
+.pagebreak\n\
+\n\
+Second page\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-range-border.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-range-border.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat range border diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(foreground: context {"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("let __arkst_page = here().page()"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("__arkst_page >= 2 and __arkst_page <= 2"),
+        "{typst_code}"
+    );
+    assert!(typst_code.contains("rgb(255, 0, 0, 100%)"), "{typst_code}");
+    assert!(typst_code.contains("rgb(0, 0, 255, 100%)"), "{typst_code}");
+    assert!(
+        typst_code.contains("thickness: __arkst_border_widths.left"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-range-border", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-range-border.qd".to_string(),
+            })
+            .expect("pageformat range border Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat margin:{1cm 2mm 3pt 8px}\nMargin output\n";
     let project = VirtualProjectBuilder::new()
