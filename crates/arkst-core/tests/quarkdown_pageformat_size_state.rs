@@ -148,7 +148,7 @@ fn unsupported_pageformat_shapes_do_not_claim_standard_size_state() {
         ".pageformat {a4} orientation:{landscape}\n",
         ".pageformat {1..2}\n",
         ".pageformat {letter} columns:{2}\n",
-        ".pageformat size:{letter} width:{8in} height:{11in}\n",
+        ".pageformat size:{.none} width:{8in}\n",
         ".pageformat side:{left} size:{a5}\n",
         ".pageformat pages:{1..2} size:{a5}\n",
         ".pageformat size:{a5} columns:{2}\n",

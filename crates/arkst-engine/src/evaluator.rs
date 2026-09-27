@@ -6965,6 +6965,9 @@ impl Evaluator {
             None
         };
         let document_type = context.document_state.borrow().document_type;
+        let mixed_global_dimensions = selector.is_none()
+            && page_size_format.is_some()
+            && (width.is_some() || height.is_some());
         let page_size = page_size_format
             .flatten()
             .map(|format| IrPageSizeSelection {
@@ -6972,6 +6975,14 @@ impl Evaluator {
                 orientation: page_orientation,
                 document_type,
             });
+        if mixed_global_dimensions && page_size.is_none() {
+            diagnostics.push(function_error(
+                "`.pageformat` mixed global size/axis composition requires a concrete standard size"
+                    .to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
         let border_widths = if border_top.is_some()
             || border_right.is_some()
             || border_bottom.is_some()
@@ -6987,11 +6998,10 @@ impl Evaluator {
             None
         };
 
-        // Preserve the successful selector-free mutation in source order
-        // before updating the existing flattened compatibility fields. This
-        // layer state is intentionally not consumed by renderers yet; it is
-        // the backend-neutral prerequisite for later selector and precedence
-        // resolution.
+        // Preserve every successful bounded mutation in source order before
+        // updating the legacy flattened global compatibility fields. Ordered
+        // selector-free dimension layers are now consumed by Typst/PDF;
+        // selector-scoped layers remain backend-neutral state for later output.
         context.publish_page_format_layer(IrPageFormatLayer {
             selector,
             alignment,
@@ -15345,6 +15355,7 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
         !width && !height && !alignment && !columns && !page_size && !orientation && !margin
     } else {
         (page_size && !width && !height && !alignment && !columns && !margin)
+            || (page_size && (width || height) && !alignment && !columns && !margin)
             || (width && height && !columns && !page_size && !orientation && !margin)
             || (alignment && !width && !height && !columns && !page_size && !orientation && !margin)
             || (columns && !width && !height && !alignment && !page_size && !orientation && !margin)

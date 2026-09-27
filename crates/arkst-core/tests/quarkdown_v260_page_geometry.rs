@@ -63,7 +63,7 @@ fn unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state() 
         ".pageformat height:{4in}\n",
         ".pageformat width:{none} height:{4in}\n",
         ".pageformat width:{8in} height:{none}\n",
-        ".pageformat size:{a4} width:{8in} height:{4in}\n",
+        ".pageformat size:{.none} width:{8in}\n",
     ] {
         let result = compile_source(&format!(
             ".pageformat width:{{10in}} height:{{5in}}\n{unsupported}"
