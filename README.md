@@ -147,7 +147,7 @@ Other raw HTML is preserved with source provenance but rejected at the document-
 | Bounded inline raw HTML | Implemented / partial by design |
 | General raw HTML semantics | Unsupported, fail-closed with `E8001` |
 | Quarkdown programmable semantics | Partial, verified in bounded families |
-| Quarkdown v2.5.1 complete compatibility | In progress |
+| Complete tracked-stable Quarkdown public-language/document-semantics compatibility | In progress; current verified v2.6.0 baseline remains partial |
 | Project-relative local images | Implemented within the bounded resource model |
 | Include/read/data loading | Partial |
 | HTML/SVG/PNG output | Not implemented |
@@ -193,14 +193,15 @@ These examples are intended to remain executable in CI rather than becoming synt
 
 ## Roadmap
 
-- **M0 Foundation** — repository bootstrap, ADRs, spikes, CI
-- **M1 Vertical Slice** — first `.qd → PDF`
-- **M2 Core Language** — Quarkdown core + Markdown MVP
-- **M3 Programmable Documents** — components, host/data loading, richer semantics
-- **M4 Developer Experience** — watch, inspect, source maps
-- **M5 Compatibility Convergence** — public-language coverage and verified-baseline promotion
-- **M6 Library, LSP, WASM** — embedding and tooling
-- **M7 Hardening** — fuzzing, benchmarks, 1.0 release
+- **M0 Foundation — Completed** — repository bootstrap, ADRs, spikes, CI
+- **M0.5 Upstream Compatibility Infrastructure — Completed** — release observation, drift automation foundation, conformance corpus
+- **M1 Vertical Slice — Completed** — first `.qd → PDF`
+- **M2 Core Language — Completed (bounded, evidence-backed baseline)** — Quarkdown core + Markdown MVP
+- **M3 Programmable Documents — In progress** — components, host/data loading, richer semantics
+- **M4 Developer Experience — Not started** — watch, inspect, source maps
+- **M5 Compatibility Convergence — Not started** — public-language coverage and verified-baseline promotion
+- **M6 Library, LSP, WASM — Not started** — embedding and tooling
+- **M7 Hardening — Not started** — fuzzing, benchmarks, 1.0 release
 
 ## License
 
