@@ -293,11 +293,13 @@ not fabricate a renderer-default margin, width, or color.
 The ordered layer snapshot is a prerequisite only: current flattened fields
 remain the bounded renderer compatibility surface and no new output claim is
 made by recording layer order or selector identity. The bounded selector slice
-accepts typed `left`/`right` and explicit finite positive page ranges, and it
-fails before publication for an open end, an open start, page zero, or an
-invalid side. The open-end failure follows the pinned contract; open-start
-semantics remain deliberately unclaimed rather than inferred. Selector-scoped
-positive columns publish only to `IrPageFormatLayer::columns` and participate in
+accepts typed `left`/`right`, explicit finite positive page ranges, and
+left-open ranges with a finite positive end. A left-open `pages:{..N}` range
+normalizes its omitted start to page 1, matching the public 1-based inclusive
+page contract while preserving the existing finite `IrPageRange` boundary.
+Ranges without a finite end, page zero, and invalid sides still fail before
+publication. Selector-scoped positive columns publish only to
+`IrPageFormatLayer::columns` and participate in
 the existing applicable-field merge; they do not replace
 `IrDocumentState::page_columns`, so current Typst/PDF column lowering remains
 global-only. The IR now exposes

@@ -15430,6 +15430,7 @@ fn convert_pageformat_pages(
     let range = value_conversion::convert_range_with_origin(argument, span)?;
     match (range.start, range.end) {
         (Some(start), Some(end)) if start >= 1 && end >= 1 => Ok(IrPageRange { start, end }),
+        (None, Some(end)) if end >= 1 => Ok(IrPageRange { start: 1, end }),
         _ => Err(value_conversion::ConversionError::InvalidText {
             target: value_conversion::ConversionTarget::Range,
         }),
