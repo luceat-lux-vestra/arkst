@@ -154,7 +154,7 @@ fn ranged_page_background(doc: &IrDocument) -> Option<String> {
 
     let mut expression = fallback;
     for (condition, content) in branches.into_iter().rev() {
-        expression = format!("if {condition} { content } else { expression }");
+        expression = format!("if {condition} {{ {content} }} else {{ {expression} }}");
     }
 
     Some(format!(
