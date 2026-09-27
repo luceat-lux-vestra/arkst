@@ -319,9 +319,9 @@ single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
 mixed calls are now admitted only when they carry a concrete standard-size base,
 and the current Typst/PDF consumer resolves that base physically before applying
-same-layer explicit width/height as per-axis overrides. Selector-free width-only
-or height-only calls without a concrete standard-size base, plus nullable mixed
-bases, remain deliberately unclaimed; the
+same-layer explicit width/height as per-axis overrides. Selector-free width-only or height-only calls are now admitted only when prior
+ordered global state already supplies a concrete standard-size base; without that
+base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed; the
 `unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
 regression continues to pin that boundary. Selector-aware output, remaining
 selector-aware geometry/size/margin/decoration/columns output, selector/columns

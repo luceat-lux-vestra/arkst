@@ -153,6 +153,82 @@ fn selector_free_mixed_standard_size_and_axis_publish_composable_state() {
 }
 
 #[test]
+fn selector_free_single_axis_layers_require_existing_standard_size_base() {
+    let rejected = compile_source(".pageformat width:{8in}\n");
+    assert!(
+        !rejected.diagnostics.is_empty(),
+        "single-axis global pageformat without a standard-size base must fail closed"
+    );
+    assert!(rejected
+        .ir
+        .metadata
+        .document_state
+        .page_format
+        .layers
+        .is_empty());
+
+    let result = compile_source(
+        ".pageformat size:{a4} orientation:{portrait}\n\
+         .pageformat width:{8in}\n\
+         .pageformat height:{10in}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert!(
+        state.page_geometry.is_none(),
+        "single-axis layers must not fabricate legacy complete geometry"
+    );
+    assert_eq!(
+        state.page_size.expect("flattened standard-size fallback").format,
+        IrPageSizeFormat::A4
+    );
+
+    let layers = &state.page_format.layers;
+    assert_eq!(layers.len(), 3);
+    assert!(layers[1].selector.is_none());
+    assert_eq!(
+        (
+            layers[1].width.as_ref().expect("width layer").value,
+            layers[1].width.as_ref().expect("width layer").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+    assert!(layers[1].height.is_none());
+    assert!(layers[2].width.is_none());
+    assert_eq!(
+        (
+            layers[2].height.as_ref().expect("height layer").value,
+            layers[2].height.as_ref().expect("height layer").unit,
+        ),
+        (10.0, IrSizeUnit::In)
+    );
+
+    let composed = state
+        .page_format
+        .compose_global_page_dimensions()
+        .expect("global dimension composition");
+    assert_eq!(
+        composed.size.expect("standard-size base").format,
+        IrPageSizeFormat::A4
+    );
+    assert_eq!(
+        (
+            composed.width.as_ref().expect("composed width").value,
+            composed.width.as_ref().expect("composed width").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (
+            composed.height.as_ref().expect("composed height").value,
+            composed.height.as_ref().expect("composed height").unit,
+        ),
+        (10.0, IrSizeUnit::In)
+    );
+}
+
+#[test]
 fn selector_scoped_margin_retains_side_and_pages_without_flattening_global_state() {
     let result = compile_source(
         ".pageformat margin:{1cm}\n\
