@@ -870,6 +870,81 @@ fn explicit_page_resolution_combines_field_merge_with_dimension_composition() {
 }
 
 #[test]
+fn resolved_page_dimensions_materialize_standard_base_without_widening_selector_output() {
+    let result = compile_source(
+        ".doctype {paged}\n\
+         .pageformat size:{a4}\n\
+         .pageformat side:{left} pages:{2..4} size:{letter} width:{8in}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state.page_format;
+    let left = state
+        .resolve_applicable_page_format(3, IrPageSide::Left)
+        .expect("left page format");
+    let left_geometry = left
+        .dimensions
+        .resolve_concrete_page_geometry(IrDocumentType::Paged)
+        .expect("left concrete geometry");
+    assert_eq!(
+        (left_geometry.width.value, left_geometry.width.unit),
+        (8.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (left_geometry.height.value, left_geometry.height.unit),
+        (279.4, IrSizeUnit::Mm)
+    );
+
+    let right = state
+        .resolve_applicable_page_format(3, IrPageSide::Right)
+        .expect("right page format");
+    let right_geometry = right
+        .dimensions
+        .resolve_concrete_page_geometry(IrDocumentType::Paged)
+        .expect("right concrete geometry");
+    assert_eq!(
+        (right_geometry.width.value, right_geometry.width.unit),
+        (210.0, IrSizeUnit::Mm)
+    );
+    assert_eq!(
+        (right_geometry.height.value, right_geometry.height.unit),
+        (297.0, IrSizeUnit::Mm)
+    );
+
+    let docs_basis = arkst_core::ir::IrComposedPageDimensions {
+        size: Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: None,
+            document_type: IrDocumentType::Docs,
+        }),
+        ..Default::default()
+    };
+    assert!(
+        docs_basis
+            .resolve_concrete_page_geometry(IrDocumentType::Paged)
+            .is_none(),
+        "omitted docs orientation basis must remain fail-closed"
+    );
+
+    let explicit = arkst_core::ir::IrComposedPageDimensions {
+        width: Some(IrSize {
+            value: 7.0,
+            unit: IrSizeUnit::In,
+        }),
+        height: Some(IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::In,
+        }),
+        ..Default::default()
+    };
+    let explicit_geometry = explicit
+        .resolve_concrete_page_geometry(IrDocumentType::Docs)
+        .expect("complete explicit geometry");
+    assert_eq!(explicit_geometry.width.value, 7.0);
+    assert_eq!(explicit_geometry.height.value, 9.0);
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
