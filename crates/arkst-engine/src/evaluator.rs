@@ -6998,11 +6998,10 @@ impl Evaluator {
             None
         };
 
-        // Preserve the successful selector-free mutation in source order
-        // before updating the existing flattened compatibility fields. This
-        // layer state is intentionally not consumed by renderers yet; it is
-        // the backend-neutral prerequisite for later selector and precedence
-        // resolution.
+        // Preserve every successful bounded mutation in source order before
+        // updating the legacy flattened global compatibility fields. Ordered
+        // selector-free dimension layers are now consumed by Typst/PDF;
+        // selector-scoped layers remain backend-neutral state for later output.
         context.publish_page_format_layer(IrPageFormatLayer {
             selector,
             alignment,
