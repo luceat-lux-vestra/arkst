@@ -263,9 +263,12 @@ the effective orientation. When orientation was omitted, the call-time
 document-type snapshot remains the default-orientation basis instead of a later
 `.doctype` mutation. An omitted-orientation layer captured under `docs` remains
 fail-closed because the pinned public contract does not define that cross-doctype
-default. Explicit complete page geometry keeps its existing output precedence
-while cross-layer size/width/height composition remains unresolved until
-selector/layer ordering is represented. The margin slice expands the documented
+default. Ordered selector-free dimension layers now determine current Typst/PDF
+size-versus-axis precedence. `IrPageFormatState::compose_global_page_dimensions`
+folds only global dimension-bearing layers in source order: a later standard
+size clears both earlier explicit axes, then explicit width/height in that same
+layer override only their respective axes. Legacy flattened geometry/size remain
+a backward-compatible fallback when ordered dimension state is absent. The margin slice expands the documented
 `Sizes` shorthand into explicit top/right/bottom/left state: one value applies
 to every side, two values map vertical/horizontal, and four values map TRBL.
 Three-value or otherwise malformed groups fail closed, and semantic `None`
@@ -314,10 +317,13 @@ size/width/height composition rule without resolving physical dimensions or wide
 renderer support. The bounded evaluator now also admits selector-scoped mixed size+axis and
 single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
-mixed size+axis and single-axis source calls remain deliberately unclaimed, so
-current global output behavior is not silently widened; the existing
+mixed calls are now admitted only when they carry a concrete standard-size base,
+and the current Typst/PDF consumer resolves that base physically before applying
+same-layer explicit width/height as per-axis overrides. Selector-free width-only
+or height-only calls without a concrete standard-size base, plus nullable mixed
+bases, remain deliberately unclaimed; the
 `unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
-regression continues to pin that selector-free boundary. Selector-aware output, remaining
+regression continues to pin that boundary. Selector-aware output, remaining
 selector-aware geometry/size/margin/decoration/columns output, selector/columns
 interaction, the remaining page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption

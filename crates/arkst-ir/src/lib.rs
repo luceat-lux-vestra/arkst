@@ -931,6 +931,29 @@ impl IrPageFormatState {
         Some(dimensions)
     }
 
+    /// Compose only selector-free page-size and explicit-axis fields.
+    ///
+    /// Global dimension layers are folded in source order with the same
+    /// cross-field rule as explicit-page composition: a standard-size layer
+    /// replaces both previously composed axes, then explicit width/height in
+    /// that same layer override their respective axes. Non-dimension and
+    /// selector-scoped layers are ignored. Semantic no-op layers therefore
+    /// preserve the previously composed global dimensions.
+    pub fn compose_global_page_dimensions(&self) -> Option<IrComposedPageDimensions> {
+        let mut dimensions = IrComposedPageDimensions::default();
+        let mut saw_dimension_layer = false;
+
+        for layer in self.layers.iter().filter(|layer| layer.selector.is_none()) {
+            if layer.size.is_none() && layer.width.is_none() && layer.height.is_none() {
+                continue;
+            }
+            saw_dimension_layer = true;
+            dimensions.overlay_layer(layer);
+        }
+
+        saw_dimension_layer.then_some(dimensions)
+    }
+
     /// Fold only layers with exactly the requested selector identity.
     ///
     /// Matching layers are applied in source order. Later non-null fields

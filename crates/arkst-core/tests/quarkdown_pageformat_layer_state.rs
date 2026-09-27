@@ -64,7 +64,7 @@ fn ordered_pageformat_layers_preserve_supported_global_source_order() {
 }
 
 #[test]
-fn ordered_layers_expose_size_vs_geometry_order_without_changing_flat_consumers() {
+fn ordered_layers_compose_global_dimensions_without_rewriting_flattened_state() {
     let result = compile_source(
         ".pageformat size:{a4}\n\
          .pageformat width:{10in} height:{5in}\n\
@@ -86,12 +86,70 @@ fn ordered_layers_expose_size_vs_geometry_order_without_changing_flat_consumers(
         IrPageSizeFormat::Legal
     );
 
-    // Existing bounded consumers remain unchanged in this prerequisite slice.
+    let composed = state
+        .page_format
+        .compose_global_page_dimensions()
+        .expect("global dimension composition");
+    assert_eq!(
+        composed.size.expect("later global size").format,
+        IrPageSizeFormat::Legal
+    );
+    assert!(
+        composed.width.is_none() && composed.height.is_none(),
+        "later standard size must clear both earlier explicit axes"
+    );
+
+    // The legacy flattened fields remain serialized for backward compatibility,
+    // but ordered consumers must no longer derive precedence from them.
     assert!(state.page_geometry.is_some());
     assert_eq!(
         state.page_size.expect("flattened size").format,
         IrPageSizeFormat::Legal
     );
+}
+
+#[test]
+fn selector_free_mixed_standard_size_and_axis_publish_composable_state() {
+    let result = compile_source(".pageformat size:{a4} orientation:{portrait} width:{8in}\n");
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert!(
+        state.page_geometry.is_none(),
+        "a single explicit axis must not fabricate complete flattened geometry"
+    );
+    assert_eq!(
+        state.page_size.expect("flattened standard size").format,
+        IrPageSizeFormat::A4
+    );
+
+    let layer = state.page_format.layers.last().expect("mixed global layer");
+    assert!(layer.selector.is_none());
+    assert_eq!(layer.size.expect("size base").format, IrPageSizeFormat::A4);
+    assert_eq!(
+        layer.size.expect("size base").orientation,
+        Some(IrPageOrientation::Portrait)
+    );
+    let width = layer.width.as_ref().expect("explicit width override");
+    assert_eq!((width.value, width.unit), (8.0, IrSizeUnit::In));
+    assert!(layer.height.is_none());
+
+    let composed = state
+        .page_format
+        .compose_global_page_dimensions()
+        .expect("mixed global composition");
+    assert_eq!(
+        composed.size.expect("composed standard size").format,
+        IrPageSizeFormat::A4
+    );
+    assert_eq!(
+        (
+            composed.width.as_ref().expect("composed width").value,
+            composed.width.as_ref().expect("composed width").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+    assert!(composed.height.is_none());
 }
 
 #[test]
