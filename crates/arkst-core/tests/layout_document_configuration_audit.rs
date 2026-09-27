@@ -207,6 +207,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         pageformat[9].contains("integration_pageformat_background_lowers_to_valid_typst_and_pdf")
     );
     assert!(pageformat[9]
+        .contains("integration_pageformat_range_background_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9]
         .contains("integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf"));
@@ -221,6 +223,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("partial-side zeroing"));
     assert!(pageformat[10].contains("bordercolor-only width inheritance/no-fabrication"));
     assert!(pageformat[10].contains("Typst/PDF background consumer"));
+    assert!(pageformat[10].contains("finite-range background"));
+    assert!(pageformat[10].contains("physical 1-based here().page()"));
+    assert!(pageformat[10].contains("side-bearing background selector"));
     assert!(pageformat[10].contains("explicit margin + committed widths + explicit color"));
     assert!(pageformat[10].contains("without fabricating renderer defaults"));
     assert!(pageformat[10].contains("gates standard-size output on the final paged/slides"));
@@ -254,6 +259,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
+    assert!(pageformat[11].contains("bounded-range-background-output"));
     assert!(pageformat[11].contains("selector-aware-layering"));
 }
 
