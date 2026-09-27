@@ -15402,10 +15402,11 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
         && (!orientation || page_size);
     let payload_supported = base_payload_supported || selector_scoped_dimension_payload;
 
-    // Columns remain the existing document-wide bounded surface. Do not
-    // pretend that a page selector scopes them until that contract is
-    // independently implemented.
-    payload_supported && (!(side || pages) || !columns)
+    // A selector may now scope the already-typed positive column count.
+    // Selector-scoped layers return before legacy flattened renderer fields
+    // are mutated, so this widens ordered state only; current Typst/PDF column
+    // lowering remains global-only.
+    payload_supported
 }
 
 fn convert_pageformat_side(

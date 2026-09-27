@@ -244,7 +244,9 @@ selector-free standard size/orientation selection, and an ordered
 page-format layer snapshot that preserves successful bounded mutations in
 source order. The snapshot now carries a bounded selector identity for typed `left`/`right` page-side selectors and finite 1-based inclusive page ranges
 when both endpoints are explicit; the two selector dimensions may be combined.
-Scoped selector layers are state-only and must not leak into the flattened global fields consumed by current renderers. Geometry/alignment,
+Selector-scoped positive columns are now retained in the ordered layer state as
+bounded state-only evidence. Scoped selector layers must not leak into the
+flattened global fields consumed by current renderers. Geometry/alignment,
 selector-free global margins, global positive columns, selector-free global
 background, and the bounded standard-size selection have current Typst/PDF
 consumers, while row/column alignment inheritance remains unchanged;
@@ -295,7 +297,11 @@ made by recording layer order or selector identity. The bounded selector slice
 accepts typed `left`/`right` and explicit finite positive page ranges, and it
 fails before publication for an open end, an open start, page zero, or an
 invalid side. The open-end failure follows the pinned contract; open-start
-semantics remain deliberately unclaimed rather than inferred. The IR now exposes
+semantics remain deliberately unclaimed rather than inferred. Selector-scoped
+positive columns publish only to `IrPageFormatLayer::columns` and participate in
+the existing applicable-field merge; they do not replace
+`IrDocumentState::page_columns`, so current Typst/PDF column lowering remains
+global-only. The IR now exposes
 a bounded exact-selector resolver that folds only layers with identical selector
 identity in source order: later non-null fields replace earlier values while
 omitted fields inherit. Distinct selector groups remain uncombined, so this does
@@ -324,8 +330,8 @@ ordered global state already supplies a concrete standard-size base; without tha
 base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed; the
 `unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
 regression continues to pin that boundary. Selector-aware output, remaining
-selector-aware geometry/size/margin/decoration/columns output, selector/columns
-interaction, the remaining page-border output outside the
+selector-aware geometry/size/margin/decoration/columns output, the remaining
+page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption
 stay open, and Typst page objects must not enter evaluator/IR state. Status is
 conservatively `PARTIAL`
