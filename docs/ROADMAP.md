@@ -134,22 +134,32 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 
 ## M4 — Developer Experience
 
-**Status:** Not started
+**Status:** In progress
 
-**Objective:** Watch mode, inspect commands, source maps, structured diagnostics.
+**Objective:** Complete watch/inspect workflows, source-map exposure, and
+developer-facing diagnostic presentation.
+
+| Item | Status |
+|------|--------|
+| `arkst inspect --emit typst` / `--emit ir` | Implemented |
+| `arkst inspect --emit ast` / `semantic` / `source-map` | CLI targets exist but remain explicit placeholders |
+| Backend-neutral/lowering source-map generation | Implemented; CLI `source-map` emission remains incomplete |
+| Shared structured diagnostic model | Implemented; dedicated structured CLI output/presentation remains incomplete |
+| Watch mode | Not implemented |
 
 ## M5 — Quarkdown Compatibility Convergence
 
-**Status:** Not started
+**Status:** Not started as the primary milestone; foundational convergence
+work is already active
 
 **Objective:** Converge toward complete verified compatibility with the
 publicly documented Quarkdown language as the stable upstream target advances.
 
 | Item | Status |
 |------|--------|
-| Public-language gap inventory and impact reports | Not started |
-| Independently authored conformance expansion | Not started |
-| Human-reviewed verified-baseline promotion procedure | Completed |
+| Public-language gap inventory and release impact reports | Completed foundation; maintained as upstream evolves |
+| Independently authored conformance expansion | In progress across compatibility slices |
+| Human-reviewed verified-baseline promotion procedure | Completed; v2.6.0 promoted |
 | Adaptation PR preparation and verification automation | Not started |
 | Typst generated-source compatibility corpus | Not started |
 
@@ -163,14 +173,18 @@ because a feature is documented upstream.
 
 **Objective:** Embedding, editor integration, `arkst-wasm` bindings crate.
 
-WASM compilation is an M0 architecture constraint (core + lowering).
-M6 delivers the `arkst-wasm` bindings crate and WASM CI coverage.
+WASM compilation of the platform-neutral compiler path is already an M0
+architecture constraint and CI responsibility. M6 delivers the public
+`arkst-wasm` bindings crate, its embedder contract, and binding-specific
+behavioral CI; it does not defer core/lowering WASM buildability.
 
 ## M7 — Hardening
 
-**Status:** Not started
+**Status:** Not started as the 1.0 release-readiness milestone; baseline CI,
+supply-chain, threat-model, and merge-gate hardening is already active
 
-**Objective:** Fuzzing, benchmarks, security audit, 1.0 release.
+**Objective:** Fuzzing, benchmarks, release-readiness security audit, and the
+1.0 release.
 
 ---
 

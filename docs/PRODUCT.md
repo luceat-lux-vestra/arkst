@@ -19,7 +19,7 @@ and Typst-quality output.
 
 1. Developers writing technical documentation, reports, lecture materials,
    books, and slides in Markdown
-2. Users who need both PDF and web output from a single source
+2. Users who ultimately need both PDF and web output from a single source
 3. Users who need variables, conditionals, iteration, and components beyond
    plain Markdown
 4. Users who want Typst typesetting without writing documents entirely in Typst
@@ -32,7 +32,8 @@ and Typst-quality output.
   Quarkdown-compatible extensions
 - **Program documents:** Use variables, conditionals, loops, and components
   to generate dynamic content
-- **Compile to multiple formats:** Produce PDF, HTML, SVG, and PNG from one source
+- **Compile to multiple formats:** Produce PDF today and converge on HTML,
+  SVG, and PNG through explicit output-backend work
 - **Check without compiling:** Validate documents incrementally
 - **Watch and iterate:** Automatic rebuild on source changes
 - **Inspect intermediates:** Debug the compilation pipeline
@@ -42,7 +43,9 @@ and Typst-quality output.
 
 1. **Complete documented Quarkdown compatibility is the long-term target** —
    current verified compatibility remains partial and evidence-based
-2. **Typst is the rendering backend** — no custom PDF/HTML renderers
+2. **Prefer official Typst rendering backends** — PDF uses Typst today;
+   HTML architecture is evaluated under [#320](https://github.com/luceat-lux-vestra/arkst/issues/320)
+   before Arkst owns any custom renderer
 3. **One CLI, one config, one project model** — users don't juggle tools
 4. **Semantic parity, not pixel parity** — PDF and HTML serve different purposes
 5. **Backend neutrality** — any future native `.typ` passthrough is a
@@ -77,44 +80,69 @@ evolution policy.
 
 Typst is tracked separately as a generated-source and compiler-adapter
 compatibility contract; Arkst does not reimplement Typst grammar. Markdown
-remains specification-driven, HTML remains isolated behind `arkst-html`, and
-Pandoc remains an optional development/compatibility oracle.
+remains specification-driven. The accepted ADR-0015 `arkst-html` input
+boundary is not yet a physical crate: current bounded raw-HTML normalization
+lives in `arkst-engine`, with extraction tracked by
+[#469](https://github.com/luceat-lux-vestra/arkst/issues/469). HTML **output**
+is a separate architecture decision under
+[#320](https://github.com/luceat-lux-vestra/arkst/issues/320). Pandoc remains
+an optional development/compatibility oracle.
+
+The user journeys below describe the target product experience unless a
+capability is explicitly listed as current. In particular, `arkst new` and
+watch mode remain planned work.
 
 ## User Journeys
 
-### New Document
+### Current CI/CD Validation
 
-```
-arkst new my-report
-→ creates project structure with template
-→ edit source files
-→ arkst build → PDF
-```
-
-### Iterative Writing
-
-```
-arkst watch docs/
-→ edit source in editor
-→ auto-rebuild on save
-→ PDF updates in viewer
+```text
+arkst check docs/main.qd
+→ validate without producing an artifact
+→ exit non-zero on errors
 ```
 
-### CI/CD Pipeline
+A dedicated machine-readable structured-diagnostics CLI format remains M4
+work; the current `check` command does **not** provide a `--format json`
+option.
 
+### Current Inspection
+
+```text
+arkst inspect docs/main.qd --emit ir
+arkst inspect docs/main.qd --emit typst
 ```
-arkst check src/ --format json
-→ structured diagnostics
-→ fail on error
-```
+
+Those two emit targets are implemented. The existing `ast`, `semantic`, and
+`source-map` emit names are explicit placeholders and must not be presented
+as completed inspection features.
+
+### Planned Project Scaffolding
+
+A first-party new-document/scaffolding command is planned product UX, not a
+current CLI capability. The exact command spelling is not frozen here.
+
+### Planned Iterative Writing
+
+Watch mode and automatic rebuild-on-save are planned M4 work. There is no
+current `arkst watch` command.
 
 ## Output Targets
 
-- **PDF** (via Typst compiler)
-- **HTML** (via Typst compiler)
-- **SVG** (via Typst compiler)
-- **PNG** (via Typst compiler)
-- **Bundle** (multiple formats in one command)
+### Current
+
+- **Typst source** — deterministic generated source
+- **PDF** — through the official Typst compiler/backend
+
+### Planned or under evaluation
+
+- **HTML** — architecture is under evaluation in
+  [#320](https://github.com/luceat-lux-vestra/arkst/issues/320); the official
+  Typst HTML target is the first candidate
+- **SVG / PNG** — future output targets, not current CLI support
+- **Bundle** — future multi-artifact product surface; backend/result-contract
+  work is tracked separately in
+  [#347](https://github.com/luceat-lux-vestra/arkst/issues/347)
 
 ## Differentiation
 
@@ -127,7 +155,7 @@ arkst check src/ --format json
 
 ## Non-Goals
 
-- Custom PDF/HTML renderer
+- Custom PDF renderer; a custom HTML renderer is a non-default path and requires the #320 evidence/architecture gate
 - SaaS/web editor
 - Custom package registry
 - Unlimited network access from documents

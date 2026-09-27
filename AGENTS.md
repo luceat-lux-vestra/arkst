@@ -68,8 +68,12 @@ from current file placement.
   backend contract; concrete execution belongs to the selected host adapter.
 - No core→Typst dependency, `RawTypst`, `BackendRaw`, or generic backend-code
   escape hatch.
-- `arkst-html` isolates HTML normalization and xberg; Pandoc is an optional
-  development/compatibility oracle only.
+- ADR-0015 reserves `arkst-html` as the target HTML input-interoperability
+  boundary, but that crate is not physically present yet. Today
+  `arkst-markdown` preserves parser-owned raw HTML and `arkst-engine`
+  performs the bounded semantic normalization/E8001 handling. #469 owns the
+  physical extraction; #320 separately owns HTML output architecture. Pandoc
+  remains an optional development/compatibility oracle only.
 - Platform-neutral compiler crates remain filesystem-, process-, and
   network-free and WASM-capable. Security capabilities require accepted host
   architecture.
@@ -223,7 +227,9 @@ unrelated narrow change.
 Repository-wide required merge gates are executed by GitHub CI. The configured
 required contexts are `fmt`, `clippy`, `test (ubuntu-latest)`,
 `test (macos-latest)`, `test (windows-latest)`, `docs`, `license`, `wasm`,
-`compatibility`, and `msrv`. CI scope must not be weakened to reduce local
+`compatibility`, `msrv`, `failure-triage`, and `dependency-review`. The
+machine-readable authority is `.github/gate-policy.toml`, and the live
+`Protect main` ruleset must match it. CI scope must not be weakened to reduce local
 validation cost. A green CI result is necessary evidence, but it is not by
 itself a strict-review PASS; relevant targeted local evidence remains required
 for changes that need it.

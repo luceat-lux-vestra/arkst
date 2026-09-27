@@ -6,6 +6,27 @@
 - **Related ADRs:** 0002, 0005, 0006, 0014, 0016
 - **Related work:** PR #46; `refactor/markdown-parser-foundation`
 
+## Implementation status addendum — 2026-09-27
+
+The `arkst-html` decision below remains an **accepted target boundary**, not
+a statement that the crate already exists. Current `main` has no
+`crates/arkst-html` workspace member and no `html-to-markdown-rs`/xberg
+production dependency.
+
+Today, `arkst-markdown` preserves Rushdown-owned raw-HTML syntax and source
+spans, while `arkst-engine::ast_to_ir` owns the existing bounded semantic
+handling: comment no-ops, exact attribute-free `em`/`strong`/`del`/`s`/
+`br` mappings to existing IR semantics, and source-backed `E8001` for the
+unsupported remainder. [#469](https://github.com/luceat-lux-vestra/arkst/issues/469)
+tracks the bounded physical extraction required to realize this accepted input
+boundary without widening behavior.
+
+This target input boundary is distinct from HTML **output** architecture.
+[#320](https://github.com/luceat-lux-vestra/arkst/issues/320) evaluates official
+Typst HTML first and owns any later output-renderer decision. The historical
+decision text below is preserved as written; references to `arkst-html` in
+that decision describe target ownership until #469 is implemented.
+
 ## Context
 
 Arkst's source-location primitives, in-memory compilation project, and
