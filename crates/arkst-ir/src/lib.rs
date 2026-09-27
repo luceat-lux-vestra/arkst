@@ -752,6 +752,22 @@ pub struct IrComposedPageDimensions {
     pub height: Option<IrSize>,
 }
 
+/// Transient backend-neutral page-format state resolved for one explicit page.
+///
+/// Dimensions retain their cross-field composition rule separately from the
+/// ordinary last-non-null field merge. The result carries no selector identity,
+/// physical page dimensions, inferred page side, or renderer-specific state.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct IrResolvedPageFormat {
+    pub dimensions: IrComposedPageDimensions,
+    pub alignment: Option<IrDocumentAlignment>,
+    pub columns: Option<u32>,
+    pub margin: Option<IrPageMargins>,
+    pub border_widths: Option<IrPageBorderWidths>,
+    pub border_color: Option<IrColor>,
+    pub background: Option<IrColor>,
+}
+
 impl IrComposedPageDimensions {
     fn overlay_layer(&mut self, later: &IrPageFormatLayer) {
         if let Some(value) = &later.size {
@@ -929,6 +945,41 @@ impl IrPageFormatState {
             dimensions.overlay_layer(layer);
         }
         Some(dimensions)
+    }
+
+    /// Resolve the bounded page-format state applicable to one explicit page.
+    ///
+    /// Applicable layers are folded once in source order. Ordinary fields use
+    /// last-non-null inheritance, while page dimensions retain the distinct
+    /// standard-size reset plus per-axis override rule. The caller supplies the
+    /// typed page side; this helper does not infer parity, resolve physical
+    /// dimensions, or widen renderer support.
+    pub fn resolve_applicable_page_format(
+        &self,
+        page_number: i32,
+        side: IrPageSide,
+    ) -> Option<IrResolvedPageFormat> {
+        let applicable = self.applicable_layers_for_page(page_number, side);
+        if applicable.is_empty() {
+            return None;
+        }
+
+        let mut merged = IrMergedPageFormatFields::default();
+        let mut dimensions = IrComposedPageDimensions::default();
+        for layer in applicable {
+            merged.overlay_non_null_from(layer);
+            dimensions.overlay_layer(layer);
+        }
+
+        Some(IrResolvedPageFormat {
+            dimensions,
+            alignment: merged.alignment,
+            columns: merged.columns,
+            margin: merged.margin,
+            border_widths: merged.border_widths,
+            border_color: merged.border_color,
+            background: merged.background,
+        })
     }
 
     /// Compose only selector-free page-size and explicit-axis fields.

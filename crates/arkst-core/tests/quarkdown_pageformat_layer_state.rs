@@ -809,6 +809,67 @@ fn page_dimension_composition_respects_layer_order_and_per_axis_overrides() {
 }
 
 #[test]
+fn explicit_page_resolution_combines_field_merge_with_dimension_composition() {
+    let result = compile_source(
+        ".pageformat size:{a4}\n\
+         .pageformat width:{10in} height:{5in}\n\
+         .pageformat margin:{1cm}\n\
+         .pageformat columns:{2}\n\
+         .pageformat side:{left} pages:{2..4} size:{letter} width:{8in}\n\
+         .pageformat side:{left} pages:{2..4} margin:{3cm}\n\
+         .pageformat pages:{3..3} background:{red}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state.page_format;
+    let left = state
+        .resolve_applicable_page_format(3, IrPageSide::Left)
+        .expect("left page format");
+
+    assert_eq!(
+        left.dimensions.size.expect("scoped size").format,
+        IrPageSizeFormat::Letter
+    );
+    let left_width = left.dimensions.width.as_ref().expect("scoped width");
+    assert_eq!((left_width.value, left_width.unit), (8.0, IrSizeUnit::In));
+    assert!(
+        left.dimensions.height.is_none(),
+        "later scoped standard size must clear the earlier global height"
+    );
+    assert_eq!(left.margin.as_ref().expect("scoped margin").top.value, 3.0);
+    assert_eq!(left.columns, Some(2));
+    assert!(left.background.is_some());
+
+    let right = state
+        .resolve_applicable_page_format(3, IrPageSide::Right)
+        .expect("right page format");
+    assert_eq!(
+        right.dimensions.size.expect("global size").format,
+        IrPageSizeFormat::A4
+    );
+    let right_width = right.dimensions.width.as_ref().expect("global width");
+    let right_height = right.dimensions.height.as_ref().expect("global height");
+    assert_eq!(
+        (right_width.value, right_width.unit),
+        (10.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (right_height.value, right_height.unit),
+        (5.0, IrSizeUnit::In)
+    );
+    assert_eq!(right.margin.as_ref().expect("global margin").top.value, 1.0);
+    assert_eq!(right.columns, Some(2));
+    assert!(right.background.is_some());
+
+    assert!(
+        state
+            .resolve_applicable_page_format(0, IrPageSide::Left)
+            .is_none(),
+        "non-positive page numbers must fail closed"
+    );
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");

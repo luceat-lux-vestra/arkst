@@ -200,6 +200,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("IrDocumentState::page_margin"));
     assert!(pageformat[9].contains("quarkdown_pageformat_margin.rs"));
     assert!(pageformat[9].contains("IrDocumentState::page_format"));
+    assert!(pageformat[9].contains("IrResolvedPageFormat"));
     assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(
@@ -239,6 +240,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("must not mutate flattened global state"));
     assert!(pageformat[10].contains("state-only prerequisite evidence"));
     assert!(pageformat[10].contains("compose_applicable_page_dimensions"));
+    assert!(pageformat[10].contains("resolve_applicable_page_format"));
+    assert!(pageformat[10].contains("resolved explicit-page snapshot"));
     assert!(pageformat[10].contains("compose_global_page_dimensions"));
     assert!(pageformat[10].contains("prior ordered global state"));
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));

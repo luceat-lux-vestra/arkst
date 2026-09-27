@@ -321,7 +321,13 @@ order for page dimensions: when a layer supplies a standard size, it replaces
 both previously composed page axes, then explicit width and height from that
 same layer override only their respective axes. This closes the backend-neutral per-layer
 size/width/height composition rule without resolving physical dimensions or widening
-renderer support. The bounded evaluator now also admits selector-scoped mixed size+axis and
+renderer support. A bounded `resolve_applicable_page_format` helper now folds the
+same applicable source order once into a resolved explicit-page snapshot: dimensions
+use that standard-size-reset/per-axis composition rule, while alignment, columns,
+margin, border widths/color, and background use the existing later-non-null field
+inheritance. The snapshot carries no selector identity, inferred page parity, physical
+dimension resolution, or renderer-specific state, so it remains backend-neutral
+prerequisite evidence rather than selector-aware output support. The bounded evaluator now also admits selector-scoped mixed size+axis and
 single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
 mixed calls are now admitted only when they carry a concrete standard-size base,
