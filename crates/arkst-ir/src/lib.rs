@@ -769,6 +769,32 @@ pub struct IrResolvedPageFormat {
 }
 
 impl IrComposedPageDimensions {
+    /// Resolve the composed dimension state to complete page geometry.
+    ///
+    /// A complete explicit width+height pair is already concrete and remains
+    /// applicable independently of document type. Otherwise the standard-size
+    /// base must resolve for the final output type, and any explicit axis
+    /// overrides only that axis.
+    pub fn resolve_concrete_page_geometry(
+        &self,
+        output_document_type: IrDocumentType,
+    ) -> Option<IrPageGeometry> {
+        if let (Some(width), Some(height)) = (&self.width, &self.height) {
+            return Some(IrPageGeometry {
+                width: width.clone(),
+                height: height.clone(),
+            });
+        }
+
+        let base = self
+            .size?
+            .resolve_standard_page_geometry(output_document_type)?;
+        Some(IrPageGeometry {
+            width: self.width.clone().unwrap_or(base.width),
+            height: self.height.clone().unwrap_or(base.height),
+        })
+    }
+
     fn overlay_layer(&mut self, later: &IrPageFormatLayer) {
         if let Some(value) = &later.size {
             self.size = Some(*value);
@@ -1078,6 +1104,77 @@ pub struct IrPageSizeSelection {
     pub orientation: Option<IrPageOrientation>,
     #[serde(default)]
     pub document_type: IrDocumentType,
+}
+
+impl IrPageSizeFormat {
+    fn portrait_dimensions_mm(self) -> (f64, f64) {
+        match self {
+            Self::A0 => (841.0, 1189.0),
+            Self::A1 => (594.0, 841.0),
+            Self::A2 => (420.0, 594.0),
+            Self::A3 => (297.0, 420.0),
+            Self::A4 => (210.0, 297.0),
+            Self::A5 => (148.0, 210.0),
+            Self::A6 => (105.0, 148.0),
+            Self::A7 => (74.0, 105.0),
+            Self::A8 => (52.0, 74.0),
+            Self::A9 => (37.0, 52.0),
+            Self::A10 => (26.0, 37.0),
+            Self::B0 => (1000.0, 1414.0),
+            Self::B1 => (707.0, 1000.0),
+            Self::B2 => (500.0, 707.0),
+            Self::B3 => (353.0, 500.0),
+            Self::B4 => (250.0, 353.0),
+            Self::B5 => (176.0, 250.0),
+            Self::Letter => (215.9, 279.4),
+            Self::Legal => (215.9, 355.6),
+            Self::Ledger => (279.4, 431.8),
+        }
+    }
+}
+
+impl IrPageSizeSelection {
+    /// Resolve a standard-size selection to explicit physical page geometry.
+    ///
+    /// Standard sizes apply only to final paged/slides output. An omitted
+    /// orientation uses the document type captured when the layer committed;
+    /// the unclassified docs basis stays fail-closed.
+    pub fn resolve_standard_page_geometry(
+        self,
+        output_document_type: IrDocumentType,
+    ) -> Option<IrPageGeometry> {
+        if !matches!(
+            output_document_type,
+            IrDocumentType::Paged | IrDocumentType::Slides
+        ) {
+            return None;
+        }
+
+        let orientation = match self.orientation {
+            Some(orientation) => orientation,
+            None => match self.document_type {
+                IrDocumentType::Slides => IrPageOrientation::Landscape,
+                IrDocumentType::Plain | IrDocumentType::Paged => IrPageOrientation::Portrait,
+                IrDocumentType::Docs => return None,
+            },
+        };
+        let portrait = self.format.portrait_dimensions_mm();
+        let (width, height) = match orientation {
+            IrPageOrientation::Portrait => portrait,
+            IrPageOrientation::Landscape => (portrait.1, portrait.0),
+        };
+
+        Some(IrPageGeometry {
+            width: IrSize {
+                value: width,
+                unit: IrSizeUnit::Mm,
+            },
+            height: IrSize {
+                value: height,
+                unit: IrSizeUnit::Mm,
+            },
+        })
+    }
 }
 
 /// Backend-neutral complete page geometry.
