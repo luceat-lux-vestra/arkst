@@ -104,6 +104,64 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     ))
 }
 
+fn ranged_page_background(doc: &IrDocument) -> Option<String> {
+    let state = &doc.metadata.document_state;
+    if state.document_type != IrDocumentType::Paged {
+        return None;
+    }
+
+    let mut backgrounds = Vec::new();
+    let mut saw_range = false;
+    for layer in &state.page_format.layers {
+        let Some(background) = layer.background.as_ref() else {
+            continue;
+        };
+        match layer.selector {
+            None => backgrounds.push((None, background)),
+            Some(selector) if selector.side.is_none() => {
+                let pages = selector.pages?;
+                saw_range = true;
+                backgrounds.push((Some(pages), background));
+            }
+            Some(_) => return None,
+        }
+    }
+    if !saw_range {
+        return None;
+    }
+
+    let mut branches = Vec::new();
+    let mut fallback = "none".to_string();
+    for (pages, background) in backgrounds.into_iter().rev() {
+        let fill = lowering_base::lower_color(background);
+        let content = format!("rect(width: 100%, height: 100%, fill: {fill})");
+        if let Some(pages) = pages {
+            branches.push((
+                format!(
+                    "__arkst_page >= {} and __arkst_page <= {}",
+                    pages.start, pages.end
+                ),
+                content,
+            ));
+        } else {
+            fallback = content;
+            break;
+        }
+    }
+    if branches.is_empty() {
+        return None;
+    }
+
+    let mut expression = fallback;
+    for (condition, content) in branches.into_iter().rev() {
+        expression = format!("if {condition} { content } else { expression }");
+    }
+
+    Some(format!(
+        "#set page(background: context {{\n  let __arkst_page = here().page()\n  {expression}\n}})\n"
+    ))
+}
+
 fn document_prelude(doc: &IrDocument) -> String {
     let state = &doc.metadata.document_state;
     let mut prelude = String::new();
@@ -151,7 +209,9 @@ fn document_prelude(doc: &IrDocument) -> String {
     if let Some(columns) = state.page_columns {
         prelude.push_str(&format!("#set page(columns: {columns})\n"));
     }
-    if let Some(background) = state.page_background.as_ref() {
+    if let Some(background) = ranged_page_background(doc) {
+        prelude.push_str(&background);
+    } else if let Some(background) = state.page_background.as_ref() {
         let fill = lowering_base::lower_color(background);
         prelude.push_str(&format!("#set page(fill: {fill})\n"));
     }
@@ -244,8 +304,8 @@ mod tests {
     use super::*;
     use arkst_ir::{
         IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageBorderWidths, IrPageFormatLayer,
-        IrPageGeometry, IrPageMargins, IrPageOrientation, IrPageSizeFormat, IrPageSizeSelection,
-        IrSize, IrSizeUnit,
+        IrPageFormatSelector, IrPageGeometry, IrPageMargins, IrPageOrientation, IrPageRange,
+        IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrSize, IrSizeUnit,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -608,6 +668,122 @@ mod tests {
         let code = lower_to_typst_code(&doc);
         assert!(
             code.starts_with("#set page(fill: rgb(1, 2, 3, 50%))\n"),
+            "{code}"
+        );
+    }
+
+
+    #[test]
+    fn finite_page_range_background_uses_physical_page_context_and_source_precedence() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        let base = IrColor {
+            red: 1,
+            green: 2,
+            blue: 3,
+            alpha: 1.0,
+        };
+        doc.metadata.document_state.page_background = Some(base.clone());
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                background: Some(base),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector: Some(IrPageFormatSelector {
+                    side: None,
+                    pages: Some(IrPageRange { start: 2, end: 4 }),
+                }),
+                background: Some(IrColor {
+                    red: 4,
+                    green: 5,
+                    blue: 6,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector: Some(IrPageFormatSelector {
+                    side: None,
+                    pages: Some(IrPageRange { start: 3, end: 3 }),
+                }),
+                background: Some(IrColor {
+                    red: 7,
+                    green: 8,
+                    blue: 9,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(code.contains("#set page(background: context {"), "{code}");
+        assert!(code.contains("let __arkst_page = here().page()"), "{code}");
+        assert!(!code.contains("#set page(fill:"), "{code}");
+        let later = code
+            .find("__arkst_page >= 3 and __arkst_page <= 3")
+            .expect("later range branch");
+        let earlier = code
+            .find("__arkst_page >= 2 and __arkst_page <= 4")
+            .expect("earlier range branch");
+        assert!(later < earlier, "{code}");
+        assert!(
+            code.contains("rect(width: 100%, height: 100%, fill: rgb(7, 8, 9, 100%))"),
+            "{code}"
+        );
+        assert!(
+            code.contains("rect(width: 100%, height: 100%, fill: rgb(1, 2, 3, 100%))"),
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn side_scoped_background_keeps_range_output_fail_closed() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        let base = IrColor {
+            red: 1,
+            green: 2,
+            blue: 3,
+            alpha: 1.0,
+        };
+        doc.metadata.document_state.page_background = Some(base.clone());
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                background: Some(base),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector: Some(IrPageFormatSelector {
+                    side: None,
+                    pages: Some(IrPageRange { start: 2, end: 4 }),
+                }),
+                background: Some(IrColor {
+                    red: 4,
+                    green: 5,
+                    blue: 6,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector: Some(IrPageFormatSelector {
+                    side: Some(IrPageSide::Left),
+                    pages: None,
+                }),
+                background: Some(IrColor {
+                    red: 7,
+                    green: 8,
+                    blue: 9,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(!code.contains("#set page(background: context {"), "{code}");
+        assert!(
+            code.contains("#set page(fill: rgb(1, 2, 3, 100%))"),
             "{code}"
         );
     }
