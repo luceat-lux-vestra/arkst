@@ -18,23 +18,26 @@ Arkst accepts Markdown and Quarkdown-compatible documents, evaluates supported p
 Markdown / Quarkdown-compatible source
         │
         ▼
-pinned Rushdown Markdown substrate
-+ Arkst Quarkdown frontend
+arkst-markdown + arkst-quarkdown
         │
         ▼
-backend-neutral IR
+frontend AST
         │
         ▼
-single evaluator
+arkst-engine
+semantic evaluation + bounded normalization
         │
         ▼
-Arkst Typst lowering
+normalized backend-neutral IR
+        │
+        ▼
+arkst-typst lowering
         │
         ▼
 generated Typst
         │
         ▼
-official Typst compiler
+official Typst backend
         │
         ▼
 PDF
@@ -147,13 +150,13 @@ Other raw HTML is preserved with source provenance but rejected at the document-
 | Bounded inline raw HTML | Implemented / partial by design |
 | General raw HTML semantics | Unsupported, fail-closed with `E8001` |
 | Quarkdown programmable semantics | Partial, verified in bounded families |
-| Quarkdown v2.5.1 complete compatibility | In progress |
+| Quarkdown v2.6.0 verified baseline | Promoted; overall compatibility remains partial |
 | Project-relative local images | Implemented within the bounded resource model |
 | Include/read/data loading | Partial |
-| HTML/SVG/PNG output | Not implemented |
+| HTML/SVG/PNG output | Not implemented; HTML architecture is under evaluation in [#320](https://github.com/luceat-lux-vestra/arkst/issues/320) |
 | Native `.typ` passthrough | Planned |
 | Watch/LSP | Planned |
-| WASM | Deferred |
+| WASM | Core/lowering buildability is enforced in CI; public bindings are deferred to M6 |
 
 No public Arkst release has shipped yet. The approved GitHub distribution contract currently targets the `arkst` CLI binary; crates.io/public `cargo install` and distributed WASM remain disabled. See [`docs/engineering/DISTRIBUTION_POLICY.md`](docs/engineering/DISTRIBUTION_POLICY.md).
 

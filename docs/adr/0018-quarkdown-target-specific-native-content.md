@@ -10,6 +10,17 @@
 - **Upstream baseline:** Quarkdown `v2.5.1`
 - **Resolved upstream tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 
+## Implementation status addendum — 2026-09-27
+
+This ADR's `arkst-html` references describe the accepted ADR-0015
+Markdown/foreign-HTML **input** boundary. That crate is not physically present
+on current `main`; existing bounded Markdown raw-HTML normalization is in
+`arkst-engine`, with extraction tracked by #469. This does not change the
+implemented `TargetSpecificContent(Html)` contract described here:
+Quarkdown `.html` remains separate from Markdown raw HTML and is silently
+omitted by the current Typst/PDF path. HTML output architecture remains future
+work under #320.
+
 ## Context
 
 > Historical context note: the state described in this section is the

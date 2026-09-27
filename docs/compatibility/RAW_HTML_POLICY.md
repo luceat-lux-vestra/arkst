@@ -15,6 +15,20 @@ This document separates four concepts that must not be conflated:
 
 Arkst uses the pinned Rushdown parser as its Markdown substrate. Rushdown may recognize a construct as raw HTML and expose it as an opaque source-backed node without giving Arkst a DOM, an element/attribute model, CSS semantics, or a portable meaning for non-HTML targets.
 
+## Current physical ownership
+
+On current `main`, `arkst-markdown` owns Rushdown-backed recognition and
+preservation of parser-owned raw-HTML syntax and provenance.
+`arkst-engine::ast_to_ir` owns the bounded semantic handling described by
+this policy: comment no-ops, the exact attribute-free inline whitelist mapped
+to existing IR semantics, and source-backed `E8001` for unsupported raw
+HTML.
+
+ADR-0015 reserves `arkst-html` as the target input-interoperability boundary,
+but that crate and its selected xberg dependency are not physically present
+yet; #469 tracks that extraction. HTML **output** is independent and remains
+under #320.
+
 ## Reference contracts
 
 ### CommonMark and GFM

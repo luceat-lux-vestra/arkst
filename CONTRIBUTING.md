@@ -4,7 +4,7 @@
 
 - Rust 1.98.0 for the pinned development/CI toolchain (`rust-toolchain.toml`)
 - Rust 1.92.0 is the workspace MSRV (`workspace.package.rust-version` in `Cargo.toml`)
-- Typst 0.15+ (optional for compile tests)
+- Typst 0.15.1 for authoritative backend parity/integration checks (ordinary Rust tests use environment-independent fixtures)
 - Git with conventional commits
 
 ## Quick Start

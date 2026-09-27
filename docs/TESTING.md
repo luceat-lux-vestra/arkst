@@ -197,6 +197,8 @@ structure and source spans; no automatic golden-update mode is provided.
 | compatibility | Markdown/Quarkdown differential campaign for relevant changes, explicit successful no-op otherwise | Merge |
 | msrv | `cargo +1.92.0 check --workspace --all-targets --all-features --locked` | Merge |
 | wasm | `cargo check --locked -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features` | Merge |
+| failure-triage | Exact-PR-revision failure-declaration metadata gate | Merge |
+| dependency-review | Diff-scoped GitHub dependency admission for newly introduced vulnerable dependencies and Actions references | Merge |
 
 The WASM build check ensures core + lowering crates remain compatible with
 browser deployment targets. It only checks that compilation passes — no WASM

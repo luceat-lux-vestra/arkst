@@ -4,9 +4,11 @@ This document describes the accepted target architecture defined by ADR-0014,
 ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, project, diagnostics,
 compatibility, Quarkdown, Markdown frontend, IR, engine, pure Typst lowering,
 and native Typst subprocess boundary crates are physically present. The
-remaining `arkst-core` role is orchestration and facade compatibility; R9
-physically removed the transitional `IrNode::RawTypst` escape hatch and
-resolved F-004.
+accepted ADR-0015 `arkst-html` input-interoperability boundary is the
+exception: it is a target crate/name and is **not** a current workspace member;
+#469 tracks its bounded physical extraction. The remaining `arkst-core` role
+is orchestration and facade compatibility; R9 physically removed the
+transitional `IrNode::RawTypst` escape hatch and resolved F-004.
 
 ## Context Diagram
 
@@ -30,9 +32,8 @@ arkst-cli
     |                    |
     |                    +---- arkst-engine
     |                               |
-    |                               +----> arkst-html
-    |                               |          |
-    |                               |          +---- HTML semantics / foreign content
+    |                               +---- bounded Markdown/raw-HTML semantics (current)
+    |                               |      target extraction: arkst-html (#469)
     |                               v
     |                         normalized IrDocument
     |                               |
@@ -60,7 +61,7 @@ Shared lower-level target crates:
   arkst-diagnostics  shared diagnostic representation
   arkst-compat       compatibility policy
   arkst-ir           backend-neutral document IR
-  arkst-html         HTML interoperability adapter
+  arkst-html         accepted target HTML input-interoperability adapter; not yet physical
 ```
 
 The shared lower-level crates are dependencies of the stages that use them;
@@ -94,9 +95,10 @@ Markdown frontend AST
   ▼
 arkst-engine: AST normalization
   │
-  ├── delegates raw HTML normalization to arkst-html
-  │     ├── structured xberg result → Arkst semantics
-  │     └── unsupported content → explicit foreign HTML content when needed
+  ├── current bounded Markdown raw-HTML handling
+  │     ├── exact safe semantic subset/comments → existing IR semantics
+  │     └── unsupported raw HTML → source-backed E8001
+  │     └── accepted target extraction → arkst-html (#469)
   │
   ▼
 initial IrDocument
@@ -224,8 +226,9 @@ Raw inline and block HTML recognized by Rushdown is preserved by
 original HTML content, its block or inline context, and its original
 `SourceSpan` in the frontend AST. It does not depend on xberg, convert HTML to
 Typst, generate synthetic Markdown, or recursively parse an HTML-to-Markdown
-string. HTML semantic normalization belongs to `arkst-engine`'s delegation
-to `arkst-html`.
+string. Current bounded HTML semantic normalization lives directly in
+`arkst-engine`; the accepted target delegation to `arkst-html` is tracked by
+#469.
 
 ADR-0017 records the pinned Rushdown revision and safety gate. The legacy
 first-party Markdown and Quarkdown parser modules were removed after the
@@ -245,7 +248,7 @@ Rushdown frontend migration completed. Markdown behavior belongs in
 | arkst-compat          | Quarkdown compatibility policy                                           | Yes  |
 | arkst-ir              | backend-neutral document IR                                              | Yes  |
 | arkst-engine          | AST→IR lowering, semantic/evaluation/normalization, built-ins            | Yes  |
-| arkst-html            | HTML fragment→backend-neutral Arkst semantics/IR adapter             | Yes  |
+| arkst-html *(target; not physical)* | HTML fragment→backend-neutral Arkst semantics/IR adapter             | Yes  |
 | arkst-core            | public facade and compiler orchestration                                 | Yes  |
 | arkst-typst           | pure IR→Typst lowering, source-map generation, and platform-neutral compiler contract | Yes  |
 | arkst-typst-subprocess | native Typst subprocess adapter                                          | No   |
@@ -253,7 +256,8 @@ Rushdown frontend migration completed. Markdown behavior belongs in
 | arkst-cli             | native host, filesystem/config/output composition                         | No   |
 | arkst-test-support    | fixtures/test utilities                                                   | No   |
 
-These are the physical architectural boundaries after R8. `arkst-source`,
+All rows above except the explicitly target-only `arkst-html` row are
+current physical architectural boundaries after R8. `arkst-source`,
 `arkst-project`, `arkst-diagnostics`, `arkst-compat`,
 `arkst-quarkdown`, `arkst-markdown`, `arkst-ir`, and
 `arkst-engine` own their extracted domains. `arkst-typst` owns only pure,
@@ -538,7 +542,7 @@ decision.
 
 | Edition | Scope | Status |
 |---------|-------|--------|
-| Compiler/library WASM | In-memory `VirtualProject` → frontend → engine (including `arkst-html` HTML normalization) → normalized IR → pure Typst lowering | Buildability/capability target; public resource binding not shipped |
+| Compiler/library WASM | In-memory `VirtualProject` → frontend → engine (including current bounded raw-HTML handling; target `arkst-html` extraction must preserve this) → normalized IR → pure Typst lowering | Buildability/capability target; public resource binding not shipped |
 | Full browser compile | Above + Typst compiler running in WASM → PDF/output | M7+ feasibility gate |
 
 The compiler/library WASM path describes `wasm32-unknown-unknown` buildability
@@ -693,119 +697,90 @@ not decide or implement that code migration; R9 is the reviewed follow-up.
 
 ## HTML Interoperability Policy
 
-`arkst-html` is the target first-party HTML interoperability boundary. It
-converts raw HTML fragments preserved by `arkst-markdown` into
-backend-neutral Arkst semantics/IR; it is not a renderer, a Typst-specific
-crate, or a generator of Typst source. HTML normalization occurs before
-rendering/backend code generation:
+Three distinct boundaries must not be conflated:
+
+1. Markdown raw-HTML syntax recognition and source preservation;
+2. backend-neutral semantic normalization of raw-HTML **input**; and
+3. HTML **output** rendering/artifact production.
+
+### Current physical implementation
+
+There is no `crates/arkst-html` workspace member on current `main`, and the
+workspace has no `html-to-markdown-rs`/xberg production dependency.
+
+The current path is:
 
 ```text
-Markdown / Quarkdown source
-        ↓
+Markdown source
+    ↓
 arkst-markdown
-        ↓ raw HTML content + block/inline context + original SourceSpan
-frontend AST
-        ↓
-arkst-engine
-        ↓ delegates HTML normalization
-arkst-html
-        ↓
+    ↓ parser-owned RawHtml + original source spans
+arkst-engine::ast_to_ir
+    ├── comment-only raw HTML → semantic no-op
+    ├── exact attribute-free em/strong/del/s/br → existing IR semantics
+    └── unsupported raw HTML → source-backed E8001
+    ↓
 backend-neutral Arkst IR
-        ↓
-arkst-typst
 ```
 
-The frontend recognizes CommonMark/Markdown syntax and preserves raw HTML
-syntax and provenance. It does not depend on xberg, convert HTML to Typst,
-reconstruct Markdown strings, or recursively parse synthetic Markdown. The
-engine invokes `arkst-html` for HTML requiring semantic normalization.
+`arkst-markdown` therefore owns syntax recognition/preservation, while
+`arkst-engine` currently owns this bounded semantic translation. This is an
+implementation-status statement, not a new architecture decision and not a
+general HTML parser/DOM contract.
 
-This HTML interoperability path is for parser-owned Markdown raw HTML and
-bounded foreign-content normalization. It does not recognize or implement the
-Quarkdown `.html` function. `.html {<em>x</em>}` is an evaluated Quarkdown
-function whose closed target-specific semantic representation and permission
-boundary are implemented under ADR-0018; its HTML output consumption remains a
-future backend concern and its intentional Typst/PDF omission is current
-behavior. Ordinary `<em>x</em>` in `.qd`/`.arkst` remains the source-backed
-`E8001` case in `RAW_HTML_POLICY.md`.
+### Accepted target input-interoperability boundary
 
-The Quarkdown `.html` payload does not pass through `arkst-html`. A future
-HTML output backend consumes `TargetSpecificContent(Html)` after backend
-selection; its physical crate/name is not frozen by ADR-0018. `arkst-html`
-remains the Markdown/foreign-HTML normalization boundary and is not an output
-renderer. This ADR does not create or rename a crate.
+ADR-0015 reserves `arkst-html` as the dedicated first-party HTML
+**input-interoperability** adapter. It remains the accepted target crate/name,
+but it is not physical today. [#469](https://github.com/luceat-lux-vestra/arkst/issues/469)
+owns the bounded extraction of the existing semantics without behavior
+widening. If implementation evidence shows that this target is no longer
+appropriate, an ADR addendum/supersession is required; documentation must not
+silently make the current engine placement permanent.
 
-The selected dependency is:
-
-```text
-Upstream project: xberg-io/html-to-markdown
-Cargo package:   html-to-markdown-rs
-```
-
-The Cargo package is isolated inside `arkst-html`. The adapter consumes its
-structured conversion result or equivalent structural API, including semantic
-document structure and visitor/customization facilities, and translates it
-directly into Arkst semantics. The architecture forbids an HTML → xberg
-Markdown string → `arkst-markdown` parser round-trip. xberg types do not
-cross the `arkst-html` public boundary.
-
-Supported HTML is mapped to existing backend-neutral concepts where the
-mapping is faithful, including concepts equivalent to paragraphs, headings,
-strong/emphasis, code, links, lists, tables, and line breaks. The supported-tag
-matrix and exact Rust API are deferred. When faithful normalization is not
-possible, the IR may represent foreign input content conceptually as:
-
-```text
-ForeignContent
-    format = Html
-    original content
-    original provenance/span
-```
-
-This is allowed for HTML input but does not introduce `RawTypst`, `BackendRaw`,
-or a generic backend-code escape hatch; those remain forbidden in
-backend-neutral IR. `arkst-typst` must handle unsupported foreign HTML
-explicitly according to the eventual compatibility/lowering policy. It must
-never paste HTML into Typst source, interpret HTML as Typst syntax, or silently
-discard it. The exact diagnostic code is not defined here.
-
-The original HTML fragment's `SourceSpan` remains authoritative. Child nodes
-produced by third-party normalization must not claim fabricated byte-precise
-spans when xberg offsets do not correspond to the original `.qd` source;
-fragment-level provenance is permitted until a later source-mapping enhancement.
-Mixed inline Markdown/HTML must preserve existing Markdown children and HTML
-provenance without guessed ranges. If faithful conversion is unavailable,
-foreign HTML and the appropriate compatibility/lowering diagnostic preserve the
-meaning.
-
-Target dependencies are:
+When that target boundary is physically realized, the intended dependency
+direction remains:
 
 ```text
 arkst-engine -> arkst-html
 arkst-html -> arkst-source
 arkst-html -> arkst-ir
 arkst-html -> arkst-diagnostics
-arkst-html -> html-to-markdown-rs  (implementation only)
 ```
 
-`arkst-html` must not depend on `arkst-engine`, `arkst-markdown`,
-`arkst-core`, `arkst-project`, `arkst-typst`, or
-`arkst-typst-subprocess`; only `arkst-html` may depend on the
-`html-to-markdown-rs` Cargo package. `arkst-markdown`, `arkst-engine`,
-`arkst-ir`, `arkst-core`, and `arkst-typst` must not directly depend
-on xberg. `arkst-html` is part of the WASM-compatible compiler path
-and must remain free of native filesystem, process, and network requirements.
+ADR-0015 selected `html-to-markdown-rs`/xberg for broader interoperability,
+but that dependency is not present today. It must not be added merely to make
+old architecture prose true; any introduction must be justified by a bounded
+input-interoperability slice with dependency, security, provenance, and WASM
+evidence. The target adapter is not a renderer and must not consume backend
+output responsibilities.
 
-Pandoc is an optional externally installed development/compatibility oracle,
-not a Arkst dependency. It may provide differential evidence, native
-AST/JSON comparisons, expected-output investigation, or compatibility
-fixtures. Pandoc behavior is reference evidence rather than the Arkst
-specification; accepted CommonMark, Quarkdown, and Arkst ADR contracts win
-when they conflict. Pandoc is not linked, vendored, required to build, needed
-for normal unit tests, used at runtime, or used as a production subprocess.
-Any future oracle tests must be isolated from the normal deterministic suite
-and use an explicitly controlled/pinned Pandoc version. Pandoc is not part of
-the WASM path.
+### Quarkdown target-specific `.html`
+
+Quarkdown `.html` is a separate language feature governed by ADR-0018. Its
+evaluated `TargetSpecificContent(Html)` representation and capability boundary
+do not pass through Markdown raw-HTML normalization. Current Typst/PDF output
+intentionally omits that target-specific payload according to the accepted
+compatibility contract.
+
+### HTML output
+
+Arkst has no HTML output backend today. HTML artifact architecture is owned by
+[#320](https://github.com/luceat-lux-vestra/arkst/issues/320), which evaluates
+the official Typst HTML target before Arkst accepts responsibility for any
+custom renderer. Output-target/result contract work is separately tracked by
+[#347](https://github.com/luceat-lux-vestra/arkst/issues/347).
+
+Consequently, neither the current `arkst-engine` raw-HTML input handling nor
+the future ADR-0015 `arkst-html` input adapter implies an
+`IrDocument -> HTML` renderer.
+
+### Development oracle
+
+Pandoc remains an optional externally installed development/compatibility
+oracle, not an Arkst runtime/build dependency or production subprocess.
+Reference behavior does not override CommonMark, Quarkdown compatibility
+policy, or accepted Arkst ADRs.
 
 ## Typst Backend Interface
 
@@ -950,7 +925,7 @@ installed Typst executable  typst::compile -> typst-pdf
 
 The CLI/host performs composition. `arkst-typst` must not depend on
 `arkst-project`, `arkst-core`, `arkst-engine`, Markdown or Quarkdown
-frontends, or `arkst-html`:
+frontends, or the target `arkst-html` boundary:
 
 ```text
 arkst-cli
@@ -1025,8 +1000,10 @@ problem owns construction and semantics:
 ```text
 syntax / Markdown parsing
     -> arkst-markdown
-HTML normalization
-    -> arkst-html
+bounded raw-HTML normalization (current)
+    -> arkst-engine
+accepted HTML input-interoperability extraction
+    -> arkst-html (target; not yet physical)
 semantic analysis / evaluation / normalization
     -> arkst-engine
 compatibility policy violations
@@ -1310,9 +1287,10 @@ Platform-independent compiler crates must:
 - enforce their own semantic/evaluation resource limits; and
 - preserve deterministic behavior for identical in-memory inputs and options.
 
-The HTML interoperability layer follows the same restrictions.
-`html-to-markdown-rs` usage inside `arkst-html` must not introduce
-filesystem, network, or process access. HTML normalization must not fetch
+The current bounded raw-HTML path in `arkst-engine` follows the same
+restrictions. If the accepted target `arkst-html` adapter and any
+`html-to-markdown-rs` dependency are physically introduced under #469, they
+must not introduce filesystem, network, or process access. HTML normalization must not fetch
 remote resources; an HTML element referring to a remote URL does not cause
 network I/O merely because the element exists.
 
@@ -1331,8 +1309,9 @@ The CLI/native host owns and enforces:
 
 These OS policies are not attributed to `arkst-core` or
 `arkst-project`. Once content is inside `VirtualProject`, compiler crates
-operate only on virtual or in-memory project data. `arkst-engine`,
-`arkst-markdown`, and `arkst-html` do not resolve OS paths.
+operate only on virtual or in-memory project data. `arkst-engine` and
+`arkst-markdown` do not resolve OS paths; the target `arkst-html` adapter
+must preserve the same restriction when extracted.
 
 ### Controlled Typst subprocess exception
 

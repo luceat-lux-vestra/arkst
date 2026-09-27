@@ -763,8 +763,11 @@ These builtin rows are canonical `PARTIAL` resource support, not complete
 Quarkdown compatibility. Their common logical resolver prerequisite completed
 under #188; native host ingestion completed under #298/#302, while upstream global-read behavior is an accepted fail-closed policy divergence recorded under completed #296/#300 and public WASM binding/parity is #191. The
 VirtualProject/ResourceProvider contract is a separate `SUPPORTED_SEMANTICS`
-row, and Typst source context is `PARTIAL` pending #187. See the cross-audit
-decision in [`RECONCILIATION.md`](compatibility/quarkdown/RECONCILIATION.md).
+row. Typst entry/source context remains `PARTIAL`, but the #187 strategy,
+#200 explicit-selection, and #201 parity chain is completed historical
+evidence rather than a pending blocker; public WASM parity remains owned by
+#191. See the cross-audit decision in
+[`RECONCILIATION.md`](compatibility/quarkdown/RECONCILIATION.md).
 
 See [`docs/compatibility/quarkdown/README.md`](compatibility/quarkdown/README.md),
 [`docs/compatibility/quarkdown/GAP_INVENTORY.md`](compatibility/quarkdown/GAP_INVENTORY.md),

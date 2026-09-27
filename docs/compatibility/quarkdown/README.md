@@ -7,6 +7,16 @@
 - **Compatibility target:** complete public-language/document-semantics compatibility
 - **Current verified compatibility:** partial; only evidence-backed matrix rows are claims
 
+### Current HTML ownership note
+
+The verified baseline is v2.6.0, while the repository still contains
+historical v2.5.1 evidence artifacts for unchanged semantic slices. Separately,
+the ADR-0015 `arkst-html` input-interoperability boundary is not yet a
+physical crate: current bounded Markdown raw-HTML normalization lives in
+`arkst-engine` and #469 tracks extraction. That input path does not consume
+Quarkdown `TargetSpecificContent(Html)`. HTML output remains unimplemented
+and its architecture is owned by #320.
+
 ## Scope
 
 This document defines Arkst's Quarkdown-compatible syntax and semantics.
@@ -521,8 +531,9 @@ The implemented representation is a closed backend-neutral target-specific
 content payload carrying `NativeTarget::Html`, the evaluated String, and its
 `SourceSpan`, with placement-preserving block and inline carriers. A future
 HTML output backend, whose physical crate/name is not frozen here, will emit the
-string verbatim. `arkst-html` continues to normalize Markdown/foreign HTML
-only and does not consume this payload. This is not a generic raw backend/MIME
+string verbatim. The accepted `arkst-html` target boundary remains an input-only concern and
+is not yet a physical crate; the current bounded Markdown/foreign-HTML path in
+`arkst-engine` does not consume this payload. This is not a generic raw backend/MIME
 mechanism.
 Ordinary `<em>x</em>` or `<!-- comment -->` in `.qd`/`.arkst` remains the
 separate source-language raw-HTML case and continues to fail closed with

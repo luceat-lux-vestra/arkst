@@ -6,6 +6,15 @@
 - **Related ADRs:** 0007, 0012, 0013, 0014, 0015
 - **Supersedes:** The compatibility-target and upstream-adoption portions of ADR-0007, ADR-0012, and ADR-0013
 
+## Implementation status addendum — 2026-09-27
+
+References below to HTML/xberg isolation behind `arkst-html` inherit the
+ADR-0015 **target** boundary. No physical `arkst-html` crate or xberg
+production dependency exists on current `main`; bounded Markdown raw-HTML
+semantic handling currently lives in `arkst-engine` and is tracked for
+physical extraction by #469. This does not change Quarkdown compatibility
+scope. HTML output remains a separate #320 decision.
+
 ## Context
 
 Arkst is an independent Quarkdown-compatible compiler and toolchain. Earlier

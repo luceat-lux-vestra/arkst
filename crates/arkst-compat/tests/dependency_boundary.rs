@@ -15,7 +15,6 @@ fn compatibility_manifest_has_no_production_dependencies() {
         "arkst-quarkdown",
         "arkst-engine",
         "arkst-ir",
-        "arkst-html",
         "arkst-typst",
         "arkst-cli",
     ] {

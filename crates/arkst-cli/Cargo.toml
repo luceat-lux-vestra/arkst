@@ -7,7 +7,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Arkst CLI — build, check, inspect, and watch commands"
+description = "Arkst CLI — build, check, and inspect commands"
 
 [features]
 default = []

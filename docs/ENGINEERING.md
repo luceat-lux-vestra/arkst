@@ -89,7 +89,9 @@ particular, implementation work must preserve:
 - no core → Typst dependency;
 - no `RawTypst`, `BackendRaw`, or generic backend-code escape hatch in the
   backend-neutral IR;
-- HTML/xberg isolation behind `arkst-html`;
+- separation of raw-HTML input interoperability from HTML output: the current
+  bounded raw-HTML normalization lives in `arkst-engine`, while ADR-0015
+  reserves the not-yet-physical `arkst-html` target boundary (#469);
 - Pandoc as an optional development/compatibility oracle only; and
 - host-owned filesystem, network, and process boundaries.
 
