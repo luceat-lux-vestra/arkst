@@ -335,7 +335,13 @@ the standard-size base on final `paged`/`slides` applicability, resolves the clo
 domain to physical millimeter geometry, uses the captured call-time document type only for
 an omitted-orientation basis, keeps an omitted `docs` basis fail-closed, and then applies
 explicit single-axis overrides independently. The current Typst/PDF global dimension path
-reuses this helper, while selector-aware renderer publication remains out of scope.
+reuses this helper, while selector-aware dimension publication remains out of scope.
+A bounded Typst/PDF background path now consumes ordered background layers when
+every background-bearing selector is global or a finite page range. It uses
+contextual page background content with physical 1-based `here().page()`, resolves
+overlapping ranges by source-order last-wins precedence, preserves a later global
+background as the fallback, and keeps any side-bearing background selector
+fail-closed rather than inferring page parity.
 The bounded evaluator now also admits selector-scoped mixed size+axis and
 single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
@@ -345,9 +351,9 @@ same-layer explicit width/height as per-axis overrides. Selector-free width-only
 ordered global state already supplies a concrete standard-size base; without that
 base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed; the
 `unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
-regression continues to pin that boundary. Selector-aware output, remaining
-selector-aware geometry/size/margin/decoration/columns output, the remaining
-page-border output outside the
+regression continues to pin that boundary. Selector-aware output outside the
+finite-range background subset, remaining selector-aware
+geometry/size/margin/border/columns output, the remaining page-border output outside the
 explicit-margin/width/color paged subset, and the remaining output consumption
 stay open, and Typst page objects must not enter evaluator/IR state. Status is
 conservatively `PARTIAL`
