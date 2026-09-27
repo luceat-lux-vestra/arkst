@@ -232,6 +232,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
     assert!(pageformat[10].contains("finite 1-based page ranges"));
+    assert!(pageformat[10].contains("left-open ranges normalized to page 1"));
+    assert!(pageformat[10]
+        .contains("left-open finite page ranges normalize the omitted start to page 1"));
+    assert!(pageformat[10].contains("page ranges without a finite end remain fail-closed"));
     assert!(pageformat[10].contains("must not mutate flattened global state"));
     assert!(pageformat[10].contains("state-only prerequisite evidence"));
     assert!(pageformat[10].contains("compose_applicable_page_dimensions"));

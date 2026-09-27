@@ -343,10 +343,72 @@ fn selector_scoped_size_is_retained_without_replacing_flattened_global_size() {
 }
 
 #[test]
+fn left_open_page_selector_normalizes_to_first_page_and_preserves_scope() {
+    let result = compile_source(
+        ".pageformat margin:{1cm}\n\
+         .pageformat side:{left} pages:{..2} margin:{2cm}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_format.layers.len(), 2);
+
+    let scoped = &state.page_format.layers[1];
+    let selector = scoped.selector.expect("selector");
+    assert_eq!(selector.side, Some(IrPageSide::Left));
+    let pages = selector.pages.expect("normalized page range");
+    assert_eq!((pages.start, pages.end), (1, 2));
+
+    let page_one_left = state
+        .page_format
+        .merge_applicable_fields_for_page(1, IrPageSide::Left)
+        .expect("left first-page fields");
+    assert_eq!(
+        page_one_left
+            .margin
+            .as_ref()
+            .expect("scoped margin")
+            .top
+            .value,
+        2.0
+    );
+
+    let page_one_right = state
+        .page_format
+        .merge_applicable_fields_for_page(1, IrPageSide::Right)
+        .expect("right first-page fields");
+    assert_eq!(
+        page_one_right
+            .margin
+            .as_ref()
+            .expect("global margin")
+            .top
+            .value,
+        1.0,
+        "combined side + left-open range must not leak across page sides"
+    );
+
+    let page_three_left = state
+        .page_format
+        .merge_applicable_fields_for_page(3, IrPageSide::Left)
+        .expect("left third-page fields");
+    assert_eq!(
+        page_three_left
+            .margin
+            .as_ref()
+            .expect("global margin")
+            .top
+            .value,
+        1.0,
+        "left-open selector must stop at its finite end"
+    );
+}
+
+#[test]
 fn invalid_or_unbounded_page_selectors_fail_before_layer_publication() {
     for invalid_selector in [
         "pages:{2..}",
-        "pages:{..2}",
+        "pages:{..}",
         "pages:{0..2}",
         "side:{diagonal}",
     ] {
