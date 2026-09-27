@@ -180,7 +180,10 @@ fn selector_free_single_axis_layers_require_existing_standard_size_base() {
         "single-axis layers must not fabricate legacy complete geometry"
     );
     assert_eq!(
-        state.page_size.expect("flattened standard-size fallback").format,
+        state
+            .page_size
+            .expect("flattened standard-size fallback")
+            .format,
         IrPageSizeFormat::A4
     );
 
