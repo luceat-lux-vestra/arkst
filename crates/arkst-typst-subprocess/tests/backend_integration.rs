@@ -395,6 +395,46 @@ Ordered dimensions output\n";
 }
 
 #[test]
+fn integration_pageformat_global_single_axis_uses_existing_standard_size_base() {
+    let source = ".doctype {paged}\n\
+.pageformat size:{a4} orientation:{portrait}\n\
+.pageformat width:{8in}\n\
+Single-axis dimensions output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-global-single-axis.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-global-single-axis.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat global single-axis diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(width: 8in, height: 297mm)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-global-single-axis", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-global-single-axis.qd".to_string(),
+            })
+            .expect("pageformat global single-axis Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf() {
     let source = ".doctype {paged}\n\
 .pageformat margin:{1cm 2cm 3cm 4cm}\n\

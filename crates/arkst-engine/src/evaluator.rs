@@ -6968,6 +6968,9 @@ impl Evaluator {
         let mixed_global_dimensions = selector.is_none()
             && page_size_format.is_some()
             && (width.is_some() || height.is_some());
+        let standalone_global_axis = selector.is_none()
+            && page_size_format.is_none()
+            && (width.is_some() != height.is_some());
         let page_size = page_size_format
             .flatten()
             .map(|format| IrPageSizeSelection {
@@ -6982,6 +6985,23 @@ impl Evaluator {
                 *span,
             ));
             return CallOutcome::Failed;
+        }
+        if standalone_global_axis {
+            let has_standard_size_base = context
+                .document_state
+                .borrow()
+                .page_format
+                .compose_global_page_dimensions()
+                .and_then(|dimensions| dimensions.size)
+                .is_some();
+            if !has_standard_size_base {
+                diagnostics.push(function_error(
+                    "`.pageformat` single-axis global composition requires an existing concrete standard-size base"
+                        .to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
         }
         let border_widths = if border_top.is_some()
             || border_right.is_some()
@@ -15357,6 +15377,12 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
         (page_size && !width && !height && !alignment && !columns && !margin)
             || (page_size && (width || height) && !alignment && !columns && !margin)
             || (width && height && !columns && !page_size && !orientation && !margin)
+            || ((width != height)
+                && !alignment
+                && !columns
+                && !page_size
+                && !orientation
+                && !margin)
             || (alignment && !width && !height && !columns && !page_size && !orientation && !margin)
             || (columns && !width && !height && !alignment && !page_size && !orientation && !margin)
             || (margin && !width && !height && !alignment && !columns && !page_size && !orientation)
