@@ -5,10 +5,7 @@
 //! by the clean-room v2.6 `focus` oracle in #328, then shifts the existing
 //! source-map ranges by the generated prelude length.
 
-use arkst_ir::{
-    IrComposedPageDimensions, IrDocument, IrDocumentType, IrPageOrientation, IrPageSizeFormat,
-    IrPageSizeSelection,
-};
+use arkst_ir::{IrComposedPageDimensions, IrDocument, IrDocumentType};
 use arkst_source::SourceMapEntry;
 
 use crate::lowering_base;
@@ -51,74 +48,14 @@ pub fn lower_to_typst_code(doc: &IrDocument) -> String {
 const SLIDES_PAGE_WIDTH_PT: f64 = 749.04;
 const SLIDES_PAGE_HEIGHT_PT: f64 = 546.0;
 
-fn standard_page_dimensions_mm(
-    selection: IrPageSizeSelection,
-    output_document_type: IrDocumentType,
-) -> Option<(&'static str, &'static str)> {
-    if !matches!(
-        output_document_type,
-        IrDocumentType::Paged | IrDocumentType::Slides
-    ) {
-        return None;
-    }
-
-    // Resolve the closed Quarkdown standard-size domain to physical bounds at
-    // the backend boundary. Keeping the dimensions explicit also covers B0,
-    // which has no Typst paper-name alias.
-    let portrait = match selection.format {
-        IrPageSizeFormat::A0 => ("841", "1189"),
-        IrPageSizeFormat::A1 => ("594", "841"),
-        IrPageSizeFormat::A2 => ("420", "594"),
-        IrPageSizeFormat::A3 => ("297", "420"),
-        IrPageSizeFormat::A4 => ("210", "297"),
-        IrPageSizeFormat::A5 => ("148", "210"),
-        IrPageSizeFormat::A6 => ("105", "148"),
-        IrPageSizeFormat::A7 => ("74", "105"),
-        IrPageSizeFormat::A8 => ("52", "74"),
-        IrPageSizeFormat::A9 => ("37", "52"),
-        IrPageSizeFormat::A10 => ("26", "37"),
-        IrPageSizeFormat::B0 => ("1000", "1414"),
-        IrPageSizeFormat::B1 => ("707", "1000"),
-        IrPageSizeFormat::B2 => ("500", "707"),
-        IrPageSizeFormat::B3 => ("353", "500"),
-        IrPageSizeFormat::B4 => ("250", "353"),
-        IrPageSizeFormat::B5 => ("176", "250"),
-        IrPageSizeFormat::Letter => ("215.9", "279.4"),
-        IrPageSizeFormat::Legal => ("215.9", "355.6"),
-        IrPageSizeFormat::Ledger => ("279.4", "431.8"),
-    };
-    let orientation = match selection.orientation {
-        Some(orientation) => orientation,
-        None => match selection.document_type {
-            IrDocumentType::Slides => IrPageOrientation::Landscape,
-            IrDocumentType::Plain | IrDocumentType::Paged => IrPageOrientation::Portrait,
-            IrDocumentType::Docs => return None,
-        },
-    };
-
-    Some(match orientation {
-        IrPageOrientation::Portrait => portrait,
-        IrPageOrientation::Landscape => (portrait.1, portrait.0),
-    })
-}
-
 fn lower_composed_page_dimensions(
     dimensions: &IrComposedPageDimensions,
     output_document_type: IrDocumentType,
 ) -> Option<(String, String)> {
-    let explicit_width = dimensions.width.as_ref().map(lowering_base::lower_size);
-    let explicit_height = dimensions.height.as_ref().map(lowering_base::lower_size);
-
-    if let (Some(width), Some(height)) = (explicit_width.as_ref(), explicit_height.as_ref()) {
-        return Some((width.clone(), height.clone()));
-    }
-
-    let (base_width, base_height) = dimensions
-        .size
-        .and_then(|selection| standard_page_dimensions_mm(selection, output_document_type))?;
+    let geometry = dimensions.resolve_concrete_page_geometry(output_document_type)?;
     Some((
-        explicit_width.unwrap_or_else(|| format!("{base_width}mm")),
-        explicit_height.unwrap_or_else(|| format!("{base_height}mm")),
+        lowering_base::lower_size(&geometry.width),
+        lowering_base::lower_size(&geometry.height),
     ))
 }
 
@@ -184,13 +121,13 @@ fn document_prelude(doc: &IrDocument) -> String {
             let width = lowering_base::lower_size(&geometry.width);
             let height = lowering_base::lower_size(&geometry.height);
             prelude.push_str(&format!("#set page(width: {width}, height: {height})\n"));
-        } else if let Some((width, height)) = state
+        } else if let Some(geometry) = state
             .page_size
-            .and_then(|selection| standard_page_dimensions_mm(selection, state.document_type))
+            .and_then(|selection| selection.resolve_standard_page_geometry(state.document_type))
         {
-            prelude.push_str(&format!(
-                "#set page(width: {width}mm, height: {height}mm)\n"
-            ));
+            let width = lowering_base::lower_size(&geometry.width);
+            let height = lowering_base::lower_size(&geometry.height);
+            prelude.push_str(&format!("#set page(width: {width}, height: {height})\n"));
         }
     }
 
@@ -362,18 +299,17 @@ mod tests {
         ];
 
         for (format, expected) in cases {
-            assert_eq!(
-                standard_page_dimensions_mm(
-                    IrPageSizeSelection {
-                        format,
-                        orientation: Some(IrPageOrientation::Portrait),
-                        document_type: IrDocumentType::Paged,
-                    },
-                    IrDocumentType::Paged,
-                ),
-                Some(expected),
-                "{format:?}"
-            );
+            let geometry = IrPageSizeSelection {
+                format,
+                orientation: Some(IrPageOrientation::Portrait),
+                document_type: IrDocumentType::Paged,
+            }
+            .resolve_standard_page_geometry(IrDocumentType::Paged)
+            .expect("standard page geometry");
+            assert_eq!(geometry.width.unit, IrSizeUnit::Mm, "{format:?}");
+            assert_eq!(geometry.height.unit, IrSizeUnit::Mm, "{format:?}");
+            assert_eq!(geometry.width.value.to_string(), expected.0, "{format:?}");
+            assert_eq!(geometry.height.value.to_string(), expected.1, "{format:?}");
         }
     }
 
@@ -435,9 +371,10 @@ mod tests {
             orientation: None,
             document_type: IrDocumentType::Docs,
         };
-        assert_eq!(
-            standard_page_dimensions_mm(selection, IrDocumentType::Paged),
-            None,
+        assert!(
+            selection
+                .resolve_standard_page_geometry(IrDocumentType::Paged)
+                .is_none(),
             "public evidence does not define an omitted docs orientation for this cross-doctype edge"
         );
     }
