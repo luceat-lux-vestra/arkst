@@ -390,20 +390,8 @@ fn selector_scoped_mixed_and_single_axis_dimensions_publish_state_only() {
     let mixed = &state.page_format.layers[2];
     let mixed_selector = mixed.selector.expect("mixed selector");
     assert_eq!(mixed_selector.side, Some(IrPageSide::Left));
-    assert_eq!(
-        mixed_selector
-            .pages
-            .expect("mixed finite range")
-            .start,
-        2
-    );
-    assert_eq!(
-        mixed_selector
-            .pages
-            .expect("mixed finite range")
-            .end,
-        4
-    );
+    assert_eq!(mixed_selector.pages.expect("mixed finite range").start, 2);
+    assert_eq!(mixed_selector.pages.expect("mixed finite range").end, 4);
     let mixed_size = mixed.size.expect("mixed size");
     assert_eq!(mixed_size.format, IrPageSizeFormat::Letter);
     assert_eq!(mixed_size.orientation, Some(IrPageOrientation::Landscape));
@@ -428,9 +416,18 @@ fn selector_scoped_mixed_and_single_axis_dimensions_publish_state_only() {
         IrPageSizeFormat::A4,
         "selector-scoped mixed dimensions must not leak into flattened page size"
     );
-    let geometry = state.page_geometry.as_ref().expect("flattened global geometry");
-    assert_eq!((geometry.width.value, geometry.width.unit), (10.0, IrSizeUnit::In));
-    assert_eq!((geometry.height.value, geometry.height.unit), (5.0, IrSizeUnit::In));
+    let geometry = state
+        .page_geometry
+        .as_ref()
+        .expect("flattened global geometry");
+    assert_eq!(
+        (geometry.width.value, geometry.width.unit),
+        (10.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (geometry.height.value, geometry.height.unit),
+        (5.0, IrSizeUnit::In)
+    );
 
     let left = state
         .page_format
@@ -457,8 +454,14 @@ fn selector_scoped_mixed_and_single_axis_dimensions_publish_state_only() {
     );
     let right_width = right.width.as_ref().expect("inherited global width");
     let right_height = right.height.as_ref().expect("scoped height override");
-    assert_eq!((right_width.value, right_width.unit), (10.0, IrSizeUnit::In));
-    assert_eq!((right_height.value, right_height.unit), (6.0, IrSizeUnit::In));
+    assert_eq!(
+        (right_width.value, right_width.unit),
+        (10.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (right_height.value, right_height.unit),
+        (6.0, IrSizeUnit::In)
+    );
 }
 
 #[test]
