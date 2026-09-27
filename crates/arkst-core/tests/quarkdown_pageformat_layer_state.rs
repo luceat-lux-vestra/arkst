@@ -262,6 +262,61 @@ fn selector_scoped_margin_retains_side_and_pages_without_flattening_global_state
 }
 
 #[test]
+fn selector_scoped_columns_publish_ordered_state_without_flattening_global_columns() {
+    let result = compile_source(
+        ".pageformat columns:{2}\n\
+         .pageformat side:{left} pages:{2..4} columns:{3}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_columns, Some(2));
+    assert_eq!(state.page_format.layers.len(), 2);
+
+    let scoped = &state.page_format.layers[1];
+    let selector = scoped.selector.expect("selector");
+    assert_eq!(selector.side, Some(IrPageSide::Left));
+    let pages = selector.pages.expect("finite page range");
+    assert_eq!((pages.start, pages.end), (2, 4));
+    assert_eq!(scoped.columns, Some(3));
+
+    let left_page_three = state
+        .page_format
+        .merge_applicable_fields_for_page(3, IrPageSide::Left)
+        .expect("left page fields");
+    assert_eq!(left_page_three.columns, Some(3));
+
+    let right_page_three = state
+        .page_format
+        .merge_applicable_fields_for_page(3, IrPageSide::Right)
+        .expect("right page fields");
+    assert_eq!(
+        right_page_three.columns,
+        Some(2),
+        "selector-scoped columns must not apply outside their selector"
+    );
+
+    let non_positive = compile_source(
+        ".pageformat columns:{2}\n\
+         .pageformat side:{left} columns:{0}\n",
+    );
+    assert!(non_positive.diagnostics.is_empty(), "{non_positive:?}");
+    let non_positive_state = &non_positive.ir.metadata.document_state;
+    assert_eq!(non_positive_state.page_columns, Some(2));
+    assert_eq!(non_positive_state.page_format.layers.len(), 2);
+    assert!(non_positive_state.page_format.layers[1].columns.is_none());
+    assert_eq!(
+        non_positive_state
+            .page_format
+            .merge_applicable_fields_for_page(1, IrPageSide::Left)
+            .expect("left page fields")
+            .columns,
+        Some(2),
+        "non-positive scoped columns must not erase the inherited global value"
+    );
+}
+
+#[test]
 fn selector_scoped_size_is_retained_without_replacing_flattened_global_size() {
     let result = compile_source(
         ".pageformat size:{a4}\n\
