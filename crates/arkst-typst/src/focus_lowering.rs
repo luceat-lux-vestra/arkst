@@ -59,17 +59,122 @@ fn lower_composed_page_dimensions(
     ))
 }
 
+fn page_range_expression(values: Vec<(Option<(i32, i32)>, String)>) -> String {
+    let mut branches = Vec::new();
+    let mut fallback = "none".to_string();
+
+    for (pages, value) in values.into_iter().rev() {
+        if let Some((start, end)) = pages {
+            branches.push((
+                format!("__arkst_page >= {start} and __arkst_page <= {end}"),
+                value,
+            ));
+        } else {
+            fallback = value;
+            break;
+        }
+    }
+
+    let mut expression = fallback;
+    for (condition, value) in branches.into_iter().rev() {
+        expression = format!("if {condition} {{ {value} }} else {{ {expression} }}");
+    }
+    expression
+}
+
+fn lower_page_margins_value(margin: &arkst_ir::IrPageMargins) -> String {
+    let top = lowering_base::lower_size(&margin.top);
+    let right = lowering_base::lower_size(&margin.right);
+    let bottom = lowering_base::lower_size(&margin.bottom);
+    let left = lowering_base::lower_size(&margin.left);
+    format!("(top: {top}, right: {right}, bottom: {bottom}, left: {left})")
+}
+
+fn lower_page_border_widths_value(widths: &arkst_ir::IrPageBorderWidths) -> String {
+    let top = lowering_base::lower_size(&widths.top);
+    let right = lowering_base::lower_size(&widths.right);
+    let bottom = lowering_base::lower_size(&widths.bottom);
+    let left = lowering_base::lower_size(&widths.left);
+    format!("(top: {top}, right: {right}, bottom: {bottom}, left: {left})")
+}
+
 fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     let state = &doc.metadata.document_state;
     if state.document_type != IrDocumentType::Paged {
         return None;
     }
 
+    let mut margins = Vec::new();
+    let mut widths = Vec::new();
+    let mut colors = Vec::new();
+    let mut saw_range = false;
+
+    for layer in &state.page_format.layers {
+        if layer.margin.is_none() && layer.border_widths.is_none() && layer.border_color.is_none() {
+            continue;
+        }
+
+        let pages = match layer.selector {
+            None => None,
+            Some(selector) if selector.side.is_none() => selector.pages.map(|pages| {
+                saw_range = true;
+                (pages.start, pages.end)
+            }),
+            Some(_) => return None,
+        };
+
+        if let Some(margin) = layer.margin.as_ref() {
+            margins.push((pages, lower_page_margins_value(margin)));
+        }
+        if let Some(border_widths) = layer.border_widths.as_ref() {
+            widths.push((pages, lower_page_border_widths_value(border_widths)));
+        }
+        if let Some(color) = layer.border_color.as_ref() {
+            colors.push((pages, lowering_base::lower_color(color)));
+        }
+    }
+
+    if saw_range {
+        let margin = page_range_expression(margins);
+        let widths = page_range_expression(widths);
+        let color = page_range_expression(colors);
+
+        return Some(format!(
+            "#set page(foreground: context {{\n\
+  let __arkst_page = here().page()\n\
+  let __arkst_margin = {margin}\n\
+  let __arkst_border_widths = {widths}\n\
+  let __arkst_border_color = {color}\n\
+  if __arkst_margin == none or __arkst_border_widths == none or __arkst_border_color == none {{\n\
+    none\n\
+  }} else {{\n\
+    place(\n\
+      top + left,\n\
+      dx: __arkst_margin.left,\n\
+      dy: __arkst_margin.top,\n\
+      rect(\n\
+        width: (100% - __arkst_margin.left - __arkst_margin.right),\n\
+        height: (100% - __arkst_margin.top - __arkst_margin.bottom),\n\
+        stroke: (\n\
+          top: (paint: __arkst_border_color, thickness: __arkst_border_widths.top),\n\
+          right: (paint: __arkst_border_color, thickness: __arkst_border_widths.right),\n\
+          bottom: (paint: __arkst_border_color, thickness: __arkst_border_widths.bottom),\n\
+          left: (paint: __arkst_border_color, thickness: __arkst_border_widths.left),\n\
+        ),\n\
+        inset: 0pt,\n\
+      ),\n\
+    )\n\
+  }}\n\
+}})\n"
+        ));
+    }
+
     // Typst's page element has no stroke parameter. The bounded selector-free
     // border path therefore uses page foreground coordinates, but only when
     // every value needed to locate and paint the content-area rectangle is
     // explicit. Missing margin, width, or color stays fail-closed rather than
-    // inventing renderer defaults.
+    // inventing renderer defaults. Legacy/deserialized IR without ordered
+    // page-format layers keeps this existing flattened-state fallback.
     let margin = state.page_margin.as_ref()?;
     let widths = state.page_border_widths.as_ref()?;
     let color = state.page_border_color.as_ref()?;
@@ -653,6 +758,194 @@ mod tests {
         doc.metadata.document_state.page_margin = Some(margins);
         doc.metadata.document_state.document_type = IrDocumentType::Slides;
         assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
+    }
+
+    #[test]
+    fn finite_page_range_border_uses_physical_page_context_and_field_inheritance() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        let margin = IrPageMargins {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 2.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 3.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 4.0,
+                unit: IrSizeUnit::Pt,
+            },
+        };
+        let widths = IrPageBorderWidths {
+            top: IrSize {
+                value: 5.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 6.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 7.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 8.0,
+                unit: IrSizeUnit::Pt,
+            },
+        };
+        let base_color = IrColor {
+            red: 10,
+            green: 20,
+            blue: 30,
+            alpha: 1.0,
+        };
+        doc.metadata.document_state.page_margin = Some(margin.clone());
+        doc.metadata.document_state.page_border_widths = Some(widths.clone());
+        doc.metadata.document_state.page_border_color = Some(base_color.clone());
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                margin: Some(margin),
+                border_widths: Some(widths),
+                border_color: Some(base_color),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector: Some(IrPageFormatSelector {
+                    side: None,
+                    pages: Some(IrPageRange { start: 2, end: 4 }),
+                }),
+                border_color: Some(IrColor {
+                    red: 200,
+                    green: 10,
+                    blue: 20,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector: Some(IrPageFormatSelector {
+                    side: None,
+                    pages: Some(IrPageRange { start: 3, end: 3 }),
+                }),
+                margin: Some(IrPageMargins {
+                    top: IrSize {
+                        value: 9.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    right: IrSize {
+                        value: 2.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    bottom: IrSize {
+                        value: 3.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    left: IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                }),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(code.contains("#set page(foreground: context {"), "{code}");
+        assert!(code.contains("let __arkst_page = here().page()"), "{code}");
+        assert!(
+            code.contains("let __arkst_border_color = if __arkst_page >= 2 and __arkst_page <= 4"),
+            "{code}"
+        );
+        assert!(
+            code.contains("let __arkst_margin = if __arkst_page >= 3 and __arkst_page <= 3"),
+            "{code}"
+        );
+        assert!(code.contains("else { rgb(10, 20, 30, 100%) }"), "{code}");
+        assert!(
+            code.contains("thickness: __arkst_border_widths.top"),
+            "{code}"
+        );
+        assert!(!code.contains("#set page(foreground: place("), "{code}");
+    }
+
+    #[test]
+    fn side_scoped_border_keeps_output_fail_closed_without_parity_inference() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        let margin = IrPageMargins {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+        };
+        let widths = IrPageBorderWidths {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+        };
+        let color = IrColor {
+            red: 1,
+            green: 2,
+            blue: 3,
+            alpha: 1.0,
+        };
+        doc.metadata.document_state.page_margin = Some(margin.clone());
+        doc.metadata.document_state.page_border_widths = Some(widths.clone());
+        doc.metadata.document_state.page_border_color = Some(color.clone());
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                margin: Some(margin),
+                border_widths: Some(widths),
+                border_color: Some(color),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector: Some(IrPageFormatSelector {
+                    side: Some(IrPageSide::Left),
+                    pages: None,
+                }),
+                border_color: Some(IrColor {
+                    red: 200,
+                    green: 10,
+                    blue: 20,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(!code.contains("page(foreground:"), "{code}");
     }
 
     #[test]
