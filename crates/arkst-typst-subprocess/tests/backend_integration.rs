@@ -519,7 +519,6 @@ fn integration_pageformat_background_lowers_to_valid_typst_and_pdf() {
     });
 }
 
-
 #[test]
 fn integration_pageformat_range_background_lowers_to_valid_typst_and_pdf() {
     let source = ".doctype {paged}\n\

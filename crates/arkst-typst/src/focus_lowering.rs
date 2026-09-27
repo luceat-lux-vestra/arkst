@@ -672,7 +672,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn finite_page_range_background_uses_physical_page_context_and_source_precedence() {
         let mut doc = document(IrDocumentType::Paged, None, None);
