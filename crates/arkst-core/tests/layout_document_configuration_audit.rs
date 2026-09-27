@@ -234,7 +234,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("omitted docs basis remains fail-closed"));
     assert!(pageformat[10].contains("remaining page-border output"));
     assert!(pageformat[10]
-        .contains("selector-aware geometry/size/margin/decoration/columns output/composition"));
+        .contains("selector-aware geometry/size/margin/border/columns output/composition"));
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
     assert!(pageformat[10].contains("finite 1-based page ranges"));
