@@ -245,8 +245,7 @@ page-format layer snapshot that preserves successful bounded mutations in
 source order. The snapshot now carries a bounded selector identity for typed `left`/`right` page-side selectors and finite 1-based inclusive page ranges
 when both endpoints are explicit; the two selector dimensions may be combined.
 Selector-scoped positive columns are now retained in the ordered layer state as
-bounded state-only evidence. Scoped selector layers must not leak into the
-flattened global fields consumed by current renderers. Geometry/alignment,
+bounded state-only evidence. Scoped selector layers are state-only and must not leak into the flattened global fields consumed by current renderers. Geometry/alignment,
 selector-free global margins, global positive columns, selector-free global
 background, and the bounded standard-size selection have current Typst/PDF
 consumers, while row/column alignment inheritance remains unchanged;
