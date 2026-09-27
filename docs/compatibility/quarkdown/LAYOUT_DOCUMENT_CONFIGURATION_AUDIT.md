@@ -325,9 +325,18 @@ renderer support. A bounded `resolve_applicable_page_format` helper now folds th
 same applicable source order once into a resolved explicit-page snapshot: dimensions
 use that standard-size-reset/per-axis composition rule, while alignment, columns,
 margin, border widths/color, and background use the existing later-non-null field
-inheritance. The snapshot carries no selector identity, inferred page parity, physical
-dimension resolution, or renderer-specific state, so it remains backend-neutral
-prerequisite evidence rather than selector-aware output support. The bounded evaluator now also admits selector-scoped mixed size+axis and
+inheritance. The snapshot carries no selector identity, inferred page parity, eagerly
+materialized physical dimensions, or renderer-specific state, so it remains backend-neutral
+prerequisite evidence rather than selector-aware output support. Its composed dimensions can
+now be passed to the bounded backend-neutral
+`IrComposedPageDimensions::resolve_concrete_page_geometry` helper. A complete explicit
+width+height pair remains concrete for any output document type; otherwise the helper gates
+the standard-size base on final `paged`/`slides` applicability, resolves the closed paper
+domain to physical millimeter geometry, uses the captured call-time document type only for
+an omitted-orientation basis, keeps an omitted `docs` basis fail-closed, and then applies
+explicit single-axis overrides independently. The current Typst/PDF global dimension path
+reuses this helper, while selector-aware renderer publication remains out of scope.
+The bounded evaluator now also admits selector-scoped mixed size+axis and
 single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
 mixed calls are now admitted only when they carry a concrete standard-size base,
