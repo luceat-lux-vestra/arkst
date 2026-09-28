@@ -38,7 +38,7 @@ class Trigger:
 class Job:
     job_id: str
     name: str
-    has_if: bool = False
+    if_expression: str | None = None
     matrix: dict[str, list[str]] = field(default_factory=dict)
 
 
@@ -224,7 +224,7 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
             end += 1
         block = lines[idx + 1 : end]
         name = job_id
-        has_if = False
+        if_expression: str | None = None
         matrix: dict[str, list[str]] = {}
         matrix_indent = None
         for block_raw in block:
@@ -237,8 +237,9 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
                 name_match = re.match(r"^\s{4}name:\s*(.+)$", block_clean)
                 if name_match:
                     name = _scalar(name_match.group(1))
-                if re.match(r"^\s{4}if:\s*", block_clean):
-                    has_if = True
+                if_match = re.match(r"^\s{4}if:\s*(.+)$", block_clean)
+                if if_match:
+                    if_expression = _scalar(if_match.group(1))
             if re.match(r"^\s{6}matrix:\s*$", block_clean):
                 matrix_indent = 6
                 continue
@@ -254,7 +255,12 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
                         values = _inline_list(axis_match.group(2))
                         if values is not None:
                             matrix[axis_match.group(1)] = values
-        jobs[job_id] = Job(job_id=job_id, name=name, has_if=has_if, matrix=matrix)
+        jobs[job_id] = Job(
+            job_id=job_id,
+            name=name,
+            if_expression=if_expression,
+            matrix=matrix,
+        )
         idx = end
 
     return Workflow(path=rel, triggers=triggers, jobs=jobs)
@@ -390,9 +396,10 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
                         "opened/reopened/synchronize/ready_for_review when pull_request "
                         "types are declared"
                     )
-            if job.has_if:
+            if job.if_expression not in {None, "${{ always() }}"}:
                 raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} has a job-level if condition"
+                    f"required producer {key[0]}#{key[1]} has an unsafe job-level if "
+                    f"condition: {job.if_expression!r}"
                 )
 
     if ruleset is not None:
