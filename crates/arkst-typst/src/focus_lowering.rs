@@ -263,7 +263,28 @@ fn scoped_page_background(doc: &IrDocument) -> Option<String> {
     ))
 }
 
+const UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-scoped page size/width/height/columns to Typst without pagination-aware page setup\")\n";
+
+fn has_unsupported_scoped_page_layout(doc: &IrDocument) -> bool {
+    doc.metadata.document_state.page_format.layers.iter().any(|layer| {
+        let scoped = matches!(
+            layer.selector,
+            Some(selector) if selector.side.is_some() || selector.pages.is_some()
+        );
+        scoped
+            && (layer.size.is_some()
+                || layer.width.is_some()
+                || layer.height.is_some()
+                || layer.columns.is_some())
+    })
+}
+
 fn document_prelude(doc: &IrDocument) -> String {
+    if has_unsupported_scoped_page_layout(doc) {
+        return UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE.to_string();
+    }
+
     let state = &doc.metadata.document_state;
     let mut prelude = String::new();
     let global_dimensions = state.page_format.compose_global_page_dimensions();
@@ -1094,6 +1115,59 @@ mod tests {
         assert!(code.contains("calc.even(__arkst_page)"), "{code}");
         assert!(code.contains("fill: rgb(7, 8, 9, 100%)"), "{code}");
         assert!(code.contains("fill: rgb(1, 2, 3, 100%)"), "{code}");
+    }
+
+    #[test]
+    fn selector_scoped_page_dimensions_and_columns_fail_closed_before_page_setup() {
+        let selector = Some(IrPageFormatSelector {
+            side: Some(IrPageSide::Left),
+            pages: Some(IrPageRange { start: 2, end: 4 }),
+        });
+        let size = IrSize {
+            value: 10.0,
+            unit: IrSizeUnit::Cm,
+        };
+        let standard_size = IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Portrait),
+            document_type: IrDocumentType::Paged,
+        };
+
+        let cases = [
+            IrPageFormatLayer {
+                selector,
+                width: Some(size.clone()),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector,
+                height: Some(size),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector,
+                columns: Some(2),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector,
+                size: Some(standard_size),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        for layer in cases {
+            let mut doc = document(IrDocumentType::Paged, None, None);
+            doc.metadata.document_state.page_format.layers = vec![layer];
+
+            let code = lower_to_typst_code(&doc);
+            assert!(
+                code.starts_with(UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE),
+                "{code}"
+            );
+            assert!(!code.contains("#set page(width:"), "{code}");
+            assert!(!code.contains("#set page(columns:"), "{code}");
+        }
     }
 
     #[test]
