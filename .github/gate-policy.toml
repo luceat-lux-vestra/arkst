@@ -4,6 +4,18 @@ schema = 1
 name = "Protect main"
 required_check_integration_id = 15368
 
+[docs_only_fast_path]
+exact_paths = [
+  "README.md",
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "CODE_OF_CONDUCT.md",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+]
+markdown_prefixes = ["docs/"]
+excluded_prefixes = ["docs/legal/"]
+
 [compatibility_scope]
 # First-match policy: `run` is evaluated before `skip`. New, unmatched path
 # classes fail closed until this registry is updated deliberately.
@@ -36,6 +48,14 @@ skip = [
   "LICENSE",
   "NOTICE",
 ]
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "scope"
+classification = "advisory"
+contexts = ["docs-only-scope"]
+always_present = true
+rationale = "Trusted-base changed-file classifier shared by required CI jobs; any uncertainty falls back to full validation."
 
 [[producer]]
 workflow = ".github/workflows/ci.yml"
