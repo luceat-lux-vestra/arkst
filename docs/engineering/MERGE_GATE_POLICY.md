@@ -24,6 +24,37 @@ The machine-readable authority is `.github/gate-policy.toml`. The live ruleset
 must remain strict and contain exactly this set. Required contexts must be produced
 on every pull request; top-level path filters and job-level `if` conditions are rejected for required producers. A required workflow may leave `pull_request` types implicit, or it may declare exactly `opened`, `reopened`, `synchronize`, and `ready_for_review` so a Draft-to-Ready transition re-runs the complete final gate on the same candidate HEAD. Draft PRs may keep an always-present required context lightweight by deferring expensive internal steps, but Ready PRs must execute the complete authoritative steps. The required `license`/cargo-deny authority remains unconditional even during Draft development.
 
+## Documentation-only fast path
+
+The canonical allowlist lives in `.github/gate-policy.toml` under
+`[docs_only_fast_path]`. A pull request may skip heavy product/toolchain work
+only when a classifier loaded from the trusted base revision proves that the
+complete changed-file set is confined to:
+
+- `README.md`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `CODE_OF_CONDUCT.md`
+- `CONTRIBUTING.md`
+- `SECURITY.md`
+- Markdown files under `docs/`, except `docs/legal/`
+
+The classifier validates the PR-reported changed-file count, every file status,
+rename/copy provenance, path normalization, and the trusted-base policy itself.
+Missing classifier/policy data, malformed API output, unknown statuses, mixed
+scope, duplicate records, count mismatch, or any non-allowlisted path falls
+back to full validation. Workflow/policy changes cannot authorize their own
+fast path because both classifier code and allowlist are loaded from the base
+revision and `.github/**` is outside the allowlist.
+
+Required status contexts remain always present. The Rust-heavy CI jobs, MSRV,
+and Dependency Review emit explicit successful fast-path steps instead of
+running product/toolchain work when the trusted-base result is true.
+`compatibility` keeps its existing independent fail-closed scope decision, so
+compatibility-relevant documentation can still run the full compatibility
+campaign. `docs/legal/` is deliberately excluded because legal/provenance
+changes must continue through the license/provenance gate.
+
 ## Complementary required supply-chain controls
 
 `dependency-review` is required because it provides diff-scoped admission for newly introduced dependency changes, including GitHub Actions references represented by GitHub's dependency graph. The required `license` job remains independently authoritative for the resulting Rust dependency graph through unconditional full-graph `cargo deny check --all-features`. Neither gate substitutes for the other.
