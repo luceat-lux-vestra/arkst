@@ -261,7 +261,7 @@ class CargoGraphOwnershipTests(unittest.TestCase):
         )
         content = content.replace(
             f"      - uses: {ACTION}\n",
-            f"      - uses: {ACTION}\\n        if: {DOCS_ONLY_STEP_GUARD}\\n",
+            f"      - uses: {ACTION}\n        if: {DOCS_ONLY_STEP_GUARD}\n",
         )
         path.write_text(content, encoding="utf-8")
         mod.verify_repository(root)
@@ -291,7 +291,7 @@ class CargoGraphOwnershipTests(unittest.TestCase):
         )
         content = content.replace(
             f"      - uses: {ACTION}\n",
-            f"      - uses: {ACTION}\\n        if: {DOCS_ONLY_STEP_GUARD}\\n",
+            f"      - uses: {ACTION}\n        if: {DOCS_ONLY_STEP_GUARD}\n",
         )
         content = content.replace(
             DOCS_ONLY_STEP_GUARD,
