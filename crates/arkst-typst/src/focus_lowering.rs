@@ -448,9 +448,7 @@ mod tests {
                 side: Some(IrPageSide::Right),
                 pages: Some(IrPageRange { start: 2, end: 5 }),
             }),
-            Some(
-                "calc.odd(__arkst_page) and __arkst_page >= 2 and __arkst_page <= 5".to_string()
-            )
+            Some("calc.odd(__arkst_page) and __arkst_page >= 2 and __arkst_page <= 5".to_string())
         );
     }
 

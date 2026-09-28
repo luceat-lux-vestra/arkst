@@ -664,12 +664,20 @@ Second page\n";
     );
 
     let typst_code = lower_to_typst_code(&result.ir);
-    let combined =
-        "calc.even(__arkst_page) and __arkst_page >= 2 and __arkst_page <= 2";
+    let combined = "calc.even(__arkst_page) and __arkst_page >= 2 and __arkst_page <= 2";
     assert!(typst_code.contains(combined), "{typst_code}");
-    assert!(typst_code.contains("#set page(background: context {"), "{typst_code}");
-    assert!(typst_code.contains("#set page(foreground: context {"), "{typst_code}");
-    assert!(typst_code.contains("fill: rgb(255, 0, 0, 100%)"), "{typst_code}");
+    assert!(
+        typst_code.contains("#set page(background: context {"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("#set page(foreground: context {"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("fill: rgb(255, 0, 0, 100%)"),
+        "{typst_code}"
+    );
     assert!(typst_code.contains("rgb(0, 128, 0, 100%)"), "{typst_code}");
 
     with_typst("pageformat-side-decoration", |backend| {
