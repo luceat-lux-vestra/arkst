@@ -27,9 +27,11 @@ on every pull request; top-level path filters are rejected for required producer
 ## Documentation-only fast path
 
 The canonical allowlist lives in `.github/gate-policy.toml` under
-`[docs_only_fast_path]`. A pull request may skip heavy product/toolchain work
-only when a classifier loaded from the trusted base revision proves that the
-complete changed-file set is confined to:
+`[docs_only_fast_path]`. The allowlist is intentionally closed: a new
+repository-root Markdown file is **not** eligible merely because it ends in
+`.md`; root files must be named explicitly in `exact_paths`. A pull request
+may skip heavy product/toolchain work only when a classifier loaded from the
+trusted base revision proves that the complete changed-file set is confined to:
 
 - `README.md`
 - `AGENTS.md`
