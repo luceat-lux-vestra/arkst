@@ -5,7 +5,9 @@
 //! by the clean-room v2.6 `focus` oracle in #328, then shifts the existing
 //! source-map ranges by the generated prelude length.
 
-use arkst_ir::{IrComposedPageDimensions, IrDocument, IrDocumentType};
+use arkst_ir::{
+    IrComposedPageDimensions, IrDocument, IrDocumentType, IrPageFormatSelector, IrPageSide,
+};
 use arkst_source::SourceMapEntry;
 
 use crate::lowering_base;
@@ -59,16 +61,30 @@ fn lower_composed_page_dimensions(
     ))
 }
 
-fn page_range_expression(values: Vec<(Option<(i32, i32)>, String)>) -> String {
+fn page_selector_condition(selector: IrPageFormatSelector) -> Option<String> {
+    let mut conditions = Vec::new();
+    if let Some(side) = selector.side {
+        conditions.push(match side {
+            IrPageSide::Left => "calc.even(__arkst_page)".to_string(),
+            IrPageSide::Right => "calc.odd(__arkst_page)".to_string(),
+        });
+    }
+    if let Some(pages) = selector.pages {
+        conditions.push(format!(
+            "__arkst_page >= {} and __arkst_page <= {}",
+            pages.start, pages.end
+        ));
+    }
+    (!conditions.is_empty()).then(|| conditions.join(" and "))
+}
+
+fn page_selector_expression(values: Vec<(Option<IrPageFormatSelector>, String)>) -> String {
     let mut branches = Vec::new();
     let mut fallback = "none".to_string();
 
-    for (pages, value) in values.into_iter().rev() {
-        if let Some((start, end)) = pages {
-            branches.push((
-                format!("__arkst_page >= {start} and __arkst_page <= {end}"),
-                value,
-            ));
+    for (selector, value) in values.into_iter().rev() {
+        if let Some(condition) = selector.and_then(page_selector_condition) {
+            branches.push((condition, value));
         } else {
             fallback = value;
             break;
@@ -107,37 +123,37 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     let mut margins = Vec::new();
     let mut widths = Vec::new();
     let mut colors = Vec::new();
-    let mut saw_range = false;
+    let mut saw_scoped_selector = false;
 
     for layer in &state.page_format.layers {
         if layer.margin.is_none() && layer.border_widths.is_none() && layer.border_color.is_none() {
             continue;
         }
 
-        let pages = match layer.selector {
+        let selector = match layer.selector {
             None => None,
-            Some(selector) if selector.side.is_none() => selector.pages.map(|pages| {
-                saw_range = true;
-                (pages.start, pages.end)
-            }),
-            Some(_) => return None,
+            Some(selector) if selector.side.is_none() && selector.pages.is_none() => None,
+            Some(selector) => {
+                saw_scoped_selector = true;
+                Some(selector)
+            }
         };
 
         if let Some(margin) = layer.margin.as_ref() {
-            margins.push((pages, lower_page_margins_value(margin)));
+            margins.push((selector, lower_page_margins_value(margin)));
         }
         if let Some(border_widths) = layer.border_widths.as_ref() {
-            widths.push((pages, lower_page_border_widths_value(border_widths)));
+            widths.push((selector, lower_page_border_widths_value(border_widths)));
         }
         if let Some(color) = layer.border_color.as_ref() {
-            colors.push((pages, lowering_base::lower_color(color)));
+            colors.push((selector, lowering_base::lower_color(color)));
         }
     }
 
-    if saw_range {
-        let margin = page_range_expression(margins);
-        let widths = page_range_expression(widths);
-        let color = page_range_expression(colors);
+    if saw_scoped_selector {
+        let margin = page_selector_expression(margins);
+        let widths = page_selector_expression(widths);
+        let color = page_selector_expression(colors);
 
         return Some(format!(
             "#set page(foreground: context {{\n\
@@ -209,59 +225,39 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     ))
 }
 
-fn ranged_page_background(doc: &IrDocument) -> Option<String> {
+fn scoped_page_background(doc: &IrDocument) -> Option<String> {
     let state = &doc.metadata.document_state;
     if state.document_type != IrDocumentType::Paged {
         return None;
     }
 
     let mut backgrounds = Vec::new();
-    let mut saw_range = false;
+    let mut saw_scoped_selector = false;
     for layer in &state.page_format.layers {
         let Some(background) = layer.background.as_ref() else {
             continue;
         };
-        match layer.selector {
-            None => backgrounds.push((None, background)),
-            Some(selector) if selector.side.is_none() => {
-                let pages = selector.pages?;
-                saw_range = true;
-                backgrounds.push((Some(pages), background));
+        let selector = match layer.selector {
+            None => None,
+            Some(selector) if selector.side.is_none() && selector.pages.is_none() => None,
+            Some(selector) => {
+                saw_scoped_selector = true;
+                Some(selector)
             }
-            Some(_) => return None,
-        }
+        };
+        backgrounds.push((
+            selector,
+            format!(
+                "rect(width: 100%, height: 100%, fill: {})",
+                lowering_base::lower_color(background)
+            ),
+        ));
     }
-    if !saw_range {
+    if !saw_scoped_selector {
         return None;
     }
 
-    let mut branches = Vec::new();
-    let mut fallback = "none".to_string();
-    for (pages, background) in backgrounds.into_iter().rev() {
-        let fill = lowering_base::lower_color(background);
-        let content = format!("rect(width: 100%, height: 100%, fill: {fill})");
-        if let Some(pages) = pages {
-            branches.push((
-                format!(
-                    "__arkst_page >= {} and __arkst_page <= {}",
-                    pages.start, pages.end
-                ),
-                content,
-            ));
-        } else {
-            fallback = content;
-            break;
-        }
-    }
-    if branches.is_empty() {
-        return None;
-    }
-
-    let mut expression = fallback;
-    for (condition, content) in branches.into_iter().rev() {
-        expression = format!("if {condition} {{ {content} }} else {{ {expression} }}");
-    }
-
+    let expression = page_selector_expression(backgrounds);
     Some(format!(
         "#set page(background: context {{\n  let __arkst_page = here().page()\n  {expression}\n}})\n"
     ))
@@ -314,7 +310,7 @@ fn document_prelude(doc: &IrDocument) -> String {
     if let Some(columns) = state.page_columns {
         prelude.push_str(&format!("#set page(columns: {columns})\n"));
     }
-    if let Some(background) = ranged_page_background(doc) {
+    if let Some(background) = scoped_page_background(doc) {
         prelude.push_str(&background);
     } else if let Some(background) = state.page_background.as_ref() {
         let fill = lowering_base::lower_color(background);
@@ -436,6 +432,26 @@ mod tests {
             }],
             metadata,
         }
+    }
+
+    #[test]
+    fn page_selector_conditions_use_physical_page_parity() {
+        assert_eq!(
+            page_selector_condition(IrPageFormatSelector {
+                side: Some(IrPageSide::Left),
+                pages: None,
+            }),
+            Some("calc.even(__arkst_page)".to_string())
+        );
+        assert_eq!(
+            page_selector_condition(IrPageFormatSelector {
+                side: Some(IrPageSide::Right),
+                pages: Some(IrPageRange { start: 2, end: 5 }),
+            }),
+            Some(
+                "calc.odd(__arkst_page) and __arkst_page >= 2 and __arkst_page <= 5".to_string()
+            )
+        );
     }
 
     #[test]
@@ -875,7 +891,7 @@ mod tests {
     }
 
     #[test]
-    fn side_scoped_border_keeps_output_fail_closed_without_parity_inference() {
+    fn side_scoped_border_uses_physical_page_parity() {
         let mut doc = document(IrDocumentType::Paged, None, None);
         let margin = IrPageMargins {
             top: IrSize {
@@ -945,7 +961,10 @@ mod tests {
         ];
 
         let code = lower_to_typst_code(&doc);
-        assert!(!code.contains("page(foreground:"), "{code}");
+        assert!(code.contains("#set page(foreground: context {"), "{code}");
+        assert!(code.contains("calc.even(__arkst_page)"), "{code}");
+        assert!(code.contains("rgb(200, 10, 20, 100%)"), "{code}");
+        assert!(code.contains("rgb(1, 2, 3, 100%)"), "{code}");
     }
 
     #[test]
@@ -1030,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn side_scoped_background_keeps_range_output_fail_closed() {
+    fn side_scoped_background_uses_physical_page_parity() {
         let mut doc = document(IrDocumentType::Paged, None, None);
         let base = IrColor {
             red: 1,
@@ -1073,11 +1092,10 @@ mod tests {
         ];
 
         let code = lower_to_typst_code(&doc);
-        assert!(!code.contains("#set page(background: context {"), "{code}");
-        assert!(
-            code.contains("#set page(fill: rgb(1, 2, 3, 100%))"),
-            "{code}"
-        );
+        assert!(code.contains("#set page(background: context {"), "{code}");
+        assert!(code.contains("calc.even(__arkst_page)"), "{code}");
+        assert!(code.contains("fill: rgb(7, 8, 9, 100%)"), "{code}");
+        assert!(code.contains("fill: rgb(1, 2, 3, 100%)"), "{code}");
     }
 
     #[test]
