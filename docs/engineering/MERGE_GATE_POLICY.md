@@ -18,18 +18,19 @@ The accepted required set remains:
 - `wasm`
 - `compatibility`
 - `msrv`
-- `failure-triage`
 - `dependency-review`
 
 The machine-readable authority is `.github/gate-policy.toml`. The live ruleset
-must remain strict and contain exactly this set. `failure-triage` is the
-unprivileged exact-PR-revision declaration gate; it is merge-authoritative even
-though it does not execute compiler tests. Required contexts must be produced
+must remain strict and contain exactly this set. Required contexts must be produced
 on every pull request; top-level path filters and job-level `if` conditions are rejected for required producers. A required workflow may leave `pull_request` types implicit, or it may declare exactly `opened`, `reopened`, `synchronize`, and `ready_for_review` so a Draft-to-Ready transition re-runs the complete final gate on the same candidate HEAD. Draft PRs may keep an always-present required context lightweight by deferring expensive internal steps, but Ready PRs must execute the complete authoritative steps. The required `license`/cargo-deny authority remains unconditional even during Draft development.
 
 ## Complementary required supply-chain controls
 
 `dependency-review` is required because it provides diff-scoped admission for newly introduced dependency changes, including GitHub Actions references represented by GitHub's dependency graph. The required `license` job remains independently authoritative for the resulting Rust dependency graph through unconditional full-graph `cargo deny check --all-features`. Neither gate substitutes for the other.
+
+## Failure handling
+
+Observed failures still require evidence-backed root-cause classification before remediation. `UNKNOWN`, `UNVERIFIED`, and `INSUFFICIENT EVIDENCE` remain fail-closed engineering states, but Arkst no longer uses PR-body declaration metadata or a sticky classification reporter as merge authority.
 
 ## Non-required PR controls
 
