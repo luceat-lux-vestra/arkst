@@ -336,6 +336,17 @@ domain to physical millimeter geometry, uses the captured call-time document typ
 an omitted-orientation basis, keeps an omitted `docs` basis fail-closed, and then applies
 explicit single-axis overrides independently. The current Typst/PDF global dimension path
 reuses this helper, while selector-aware dimension publication remains out of scope.
+Typst page width/height and columns are page-setup parameters rather than contextual
+background/foreground content, and changing a page set rule establishes a new conforming
+page. Arkst therefore must not approximate selector-scoped size/width/height/columns by
+consulting `here().page()` after pagination. The Typst lowerer now detects those scoped
+fields and emits an explicit `panic(...)` before any page setup instead of silently
+falling back to global dimensions/columns. The real pinned Typst subprocess regression
+`integration_selector_scoped_page_layout_fails_closed_at_typst_boundary` proves that
+this boundary fails closed. This is an explicit unsupported-output guard, not
+selector-aware layout support; selector-scoped content margin output remains a separate
+residual because scoped margin is already consumed only as explicit foreground geometry
+by the bounded border path.
 A bounded Typst/PDF background path now consumes ordered background layers for
 global, side-only, finite-range-only, and combined side+range selectors. It uses
 contextual page background content with physical 1-based `here().page()`; the
@@ -361,7 +372,9 @@ ordered global state already supplies a concrete standard-size base; without tha
 base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed; the
 `unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
 regression continues to pin that boundary. Selector-aware output outside the bounded background/border side+range subsets,
-remaining selector-aware geometry/size/margin/columns output, page-border output
+remaining selector-aware geometry/size/margin/columns output (with scoped
+size/width/height/columns now explicitly failing closed at the Typst boundary rather than
+being silently ignored), page-border output
 that still depends on unresolved renderer defaults, and the remaining output
 consumption stay open, and Typst page objects must not enter evaluator/IR state. Status is
 conservatively `PARTIAL`
