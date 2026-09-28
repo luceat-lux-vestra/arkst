@@ -251,9 +251,11 @@ background, and the bounded standard-size selection have current Typst/PDF
 consumers, while row/column alignment inheritance remains unchanged;
 page-border decoration state now has one bounded Typst/PDF consumer when the
 final document is `paged` and explicit margin, committed border widths, and
-explicit border color are all present; implicit-margin, width-only,
-color-only, slides/plain/docs, and border cases outside the bounded
-explicit-value page-side/range subset remain fail-closed. The size slice
+explicit border color are all present; selector-free implicit-margin,
+width-only, and color-only cases are explicitly backend-rejected with a
+generated panic before page setup instead of silently omitting the requested
+border. Slides/plain/docs and border cases outside the bounded explicit-value
+page-side/range subset remain fail-closed. The size slice
 preserves the closed standard-format domain, named size binding, and an
 explicit portrait/landscape orientation when supplied; when orientation is
 omitted it records the document type in effect at commit time as the downstream
