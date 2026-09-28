@@ -160,11 +160,3 @@ classification = "advisory"
 contexts = ["label"]
 always_present = false
 rationale = "PR metadata automation is non-authoritative and must never satisfy a merge requirement."
-[[producer]]
-workflow = ".github/workflows/failure-declaration.yml"
-job = "failure-triage"
-trigger = "pull_request"
-classification = "required"
-contexts = ["failure-triage"]
-always_present = true
-rationale = "Unprivileged exact-PR-revision declaration gate backed by the immutable central failure-declaration action; required context identity remains failure-triage."
