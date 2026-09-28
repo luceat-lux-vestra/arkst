@@ -227,7 +227,7 @@ unrelated narrow change.
 Repository-wide required merge gates are executed by GitHub CI. The configured
 required contexts are `fmt`, `clippy`, `test (ubuntu-latest)`,
 `test (macos-latest)`, `test (windows-latest)`, `docs`, `license`, `wasm`,
-`compatibility`, `msrv`, `failure-triage`, and `dependency-review`. The
+`compatibility`, `msrv`, and `dependency-review`. The
 machine-readable authority is `.github/gate-policy.toml`, and the live
 `Protect main` ruleset must match it. CI scope must not be weakened to reduce local
 validation cost. A green CI result is necessary evidence, but it is not by
