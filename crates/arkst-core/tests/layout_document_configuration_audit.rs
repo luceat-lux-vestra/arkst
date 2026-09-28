@@ -243,6 +243,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("omitted-orientation basis"));
     assert!(pageformat[10].contains("omitted docs basis remains fail-closed"));
     assert!(pageformat[10].contains("page-border cases requiring unresolved renderer defaults"));
+    assert!(pageformat[10].contains(
+        "selector-free implicit-margin/width-only/color-only cases are explicitly backend-rejected"
+    ));
+    assert!(pageformat[10].contains("instead of silently omitting the requested border"));
     assert!(pageformat[10].contains("selector-aware geometry/size/margin/columns output"));
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));

@@ -325,6 +325,49 @@ Second page\n";
 }
 
 #[test]
+fn integration_selector_free_page_border_defaults_fail_closed_at_typst_boundary() {
+    let source = ".doctype {paged}\n\
+.pageformat margin:{1cm}\n\
+.pageformat bordercolor:{red}\n\
+Border default unresolved\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-border-defaults.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-border-defaults.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat unresolved border-default diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-free page border without explicit margin, border widths, and border color\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-border-defaults-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-border-defaults.qd".to_string(),
+            })
+            .expect_err("unresolved selector-free border defaults must fail closed in Typst");
+        let message = error.to_string();
+        assert!(
+            message.contains("selector-free page border without explicit margin, border widths, and border color"),
+            "{message}"
+        );
+    });
+}
+
+#[test]
 fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat columns:{2}\nColumn output\n";
     let project = VirtualProjectBuilder::new()

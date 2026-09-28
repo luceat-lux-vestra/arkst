@@ -285,9 +285,43 @@ fn has_unsupported_scoped_page_layout(doc: &IrDocument) -> bool {
         })
 }
 
+const UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-free page border without explicit margin, border widths, and border color\")\n";
+
+fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
+    let state = &doc.metadata.document_state;
+    if state.document_type != IrDocumentType::Paged {
+        return false;
+    }
+
+    let has_scoped_border_inputs = state.page_format.layers.iter().any(|layer| {
+        let scoped = matches!(
+            layer.selector,
+            Some(selector) if selector.side.is_some() || selector.pages.is_some()
+        );
+        scoped
+            && (layer.margin.is_some()
+                || layer.border_widths.is_some()
+                || layer.border_color.is_some())
+    });
+    if has_scoped_border_inputs {
+        return false;
+    }
+
+    let has_border_request =
+        state.page_border_widths.is_some() || state.page_border_color.is_some();
+    has_border_request
+        && (state.page_margin.is_none()
+            || state.page_border_widths.is_none()
+            || state.page_border_color.is_none())
+}
+
 fn document_prelude(doc: &IrDocument) -> String {
     if has_unsupported_scoped_page_layout(doc) {
         return UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE.to_string();
+    }
+    if has_unresolved_selector_free_page_border_defaults(doc) {
+        return UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE.to_string();
     }
 
     let state = &doc.metadata.document_state;
@@ -738,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn page_border_output_keeps_unresolved_defaults_fail_closed() {
+    fn selector_free_page_border_unresolved_defaults_fail_at_typst_boundary() {
         let margins = IrPageMargins {
             top: IrSize {
                 value: 1.0,
@@ -785,19 +819,27 @@ mod tests {
         let mut doc = document(IrDocumentType::Paged, None, None);
         doc.metadata.document_state.page_margin = Some(margins.clone());
         doc.metadata.document_state.page_border_widths = Some(widths.clone());
-        assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
+        assert!(lower_to_typst_code(&doc)
+            .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
         doc.metadata.document_state.page_border_widths = None;
         doc.metadata.document_state.page_border_color = Some(color.clone());
-        assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
+        assert!(lower_to_typst_code(&doc)
+            .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
         doc.metadata.document_state.page_margin = None;
         doc.metadata.document_state.page_border_widths = Some(widths.clone());
-        assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
+        assert!(lower_to_typst_code(&doc)
+            .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
         doc.metadata.document_state.page_margin = Some(margins);
         doc.metadata.document_state.document_type = IrDocumentType::Slides;
-        assert!(!lower_to_typst_code(&doc).contains("page(foreground:"));
+        let slides_code = lower_to_typst_code(&doc);
+        assert!(
+            !slides_code.starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE),
+            "{slides_code}"
+        );
+        assert!(!slides_code.contains("page(foreground:"), "{slides_code}");
     }
 
     #[test]
