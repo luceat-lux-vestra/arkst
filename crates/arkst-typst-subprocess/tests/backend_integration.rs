@@ -639,6 +639,54 @@ Second page\n";
 }
 
 #[test]
+fn integration_pageformat_side_decoration_lowers_to_valid_typst_and_pdf() {
+    let source = ".doctype {paged}\n\
+.pageformat margin:{1cm}\n\
+.pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{blue} background:{blue}\n\
+.pageformat side:{left} pages:{2..2} bordercolor:{green} background:{red}\n\
+First page\n\
+\n\
+.pagebreak\n\
+\n\
+Second page\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-side-decoration.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-side-decoration.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat side decoration diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    let combined =
+        "calc.even(__arkst_page) and __arkst_page >= 2 and __arkst_page <= 2";
+    assert!(typst_code.contains(combined), "{typst_code}");
+    assert!(typst_code.contains("#set page(background: context {"), "{typst_code}");
+    assert!(typst_code.contains("#set page(foreground: context {"), "{typst_code}");
+    assert!(typst_code.contains("fill: rgb(255, 0, 0, 100%)"), "{typst_code}");
+    assert!(typst_code.contains("rgb(0, 128, 0, 100%)"), "{typst_code}");
+
+    with_typst("pageformat-side-decoration", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-side-decoration.qd".to_string(),
+            })
+            .expect("pageformat side decoration Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat margin:{1cm 2mm 3pt 8px}\nMargin output\n";
     let project = VirtualProjectBuilder::new()
