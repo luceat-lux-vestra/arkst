@@ -20,6 +20,7 @@ rev = "06a591e2f237d25e1dfdedac3f3d1494c496c52d"
 '''
 
 ACTION = "EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25"
+DOCS_ONLY_STEP_GUARD = "${{ needs.scope.outputs.docs_only != 'true' }}"
 CI_WORKFLOW = f'''jobs:
   deny:
     name: license
@@ -250,6 +251,74 @@ class CargoGraphOwnershipTests(unittest.TestCase):
         ):
             mod.verify_repository(root)
 
+    def test_exact_docs_only_supply_chain_contract_passes(self):
+        root = self.make_repo()
+        path = root / ".github/workflows/ci.yml"
+        content = path.read_text(encoding="utf-8")
+        content = content.replace(
+            "  deny:\n    name: license\n",
+            "  deny:\n    name: license\n    needs: [scope]\n    if: ${{ always() }}\n",
+        )
+        content = content.replace(
+            f"      - uses: {ACTION}\n",
+            f"      - uses: {ACTION}\n        if: ${{ needs.scope.outputs.docs_only != 'true' }}\n",
+        )
+        path.write_text(content, encoding="utf-8")
+        mod.verify_repository(root)
+
+    def test_docs_only_supply_chain_needs_without_always_fails_closed(self):
+        root = self.make_repo()
+        path = root / ".github/workflows/ci.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "  deny:\n    name: license\n",
+                "  deny:\n    name: license\n    needs: [scope]\n",
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            mod.CargoGraphOwnershipError, "must be unconditional or use exact docs-only contract"
+        ):
+            mod.verify_repository(root)
+
+    def test_docs_only_supply_chain_wrong_step_guard_fails_closed(self):
+        root = self.make_repo()
+        path = root / ".github/workflows/ci.yml"
+        content = path.read_text(encoding="utf-8")
+        content = content.replace(
+            "  deny:\n    name: license\n",
+            "  deny:\n    name: license\n    needs: [scope]\n    if: ${{ always() }}\n",
+        )
+        content = content.replace(
+            f"      - uses: {ACTION}\n",
+            f"      - uses: {ACTION}\n        if: ${{ needs.scope.outputs.docs_only != 'true' }}\n",
+        )
+        content = content.replace(
+            DOCS_ONLY_STEP_GUARD,
+            "${{ github.actor != 'nobody' }}",
+            1,
+        )
+        path.write_text(content, encoding="utf-8")
+        with self.assertRaisesRegex(
+            mod.CargoGraphOwnershipError, "must use exact docs-only guard"
+        ):
+            mod.verify_repository(root)
+
+    def test_scheduled_supply_chain_job_cannot_use_docs_only_contract(self):
+        root = self.make_repo()
+        path = root / ".github/workflows/security.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "  audit:\n",
+                "  audit:\n    needs: [scope]\n    if: ${{ always() }}\n",
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            mod.CargoGraphOwnershipError, "scheduled supply-chain authority job must remain unconditional"
+        ):
+            mod.verify_repository(root)
+
     def test_conditional_research_audit_fails_closed(self):
         root = self.make_repo()
         path = root / ".github/workflows/ci.yml"
@@ -323,7 +392,7 @@ class CargoGraphOwnershipTests(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(
-            mod.CargoGraphOwnershipError, "supply-chain authority job must not be conditional"
+            mod.CargoGraphOwnershipError, "must be unconditional or use exact docs-only contract"
         ):
             mod.verify_repository(root)
 
