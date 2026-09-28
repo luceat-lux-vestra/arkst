@@ -212,6 +212,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         pageformat[9].contains("integration_pageformat_range_border_lowers_to_valid_typst_and_pdf")
     );
     assert!(pageformat[9]
+        .contains("integration_pageformat_side_decoration_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9]
         .contains("integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf"));
@@ -226,21 +228,20 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("partial-side zeroing"));
     assert!(pageformat[10].contains("bordercolor-only width inheritance/no-fabrication"));
     assert!(pageformat[10].contains("Typst/PDF background consumer"));
-    assert!(pageformat[10].contains("finite-range background"));
+    assert!(pageformat[10].contains("combined side+range background precedence"));
     assert!(pageformat[10].contains("physical 1-based here().page()"));
-    assert!(pageformat[10].contains("side-bearing background selector"));
-    assert!(pageformat[10].contains("finite-range border"));
+    assert!(pageformat[10].contains("left/verso to even physical pages"));
+    assert!(pageformat[10].contains("combined side+range margin/border-width/border-color layers"));
     assert!(pageformat[10].contains("independently in source order"));
-    assert!(pageformat[10].contains("side-bearing border selector"));
+    assert!(pageformat[10].contains("left/even and right/odd physical-page parity"));
     assert!(pageformat[10].contains("explicit margin + committed widths + explicit color"));
     assert!(pageformat[10].contains("without fabricating renderer defaults"));
     assert!(pageformat[10].contains("gates standard-size output on the final paged/slides"));
     assert!(pageformat[10].contains("explicit physical millimeter bounds"));
     assert!(pageformat[10].contains("omitted-orientation basis"));
     assert!(pageformat[10].contains("omitted docs basis remains fail-closed"));
-    assert!(pageformat[10].contains("remaining page-border output"));
-    assert!(pageformat[10]
-        .contains("selector-aware geometry/size/margin/border/columns output/composition"));
+    assert!(pageformat[10].contains("page-border cases requiring unresolved renderer defaults"));
+    assert!(pageformat[10].contains("selector-aware geometry/size/margin/columns output"));
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
     assert!(pageformat[10].contains("finite 1-based page ranges"));
@@ -267,6 +268,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
     assert!(pageformat[11].contains("bounded-range-background-output"));
     assert!(pageformat[11].contains("bounded-range-border-output"));
+    assert!(pageformat[11].contains("bounded-side-decoration-output"));
     assert!(pageformat[11].contains("selector-aware-layering"));
 }
 

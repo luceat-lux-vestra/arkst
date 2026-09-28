@@ -252,8 +252,8 @@ consumers, while row/column alignment inheritance remains unchanged;
 page-border decoration state now has one bounded Typst/PDF consumer when the
 final document is `paged` and explicit margin, committed border widths, and
 explicit border color are all present; implicit-margin, width-only,
-color-only, slides/plain/docs, and selector-aware border output remain
-fail-closed. The size slice
+color-only, slides/plain/docs, and border cases outside the bounded
+explicit-value page-side/range subset remain fail-closed. The size slice
 preserves the closed standard-format domain, named size binding, and an
 explicit portrait/landscape orientation when supplied; when orientation is
 omitted it records the document type in effect at commit time as the downstream
@@ -336,20 +336,21 @@ domain to physical millimeter geometry, uses the captured call-time document typ
 an omitted-orientation basis, keeps an omitted `docs` basis fail-closed, and then applies
 explicit single-axis overrides independently. The current Typst/PDF global dimension path
 reuses this helper, while selector-aware dimension publication remains out of scope.
-A bounded Typst/PDF background path now consumes ordered background layers when
-every background-bearing selector is global or a finite page range. It uses
-contextual page background content with physical 1-based `here().page()`, resolves
-overlapping ranges by source-order last-wins precedence, preserves a later global
-background as the fallback, and keeps any side-bearing background selector
-fail-closed rather than inferring page parity.
-A bounded Typst/PDF finite-range border path now consumes ordered margin,
-border-width, and border-color layers when every relevant selector is global
-or a finite page range. It resolves those three fields independently in source
-order so a later color-only range inherits earlier widths and margins, renders
-through contextual page foreground content keyed by physical 1-based
-`here().page()`, and draws only when margin, widths, and color are all
-explicit for that page. Any relevant side-bearing border selector remains
-fail-closed rather than inferring page parity.
+A bounded Typst/PDF background path now consumes ordered background layers for
+global, side-only, finite-range-only, and combined side+range selectors. It uses
+contextual page background content with physical 1-based `here().page()`; the
+public page-side contract maps left/verso pages to even physical numbers and
+right/recto pages to odd physical numbers. Overlapping selectors preserve
+source-order last-wins precedence and a later global background remains the
+fallback.
+A bounded Typst/PDF scoped border path now consumes ordered margin,
+border-width, and border-color layers for global, side-only, finite-range-only,
+and combined side+range selectors. It resolves those three fields independently
+in source order so a later color-only scoped layer inherits earlier widths and
+margins, renders through contextual page foreground content keyed by physical
+1-based `here().page()`, applies the public left/even and right/odd page-side
+mapping, and draws only when margin, widths, and color are all explicit for that
+physical page.
 The bounded evaluator now also admits selector-scoped mixed size+axis and
 single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
@@ -359,11 +360,10 @@ same-layer explicit width/height as per-axis overrides. Selector-free width-only
 ordered global state already supplies a concrete standard-size base; without that
 base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed; the
 `unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
-regression continues to pin that boundary. Selector-aware output outside the
-finite-range background/border subsets, remaining selector-aware
-geometry/size/margin/border/columns output outside the bounded finite-range border subset, the remaining page-border output outside the
-explicit-margin/width/color paged subset, and the remaining output consumption
-stay open, and Typst page objects must not enter evaluator/IR state. Status is
+regression continues to pin that boundary. Selector-aware output outside the bounded background/border side+range subsets,
+remaining selector-aware geometry/size/margin/columns output, page-border output
+that still depends on unresolved renderer defaults, and the remaining output
+consumption stay open, and Typst page objects must not enter evaluator/IR state. Status is
 conservatively `PARTIAL`
 under #175.
 
