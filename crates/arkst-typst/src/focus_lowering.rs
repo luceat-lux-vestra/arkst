@@ -819,24 +819,18 @@ mod tests {
         let mut doc = document(IrDocumentType::Paged, None, None);
         doc.metadata.document_state.page_margin = Some(margins.clone());
         doc.metadata.document_state.page_border_widths = Some(widths.clone());
-        assert!(
-            lower_to_typst_code(&doc)
-                .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE)
-        );
+        assert!(lower_to_typst_code(&doc)
+            .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
         doc.metadata.document_state.page_border_widths = None;
         doc.metadata.document_state.page_border_color = Some(color.clone());
-        assert!(
-            lower_to_typst_code(&doc)
-                .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE)
-        );
+        assert!(lower_to_typst_code(&doc)
+            .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
         doc.metadata.document_state.page_margin = None;
         doc.metadata.document_state.page_border_widths = Some(widths.clone());
-        assert!(
-            lower_to_typst_code(&doc)
-                .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE)
-        );
+        assert!(lower_to_typst_code(&doc)
+            .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
         doc.metadata.document_state.page_margin = Some(margins);
         doc.metadata.document_state.document_type = IrDocumentType::Slides;
