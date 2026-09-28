@@ -267,17 +267,22 @@ const UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE: &str =
     "#panic(\"Arkst cannot lower selector-scoped page size/width/height/columns to Typst without pagination-aware page setup\")\n";
 
 fn has_unsupported_scoped_page_layout(doc: &IrDocument) -> bool {
-    doc.metadata.document_state.page_format.layers.iter().any(|layer| {
-        let scoped = matches!(
-            layer.selector,
-            Some(selector) if selector.side.is_some() || selector.pages.is_some()
-        );
-        scoped
-            && (layer.size.is_some()
-                || layer.width.is_some()
-                || layer.height.is_some()
-                || layer.columns.is_some())
-    })
+    doc.metadata
+        .document_state
+        .page_format
+        .layers
+        .iter()
+        .any(|layer| {
+            let scoped = matches!(
+                layer.selector,
+                Some(selector) if selector.side.is_some() || selector.pages.is_some()
+            );
+            scoped
+                && (layer.size.is_some()
+                    || layer.width.is_some()
+                    || layer.height.is_some()
+                    || layer.columns.is_some())
+        })
 }
 
 fn document_prelude(doc: &IrDocument) -> String {
