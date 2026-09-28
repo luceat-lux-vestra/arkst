@@ -29,6 +29,9 @@ CARGO_DENY_ACTION_REF = (
     "EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25"
 )
 CARGO_DENY_ACTION_FAMILY = "EmbarkStudios/cargo-deny-action@"
+DOCS_ONLY_JOB_NEEDS = "[scope]"
+DOCS_ONLY_JOB_GUARD = "${{ always() }}"
+DOCS_ONLY_STEP_GUARD = "${{ needs.scope.outputs.docs_only != 'true' }}"
 CARGO_DENY_ACTION = re.compile(
     rf"^\s*-\s+uses:\s+{re.escape(CARGO_DENY_ACTION_REF)}\s*(?:#.*)?$"
 )
@@ -306,10 +309,21 @@ def step_field(block: str, name: str) -> str | None:
     return direct_field(block, name, leading_spaces(lines[0]) + 2)
 
 
-def reject_conditional_or_nonblocking(path: Path, authority: str, block: str) -> None:
-    if step_field(block, "if") is not None:
+def verify_authority_step_guard(
+    path: Path,
+    authority: str,
+    block: str,
+    expected_if: str | None,
+) -> None:
+    actual_if = step_field(block, "if")
+    if actual_if != expected_if:
+        if expected_if is None:
+            raise CargoGraphOwnershipError(
+                f"{path.as_posix()}: {authority} cargo-deny authority must not be conditional"
+            )
         raise CargoGraphOwnershipError(
-            f"{path.as_posix()}: {authority} cargo-deny authority must not be conditional"
+            f"{path.as_posix()}: {authority} cargo-deny authority must use exact "
+            f"docs-only guard {expected_if!r}; got {actual_if!r}"
         )
     if step_field(block, "continue-on-error") is not None:
         raise CargoGraphOwnershipError(
@@ -325,10 +339,27 @@ def verify_supply_chain_workflow(
         raise CargoGraphOwnershipError(
             f"{path.as_posix()}: supply-chain job {job_id!r} must produce {required_name!r}"
         )
-    if direct_field(job, "if", 4) is not None:
+    job_if = direct_field(job, "if", 4)
+    job_needs = direct_field(job, "needs", 4)
+    docs_only_fast_path = False
+
+    if required_name is None:
+        if job_if is not None or job_needs is not None:
+            raise CargoGraphOwnershipError(
+                f"{path.as_posix()}: scheduled supply-chain authority job must remain unconditional"
+            )
+    elif job_if is None and job_needs is None:
+        # Legacy/full-validation fixture: still valid and fully unconditional.
+        pass
+    elif job_if == DOCS_ONLY_JOB_GUARD and job_needs == DOCS_ONLY_JOB_NEEDS:
+        docs_only_fast_path = True
+    else:
         raise CargoGraphOwnershipError(
-            f"{path.as_posix()}: supply-chain authority job must not be conditional"
+            f"{path.as_posix()}: supply-chain authority job must be unconditional or use "
+            f"exact docs-only contract needs={DOCS_ONLY_JOB_NEEDS!r} "
+            f"if={DOCS_ONLY_JOB_GUARD!r}; got needs={job_needs!r} if={job_if!r}"
         )
+
     if direct_field(job, "continue-on-error", 4) is not None:
         raise CargoGraphOwnershipError(
             f"{path.as_posix()}: supply-chain authority job must not allow failure"
@@ -358,8 +389,9 @@ def verify_supply_chain_workflow(
             f"{path.as_posix()}: unexpected additional cargo-deny authority in supply-chain job"
         )
 
-    reject_conditional_or_nonblocking(path, "production", production[0])
-    reject_conditional_or_nonblocking(path, "research", research[0])
+    expected_step_if = DOCS_ONLY_STEP_GUARD if docs_only_fast_path else None
+    verify_authority_step_guard(path, "production", production[0], expected_step_if)
+    verify_authority_step_guard(path, "research", research[0], expected_step_if)
 
     if (
         field(production[0], "command") != "check"

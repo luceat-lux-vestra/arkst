@@ -164,6 +164,39 @@ class GatePolicyNegativeTests(unittest.TestCase):
         ):
             mod.verify_repository(root, policy)
 
+    def test_required_producer_prerequisite_without_always_fails(self):
+        workflow = BASE_CI.replace(
+            "jobs:\n",
+            "jobs:\n"
+            "  scope:\n"
+            "    name: docs-only-scope\n"
+            "    runs-on: ubuntu-latest\n",
+        ).replace(
+            "    name: fmt\n",
+            "    name: fmt\n    needs: [scope]\n",
+        )
+        policy_text = POLICY + """
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "scope"
+classification = "advisory"
+contexts = ["docs-only-scope"]
+always_present = true
+rationale = "fixture"
+"""
+        tmp, root, policy = self.make_repo(workflow, policy_text)
+        self.addCleanup(tmp.cleanup)
+        with self.assertRaisesRegex(mod.PolicyError, "does not use the exact fail-closed"):
+            mod.verify_repository(root, policy)
+
+    def test_required_producer_always_condition_passes(self):
+        workflow = BASE_CI.replace(
+            "    name: fmt\n", "    name: fmt\n    if: ${{ always() }}\n"
+        )
+        tmp, root, policy = self.make_repo(workflow)
+        self.addCleanup(tmp.cleanup)
+        mod.verify_repository(root, policy, ruleset(["fmt"]))
+
     def test_required_producer_job_condition_fails(self):
         workflow = BASE_CI.replace(
             "    name: fmt\n", "    name: fmt\n    if: github.actor != 'nobody'\n"

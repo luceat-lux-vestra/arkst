@@ -203,3 +203,11 @@ The WASM build check ensures core + lowering crates remain compatible with
 browser deployment targets. It only checks that compilation passes — no WASM
 test runner is required. If the check is slow, it may use `--target-dir`
 caching.
+
+For a trusted-base-proven documentation-only pull request, the required
+`fmt`, `clippy`, native test matrix, `docs`, `license`, `wasm`, `msrv`,
+and `dependency-review` contexts still materialize but skip their heavy
+product/toolchain work. The documentation spelling workflow remains applicable,
+and `compatibility` independently decides whether compatibility evidence is
+required. Any uncertainty in documentation-only classification falls back to
+the full paths above.

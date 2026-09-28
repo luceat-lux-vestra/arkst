@@ -234,6 +234,15 @@ validation cost. A green CI result is necessary evidence, but it is not by
 itself a strict-review PASS; relevant targeted local evidence remains required
 for changes that need it.
 
+A conservative documentation-only fast path may skip heavy product/toolchain
+steps while preserving every required status context. Its allowlist and
+trusted-base classification contract are defined in `.github/gate-policy.toml`
+and `docs/engineering/MERGE_GATE_POLICY.md`. Any classifier uncertainty,
+mixed scope, policy/workflow change, or `docs/legal/` change must use full
+validation. Shared scope failure must materialize required jobs through the
+verifier-approved exact `${{ always() }}` guard, never by accepting skipped
+required jobs. Do not broaden the allowlist merely to reduce CI cost.
+
 The workspace MSRV is Rust 1.92.0. Repository development and CI use the
 pinned Rust 1.98.0 toolchain from `rust-toolchain.toml`; do not conflate the
 minimum supported compiler with the toolchain used for authoritative current
