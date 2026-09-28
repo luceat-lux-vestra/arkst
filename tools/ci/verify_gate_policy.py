@@ -39,6 +39,7 @@ class Job:
     job_id: str
     name: str
     if_expression: str | None = None
+    needs: tuple[str, ...] = ()
     matrix: dict[str, list[str]] = field(default_factory=dict)
 
 
@@ -225,6 +226,7 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
         block = lines[idx + 1 : end]
         name = job_id
         if_expression: str | None = None
+        needs: tuple[str, ...] = ()
         matrix: dict[str, list[str]] = {}
         matrix_indent = None
         for block_raw in block:
@@ -240,6 +242,16 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
                 if_match = re.match(r"^\s{4}if:\s*(.+)$", block_clean)
                 if if_match:
                     if_expression = _scalar(if_match.group(1))
+                needs_match = re.match(r"^\s{4}needs:\s*(.*)$", block_clean)
+                if needs_match:
+                    raw_needs = needs_match.group(1).strip()
+                    parsed_needs = _inline_list(raw_needs)
+                    if parsed_needs is not None:
+                        needs = tuple(parsed_needs)
+                    elif raw_needs:
+                        needs = (_scalar(raw_needs),)
+                    else:
+                        needs = ("<block-needs>",)
             if re.match(r"^\s{6}matrix:\s*$", block_clean):
                 matrix_indent = 6
                 continue
@@ -259,6 +271,7 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
             job_id=job_id,
             name=name,
             if_expression=if_expression,
+            needs=needs,
             matrix=matrix,
         )
         idx = end
@@ -396,6 +409,11 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
                         "opened/reopened/synchronize/ready_for_review when pull_request "
                         "types are declared"
                     )
+            if job.needs and job.if_expression != "${{ always() }}":
+                raise PolicyError(
+                    f"required producer {key[0]}#{key[1]} has prerequisites {job.needs!r} "
+                    "but does not use the exact fail-closed job guard ${{ always() }}"
+                )
             if job.if_expression not in {None, "${{ always() }}"}:
                 raise PolicyError(
                     f"required producer {key[0]}#{key[1]} has an unsafe job-level if "
