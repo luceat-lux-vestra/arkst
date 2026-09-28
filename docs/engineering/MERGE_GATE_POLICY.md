@@ -1,12 +1,16 @@
 # Merge-gate policy
 
-Arkst's canonical PR gate inventory is `.github/gate-policy.toml`. The policy is executable: `tools/ci/verify_gate_policy.py` compares every PR-time workflow job against the inventory, expands matrix job names into exact status contexts, rejects suppression of required producers, and can compare the accepted required-context set with the live `Protect main` ruleset.
+Arkst's canonical PR gate inventory is `.github/gate-policy.toml`. The policy is executable: `tools/ci/verify_gate_policy.py` compares every PR-time workflow job against the inventory, expands matrix job names into exact status contexts, validates the closed authoritative component graph, and can compare the accepted live required-context set with the `Protect main` ruleset.
 
-The verifier runs inside the already-required `fmt` context. Arkst therefore does not add a second required status context merely to check the first set of contexts; a renamed, removed, newly unclassified, path-filtered, or job-conditioned required producer makes `fmt` fail.
+The live ruleset requires exactly one GitHub Actions context: `Merge Gate`. The aggregate lives in `.github/workflows/ci.yml`, uses `${{ always() }}`, directly depends on every authoritative internal merge component, and succeeds only when every component result is exactly `success`. The verifier runs inside the internal `fmt` component and rejects missing/renamed/unclassified producers, component dependency drift, unsafe job conditions, or an aggregate that does not fail closed.
 
-## Required contexts
+## Required context and authoritative components
 
-The accepted required set remains:
+Live required set:
+
+- `Merge Gate`
+
+Authoritative internal merge components:
 
 - `fmt`
 - `clippy`
@@ -20,9 +24,7 @@ The accepted required set remains:
 - `msrv`
 - `dependency-review`
 
-The machine-readable authority is `.github/gate-policy.toml`. The live ruleset
-must remain strict and contain exactly this set. Required contexts must be produced
-on every pull request; top-level path filters are rejected for required producers, and job-level conditions are rejected except the exact `${{ always() }}` guard used to keep a required producer materialized after a shared prerequisite fails. A required workflow may leave `pull_request` types implicit, or it may declare exactly `opened`, `reopened`, `synchronize`, and `ready_for_review` so a Draft-to-Ready transition re-runs the complete final gate on the same candidate HEAD. Draft PRs may keep an always-present required context lightweight by deferring expensive internal steps. Ready PRs execute complete authoritative steps unless trusted-base classification proves the separately documented documentation-only scope; in that case required contexts remain materialized while non-applicable heavy work is skipped. The `license` job follows the exact supply-chain fast-path contract in `docs/engineering/SUPPLY_CHAIN.md`.
+The machine-readable authority is `.github/gate-policy.toml`. All merge components are always-present PR producers inside the canonical CI graph. Top-level path filters are rejected for authoritative producers, and job-level conditions are rejected except the exact `${{ always() }}` guard used to keep a component or aggregate materialized after a prerequisite fails. The PR trigger may leave event types implicit, or declare exactly `opened`, `reopened`, `synchronize`, and `ready_for_review`. Draft PRs may keep component work lightweight; Ready PRs execute full authoritative work unless the trusted-base documentation-only classifier proves the separately documented bounded scope.
 
 ## Documentation-only fast path
 
@@ -52,7 +54,8 @@ Workflow/policy changes cannot authorize their own
 fast path because both classifier code and allowlist are loaded from the base
 revision and `.github/**` is outside the allowlist.
 
-Required status contexts remain always present. The Rust-heavy CI jobs, MSRV,
+Authoritative component jobs remain always present, and the sole required
+`Merge Gate` remains materialized above them. The Rust-heavy components, MSRV,
 and Dependency Review emit explicit successful fast-path steps instead of
 running product/toolchain work when the trusted-base result is true.
 `compatibility` keeps its existing independent fail-closed scope decision, so
@@ -60,9 +63,9 @@ compatibility-relevant documentation can still run the full compatibility
 campaign. `docs/legal/` is deliberately excluded because legal/provenance
 changes must continue through the license/provenance gate.
 
-## Complementary required supply-chain controls
+## Complementary supply-chain components
 
-`dependency-review` is required because it provides diff-scoped admission for newly introduced dependency changes, including GitHub Actions references represented by GitHub's dependency graph. The required `license` job remains independently authoritative for the resulting Rust dependency graph through unconditional full-graph `cargo deny check --all-features`. Neither gate substitutes for the other.
+`dependency-review` remains an authoritative merge component because it provides diff-scoped admission for newly introduced dependency changes, including GitHub Actions references represented by GitHub's dependency graph. The `license` component remains independently authoritative for the resulting Rust dependency graph through full-graph `cargo deny check --all-features` on substantive changes. `Merge Gate` requires both component results to succeed; neither control substitutes for the other.
 
 ## Failure handling
 
@@ -76,14 +79,14 @@ Arkst previously carried a custom advisory AI review workflow backed by GitHub M
 
 ## Compatibility scope
 
-The required `compatibility` context always exists. Its expensive campaign uses the same canonical policy for relevance decisions.
+The authoritative `compatibility` component always exists and is included in `Merge Gate`. Its expensive campaign uses the same canonical policy for relevance decisions.
 
-Paths are classified as `run` or `skip`. `run` is evaluated first so compatibility documentation and workflow paths can override broader documentation or `.github` skip classes. Any changed path that matches neither class fails the required `compatibility` job. New path classes therefore require an explicit policy decision instead of silently receiving a green no-op.
+Paths are classified as `run` or `skip`. `run` is evaluated first so compatibility documentation and workflow paths can override broader documentation or `.github` skip classes. Any changed path that matches neither class fails the authoritative `compatibility` component. New path classes therefore require an explicit policy decision instead of silently receiving a green no-op.
 
 The `run` classes deliberately include all crates, tools, compatibility tests/corpora, fixtures, examples, compatibility documentation, and the policy/workflows that govern compatibility. This includes the JDK25 locale/unicode generators, oracle/reference data, `arkst-engine` locale semantics, and related #172/#173 assets.
 
 ## Live ruleset evidence
 
-The repository ruleset is named `Protect main` and targets `refs/heads/main`. Besides the exact required-context set, independent admin-level readback must continue to verify deletion and non-fast-forward protection, linear history, squash-only merging, strict required checks, review-thread resolution, extra approval for unattributed changes, and no bypass actors.
+The repository ruleset is named `Protect main` and targets `refs/heads/main`. Besides the exact sole required context `Merge Gate`, independent admin-level readback must continue to verify deletion and non-fast-forward protection, linear history, squash-only merging, strict required checks, review-thread resolution, extra approval for unattributed changes, and no bypass actors.
 
 A public/read-only ruleset response may omit bypass-actor details by GitHub API design. Absence of that field from a read-only CI response is not evidence that bypass actors do not exist; exact merge-gate review must use an authorized readback when validating that property.

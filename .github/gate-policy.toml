@@ -60,7 +60,7 @@ rationale = "Trusted-base changed-file classifier shared by required CI jobs; an
 [[producer]]
 workflow = ".github/workflows/ci.yml"
 job = "fmt"
-classification = "required"
+classification = "merge_component"
 contexts = ["fmt"]
 always_present = true
 rationale = "Formatting plus canonical merge-gate policy verification for substantive changes; trusted docs-only changes retain the required context without product/toolchain work."
@@ -68,7 +68,7 @@ rationale = "Formatting plus canonical merge-gate policy verification for substa
 [[producer]]
 workflow = ".github/workflows/ci.yml"
 job = "clippy"
-classification = "required"
+classification = "merge_component"
 contexts = ["clippy"]
 always_present = true
 rationale = "Workspace lint gate for substantive changes; trusted docs-only changes retain the required context without Rust lint work."
@@ -76,7 +76,7 @@ rationale = "Workspace lint gate for substantive changes; trusted docs-only chan
 [[producer]]
 workflow = ".github/workflows/ci.yml"
 job = "test"
-classification = "required"
+classification = "merge_component"
 contexts = ["test (ubuntu-latest)", "test (macos-latest)", "test (windows-latest)"]
 always_present = true
 matrix_axis = "os"
@@ -86,7 +86,7 @@ rationale = "Required three-OS workspace, CLI-boundary, and backend-parity tests
 [[producer]]
 workflow = ".github/workflows/ci.yml"
 job = "wasm"
-classification = "required"
+classification = "merge_component"
 contexts = ["wasm"]
 always_present = true
 rationale = "Required platform-neutral WASM compile boundary for substantive changes; trusted docs-only changes retain the required context without compilation."
@@ -94,7 +94,7 @@ rationale = "Required platform-neutral WASM compile boundary for substantive cha
 [[producer]]
 workflow = ".github/workflows/ci.yml"
 job = "doc"
-classification = "required"
+classification = "merge_component"
 contexts = ["docs"]
 always_present = true
 rationale = "Required Rust API documentation build for substantive changes; trusted docs-only Markdown changes use the spelling workflow instead of rebuilding Rust docs."
@@ -102,34 +102,42 @@ rationale = "Required Rust API documentation build for substantive changes; trus
 [[producer]]
 workflow = ".github/workflows/ci.yml"
 job = "deny"
-classification = "required"
+classification = "merge_component"
 contexts = ["license"]
 always_present = true
 rationale = "Authoritative cargo-deny plus license/provenance engineering gate for non-docs-only changes; trusted docs-only scope excludes legal policy and all dependency/provenance inputs before this work may be skipped."
 
 [[producer]]
-workflow = ".github/workflows/markdown-compat.yml"
+workflow = ".github/workflows/ci.yml"
 job = "compatibility"
-classification = "required"
+classification = "merge_component"
 contexts = ["compatibility"]
 always_present = true
 rationale = "Always-present compatibility context; expensive campaign is controlled by the fail-closed compatibility scope registry."
 
 [[producer]]
-workflow = ".github/workflows/msrv.yml"
+workflow = ".github/workflows/ci.yml"
 job = "msrv"
-classification = "required"
+classification = "merge_component"
 contexts = ["msrv"]
 always_present = true
 rationale = "Required minimum-supported-Rust-version contract for substantive changes; trusted docs-only changes retain the required context without compiling on MSRV."
 
 [[producer]]
-workflow = ".github/workflows/dependency-review.yml"
-job = "dependency-review"
-classification = "required"
+workflow = ".github/workflows/ci.yml"
+job = "dependency_review"
+classification = "merge_component"
 contexts = ["dependency-review"]
 always_present = true
 rationale = "Required diff-scoped dependency admission for non-docs-only changes; trusted docs-only scope cannot include dependency or workflow inputs, so the context may fast-path while cargo-deny remains authoritative for substantive changes."
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "merge_gate"
+classification = "required"
+contexts = ["Merge Gate"]
+always_present = true
+rationale = "Sole live merge requirement. Fails closed unless every authoritative internal merge component in the canonical CI graph concludes success."
 
 [[producer]]
 workflow = ".github/workflows/codeql.yml"

@@ -224,18 +224,20 @@ unrelated narrow change.
 
 ### GitHub merge gate
 
-Repository-wide required merge gates are executed by GitHub CI. The configured
-required contexts are `fmt`, `clippy`, `test (ubuntu-latest)`,
-`test (macos-latest)`, `test (windows-latest)`, `docs`, `license`, `wasm`,
-`compatibility`, `msrv`, and `dependency-review`. The
-machine-readable authority is `.github/gate-policy.toml`, and the live
-`Protect main` ruleset must match it. CI scope must not be weakened to reduce local
-validation cost. A green CI result is necessary evidence, but it is not by
-itself a strict-review PASS; relevant targeted local evidence remains required
-for changes that need it.
+Repository-wide merge authority is executed by GitHub CI. The live
+`Protect main` ruleset requires exactly one context: `Merge Gate`.
+The machine-readable authority is `.github/gate-policy.toml`. Its internal
+merge components remain `fmt`, `clippy`, the Ubuntu/macOS/Windows test matrix,
+`docs`, `license`, `wasm`, `compatibility`, `msrv`, and
+`dependency-review`. `Merge Gate` depends directly on those component jobs
+and fails unless every component result is exactly `success`. CI scope must
+not be weakened to reduce local validation cost. A green aggregate is necessary
+evidence, but it is not by itself a strict-review PASS; relevant targeted local
+evidence remains required for changes that need it.
 
 A conservative documentation-only fast path may skip heavy product/toolchain
-steps while preserving every required status context. Its allowlist and
+steps while preserving every authoritative component job and the sole required
+`Merge Gate` context. Its allowlist and
 trusted-base classification contract are defined in `.github/gate-policy.toml`
 and `docs/engineering/MERGE_GATE_POLICY.md`. Any classifier uncertainty,
 mixed scope, policy/workflow change, or `docs/legal/` change must use full

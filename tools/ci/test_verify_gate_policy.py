@@ -328,5 +328,174 @@ rationale = "must not be allowed"
             mod.load_policy(root / ".github" / "gate-policy.toml")
 
 
+    def test_merge_component_graph_passes_with_single_aggregate(self):
+        workflow = """
+name: CI
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+  merge_gate:
+    name: Merge Gate
+    needs: [fmt, clippy]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          jq -e 'all(to_entries[]; .value.result == "success")' <<<"$NEEDS_JSON"
+"""
+        policy_text = """
+schema = 1
+[ruleset]
+name = "Protect main"
+required_check_integration_id = 15368
+[compatibility_scope]
+run = ["crates/**"]
+skip = ["docs/**"]
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "fmt"
+classification = "merge_component"
+contexts = ["fmt"]
+always_present = true
+rationale = "fixture"
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "clippy"
+classification = "merge_component"
+contexts = ["clippy"]
+always_present = true
+rationale = "fixture"
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "merge_gate"
+classification = "required"
+contexts = ["Merge Gate"]
+always_present = true
+rationale = "fixture"
+"""
+        tmp, root, policy = self.make_repo(workflow, policy_text)
+        self.addCleanup(tmp.cleanup)
+        mod.verify_repository(root, policy, ruleset(["Merge Gate"]))
+
+    def test_merge_gate_missing_component_dependency_fails(self):
+        workflow = """
+name: CI
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+  merge_gate:
+    name: Merge Gate
+    needs: [fmt]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          jq -e 'all(to_entries[]; .value.result == "success")' <<<"$NEEDS_JSON"
+"""
+        policy_text = """
+schema = 1
+[ruleset]
+name = "Protect main"
+required_check_integration_id = 15368
+[compatibility_scope]
+run = ["crates/**"]
+skip = ["docs/**"]
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "fmt"
+classification = "merge_component"
+contexts = ["fmt"]
+always_present = true
+rationale = "fixture"
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "clippy"
+classification = "merge_component"
+contexts = ["clippy"]
+always_present = true
+rationale = "fixture"
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "merge_gate"
+classification = "required"
+contexts = ["Merge Gate"]
+always_present = true
+rationale = "fixture"
+"""
+        tmp, root, policy = self.make_repo(workflow, policy_text)
+        self.addCleanup(tmp.cleanup)
+        with self.assertRaisesRegex(mod.PolicyError, "Merge Gate dependency set drift"):
+            mod.verify_repository(root, policy)
+
+    def test_merge_gate_non_fail_closed_aggregate_fails(self):
+        workflow = """
+name: CI
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+  merge_gate:
+    name: Merge Gate
+    needs: [fmt]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: echo "not an aggregate"
+"""
+        policy_text = """
+schema = 1
+[ruleset]
+name = "Protect main"
+required_check_integration_id = 15368
+[compatibility_scope]
+run = ["crates/**"]
+skip = ["docs/**"]
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "fmt"
+classification = "merge_component"
+contexts = ["fmt"]
+always_present = true
+rationale = "fixture"
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "merge_gate"
+classification = "required"
+contexts = ["Merge Gate"]
+always_present = true
+rationale = "fixture"
+"""
+        tmp, root, policy = self.make_repo(workflow, policy_text)
+        self.addCleanup(tmp.cleanup)
+        with self.assertRaisesRegex(mod.PolicyError, "fail closed"):
+            mod.verify_repository(root, policy)
+
+
 if __name__ == "__main__":
     unittest.main()

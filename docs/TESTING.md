@@ -185,29 +185,33 @@ structure and source spans; no automatic golden-update mode is provided.
 
 ## CI Checks
 
-| Check | What it runs | Gate |
+The live ruleset requires only `Merge Gate`. The rows below are authoritative
+internal components of that aggregate.
+
+| Component | What it runs | Merge authority |
 |-------|-------------|------|
-| fmt | `cargo fmt --all --check` | Merge |
-| clippy | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Merge |
-| test (macos-latest) | `cargo test --locked --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge |
-| test (ubuntu-latest) | The same workspace, CLI, and parity checks, plus the CLI dependency-tree and public-example smoke checks | Merge |
-| test (windows-latest) | `cargo test --locked --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge |
-| docs | `cargo doc --locked --workspace --all-features --no-deps` | Merge |
-| license | `cargo deny check --all-features` through the repository's cargo-deny action | Merge |
-| compatibility | Markdown/Quarkdown differential campaign for relevant changes, explicit successful no-op otherwise | Merge |
-| msrv | `cargo +1.92.0 check --workspace --all-targets --all-features --locked` | Merge |
-| wasm | `cargo check --locked -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features` | Merge |
-| dependency-review | Diff-scoped GitHub dependency admission for newly introduced vulnerable dependencies and Actions references | Merge |
+| fmt | `cargo fmt --all --check` plus deterministic policy/hardening verifiers | Merge Gate component |
+| clippy | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Merge Gate component |
+| test (macos-latest) | `cargo test --locked --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge Gate component |
+| test (ubuntu-latest) | The same workspace, CLI, and parity checks, plus the CLI dependency-tree and public-example smoke checks | Merge Gate component |
+| test (windows-latest) | `cargo test --locked --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge Gate component |
+| docs | `cargo doc --locked --workspace --all-features --no-deps` | Merge Gate component |
+| license | `cargo deny check --all-features` through the repository's cargo-deny action | Merge Gate component |
+| compatibility | Markdown/Quarkdown differential campaign for relevant changes, explicit successful no-op otherwise | Merge Gate component |
+| msrv | `cargo +1.92.0 check --workspace --all-targets --all-features --locked` | Merge Gate component |
+| wasm | `cargo check --locked -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features` | Merge Gate component |
+| dependency-review | Diff-scoped GitHub dependency admission for newly introduced vulnerable dependencies and Actions references | Merge Gate component |
+| Merge Gate | Fail-closed `needs` aggregation; every component result must be exactly `success` | Sole live required context |
 
 The WASM build check ensures core + lowering crates remain compatible with
 browser deployment targets. It only checks that compilation passes — no WASM
 test runner is required. If the check is slow, it may use `--target-dir`
 caching.
 
-For a trusted-base-proven documentation-only pull request, the required
+For a trusted-base-proven documentation-only pull request, the authoritative
 `fmt`, `clippy`, native test matrix, `docs`, `license`, `wasm`, `msrv`,
-and `dependency-review` contexts still materialize but skip their heavy
-product/toolchain work. The documentation spelling workflow remains applicable,
+and `dependency-review` components still materialize but skip their heavy
+product/toolchain work. `Merge Gate` still waits for and aggregates them. The documentation spelling workflow remains applicable,
 and `compatibility` independently decides whether compatibility evidence is
 required. Any uncertainty in documentation-only classification falls back to
 the full paths above.
