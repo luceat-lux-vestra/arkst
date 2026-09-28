@@ -378,23 +378,7 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
                     f"required producer {key[0]}#{key[1]} has top-level "
                     f"{expected_trigger} paths/paths-ignore filtering"
                 )
-            declaration_key = (
-                ".github/workflows/failure-declaration.yml",
-                "failure-triage",
-            )
-            canonical_types = {"opened", "reopened", "synchronize", "edited"}
-            if key == declaration_key:
-                if (
-                    not trigger.types_restricted
-                    or trigger.types is None
-                    or len(trigger.types) != len(canonical_types)
-                    or set(trigger.types) != canonical_types
-                ):
-                    raise PolicyError(
-                        "failure declaration must run on exactly "
-                        "opened/reopened/synchronize/edited"
-                    )
-            elif trigger.types_restricted:
+            if trigger.types_restricted:
                 canonical_types = {"opened", "reopened", "synchronize", "ready_for_review"}
                 if (
                     trigger.types is None
