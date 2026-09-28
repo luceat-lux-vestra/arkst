@@ -164,6 +164,14 @@ class GatePolicyNegativeTests(unittest.TestCase):
         ):
             mod.verify_repository(root, policy)
 
+    def test_required_producer_always_condition_passes(self):
+        workflow = BASE_CI.replace(
+            "    name: fmt\n", "    name: fmt\n    if: ${{ always() }}\n"
+        )
+        tmp, root, policy = self.make_repo(workflow)
+        self.addCleanup(tmp.cleanup)
+        mod.verify_repository(root, policy, ruleset(["fmt"]))
+
     def test_required_producer_job_condition_fails(self):
         workflow = BASE_CI.replace(
             "    name: fmt\n", "    name: fmt\n    if: github.actor != 'nobody'\n"
