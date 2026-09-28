@@ -78,9 +78,9 @@ counted as production translation candidates.
 
 ## CI semantics
 
-The required `license` PR context runs the verifier unit tests, normal PR mode,
-and the explicit `--release` mode. After #444 closure, both modes are required
-evidence on every PR. The gate prevents regression by failing on:
+The authoritative `license` merge component runs the verifier unit tests, normal PR mode,
+and the explicit `--release` mode. After #444 closure, both modes are mandatory
+component evidence on every substantive PR and are aggregated by `Merge Gate`. The gate prevents regression by failing on:
 
 - direct Quarkdown implementation-source references in production, test,
   fixture, or example paths;
@@ -101,8 +101,8 @@ The explicit release-clearance command is:
 python3 tools/ci/verify_license_provenance.py --release
 ```
 
-It is also executed by the required PR-time `license` context, so the release
-invariant cannot drift separately from ordinary merge authority.
+It is also executed by the PR-time `license` merge component, so the release
+invariant cannot drift separately from ordinary `Merge Gate` authority.
 
 Release mode additionally fails until:
 
@@ -112,6 +112,6 @@ Release mode additionally fails until:
 4. no fixture remains `REVIEW_REQUIRED`.
 
 This is the finite unblock condition. With the #444 ledger at
-`coverage = "COMPLETE"`, the required PR-time `license` context locks that
-clear state for future changes. Git history is preserved; history must not be
+`coverage = "COMPLETE"`, the PR-time `license` merge component locks that
+clear state for future changes through the aggregate `Merge Gate`. Git history is preserved; history must not be
 rewritten to manufacture a clean-room record.

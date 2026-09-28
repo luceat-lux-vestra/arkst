@@ -48,8 +48,8 @@ metadata: the 14 `crates/*` packages plus `arkst-markdown-compat` and
 The verifier's tests exercise the production validation path with negative
 mutations for accidental Cargo publication, workspace inventory drift, stale
 entries, GitHub Release contract drift, CLI channel mismatch, omitted internal
-tools, and malformed artifact classification. It remains inside the existing
-required `fmt` gate, so this change adds no new required status context.
+tools, and malformed artifact classification. It remains inside the existing authoritative
+`fmt` component, so this change adds no new live required status context beyond `Merge Gate`.
 
 ## Next release gates
 
