@@ -203,6 +203,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("IrResolvedPageFormat"));
     assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9]
+        .contains("integration_selector_scoped_page_layout_fails_closed_at_typst_boundary"));
     assert!(
         pageformat[9].contains("integration_pageformat_background_lowers_to_valid_typst_and_pdf")
     );
@@ -263,6 +265,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
+    assert!(pageformat[10].contains("selector-scoped size/width/height/columns"));
+    assert!(pageformat[10].contains("generated panic before page setup"));
+    assert!(pageformat[10]
+        .contains("unsupported scoped layout cannot silently degrade to global output"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
@@ -270,6 +276,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("bounded-range-border-output"));
     assert!(pageformat[11].contains("bounded-side-decoration-output"));
     assert!(pageformat[11].contains("selector-aware-layering"));
+    assert!(pageformat[11].contains("scoped-layout-backend-fail-closed"));
 }
 
 #[test]
