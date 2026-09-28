@@ -267,7 +267,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
     assert!(pageformat[10].contains("selector-scoped size/width/height/columns"));
     assert!(pageformat[10].contains("generated panic before page setup"));
-    assert!(pageformat[10].contains("unsupported scoped layout cannot silently degrade to global output"));
+    assert!(pageformat[10]
+        .contains("unsupported scoped layout cannot silently degrade to global output"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
