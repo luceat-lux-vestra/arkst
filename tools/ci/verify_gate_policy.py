@@ -13,6 +13,7 @@ from typing import Iterable
 
 ALLOWED_CLASSIFICATIONS = {
     "required",
+    "merge_component",
     "advisory",
     "path_scoped_optional",
     "reference_generated_data_deep_check",
@@ -41,6 +42,7 @@ class Job:
     if_expression: str | None = None
     needs: tuple[str, ...] = ()
     matrix: dict[str, list[str]] = field(default_factory=dict)
+    source: str = ""
 
 
 @dataclass
@@ -273,6 +275,7 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
             if_expression=if_expression,
             needs=needs,
             matrix=matrix,
+            source="\n".join([raw, *block]),
         )
         idx = end
 
@@ -308,9 +311,9 @@ def load_policy(path: Path) -> dict:
             if context in seen_contexts:
                 raise PolicyError(f"{path}: duplicate PR context {context!r}")
             seen_contexts.add(context)
-        if classification == "required" and producer.get("always_present") is not True:
+        if classification in {"required", "merge_component"} and producer.get("always_present") is not True:
             raise PolicyError(
-                f"{path}: required producer {key[0]}#{key[1]} must set always_present = true"
+                f"{path}: authoritative producer {key[0]}#{key[1]} must set always_present = true"
             )
         declared_trigger = producer.get("trigger", "pull_request")
         if declared_trigger not in PR_EVENTS:
@@ -375,6 +378,7 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
         raise PolicyError(f"policy producer(s) missing from workflows: {rendered}")
 
     required_contexts: set[str] = set()
+    merge_component_keys: list[tuple[str, str]] = []
     for key, producer in producers.items():
         workflow = workflows[key[0]]
         job = workflow.jobs[key[1]]
@@ -384,41 +388,83 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
             raise PolicyError(
                 f"{key[0]}#{key[1]} context drift: expected {expected_contexts}, got {contexts}"
             )
-        if producer["classification"] == "required":
+
+        classification = producer["classification"]
+        if classification == "required":
             required_contexts.update(contexts)
-            expected_trigger = producer.get("trigger", "pull_request")
-            trigger = workflow.triggers.get(expected_trigger)
-            if trigger is None:
+        elif classification == "merge_component":
+            merge_component_keys.append(key)
+
+        if classification not in {"required", "merge_component"}:
+            continue
+
+        expected_trigger = producer.get("trigger", "pull_request")
+        trigger = workflow.triggers.get(expected_trigger)
+        if trigger is None:
+            raise PolicyError(
+                f"authoritative producer {key[0]}#{key[1]} must use {expected_trigger}"
+            )
+        if trigger.path_filtered:
+            raise PolicyError(
+                f"authoritative producer {key[0]}#{key[1]} has top-level "
+                f"{expected_trigger} paths/paths-ignore filtering"
+            )
+        if trigger.types_restricted:
+            canonical_types = {"opened", "reopened", "synchronize", "ready_for_review"}
+            if (
+                trigger.types is None
+                or len(trigger.types) != len(canonical_types)
+                or set(trigger.types) != canonical_types
+            ):
                 raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} must use {expected_trigger}"
+                    f"authoritative producer {key[0]}#{key[1]} must use exactly "
+                    "opened/reopened/synchronize/ready_for_review when pull_request "
+                    "types are declared"
                 )
-            if trigger.path_filtered:
-                raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} has top-level "
-                    f"{expected_trigger} paths/paths-ignore filtering"
-                )
-            if trigger.types_restricted:
-                canonical_types = {"opened", "reopened", "synchronize", "ready_for_review"}
-                if (
-                    trigger.types is None
-                    or len(trigger.types) != len(canonical_types)
-                    or set(trigger.types) != canonical_types
-                ):
-                    raise PolicyError(
-                        f"required producer {key[0]}#{key[1]} must use exactly "
-                        "opened/reopened/synchronize/ready_for_review when pull_request "
-                        "types are declared"
-                    )
-            if job.needs and job.if_expression != "${{ always() }}":
-                raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} has prerequisites {job.needs!r} "
-                    "but does not use the exact fail-closed job guard ${{ always() }}"
-                )
-            if job.if_expression not in {None, "${{ always() }}"}:
-                raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} has an unsafe job-level if "
-                    f"condition: {job.if_expression!r}"
-                )
+        if job.needs and job.if_expression != "${{ always() }}":
+            raise PolicyError(
+                f"authoritative producer {key[0]}#{key[1]} has prerequisites {job.needs!r} "
+                "but does not use the exact fail-closed job guard ${{ always() }}"
+            )
+        if job.if_expression not in {None, "${{ always() }}"}:
+            raise PolicyError(
+                f"authoritative producer {key[0]}#{key[1]} has an unsafe job-level if "
+                f"condition: {job.if_expression!r}"
+            )
+
+    if merge_component_keys:
+        required_keys = [
+            key for key, producer in producers.items()
+            if producer["classification"] == "required"
+        ]
+        if len(required_keys) != 1:
+            raise PolicyError(
+                "merge-component policy requires exactly one aggregate required producer"
+            )
+        gate_key = required_keys[0]
+        gate_producer = producers[gate_key]
+        if gate_producer["contexts"] != ["Merge Gate"]:
+            raise PolicyError("aggregate required producer must expose exactly 'Merge Gate'")
+        gate_job = workflows[gate_key[0]].jobs[gate_key[1]]
+        component_workflows = {key[0] for key in merge_component_keys}
+        if component_workflows != {gate_key[0]}:
+            raise PolicyError(
+                "all merge components must live in the same workflow as Merge Gate"
+            )
+        expected_needs = {key[1] for key in merge_component_keys}
+        actual_needs = set(gate_job.needs)
+        if len(gate_job.needs) != len(expected_needs) or actual_needs != expected_needs:
+            raise PolicyError(
+                "Merge Gate dependency set drift: "
+                f"expected={sorted(expected_needs)}, got={list(gate_job.needs)}"
+            )
+        if 'NEEDS_JSON: ${{ toJSON(needs) }}' not in gate_job.source:
+            raise PolicyError("Merge Gate must serialize the complete needs graph")
+        aggregate_check = 'jq -e \'all(to_entries[]; .value.result == "success")\' <<<"$NEEDS_JSON"'
+        if aggregate_check not in gate_job.source:
+            raise PolicyError(
+                "Merge Gate must fail closed unless every component result is success"
+            )
 
     if ruleset is not None:
         verify_ruleset(policy, ruleset, required_contexts)
