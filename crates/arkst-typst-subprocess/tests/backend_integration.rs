@@ -368,6 +368,55 @@ Border default unresolved\n";
 }
 
 #[test]
+fn integration_selector_scoped_margin_without_border_fails_closed_at_typst_boundary() {
+    let source = ".doctype {paged}\n\
+.pageformat margin:{1cm}\n\
+.pageformat pages:{2..2} margin:{2cm}\n\
+First page\n\
+\n\
+.pagebreak\n\
+\n\
+Second page\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-scoped-margin.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-scoped-margin.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "selector-scoped margin diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-scoped page margin to Typst content layout outside the explicit border decoration path\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-scoped-margin-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-scoped-margin.qd".to_string(),
+            })
+            .expect_err("selector-scoped margin-only layout must fail closed in Typst");
+        let message = error.to_string();
+        assert!(
+            message.contains(
+                "selector-scoped page margin to Typst content layout outside the explicit border decoration path"
+            ),
+            "{message}"
+        );
+    });
+}
+
+#[test]
 fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat columns:{2}\nColumn output\n";
     let project = VirtualProjectBuilder::new()
