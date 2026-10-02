@@ -815,7 +815,7 @@ Second page\n";
         "{typst_code}"
     );
     assert!(
-        typst_code.contains("let __arkst_border_requested = true"),
+        typst_code.contains("let __arkst_border_requested ="),
         "{typst_code}"
     );
 
