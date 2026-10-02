@@ -248,7 +248,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("explicit physical millimeter bounds"));
     assert!(pageformat[10].contains("omitted-orientation basis"));
     assert!(pageformat[10].contains("omitted docs basis remains fail-closed"));
-    assert!(pageformat[10].contains("page-border cases requiring unresolved renderer defaults"));
+    assert!(pageformat[10]
+        .contains("remaining page-border semantics beyond the selector-free and per-page scoped completeness guards"));
     assert!(pageformat[10].contains(
         "selector-free implicit-margin/width-only/color-only cases are explicitly backend-rejected"
     ));
