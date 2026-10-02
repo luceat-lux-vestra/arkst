@@ -98,6 +98,26 @@ fn page_selector_expression(values: Vec<(Option<IrPageFormatSelector>, String)>)
     expression
 }
 
+fn page_selector_presence_expression(selectors: Vec<Option<IrPageFormatSelector>>) -> String {
+    let mut branches = Vec::new();
+    let mut fallback = "false".to_string();
+
+    for selector in selectors.into_iter().rev() {
+        if let Some(condition) = selector.and_then(page_selector_condition) {
+            branches.push(condition);
+        } else {
+            fallback = "true".to_string();
+            break;
+        }
+    }
+
+    let mut expression = fallback;
+    for condition in branches.into_iter().rev() {
+        expression = format!("if {condition} {{ true }} else {{ {expression} }}");
+    }
+    expression
+}
+
 fn lower_page_margins_value(margin: &arkst_ir::IrPageMargins) -> String {
     let top = lowering_base::lower_size(&margin.top);
     let right = lowering_base::lower_size(&margin.right);
@@ -123,6 +143,7 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     let mut margins = Vec::new();
     let mut widths = Vec::new();
     let mut colors = Vec::new();
+    let mut border_requests = Vec::new();
     let mut saw_scoped_selector = false;
 
     for layer in &state.page_format.layers {
@@ -142,6 +163,9 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
         if let Some(margin) = layer.margin.as_ref() {
             margins.push((selector, lower_page_margins_value(margin)));
         }
+        if layer.border_widths.is_some() || layer.border_color.is_some() {
+            border_requests.push(selector);
+        }
         if let Some(border_widths) = layer.border_widths.as_ref() {
             widths.push((selector, lower_page_border_widths_value(border_widths)));
         }
@@ -154,6 +178,7 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
         let margin = page_selector_expression(margins);
         let widths = page_selector_expression(widths);
         let color = page_selector_expression(colors);
+        let border_requested = page_selector_presence_expression(border_requests);
 
         return Some(format!(
             "#set page(foreground: context {{\n\
@@ -161,7 +186,10 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
   let __arkst_margin = {margin}\n\
   let __arkst_border_widths = {widths}\n\
   let __arkst_border_color = {color}\n\
-  if __arkst_margin == none or __arkst_border_widths == none or __arkst_border_color == none {{\n\
+  let __arkst_border_requested = {border_requested}\n\
+  if __arkst_border_requested and (__arkst_margin == none or __arkst_border_widths == none or __arkst_border_color == none) {{\n\
+    panic(\"Arkst cannot lower selector-scoped page border without explicit margin, border widths, and border color\")\n\
+  }} else if __arkst_margin == none or __arkst_border_widths == none or __arkst_border_color == none {{\n\
     none\n\
   }} else {{\n\
     place(\n\

@@ -209,6 +209,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         "integration_selector_scoped_margin_without_border_fails_closed_at_typst_boundary"
     ));
     assert!(
+        pageformat[9].contains("integration_selector_scoped_border_defaults_fail_closed_per_page")
+    );
+    assert!(
         pageformat[9].contains("integration_pageformat_background_lowers_to_valid_typst_and_pdf")
     );
     assert!(pageformat[9]
@@ -245,7 +248,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("explicit physical millimeter bounds"));
     assert!(pageformat[10].contains("omitted-orientation basis"));
     assert!(pageformat[10].contains("omitted docs basis remains fail-closed"));
-    assert!(pageformat[10].contains("page-border cases requiring unresolved renderer defaults"));
+    assert!(pageformat[10]
+        .contains("remaining page-border semantics beyond the selector-free and per-page scoped completeness guards"));
     assert!(pageformat[10].contains(
         "selector-free implicit-margin/width-only/color-only cases are explicitly backend-rejected"
     ));
@@ -279,6 +283,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-scoped margin-only paged output"));
     assert!(pageformat[10]
         .contains("existing bounded scoped-border path continues to consume scoped margin"));
+    assert!(pageformat[10].contains("per-page selector-aware request flag"));
+    assert!(pageformat[10]
+        .contains("current page requests a border but margin, widths, or color remain unresolved"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
@@ -288,6 +295,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("selector-aware-layering"));
     assert!(pageformat[11].contains("scoped-layout-backend-fail-closed"));
     assert!(pageformat[11].contains("scoped-margin-backend-fail-closed"));
+    assert!(pageformat[11].contains("scoped-border-completeness-fail-closed"));
 }
 
 #[test]

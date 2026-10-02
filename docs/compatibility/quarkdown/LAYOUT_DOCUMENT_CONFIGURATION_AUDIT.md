@@ -364,9 +364,13 @@ border-width, and border-color layers for global, side-only, finite-range-only,
 and combined side+range selectors. It resolves those three fields independently
 in source order so a later color-only scoped layer inherits earlier widths and
 margins, renders through contextual page foreground content keyed by physical
-1-based `here().page()`, applies the public left/even and right/odd page-side
-mapping, and draws only when margin, widths, and color are all explicit for that
-physical page.
+1-based `here().page()`, and applies the public left/even and right/odd page-side
+mapping. A selector-aware border-request flag is resolved with the same page
+conditions; when a border is requested on the current physical page but margin,
+widths, or color remain unresolved after inheritance, the Typst context now
+panics instead of silently returning `none`. Pages with no border request still
+emit no foreground, while complete explicit border pages retain the existing
+bounded drawing path.
 The bounded evaluator now also admits selector-scoped mixed size+axis and
 single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
@@ -380,9 +384,9 @@ regression continues to pin that boundary. Selector-aware output outside the bou
 remaining selector-aware geometry/size/margin/columns output (with scoped
 size/width/height/columns explicitly failing closed at the Typst boundary and scoped
 margin-only `paged` output outside an explicit ordered border decoration path likewise
-backend-rejected by #491 rather than being silently ignored), page-border output that
-still depends on unresolved renderer defaults, and the remaining output consumption stay
-open, and Typst page objects must not enter evaluator/IR state. Status is
+backend-rejected by #491 rather than being silently ignored), page-border semantics
+outside the bounded selector-free and per-page scoped completeness guards, and the
+remaining output consumption stay open, and Typst page objects must not enter evaluator/IR state. Status is
 conservatively `PARTIAL`
 under #175.
 
