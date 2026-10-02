@@ -955,8 +955,7 @@ mod tests {
                 ..IrPageFormatLayer::default()
             },
         ];
-        assert!(lower_to_typst_code(&doc)
-            .starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE));
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE));
 
         doc.metadata.document_state.page_format.layers = vec![
             IrPageFormatLayer {
@@ -969,8 +968,7 @@ mod tests {
                 ..IrPageFormatLayer::default()
             },
         ];
-        assert!(lower_to_typst_code(&doc)
-            .starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE));
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE));
 
         doc.metadata.document_state.page_format.layers = vec![
             IrPageFormatLayer {
