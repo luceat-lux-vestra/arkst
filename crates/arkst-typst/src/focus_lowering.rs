@@ -316,12 +316,49 @@ fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
             || state.page_border_color.is_none())
 }
 
+const UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-scoped page margin to Typst content layout outside the explicit border decoration path\")\n";
+
+fn has_unsupported_scoped_page_margin(doc: &IrDocument) -> bool {
+    let state = &doc.metadata.document_state;
+    if state.document_type != IrDocumentType::Paged {
+        return false;
+    }
+
+    let has_scoped_margin = state.page_format.layers.iter().any(|layer| {
+        let scoped = matches!(
+            layer.selector,
+            Some(selector) if selector.side.is_some() || selector.pages.is_some()
+        );
+        scoped && layer.margin.is_some()
+    });
+    if !has_scoped_margin {
+        return false;
+    }
+
+    let has_ordered_border_widths = state
+        .page_format
+        .layers
+        .iter()
+        .any(|layer| layer.border_widths.is_some());
+    let has_ordered_border_color = state
+        .page_format
+        .layers
+        .iter()
+        .any(|layer| layer.border_color.is_some());
+
+    !(has_ordered_border_widths && has_ordered_border_color)
+}
+
 fn document_prelude(doc: &IrDocument) -> String {
     if has_unsupported_scoped_page_layout(doc) {
         return UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE.to_string();
     }
     if has_unresolved_selector_free_page_border_defaults(doc) {
         return UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE.to_string();
+    }
+    if has_unsupported_scoped_page_margin(doc) {
+        return UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE.to_string();
     }
 
     let state = &doc.metadata.document_state;
@@ -840,6 +877,121 @@ mod tests {
             "{slides_code}"
         );
         assert!(!slides_code.contains("page(foreground:"), "{slides_code}");
+    }
+
+    #[test]
+    fn selector_scoped_margin_without_explicit_border_path_fails_closed() {
+        let margin = IrPageMargins {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Cm,
+            },
+            right: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Cm,
+            },
+            bottom: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Cm,
+            },
+            left: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Cm,
+            },
+        };
+        let selector = Some(IrPageFormatSelector {
+            side: Some(IrPageSide::Left),
+            pages: Some(IrPageRange { start: 2, end: 4 }),
+        });
+
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer {
+            selector,
+            margin: Some(margin.clone()),
+            ..IrPageFormatLayer::default()
+        }];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE),
+            "{code}"
+        );
+        assert!(!code.contains("#set page(margin:"), "{code}");
+        assert!(!code.contains("#set page(foreground:"), "{code}");
+
+        let widths = IrPageBorderWidths {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Pt,
+            },
+        };
+        let color = IrColor {
+            red: 255,
+            green: 0,
+            blue: 0,
+            alpha: 1.0,
+        };
+
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                border_widths: Some(widths.clone()),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector,
+                margin: Some(margin.clone()),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE));
+
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                border_color: Some(color.clone()),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector,
+                margin: Some(margin.clone()),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE));
+
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                border_widths: Some(widths),
+                border_color: Some(color),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector,
+                margin: Some(margin),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        let border_code = lower_to_typst_code(&doc);
+        assert!(
+            !border_code.starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE),
+            "{border_code}"
+        );
+        assert!(
+            border_code.contains("#set page(foreground: context {"),
+            "{border_code}"
+        );
     }
 
     #[test]
