@@ -943,6 +943,33 @@ mod tests {
             blue: 0,
             alpha: 1.0,
         };
+
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                border_widths: Some(widths.clone()),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector,
+                margin: Some(margin.clone()),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE));
+
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                border_color: Some(color.clone()),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                selector,
+                margin: Some(margin.clone()),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE));
+
         doc.metadata.document_state.page_format.layers = vec![
             IrPageFormatLayer {
                 border_widths: Some(widths),
