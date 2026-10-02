@@ -417,6 +417,59 @@ Second page\n";
 }
 
 #[test]
+fn integration_selector_scoped_border_defaults_fail_closed_per_page() {
+    let source = ".doctype {paged}\n\
+.pageformat margin:{1cm}\n\
+.pageformat pages:{2..2} bordercolor:{red}\n\
+First page\n\
+\n\
+.pagebreak\n\
+\n\
+Second page\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-scoped-border-defaults.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-scoped-border-defaults.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "selector-scoped border-default diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("let __arkst_border_requested = if __arkst_page >= 2 and __arkst_page <= 2 { true } else { false }"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains(
+            "panic(\"Arkst cannot lower selector-scoped page border without explicit margin, border widths, and border color\")"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-scoped-border-defaults-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-scoped-border-defaults.qd".to_string(),
+            })
+            .expect_err("incomplete selector-scoped border must fail closed on the selected page");
+        let message = error.to_string();
+        assert!(
+            message.contains(
+                "selector-scoped page border without explicit margin, border widths, and border color"
+            ),
+            "{message}"
+        );
+    });
+}
+
+#[test]
 fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat columns:{2}\nColumn output\n";
     let project = VirtualProjectBuilder::new()
@@ -759,6 +812,10 @@ Second page\n";
     assert!(typst_code.contains("rgb(0, 0, 255, 100%)"), "{typst_code}");
     assert!(
         typst_code.contains("thickness: __arkst_border_widths.left"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("let __arkst_border_requested = true"),
         "{typst_code}"
     );
 
