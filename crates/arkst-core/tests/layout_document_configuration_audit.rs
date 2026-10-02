@@ -208,8 +208,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains(
         "integration_selector_scoped_margin_without_border_fails_closed_at_typst_boundary"
     ));
-    assert!(pageformat[9]
-        .contains("integration_selector_scoped_border_defaults_fail_closed_per_page"));
+    assert!(
+        pageformat[9].contains("integration_selector_scoped_border_defaults_fail_closed_per_page")
+    );
     assert!(
         pageformat[9].contains("integration_pageformat_background_lowers_to_valid_typst_and_pdf")
     );
@@ -282,9 +283,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10]
         .contains("existing bounded scoped-border path continues to consume scoped margin"));
     assert!(pageformat[10].contains("per-page selector-aware request flag"));
-    assert!(pageformat[10].contains(
-        "current page requests a border but margin, widths, or color remain unresolved"
-    ));
+    assert!(pageformat[10]
+        .contains("current page requests a border but margin, widths, or color remain unresolved"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
