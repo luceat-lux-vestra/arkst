@@ -209,8 +209,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .contains("integration_pageformat_ordered_global_columns_override_stale_flattened_state"));
     assert!(pageformat[9]
         .contains("integration_pageformat_ordered_global_margin_overrides_stale_flattened_state"));
-    assert!(pageformat[9]
-        .contains("integration_pageformat_docs_margin_fails_closed_at_typst_boundary"));
+    assert!(
+        pageformat[9].contains("integration_pageformat_docs_margin_fails_closed_at_typst_boundary")
+    );
     assert!(pageformat[9]
         .contains("integration_non_paged_page_selector_fails_closed_at_typst_boundary"));
     assert!(pageformat[9].contains(
@@ -383,8 +384,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains(
         "Final docs output rejects selector-free global margin/columns before page setup"
     ));
-    assert!(pageformat[10]
-        .contains("pinned applicability limits those fields to plain/paged/slides"));
+    assert!(
+        pageformat[10].contains("pinned applicability limits those fields to plain/paged/slides")
+    );
     assert!(pageformat[10].contains("selector-scoped alignment/size/width/height/columns"));
     assert!(pageformat[10].contains("generated panic before page setup"));
     assert!(pageformat[10].contains(
