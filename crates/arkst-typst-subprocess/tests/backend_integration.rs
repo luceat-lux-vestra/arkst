@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use arkst_core::ir::{
-    IrColor, IrComponent, IrInline, IrNode, IrPageBorderWidths, IrPageMargins, IrSize, IrSizeUnit,
-    NativeTarget,
+    IrColor, IrComponent, IrDocumentAlignment, IrInline, IrNode, IrPageBorderWidths, IrPageMargins,
+    IrSize, IrSizeUnit, NativeTarget,
 };
 use arkst_core::{compile, CompileOptions, VirtualPathBuf, VirtualProjectBuilder};
 use arkst_typst::lowering::{lower_to_typst, lower_to_typst_code};
@@ -1501,6 +1501,44 @@ fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
                 entry_path: "pageformat-margin.qd".to_string(),
             })
             .expect("pageformat margin Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_v260_ordered_global_alignment_overrides_stale_flattened_state() {
+    let source =
+        ".row\n    A\n\n    B\n\n.pageformat alignment:{center}\n.column\n    C\n\n    D\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("v260-ordered-stack-inherit.qd")
+        .expect("valid entry path")
+        .add_source("v260-ordered-stack-inherit.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let mut result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "v2.6 ordered stack inheritance diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    result.ir.metadata.document_state.page_alignment = Some(IrDocumentAlignment::End);
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert_eq!(typst_code.matches("h(1fr)").count(), 2, "{typst_code}");
+    assert_eq!(typst_code.matches("v(1fr)").count(), 2, "{typst_code}");
+
+    with_typst("v260-ordered-stack-alignment-inheritance", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "v260-ordered-stack-inherit.qd".to_string(),
+            })
+            .expect("ordered inherited stack Typst must compile");
         assert!(output
             .pdf
             .expect("PDF output must be present")
