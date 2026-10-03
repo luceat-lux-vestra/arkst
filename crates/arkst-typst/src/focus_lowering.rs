@@ -151,6 +151,18 @@ fn selector_free_page_columns(doc: &IrDocument) -> Option<u32> {
     state.page_columns
 }
 
+fn selector_free_page_background(doc: &IrDocument) -> Option<arkst_ir::IrColor> {
+    let state = &doc.metadata.document_state;
+    if !state.page_format.layers.is_empty() {
+        return state
+            .page_format
+            .resolve_exact_selector(None)
+            .and_then(|global| global.background);
+    }
+
+    state.page_background.clone()
+}
+
 fn lower_page_border_widths_value(widths: &arkst_ir::IrPageBorderWidths) -> String {
     let top = lowering_base::lower_size(&widths.top);
     let right = lowering_base::lower_size(&widths.right);
@@ -554,8 +566,8 @@ fn document_prelude(doc: &IrDocument) -> String {
     }
     if let Some(background) = scoped_page_background(doc) {
         prelude.push_str(&background);
-    } else if let Some(background) = state.page_background.as_ref() {
-        let fill = lowering_base::lower_color(background);
+    } else if let Some(background) = selector_free_page_background(doc) {
+        let fill = lowering_base::lower_color(&background);
         prelude.push_str(&format!("#set page(fill: {fill})\n"));
     }
     if state.document_type == IrDocumentType::Slides {
@@ -899,6 +911,60 @@ mod tests {
 
         let code = lower_to_typst_code(&doc);
         assert!(code.starts_with("#set page(columns: 3)\n"), "{code}");
+    }
+
+    #[test]
+    fn ordered_selector_free_background_overrides_stale_flattened_compatibility_field() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_background = Some(IrColor {
+            red: 9,
+            green: 9,
+            blue: 9,
+            alpha: 1.0,
+        });
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                background: Some(IrColor {
+                    red: 10,
+                    green: 20,
+                    blue: 30,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                background: Some(IrColor {
+                    red: 40,
+                    green: 50,
+                    blue: 60,
+                    alpha: 0.5,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.contains("#set page(fill: rgb(40, 50, 60, 50%))"),
+            "{code}"
+        );
+        assert!(!code.contains("rgb(9, 9, 9, 100%)"), "{code}");
+    }
+
+    #[test]
+    fn ordered_pageformat_without_global_background_does_not_revive_stale_flattened_background() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_background = Some(IrColor {
+            red: 9,
+            green: 9,
+            blue: 9,
+            alpha: 1.0,
+        });
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer::default()];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(!code.contains("#set page(fill:"), "{code}");
+        assert!(!code.contains("rgb(9, 9, 9, 100%)"), "{code}");
     }
 
     #[test]

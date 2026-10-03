@@ -1067,6 +1067,51 @@ Border output\n";
 }
 
 #[test]
+fn integration_pageformat_ordered_global_background_overrides_stale_flattened_state() {
+    let source = ".doctype {paged}\n.pageformat background:{blue}\nBackground output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-ordered-background.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-ordered-background.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let mut result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat ordered background diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    result.ir.metadata.document_state.page_background = Some(IrColor {
+        red: 9,
+        green: 9,
+        blue: 9,
+        alpha: 1.0,
+    });
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(fill: rgb(0, 0, 255, 100%))"),
+        "{typst_code}"
+    );
+    assert!(!typst_code.contains("rgb(9, 9, 9, 100%)"), "{typst_code}");
+
+    with_typst("pageformat-ordered-background", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-ordered-background.qd".to_string(),
+            })
+            .expect("ordered pageformat background Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_background_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat background:{blue}\nBackground output\n";
     let project = VirtualProjectBuilder::new()

@@ -306,8 +306,12 @@ border rule: once any non-null border side is supplied, omitted/null sides
 become explicit zero; color-only input updates border color without fabricating
 a border width and therefore preserves any previously committed width
 structure. Semantic-None border/color/background inputs preserve prior
-effective state. The current Typst/PDF background consumer maps the committed
-typed RGB/alpha color directly to page fill without changing border state.
+effective state. When ordered page-format state exists, selector-free/global
+background output resolves the exact global selector group in source order and
+treats that merged background as canonical; flattened `page_background` is a
+legacy-IR fallback only when ordered page-format state is absent. The current
+Typst/PDF background consumer maps that committed typed RGB/alpha color directly
+to page fill without changing border state.
 The bounded Typst/PDF border consumer uses page foreground coordinates to draw
 the explicit content-area rectangle only when all of margin, border widths, and
 border color are committed. It preserves four independent side widths and does
