@@ -391,7 +391,10 @@ const UNRESOLVED_SELECTOR_FREE_PAGE_DIMENSIONS_PRELUDE: &str =
 
 fn has_unresolved_selector_free_page_dimensions(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
-    if !matches!(state.document_type, IrDocumentType::Paged | IrDocumentType::Slides) {
+    if !matches!(
+        state.document_type,
+        IrDocumentType::Paged | IrDocumentType::Slides
+    ) {
         return false;
     }
 
