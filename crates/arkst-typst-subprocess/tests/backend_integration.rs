@@ -455,9 +455,7 @@ Second page\n";
             .expect_err("selector-scoped margin must fail closed even with a complete border path");
         let message = error.to_string();
         assert!(
-            message.contains(
-                "selector-scoped page margin to Typst content layout"
-            ),
+            message.contains("selector-scoped page margin to Typst content layout"),
             "{message}"
         );
     });
