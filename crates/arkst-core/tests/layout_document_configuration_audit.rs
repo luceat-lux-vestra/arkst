@@ -249,9 +249,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     ));
     assert!(pageformat[9]
         .contains("integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf"));
-    assert!(pageformat[9].contains(
-        "integration_pageformat_ordered_global_border_overrides_stale_flattened_state"
-    ));
+    assert!(pageformat[9]
+        .contains("integration_pageformat_ordered_global_border_overrides_stale_flattened_state"));
     assert!(pageformat[10].contains("global positive columns"));
     assert!(pageformat[10].contains("selector-free global background"));
     assert!(pageformat[10].contains("Typst/PDF columns consumer"));
