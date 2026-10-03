@@ -203,9 +203,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("IrResolvedPageFormat"));
     assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
-    assert!(pageformat[9].contains(
-        "integration_pageformat_ordered_global_margin_overrides_stale_flattened_state"
-    ));
+    assert!(pageformat[9]
+        .contains("integration_pageformat_ordered_global_margin_overrides_stale_flattened_state"));
     assert!(pageformat[9]
         .contains("integration_non_paged_page_selector_fails_closed_at_typst_boundary"));
     assert!(pageformat[9].contains(
