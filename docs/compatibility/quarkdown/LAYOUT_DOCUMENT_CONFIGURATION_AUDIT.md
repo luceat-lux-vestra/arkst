@@ -319,8 +319,12 @@ Typst/PDF background consumer maps that committed typed RGB/alpha color directly
 to page fill without changing border state.
 The bounded Typst/PDF border consumer uses page foreground coordinates to draw
 the explicit content-area rectangle only when all of margin, border widths, and
-border color are committed. It preserves four independent side widths and does
-not fabricate a renderer-default margin, width, or color. When ordered
+border color are committed. It applies to selector-free final `paged` and
+`slides` output, matching the pinned page-format applicability of margin and
+border fields; slide output reuses the already-established concrete slide page
+geometry and the same explicit content-area rectangle. It preserves four
+independent side widths and does not fabricate a renderer-default margin, width,
+or color. When ordered
 page-format state exists, selector-free border output now resolves the exact
 global selector group in source order and treats that ordered result as
 canonical for margin, border widths, border color, non-paged rejection, and
@@ -467,9 +471,11 @@ effective payload remain fail-closed as before. This does not widen selector-awa
 alignment rendering; non-null scoped alignment remains explicitly fail-closed at the
 Typst boundary. Selector-aware output outside the bounded background/border side+range subsets
 remains paged-only at the current Typst boundary, with final non-paged selector state
-explicitly backend-fail-closed. Selector-free border requests are likewise rejected when
-the final document is non-paged, because the current bounded border consumer is paged-only
-and silently dropping a complete requested border would violate the fail-closed boundary. Remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
+explicitly backend-fail-closed. Selector-free border requests remain rejected for final `plain` and `docs`
+output, where the current bounded Typst border consumer does not claim compatible
+content-area semantics. Final `slides` is now a supported selector-free explicit-value
+subset: complete margin + widths + color lower to page foreground, while incomplete
+slide border state fails closed under the same unresolved-default guard as `paged`. Remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
 alignment/size/width/height/columns explicitly failing closed at the Typst boundary and
 every scoped `paged` margin likewise backend-rejected rather than being consumed only as
 border geometry), page-border semantics
