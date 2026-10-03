@@ -139,6 +139,18 @@ fn selector_free_page_margin(doc: &IrDocument) -> Option<arkst_ir::IrPageMargins
     state.page_margin.clone()
 }
 
+fn selector_free_page_columns(doc: &IrDocument) -> Option<u32> {
+    let state = &doc.metadata.document_state;
+    if !state.page_format.layers.is_empty() {
+        return state
+            .page_format
+            .resolve_exact_selector(None)
+            .and_then(|global| global.columns);
+    }
+
+    state.page_columns
+}
+
 fn lower_page_border_widths_value(widths: &arkst_ir::IrPageBorderWidths) -> String {
     let top = lowering_base::lower_size(&widths.top);
     let right = lowering_base::lower_size(&widths.right);
@@ -537,7 +549,7 @@ fn document_prelude(doc: &IrDocument) -> String {
     if let Some(border) = page_border_foreground(doc) {
         prelude.push_str(&border);
     }
-    if let Some(columns) = state.page_columns {
+    if let Some(columns) = selector_free_page_columns(doc) {
         prelude.push_str(&format!("#set page(columns: {columns})\n"));
     }
     if let Some(background) = scoped_page_background(doc) {
@@ -1666,6 +1678,36 @@ mod tests {
             code.starts_with("#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))\n"),
             "{code}"
         );
+    }
+
+    #[test]
+    fn ordered_selector_free_columns_override_stale_flattened_compatibility_field() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_columns = Some(9);
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                columns: Some(2),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                columns: Some(4),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(code.contains("#set page(columns: 4)"), "{code}");
+        assert!(!code.contains("#set page(columns: 9)"), "{code}");
+    }
+
+    #[test]
+    fn ordered_pageformat_without_global_columns_does_not_revive_stale_flattened_columns() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_columns = Some(9);
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer::default()];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(!code.contains("#set page(columns:"), "{code}");
     }
 
     #[test]

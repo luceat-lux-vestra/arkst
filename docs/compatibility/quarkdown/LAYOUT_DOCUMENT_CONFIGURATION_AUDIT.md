@@ -294,9 +294,14 @@ state cannot diverge content margin from the ordered margin already used by the
 border consumer. The four explicit sides still lower through the shared size
 conversion boundary, with real pinned-backend PDF integration coverage. Non-positive or
 semantic-None column inputs are discarded without replacing an earlier
-positive global value. The current Typst consumer maps the committed positive
-column count directly to the page column configuration, with real
-pinned-backend PDF integration coverage. The decoration slice preserves the pinned cross-field
+positive global value. When ordered page-format state exists, the current
+Typst/PDF columns consumer resolves only the exact selector-free/global layer
+group in source order and treats that merged positive count as canonical.
+Flattened `page_columns` remains a legacy-IR fallback only when ordered
+page-format state is absent, so stale compatibility state cannot override or
+revive a global columns value. The committed positive count still maps directly
+to the page column configuration, with real pinned-backend PDF integration
+coverage. The decoration slice preserves the pinned cross-field
 border rule: once any non-null border side is supplied, omitted/null sides
 become explicit zero; color-only input updates border color without fabricating
 a border width and therefore preserves any previously committed width
