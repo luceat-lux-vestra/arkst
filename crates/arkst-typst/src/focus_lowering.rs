@@ -6,7 +6,8 @@
 //! source-map ranges by the generated prelude length.
 
 use arkst_ir::{
-    IrComposedPageDimensions, IrDocument, IrDocumentType, IrPageFormatSelector, IrPageSide,
+    IrComposedPageDimensions, IrDocument, IrDocumentType, IrPageFormatLayer, IrPageFormatSelector,
+    IrPageSide,
 };
 use arkst_source::SourceMapEntry;
 
@@ -294,14 +295,27 @@ fn scoped_page_background(doc: &IrDocument) -> Option<String> {
 const UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE: &str =
     "#panic(\"Arkst cannot lower page side/pages selectors for a non-paged final document\")\n";
 
+fn page_format_layer_has_effective_payload(layer: &IrPageFormatLayer) -> bool {
+    layer.alignment.is_some()
+        || layer.width.is_some()
+        || layer.height.is_some()
+        || layer.columns.is_some()
+        || layer.size.is_some()
+        || layer.margin.is_some()
+        || layer.border_widths.is_some()
+        || layer.border_color.is_some()
+        || layer.background.is_some()
+}
+
 fn has_unsupported_non_paged_page_selector(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
     state.document_type != IrDocumentType::Paged
         && state.page_format.layers.iter().any(|layer| {
-            matches!(
-                layer.selector,
-                Some(selector) if selector.side.is_some() || selector.pages.is_some()
-            )
+            page_format_layer_has_effective_payload(layer)
+                && matches!(
+                    layer.selector,
+                    Some(selector) if selector.side.is_some() || selector.pages.is_some()
+                )
         })
 }
 
