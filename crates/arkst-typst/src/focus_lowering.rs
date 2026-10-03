@@ -943,10 +943,22 @@ mod tests {
     fn ordered_selector_free_border_state_overrides_stale_flattened_compatibility_fields() {
         let mut doc = document(IrDocumentType::Paged, None, None);
         doc.metadata.document_state.page_margin = Some(IrPageMargins {
-            top: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
-            right: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
-            bottom: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
-            left: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+            top: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
         });
         doc.metadata.document_state.page_border_widths = Some(IrPageBorderWidths {
             top: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
@@ -963,16 +975,40 @@ mod tests {
         doc.metadata.document_state.page_format.layers = vec![
             IrPageFormatLayer {
                 margin: Some(IrPageMargins {
-                    top: IrSize { value: 1.0, unit: IrSizeUnit::Pt },
-                    right: IrSize { value: 2.0, unit: IrSizeUnit::Pt },
-                    bottom: IrSize { value: 3.0, unit: IrSizeUnit::Pt },
-                    left: IrSize { value: 4.0, unit: IrSizeUnit::Pt },
+                    top: IrSize {
+                        value: 1.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    right: IrSize {
+                        value: 2.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    bottom: IrSize {
+                        value: 3.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    left: IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Pt,
+                    },
                 }),
                 border_widths: Some(IrPageBorderWidths {
-                    top: IrSize { value: 5.0, unit: IrSizeUnit::Pt },
-                    right: IrSize { value: 6.0, unit: IrSizeUnit::Pt },
-                    bottom: IrSize { value: 7.0, unit: IrSizeUnit::Pt },
-                    left: IrSize { value: 8.0, unit: IrSizeUnit::Pt },
+                    top: IrSize {
+                        value: 5.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    right: IrSize {
+                        value: 6.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    bottom: IrSize {
+                        value: 7.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    left: IrSize {
+                        value: 8.0,
+                        unit: IrSizeUnit::Pt,
+                    },
                 }),
                 border_color: Some(IrColor {
                     red: 10,
