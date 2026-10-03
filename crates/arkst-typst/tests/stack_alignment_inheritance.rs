@@ -1,6 +1,7 @@
 use arkst_ir::{
     IrComponent, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentState, IrInline,
-    IrMainAxisAlignment, IrMetadata, IrNode, IrStackedComponent, IrStackedLayout,
+    IrMainAxisAlignment, IrMetadata, IrNode, IrPageFormatLayer, IrStackedComponent,
+    IrStackedLayout,
 };
 use arkst_source::{SourceId, SourceSpan};
 use arkst_typst::lowering::lower_to_typst_code;
@@ -80,6 +81,53 @@ fn explicit_alignment_wins_and_justify_falls_back_to_start() {
         stack(IrStackedLayout::Row, None),
     );
     assert_eq!(justify.matches("h(1fr)").count(), 0, "{justify}");
+}
+
+#[test]
+fn ordered_global_alignment_overrides_stale_flattened_page_alignment() {
+    let mut state = IrDocumentState {
+        page_alignment: Some(IrDocumentAlignment::End),
+        ..IrDocumentState::default()
+    };
+    state.page_format.layers = vec![
+        IrPageFormatLayer {
+            alignment: Some(IrDocumentAlignment::Start),
+            ..IrPageFormatLayer::default()
+        },
+        IrPageFormatLayer {
+            alignment: Some(IrDocumentAlignment::Center),
+            ..IrPageFormatLayer::default()
+        },
+    ];
+
+    let row = lower_to_typst_code(&IrDocument {
+        nodes: vec![stack(IrStackedLayout::Row, None)],
+        metadata: IrMetadata {
+            document_state: state,
+            ..IrMetadata::default()
+        },
+    });
+
+    assert_eq!(row.matches("h(1fr)").count(), 2, "{row}");
+}
+
+#[test]
+fn effectless_ordered_state_does_not_revive_stale_flattened_page_alignment() {
+    let mut state = IrDocumentState {
+        page_alignment: Some(IrDocumentAlignment::Center),
+        ..IrDocumentState::default()
+    };
+    state.page_format.layers = vec![IrPageFormatLayer::default()];
+
+    let row = lower_to_typst_code(&IrDocument {
+        nodes: vec![stack(IrStackedLayout::Row, None)],
+        metadata: IrMetadata {
+            document_state: state,
+            ..IrMetadata::default()
+        },
+    });
+
+    assert_eq!(row.matches("h(1fr)").count(), 0, "{row}");
 }
 
 #[test]

@@ -81,6 +81,18 @@ struct LoweringContext {
     inherited_stack_main_axis: IrMainAxisAlignment,
 }
 
+fn selector_free_page_alignment(doc: &IrDocument) -> Option<IrDocumentAlignment> {
+    let state = &doc.metadata.document_state;
+    if !state.page_format.layers.is_empty() {
+        return state
+            .page_format
+            .resolve_exact_selector(None)
+            .and_then(|global| global.alignment);
+    }
+
+    state.page_alignment
+}
+
 impl LoweringContext {
     fn new() -> Self {
         Self {
@@ -109,7 +121,7 @@ impl LoweringContext {
     }
 
     fn lower_document(&mut self, doc: &IrDocument) {
-        self.inherited_stack_main_axis = match doc.metadata.document_state.page_alignment {
+        self.inherited_stack_main_axis = match selector_free_page_alignment(doc) {
             Some(IrDocumentAlignment::Center) => IrMainAxisAlignment::Center,
             Some(IrDocumentAlignment::End) => IrMainAxisAlignment::End,
             Some(IrDocumentAlignment::Start) | Some(IrDocumentAlignment::Justify) | None => {

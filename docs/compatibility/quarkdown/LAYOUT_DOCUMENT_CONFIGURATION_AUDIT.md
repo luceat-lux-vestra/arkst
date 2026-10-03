@@ -378,9 +378,13 @@ Typst page width/height and columns are page-setup parameters rather than contex
 background/foreground content, and changing a page set rule establishes a new conforming
 page. Arkst therefore must not approximate selector-scoped size/width/height/columns by
 consulting `here().page()` after pagination. Selector-scoped alignment has a separate
-unsupported boundary: the current bounded global `page_alignment` consumer determines
+unsupported boundary: the current bounded global alignment consumer determines
 compile-time row/column inherited main-axis alignment, while scoped alignment is retained
 only in ordered page-format state and has no selector-aware content-alignment consumer.
+When ordered page-format state exists, that global consumer resolves the exact
+selector-free/global layer group in source order and treats the merged alignment as
+canonical; flattened `page_alignment` is a legacy-IR fallback only when ordered
+page-format state is absent.
 The Typst lowerer therefore detects scoped alignment together with scoped
 size/width/height/columns and emits an explicit `panic(...)` before output instead of
 silently falling back to global layout state. The pinned Typst subprocess regressions
