@@ -413,9 +413,17 @@ remain fail-closed. The pinned PageFormatInfo merge contract also makes
 `alignment` nullable and applies later-non-null field precedence. Arkst therefore
 treats semantic `.none` alignment as no new override: selector-free state keeps
 the previously committed document alignment, and exact same-selector resolution
-inherits the earlier alignment. This does not widen selector-aware alignment
-rendering; non-null scoped alignment remains explicitly fail-closed at the Typst
-boundary. Selector-aware output outside the bounded background/border side+range subsets
+inherits the earlier alignment. The pinned setter also computes orientation only
+through `format?.getBounds(orientation)`: if no standard `size` is present,
+orientation has no page-format payload. Empty calls, orientation-only calls, and
+selector-only calls therefore append effectless layers whose payload fields are all
+null. Arkst retains those successful layers in ordered state after validating any
+explicit orientation or finite page range, without mutating flattened effective
+state. A selector on such an effectless layer is not an unsupported output request,
+so the non-paged Typst selector guard ignores it; selector-bearing layers with any
+effective payload remain fail-closed as before. This does not widen selector-aware
+alignment rendering; non-null scoped alignment remains explicitly fail-closed at the
+Typst boundary. Selector-aware output outside the bounded background/border side+range subsets
 remains paged-only at the current Typst boundary, with final non-paged selector state
 explicitly backend-fail-closed. Selector-free border requests are likewise rejected when
 the final document is non-paged, because the current bounded border consumer is paged-only

@@ -279,6 +279,45 @@ fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_effectless_non_paged_page_selector_does_not_trigger_fail_closed_guard() {
+    let source = ".pageformat side:{left} orientation:{landscape}\nEffectless selector output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-effectless-non-paged-selector.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-effectless-non-paged-selector.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "effectless non-paged selector diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        !typst_code.contains(
+            "Arkst cannot lower page side/pages selectors for a non-paged final document"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-effectless-non-paged-selector", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-effectless-non-paged-selector.qd".to_string(),
+            })
+            .expect("effectless non-paged selector Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_non_paged_page_selector_fails_closed_at_typst_boundary() {
     let source = ".pageformat pages:{1..1} background:{red}\nPlain output\n";
     let project = VirtualProjectBuilder::new()
