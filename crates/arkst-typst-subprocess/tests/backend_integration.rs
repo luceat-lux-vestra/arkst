@@ -693,7 +693,8 @@ Second page\n";
 
 #[test]
 fn integration_pageformat_ordered_global_columns_override_stale_flattened_state() {
-    let source = ".doctype {paged}\n.pageformat columns:{2}\n.pageformat columns:{4}\nColumn output\n";
+    let source =
+        ".doctype {paged}\n.pageformat columns:{2}\n.pageformat columns:{4}\nColumn output\n";
     let project = VirtualProjectBuilder::new()
         .entry("pageformat-ordered-columns.qd")
         .expect("valid entry path")
@@ -712,7 +713,10 @@ fn integration_pageformat_ordered_global_columns_override_stale_flattened_state(
 
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(typst_code.contains("#set page(columns: 4)"), "{typst_code}");
-    assert!(!typst_code.contains("#set page(columns: 9)"), "{typst_code}");
+    assert!(
+        !typst_code.contains("#set page(columns: 9)"),
+        "{typst_code}"
+    );
 
     with_typst("pageformat-ordered-columns", |backend| {
         let output = backend
