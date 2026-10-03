@@ -164,7 +164,10 @@ fn paged_single_axis_layer_uses_document_default_without_fabricating_layer_size(
     let layers = &state.page_format.layers;
     assert_eq!(layers.len(), 1);
     assert!(layers[0].selector.is_none());
-    assert!(layers[0].size.is_none(), "document default must not be fabricated into the stored mutation");
+    assert!(
+        layers[0].size.is_none(),
+        "document default must not be fabricated into the stored mutation"
+    );
     assert_eq!(
         (
             layers[0].width.as_ref().expect("width layer").value,
