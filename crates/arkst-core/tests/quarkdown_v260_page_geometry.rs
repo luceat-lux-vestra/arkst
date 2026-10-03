@@ -57,18 +57,25 @@ fn geometry_and_alignment_can_commit_atomically_in_one_bounded_call() {
 }
 
 #[test]
-fn unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state() {
-    for unsupported in [
-        ".pageformat width:{8in}\n",
-        ".pageformat height:{4in}\n",
-        ".pageformat width:{none} height:{4in}\n",
-        ".pageformat width:{8in} height:{none}\n",
-    ] {
+fn partial_geometry_layers_do_not_rewrite_the_legacy_flattened_pair() {
+    for partial in [".pageformat width:{8in}\n", ".pageformat height:{4in}\n"] {
         let result = compile_source(&format!(
-            ".pageformat width:{{10in}} height:{{5in}}\n{unsupported}"
+            ".pageformat width:{{10in}} height:{{5in}}\n{partial}"
         ));
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert_geometry(&result, (10.0, IrSizeUnit::In), (5.0, IrSizeUnit::In));
     }
+}
+
+#[test]
+fn nullable_geometry_axes_preserve_the_existing_flattened_pair() {
+    let result = compile_source(
+        ".pageformat width:{10in} height:{5in}\n\
+         .pageformat width:{.none} height:{4in}\n\
+         .pageformat width:{8in} height:{.none}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_geometry(&result, (10.0, IrSizeUnit::In), (5.0, IrSizeUnit::In));
 }
 
 #[test]
