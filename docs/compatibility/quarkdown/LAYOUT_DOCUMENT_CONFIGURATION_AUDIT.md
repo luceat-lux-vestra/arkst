@@ -270,14 +270,15 @@ page-side/range subset remain fail-closed. The size slice
 preserves the closed standard-format domain, named size binding, and an
 explicit portrait/landscape orientation when supplied; when orientation is
 omitted it records the document type in effect at commit time as the downstream
-preferred-orientation basis. The selected Typst/PDF backend applies standard size only when the final output
-document type supports it (`paged` or `slides`), resolves the closed format to
-explicit physical millimeter bounds including B0, and rotates those bounds for
-the effective orientation. When orientation was omitted, the call-time
-document-type snapshot remains the default-orientation basis instead of a later
-`.doctype` mutation. An omitted-orientation layer captured under `docs` remains
-fail-closed because the pinned public contract does not define that cross-doctype
-default. When such a selector-free standard-size request later reaches a final
+preferred-orientation basis. The selected Typst/PDF backend resolves a standard-size selection to
+explicit physical millimeter bounds for every final document type, matching the
+pinned setter which materializes `size` to concrete `pageWidth`/`pageHeight`
+before the layer is stored and the renderer which consumes those dimensions
+without a final document-type gate. Explicit orientation rotates those bounds.
+When orientation was omitted, the call-time document-type snapshot remains the
+preferred-orientation basis instead of a later `.doctype` mutation: pinned
+`plain`, `paged`, and `docs` prefer portrait while `slides` prefers
+landscape. When such a selector-free standard-size request later reaches a final
 `paged` or `slides` document without enough explicit axes to resolve concrete
 geometry, the Typst boundary now emits an explicit panic rather than silently
 falling back to default page dimensions. Ordered selector-free dimension layers now determine current Typst/PDF
