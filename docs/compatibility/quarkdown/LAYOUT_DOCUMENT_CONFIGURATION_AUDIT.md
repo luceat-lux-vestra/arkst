@@ -351,12 +351,13 @@ silently falling back to global layout state. The pinned Typst subprocess regres
 `integration_selector_scoped_page_layout_fails_closed_at_typst_boundary` and
 `integration_selector_scoped_page_alignment_fails_closed_at_typst_boundary` prove
 these boundaries fail closed. This is an explicit unsupported-output guard, not
-selector-aware layout support. Selector-scoped content margin output remains a separate
-residual: #491 now rejects scoped margin-only `paged` output at the Typst boundary when
-ordered border widths and border color are absent, preventing silent loss through the
-global-only content-margin consumer, while the existing bounded border path may still
-consume scoped margin only as explicit foreground geometry when those border inputs are
-present.
+selector-aware layout support. Selector-scoped content margin output remains unsupported. The Typst lowerer
+now rejects every selector-scoped `paged` margin before output, including cases where
+explicit border widths and color would otherwise make the foreground border path complete.
+A scoped margin is part of page content layout, so consuming it only as border inset
+geometry would still silently lose setter semantics. The bounded scoped-border path remains
+available when margin is inherited from selector-free/global state and the selector scopes
+only border/background decoration fields.
 A bounded Typst/PDF background path now consumes ordered background layers for
 global, side-only, finite-range-only, and combined side+range selectors. It uses
 contextual page background content with physical 1-based `here().page()`; the
@@ -388,8 +389,8 @@ base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed
 regression continues to pin that boundary. Selector-aware output outside the bounded background/border side+range subsets,
 remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
 alignment/size/width/height/columns explicitly failing closed at the Typst boundary and
-scoped margin-only `paged` output outside an explicit ordered border decoration path
-likewise backend-rejected by #491 rather than being silently ignored), page-border semantics
+every scoped `paged` margin likewise backend-rejected rather than being consumed only as
+border geometry), page-border semantics
 outside the bounded selector-free and per-page scoped completeness guards, and the
 remaining output consumption stay open, and Typst page objects must not enter evaluator/IR state. Status is
 conservatively `PARTIAL`
