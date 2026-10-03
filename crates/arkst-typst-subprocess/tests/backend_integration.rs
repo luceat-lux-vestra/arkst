@@ -692,6 +692,43 @@ Second page\n";
 }
 
 #[test]
+fn integration_pageformat_ordered_global_columns_override_stale_flattened_state() {
+    let source = ".doctype {paged}\n.pageformat columns:{2}\n.pageformat columns:{4}\nColumn output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-ordered-columns.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-ordered-columns.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let mut result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat ordered columns diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    result.ir.metadata.document_state.page_columns = Some(9);
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("#set page(columns: 4)"), "{typst_code}");
+    assert!(!typst_code.contains("#set page(columns: 9)"), "{typst_code}");
+
+    with_typst("pageformat-ordered-columns", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-ordered-columns.qd".to_string(),
+            })
+            .expect("ordered pageformat columns Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat columns:{2}\nColumn output\n";
     let project = VirtualProjectBuilder::new()
