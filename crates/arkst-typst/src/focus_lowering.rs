@@ -1284,6 +1284,7 @@ mod tests {
             .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
         doc.metadata.document_state.page_margin = Some(margins.clone());
+        doc.metadata.document_state.page_border_color = None;
         doc.metadata.document_state.document_type = IrDocumentType::Slides;
         let slides_incomplete = lower_to_typst_code(&doc);
         assert!(
