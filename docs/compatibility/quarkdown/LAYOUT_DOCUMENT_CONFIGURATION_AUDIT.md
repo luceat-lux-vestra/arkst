@@ -273,7 +273,10 @@ the effective orientation. When orientation was omitted, the call-time
 document-type snapshot remains the default-orientation basis instead of a later
 `.doctype` mutation. An omitted-orientation layer captured under `docs` remains
 fail-closed because the pinned public contract does not define that cross-doctype
-default. Ordered selector-free dimension layers now determine current Typst/PDF
+default. When such a selector-free standard-size request later reaches a final
+`paged` or `slides` document without enough explicit axes to resolve concrete
+geometry, the Typst boundary now emits an explicit panic rather than silently
+falling back to default page dimensions. Ordered selector-free dimension layers now determine current Typst/PDF
 size-versus-axis precedence. `IrPageFormatState::compose_global_page_dimensions`
 folds only global dimension-bearing layers in source order: a later standard
 size clears both earlier explicit axes, then explicit width/height in that same

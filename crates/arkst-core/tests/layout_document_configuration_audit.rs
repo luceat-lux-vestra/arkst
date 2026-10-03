@@ -233,6 +233,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .contains("integration_pageformat_side_decoration_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9].contains(
+        "integration_pageformat_docs_omitted_orientation_fails_closed_after_paged_mutation"
+    ));
     assert!(pageformat[9]
         .contains("integration_pageformat_global_single_axis_uses_existing_standard_size_base"));
     assert!(pageformat[9]
@@ -262,6 +265,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("explicit physical millimeter bounds"));
     assert!(pageformat[10].contains("omitted-orientation basis"));
     assert!(pageformat[10].contains("omitted docs basis remains fail-closed"));
+    assert!(pageformat[10].contains(
+        "explicit Typst panic when final paged/slides output cannot resolve concrete global dimensions"
+    ));
     assert!(pageformat[10]
         .contains("remaining page-border semantics beyond the selector-free and per-page scoped completeness guards"));
     assert!(pageformat[10].contains(
@@ -316,6 +322,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .contains("current page requests a border but margin, widths, or color remain unresolved"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-explicit-axis-inheritance"));
+    assert!(pageformat[11].contains("unresolved-global-page-dimensions-backend-fail-closed"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
     assert!(pageformat[11].contains("bounded-range-background-output"));
