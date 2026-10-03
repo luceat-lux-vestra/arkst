@@ -231,7 +231,6 @@ fn selector_free_single_axis_layers_require_existing_opposite_axis_or_standard_s
     );
 }
 
-
 #[test]
 fn selector_free_single_axis_layers_inherit_existing_explicit_geometry() {
     let result = compile_source(
@@ -246,26 +245,47 @@ fn selector_free_single_axis_layers_inherit_existing_explicit_geometry() {
         .page_geometry
         .as_ref()
         .expect("initial complete geometry remains legacy fallback");
-    assert_eq!((legacy.width.value, legacy.width.unit), (10.0, IrSizeUnit::In));
-    assert_eq!((legacy.height.value, legacy.height.unit), (5.0, IrSizeUnit::In));
+    assert_eq!(
+        (legacy.width.value, legacy.width.unit),
+        (10.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (legacy.height.value, legacy.height.unit),
+        (5.0, IrSizeUnit::In)
+    );
 
     let layers = &state.page_format.layers;
     assert_eq!(layers.len(), 3);
     assert!(layers[1].size.is_none());
     assert_eq!(
         (
-            layers[1].width.as_ref().expect("later width override").value,
+            layers[1]
+                .width
+                .as_ref()
+                .expect("later width override")
+                .value,
             layers[1].width.as_ref().expect("later width override").unit,
         ),
         (8.0, IrSizeUnit::In)
     );
     assert!(layers[1].height.is_none());
-    assert!(layers[2].size.is_none(), "explicit nullable size must not fabricate a base");
+    assert!(
+        layers[2].size.is_none(),
+        "explicit nullable size must not fabricate a base"
+    );
     assert!(layers[2].width.is_none());
     assert_eq!(
         (
-            layers[2].height.as_ref().expect("nullable-size height override").value,
-            layers[2].height.as_ref().expect("nullable-size height override").unit,
+            layers[2]
+                .height
+                .as_ref()
+                .expect("nullable-size height override")
+                .value,
+            layers[2]
+                .height
+                .as_ref()
+                .expect("nullable-size height override")
+                .unit,
         ),
         (4.0, IrSizeUnit::In)
     );
