@@ -6828,6 +6828,9 @@ impl Evaluator {
                     });
                 }
                 "width" | "height" => {
+                    if matches!(&value.value, IrValue::None) {
+                        continue;
+                    }
                     let size = match convert_pageformat_size(&value) {
                         Ok(value) => value,
                         Err(error) => {
