@@ -208,7 +208,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9]
         .contains("integration_selector_scoped_page_alignment_fails_closed_at_typst_boundary"));
     assert!(pageformat[9].contains(
-        "integration_selector_scoped_margin_without_border_fails_closed_at_typst_boundary"
+        "integration_selector_scoped_margin_fails_closed_even_with_complete_border_path"
     ));
     assert!(
         pageformat[9].contains("integration_selector_scoped_border_defaults_fail_closed_per_page")
@@ -283,9 +283,11 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains(
         "scoped alignment cannot silently disappear through the global-only page_alignment/stack-inheritance consumer"
     ));
-    assert!(pageformat[10].contains("selector-scoped margin-only paged output"));
+    assert!(pageformat[10].contains("every selector-scoped paged margin"));
     assert!(pageformat[10]
-        .contains("existing bounded scoped-border path continues to consume scoped margin"));
+        .contains("consuming scoped margin only as border inset would silently lose its content-layout semantics"));
+    assert!(pageformat[10]
+        .contains("scoped-border path remains supported when margin is inherited from selector-free/global state"));
     assert!(pageformat[10].contains("per-page selector-aware request flag"));
     assert!(pageformat[10]
         .contains("current page requests a border but margin, widths, or color remain unresolved"));
