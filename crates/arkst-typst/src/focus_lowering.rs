@@ -292,7 +292,7 @@ fn scoped_page_background(doc: &IrDocument) -> Option<String> {
 }
 
 const UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE: &str =
-    "#panic(\"Arkst cannot lower selector-scoped page size/width/height/columns to Typst without pagination-aware page setup\")\n";
+    "#panic(\"Arkst cannot lower selector-scoped page alignment/size/width/height/columns to Typst without selector-aware layout output\")\n";
 
 fn has_unsupported_scoped_page_layout(doc: &IrDocument) -> bool {
     doc.metadata
@@ -306,7 +306,8 @@ fn has_unsupported_scoped_page_layout(doc: &IrDocument) -> bool {
                 Some(selector) if selector.side.is_some() || selector.pages.is_some()
             );
             scoped
-                && (layer.size.is_some()
+                && (layer.alignment.is_some()
+                    || layer.size.is_some()
                     || layer.width.is_some()
                     || layer.height.is_some()
                     || layer.columns.is_some())
@@ -529,9 +530,9 @@ fn render_focus_prelude(kind: FocusDocumentKind, paperwhite: bool) -> String {
 mod tests {
     use super::*;
     use arkst_ir::{
-        IrColor, IrDocumentTheme, IrMetadata, IrNode, IrPageBorderWidths, IrPageFormatLayer,
-        IrPageFormatSelector, IrPageGeometry, IrPageMargins, IrPageOrientation, IrPageRange,
-        IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrSize, IrSizeUnit,
+        IrColor, IrDocumentAlignment, IrDocumentTheme, IrMetadata, IrNode, IrPageBorderWidths,
+        IrPageFormatLayer, IrPageFormatSelector, IrPageGeometry, IrPageMargins, IrPageOrientation,
+        IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrSize, IrSizeUnit,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -1361,6 +1362,11 @@ mod tests {
         };
 
         let cases = [
+            IrPageFormatLayer {
+                selector,
+                alignment: Some(IrDocumentAlignment::Center),
+                ..IrPageFormatLayer::default()
+            },
             IrPageFormatLayer {
                 selector,
                 width: Some(size.clone()),
