@@ -322,9 +322,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .contains("current page requests a border but margin, widths, or color remain unresolved"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-explicit-axis-inheritance"));
-    assert!(pageformat[11].contains(
-        "unresolved-global-page-dimensions-backend-fail-closed"
-    ));
+    assert!(pageformat[11].contains("unresolved-global-page-dimensions-backend-fail-closed"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
     assert!(pageformat[11].contains("bounded-range-background-output"));
