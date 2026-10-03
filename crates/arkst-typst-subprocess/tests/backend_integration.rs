@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use arkst_core::ir::{
-    IrColor, IrComponent, IrDocumentAlignment, IrInline, IrNode, IrPageBorderWidths, IrPageMargins,
-    IrSize, IrSizeUnit, NativeTarget,
+    IrColor, IrComponent, IrDocumentAlignment, IrInline, IrNode, IrPageBorderWidths, IrPageGeometry,
+    IrPageMargins, IrSize, IrSizeUnit, NativeTarget,
 };
 use arkst_core::{compile, CompileOptions, VirtualPathBuf, VirtualProjectBuilder};
 use arkst_typst::lowering::{lower_to_typst, lower_to_typst_code};
@@ -966,6 +966,55 @@ Explicit-base single-axis output\n";
                 entry_path: "pageformat-global-single-axis-explicit-base.qd".to_string(),
             })
             .expect("explicit-base single-axis Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_effectless_ordered_pageformat_does_not_revive_stale_flattened_geometry() {
+    let source = ".doctype {paged}\n.pageformat\nEffectless dimension output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-effectless-dimension-fallback.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-effectless-dimension-fallback.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let mut result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat effectless dimension diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        !result.ir.metadata.document_state.page_format.layers.is_empty(),
+        "effectless pageformat must retain ordered state"
+    );
+
+    result.ir.metadata.document_state.page_geometry = Some(IrPageGeometry {
+        width: IrSize {
+            value: 10.0,
+            unit: IrSizeUnit::In,
+        },
+        height: IrSize {
+            value: 5.0,
+            unit: IrSizeUnit::In,
+        },
+    });
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(!typst_code.contains("#set page(width: 10in, height: 5in)"), "{typst_code}");
+
+    with_typst("pageformat-effectless-dimension-fallback", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-effectless-dimension-fallback.qd".to_string(),
+            })
+            .expect("effectless pageformat Typst must compile without stale dimensions");
         assert!(output
             .pdf
             .expect("PDF output must be present")
