@@ -763,6 +763,47 @@ Single-axis dimensions output\n";
     });
 }
 
+
+#[test]
+fn integration_pageformat_global_single_axis_inherits_explicit_geometry_base() {
+    let source = ".doctype {paged}\n\
+.pageformat width:{10in} height:{5in}\n\
+.pageformat size:{.none} width:{8in}\n\
+Explicit-base single-axis output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-global-single-axis-explicit-base.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-global-single-axis-explicit-base.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat explicit-base single-axis diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(width: 8in, height: 5in)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-global-single-axis-explicit-base", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-global-single-axis-explicit-base.qd".to_string(),
+            })
+            .expect("explicit-base single-axis Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
 #[test]
 fn integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf() {
     let source = ".doctype {paged}\n\
