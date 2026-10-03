@@ -286,10 +286,10 @@ without a final document-type gate. Explicit orientation rotates those bounds.
 When orientation was omitted, the call-time document-type snapshot remains the
 preferred-orientation basis instead of a later `.doctype` mutation: pinned
 `plain`, `paged`, and `docs` prefer portrait while `slides` prefers
-landscape. When such a selector-free standard-size request later reaches a final
-`paged` or `slides` document without enough explicit axes to resolve concrete
-geometry, the Typst boundary now emits an explicit panic rather than silently
-falling back to default page dimensions. Ordered selector-free dimension layers now determine current Typst/PDF
+landscape. Because a valid explicit standard-size selection is materialized to complete physical
+geometry for every final document type, it does not depend on final `paged`/`slides`
+applicability. The unresolved-dimension panic is reserved for genuinely incomplete
+explicit-axis state that has neither both axes nor a resolvable standard-size base. Ordered selector-free dimension layers now determine current Typst/PDF
 size-versus-axis precedence. `IrPageFormatState::compose_global_page_dimensions`
 folds only global dimension-bearing layers in source order: a later standard
 size clears both earlier explicit axes, then explicit width/height in that same
@@ -385,11 +385,11 @@ materialized physical dimensions, or renderer-specific state, so it remains back
 prerequisite evidence rather than selector-aware output support. Its composed dimensions can
 now be passed to the bounded backend-neutral
 `IrComposedPageDimensions::resolve_concrete_page_geometry` helper. A complete explicit
-width+height pair remains concrete for any output document type; otherwise the helper gates
-the standard-size base on final `paged`/`slides` applicability, resolves the closed paper
-domain to physical millimeter geometry, uses the captured call-time document type only for
-an omitted-orientation basis, keeps an omitted `docs` basis fail-closed, and then applies
-explicit single-axis overrides independently. The current Typst/PDF global dimension path
+width+height pair remains concrete for any output document type. A standard-size base likewise
+resolves to closed-domain physical millimeter geometry for every final document type; when
+orientation was omitted, the captured call-time document type supplies the pinned preference
+(`plain`/`paged`/`docs` portrait, `slides` landscape), after which explicit single-axis
+overrides apply independently. The current Typst/PDF global dimension path
 reuses this helper. Once any ordered page-format layer exists, that ordered state is
 canonical for global dimensions even when it contains no dimension payload; flattened
 `page_geometry` / `page_size` are legacy-IR fallbacks only when ordered page-format
