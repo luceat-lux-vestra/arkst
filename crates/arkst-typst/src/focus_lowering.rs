@@ -961,10 +961,22 @@ mod tests {
             },
         });
         doc.metadata.document_state.page_border_widths = Some(IrPageBorderWidths {
-            top: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
-            right: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
-            bottom: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
-            left: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+            top: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
         });
         doc.metadata.document_state.page_border_color = Some(IrColor {
             red: 9,
