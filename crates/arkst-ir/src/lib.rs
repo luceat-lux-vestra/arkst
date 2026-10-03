@@ -1136,26 +1136,21 @@ impl IrPageSizeFormat {
 impl IrPageSizeSelection {
     /// Resolve a standard-size selection to explicit physical page geometry.
     ///
-    /// Standard sizes apply only to final paged/slides output. An omitted
-    /// orientation uses the document type captured when the layer committed;
-    /// the unclassified docs basis stays fail-closed.
+    /// The pinned setter materializes a selected standard format to concrete
+    /// page width/height when the layer is authored. Final document type does
+    /// not gate those dimensions. An omitted orientation uses the preferred
+    /// orientation of the document type captured when the layer committed.
     pub fn resolve_standard_page_geometry(
         self,
-        output_document_type: IrDocumentType,
+        _output_document_type: IrDocumentType,
     ) -> Option<IrPageGeometry> {
-        if !matches!(
-            output_document_type,
-            IrDocumentType::Paged | IrDocumentType::Slides
-        ) {
-            return None;
-        }
-
         let orientation = match self.orientation {
             Some(orientation) => orientation,
             None => match self.document_type {
                 IrDocumentType::Slides => IrPageOrientation::Landscape,
-                IrDocumentType::Plain | IrDocumentType::Paged => IrPageOrientation::Portrait,
-                IrDocumentType::Docs => return None,
+                IrDocumentType::Plain | IrDocumentType::Paged | IrDocumentType::Docs => {
+                    IrPageOrientation::Portrait
+                }
             },
         };
         let portrait = self.format.portrait_dimensions_mm();
