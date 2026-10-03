@@ -203,6 +203,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("IrResolvedPageFormat"));
     assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9].contains(
+        "integration_pageformat_ordered_global_columns_override_stale_flattened_state"
+    ));
     assert!(pageformat[9]
         .contains("integration_pageformat_ordered_global_margin_overrides_stale_flattened_state"));
     assert!(pageformat[9]
@@ -256,6 +259,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("global positive columns"));
     assert!(pageformat[10].contains("selector-free global background"));
     assert!(pageformat[10].contains("Typst/PDF columns consumer"));
+    assert!(pageformat[10].contains("selector-free/global columns output"));
+    assert!(pageformat[10].contains("merged positive count as canonical"));
+    assert!(pageformat[10].contains("flattened page_columns is a legacy fallback only"));
     assert!(pageformat[10].contains("typed standard size/orientation"));
     assert!(pageformat[10].contains("named size binding"));
     assert!(pageformat[10].contains("selector-free global margin"));
