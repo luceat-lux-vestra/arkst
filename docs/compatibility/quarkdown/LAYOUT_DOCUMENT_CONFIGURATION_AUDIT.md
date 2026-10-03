@@ -404,7 +404,9 @@ base and therefore follows the same single-axis inheritance rule: it is accepted
 only when the prior composition supplies the missing axis. Base-less single-axis
 calls and explicit nullable width/height candidates remain fail-closed. Selector-aware output outside the bounded background/border side+range subsets
 remains paged-only at the current Typst boundary, with final non-paged selector state
-explicitly backend-fail-closed. Remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
+explicitly backend-fail-closed. Selector-free border requests are likewise rejected when
+the final document is non-paged, because the current bounded border consumer is paged-only
+and silently dropping a complete requested border would violate the fail-closed boundary. Remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
 alignment/size/width/height/columns explicitly failing closed at the Typst boundary and
 every scoped `paged` margin likewise backend-rejected rather than being consumed only as
 border geometry), page-border semantics

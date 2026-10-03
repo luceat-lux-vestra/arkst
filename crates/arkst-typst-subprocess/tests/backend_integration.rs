@@ -319,6 +319,48 @@ fn integration_non_paged_page_selector_fails_closed_at_typst_boundary() {
 }
 
 #[test]
+fn integration_non_paged_selector_free_page_border_fails_closed_at_typst_boundary() {
+    let source = ".pageformat margin:{1cm}\n\
+.pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
+Plain border output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-non-paged-border.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-non-paged-border.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "non-paged selector-free border diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-free page border for a non-paged final document\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-non-paged-border-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-non-paged-border.qd".to_string(),
+            })
+            .expect_err("selector-free border on a non-paged final document must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains("selector-free page border for a non-paged final document"),
+            "{message}"
+        );
+    });
+}
+
+#[test]
 fn integration_page_selector_declared_before_paged_doctype_uses_final_document_type() {
     let source = ".pageformat pages:{2..2} background:{red}\n\
 .doctype {paged}\n\

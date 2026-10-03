@@ -305,6 +305,15 @@ fn has_unsupported_non_paged_page_selector(doc: &IrDocument) -> bool {
         })
 }
 
+const UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-free page border for a non-paged final document\")\n";
+
+fn has_unsupported_non_paged_page_border(doc: &IrDocument) -> bool {
+    let state = &doc.metadata.document_state;
+    state.document_type != IrDocumentType::Paged
+        && (state.page_border_widths.is_some() || state.page_border_color.is_some())
+}
+
 const UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE: &str =
     "#panic(\"Arkst cannot lower selector-scoped page alignment/size/width/height/columns to Typst without selector-aware layout output\")\n";
 
@@ -380,6 +389,9 @@ fn has_unsupported_scoped_page_margin(doc: &IrDocument) -> bool {
 fn document_prelude(doc: &IrDocument) -> String {
     if has_unsupported_non_paged_page_selector(doc) {
         return UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE.to_string();
+    }
+    if has_unsupported_non_paged_page_border(doc) {
+        return UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE.to_string();
     }
     if has_unsupported_scoped_page_layout(doc) {
         return UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE.to_string();
