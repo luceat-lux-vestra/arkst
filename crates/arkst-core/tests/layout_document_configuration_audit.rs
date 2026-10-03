@@ -251,6 +251,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .contains("integration_pageformat_global_nullable_axes_inherit_existing_dimensions"));
     assert!(pageformat[9]
         .contains("integration_pageformat_nullable_alignment_preserves_final_page_state"));
+    assert!(pageformat[9]
+        .contains("integration_v260_ordered_global_alignment_overrides_stale_flattened_state"));
     assert!(pageformat[9].contains(
         "integration_effectless_non_paged_page_selector_does_not_trigger_fail_closed_guard"
     ));
@@ -349,6 +351,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains(
         "selector-free page borders on final non-paged documents explicitly backend-fail-closed"
     ));
+    assert!(pageformat[10].contains("global row/column inheritance consumer"));
+    assert!(pageformat[10].contains("merged alignment as canonical"));
+    assert!(pageformat[10].contains("flattened page_alignment remains a legacy fallback only"));
     assert!(pageformat[10].contains(
         "scoped alignment cannot silently disappear through the global-only page_alignment/stack-inheritance consumer"
     ));
