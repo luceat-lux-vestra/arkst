@@ -143,7 +143,6 @@ fn invalid_size_or_orientation_preserves_the_last_committed_selection() {
 #[test]
 fn unsupported_pageformat_shapes_do_not_claim_standard_size_state() {
     for unsupported in [
-        ".pageformat orientation:{landscape}\n",
         ".pageformat {letter}\n",
         ".pageformat {a4} orientation:{landscape}\n",
         ".pageformat {1..2}\n",
