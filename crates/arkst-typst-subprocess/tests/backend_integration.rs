@@ -361,6 +361,51 @@ fn integration_non_paged_page_selector_fails_closed_at_typst_boundary() {
 }
 
 #[test]
+fn integration_slides_selector_free_page_border_defaults_fail_closed_at_typst_boundary() {
+    let source = ".doctype {slides}\n\
+.pageformat margin:{1cm}\n\
+.pageformat bordertop:{1pt}\n\
+Incomplete slide border output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-slides-border-defaults.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-slides-border-defaults.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "slides selector-free border default diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-free page border without explicit margin, border widths, and border color\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-slides-border-defaults-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-slides-border-defaults.qd".to_string(),
+            })
+            .expect_err("incomplete selector-free slide border must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains(
+                "selector-free page border without explicit margin, border widths, and border color"
+            ),
+            "{message}"
+        );
+    });
+}
+
+#[test]
 fn integration_non_paged_selector_free_page_border_fails_closed_at_typst_boundary() {
     let source = ".pageformat margin:{1cm}\n\
 .pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
@@ -1266,6 +1311,54 @@ Nullable axis output\n";
                 entry_path: "pageformat-nullable-axis-inheritance.qd".to_string(),
             })
             .expect("nullable page-axis inheritance Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_pageformat_explicit_border_lowers_on_slides_to_valid_typst_and_pdf() {
+    let source = ".doctype {slides}\n\
+.pageformat margin:{1cm 2cm 3cm 4cm}\n\
+.pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
+Slide border output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-slides-border.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-slides-border.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat slides border diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(foreground: place("),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("width: (100% - 4cm - 2cm)"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("top: (paint: rgb(255, 0, 0, 100%), thickness: 1pt)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-slides-border", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-slides-border.qd".to_string(),
+            })
+            .expect("pageformat slides border Typst must compile");
         assert!(output
             .pdf
             .expect("PDF output must be present")
