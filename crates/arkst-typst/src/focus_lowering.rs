@@ -217,12 +217,27 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     // Typst's page element has no stroke parameter. The bounded selector-free
     // border path therefore uses page foreground coordinates, but only when
     // every value needed to locate and paint the content-area rectangle is
-    // explicit. Missing margin, width, or color stays fail-closed rather than
-    // inventing renderer defaults. Legacy/deserialized IR without ordered
-    // page-format layers keeps this existing flattened-state fallback.
-    let margin = state.page_margin.as_ref()?;
-    let widths = state.page_border_widths.as_ref()?;
-    let color = state.page_border_color.as_ref()?;
+    // explicit. When ordered page-format state exists it is canonical: fold
+    // only selector-free layers in source order and do not consult potentially
+    // stale flattened compatibility fields. Legacy/deserialized IR that
+    // predates ordered page-format layers keeps the flattened-state fallback.
+    let ordered_global = (!state.page_format.layers.is_empty())
+        .then(|| state.page_format.resolve_exact_selector(None))
+        .flatten();
+    let (margin, widths, color) = if !state.page_format.layers.is_empty() {
+        let global = ordered_global.as_ref()?;
+        (
+            global.margin.as_ref()?,
+            global.border_widths.as_ref()?,
+            global.border_color.as_ref()?,
+        )
+    } else {
+        (
+            state.page_margin.as_ref()?,
+            state.page_border_widths.as_ref()?,
+            state.page_border_color.as_ref()?,
+        )
+    };
 
     let margin_top = lowering_base::lower_size(&margin.top);
     let margin_right = lowering_base::lower_size(&margin.right);
@@ -324,8 +339,18 @@ const UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE: &str =
 
 fn has_unsupported_non_paged_page_border(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
-    state.document_type != IrDocumentType::Paged
-        && (state.page_border_widths.is_some() || state.page_border_color.is_some())
+    if state.document_type == IrDocumentType::Paged {
+        return false;
+    }
+
+    if !state.page_format.layers.is_empty() {
+        return state
+            .page_format
+            .resolve_exact_selector(None)
+            .is_some_and(|global| global.border_widths.is_some() || global.border_color.is_some());
+    }
+
+    state.page_border_widths.is_some() || state.page_border_color.is_some()
 }
 
 const UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE: &str =
@@ -372,6 +397,17 @@ fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
     });
     if has_scoped_border_inputs {
         return false;
+    }
+
+    if !state.page_format.layers.is_empty() {
+        let Some(global) = state.page_format.resolve_exact_selector(None) else {
+            return false;
+        };
+        let has_border_request = global.border_widths.is_some() || global.border_color.is_some();
+        return has_border_request
+            && (global.margin.is_none()
+                || global.border_widths.is_none()
+                || global.border_color.is_none());
     }
 
     let has_border_request =
@@ -901,6 +937,69 @@ mod tests {
             code.contains("left: (paint: rgb(10, 20, 30, 50%), thickness: 8pt)"),
             "{code}"
         );
+    }
+
+    #[test]
+    fn ordered_selector_free_border_state_overrides_stale_flattened_compatibility_fields() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_margin = Some(IrPageMargins {
+            top: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+            right: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+            bottom: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+            left: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+        });
+        doc.metadata.document_state.page_border_widths = Some(IrPageBorderWidths {
+            top: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+            right: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+            bottom: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+            left: IrSize { value: 9.0, unit: IrSizeUnit::Pt },
+        });
+        doc.metadata.document_state.page_border_color = Some(IrColor {
+            red: 9,
+            green: 9,
+            blue: 9,
+            alpha: 1.0,
+        });
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                margin: Some(IrPageMargins {
+                    top: IrSize { value: 1.0, unit: IrSizeUnit::Pt },
+                    right: IrSize { value: 2.0, unit: IrSizeUnit::Pt },
+                    bottom: IrSize { value: 3.0, unit: IrSizeUnit::Pt },
+                    left: IrSize { value: 4.0, unit: IrSizeUnit::Pt },
+                }),
+                border_widths: Some(IrPageBorderWidths {
+                    top: IrSize { value: 5.0, unit: IrSizeUnit::Pt },
+                    right: IrSize { value: 6.0, unit: IrSizeUnit::Pt },
+                    bottom: IrSize { value: 7.0, unit: IrSizeUnit::Pt },
+                    left: IrSize { value: 8.0, unit: IrSizeUnit::Pt },
+                }),
+                border_color: Some(IrColor {
+                    red: 10,
+                    green: 20,
+                    blue: 30,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer {
+                border_color: Some(IrColor {
+                    red: 40,
+                    green: 50,
+                    blue: 60,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            },
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(code.contains("dx: 4pt"), "{code}");
+        assert!(code.contains("dy: 1pt"), "{code}");
+        assert!(code.contains("thickness: 5pt"), "{code}");
+        assert!(code.contains("paint: rgb(40, 50, 60, 100%)"), "{code}");
+        assert!(!code.contains("rgb(9, 9, 9, 100%)"), "{code}");
+        assert!(!code.contains("dx: 9pt"), "{code}");
     }
 
     #[test]
