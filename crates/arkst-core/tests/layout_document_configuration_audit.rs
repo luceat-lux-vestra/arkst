@@ -243,6 +243,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9]
         .contains("integration_pageformat_global_nullable_axes_inherit_existing_dimensions"));
     assert!(pageformat[9]
+        .contains("integration_pageformat_nullable_alignment_preserves_final_page_state"));
+    assert!(pageformat[9]
         .contains("integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[10].contains("global positive columns"));
     assert!(pageformat[10].contains("selector-free global background"));
@@ -304,6 +306,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains(
         "explicit nullable width/height values contribute no axis override and inherit the previously composed axis"
     ));
+    assert!(pageformat[10].contains(
+        "semantic None contributes no alignment override, preserving the prior selector-free document alignment and the prior exact same-selector alignment"
+    ));
     assert!(
         pageformat[10].contains("truly base-less non-null single-axis calls remain fail-closed")
     );
@@ -329,6 +334,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-explicit-axis-inheritance"));
     assert!(pageformat[11].contains("bounded-global-nullable-axis-inheritance"));
+    assert!(pageformat[11].contains("bounded-nullable-alignment-inheritance"));
     assert!(pageformat[11].contains("unresolved-global-page-dimensions-backend-fail-closed"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));

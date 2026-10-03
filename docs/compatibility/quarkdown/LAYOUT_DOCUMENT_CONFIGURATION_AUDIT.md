@@ -409,7 +409,13 @@ only when the prior composition supplies the missing axis. Explicit nullable
 composed value for that axis is inherited. A remaining non-null single-axis
 override is accepted only when prior composition supplies the opposite explicit
 axis or a concrete standard-size base; truly base-less non-null single-axis calls
-remain fail-closed. Selector-aware output outside the bounded background/border side+range subsets
+remain fail-closed. The pinned PageFormatInfo merge contract also makes
+`alignment` nullable and applies later-non-null field precedence. Arkst therefore
+treats semantic `.none` alignment as no new override: selector-free state keeps
+the previously committed document alignment, and exact same-selector resolution
+inherits the earlier alignment. This does not widen selector-aware alignment
+rendering; non-null scoped alignment remains explicitly fail-closed at the Typst
+boundary. Selector-aware output outside the bounded background/border side+range subsets
 remains paged-only at the current Typst boundary, with final non-paged selector state
 explicitly backend-fail-closed. Selector-free border requests are likewise rejected when
 the final document is non-paged, because the current bounded border consumer is paged-only

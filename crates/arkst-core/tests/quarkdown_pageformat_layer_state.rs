@@ -2,8 +2,8 @@
 //! `.pageformat` layer/selector-state slice.
 
 use arkst_core::ir::{
-    IrDocumentState, IrDocumentType, IrPageFormatLayer, IrPageFormatState, IrPageOrientation,
-    IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrSize, IrSizeUnit,
+    IrDocumentAlignment, IrDocumentState, IrDocumentType, IrPageFormatLayer, IrPageFormatState,
+    IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrSize, IrSizeUnit,
 };
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
@@ -392,6 +392,26 @@ fn selector_scoped_nullable_axis_inherits_same_selector_dimension() {
         ),
         (4.0, IrSizeUnit::In)
     );
+}
+
+#[test]
+fn selector_scoped_nullable_alignment_inherits_same_selector_value() {
+    let result = compile_source(
+        ".pageformat pages:{2..2} alignment:{center}\n\
+         .pageformat pages:{2..2} alignment:{.none}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_format.layers.len(), 2);
+    assert!(state.page_format.layers[1].alignment.is_none());
+
+    let selector = state.page_format.layers[0].selector;
+    let merged = state
+        .page_format
+        .resolve_exact_selector(selector)
+        .expect("same-selector nullable-alignment merge");
+    assert_eq!(merged.alignment, Some(IrDocumentAlignment::Center));
 }
 
 #[test]

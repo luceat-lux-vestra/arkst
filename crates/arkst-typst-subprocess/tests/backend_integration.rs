@@ -1272,6 +1272,40 @@ fn integration_v260_omitted_stack_alignment_uses_final_page_state() {
 }
 
 #[test]
+fn integration_pageformat_nullable_alignment_preserves_final_page_state() {
+    let source = ".row\n    A\n\n    B\n\n.pageformat alignment:{center}\n.pageformat alignment:{.none}\n.column\n    C\n\n    D\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-nullable-alignment.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-nullable-alignment.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "nullable page-alignment diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert_eq!(typst_code.matches("h(1fr)").count(), 2, "{typst_code}");
+    assert_eq!(typst_code.matches("v(1fr)").count(), 2, "{typst_code}");
+
+    with_typst("pageformat-nullable-alignment", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-nullable-alignment.qd".to_string(),
+            })
+            .expect("nullable page-alignment Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_center_layout_lowers_to_valid_typst_and_pdf() {
     let source = ".center\n    Hello\n\n    .row\n        A\n\n        B\n";
     let project = VirtualProjectBuilder::new()
