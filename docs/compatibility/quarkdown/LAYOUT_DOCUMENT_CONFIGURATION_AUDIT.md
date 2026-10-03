@@ -217,7 +217,10 @@ rotated to the selected orientation. Explicit width/height override those
 bounds. Later layers with the same selector override only their non-null
 fields; omitted fields inherit through the selector group. Positive
 `columns` is document-wide multi-column configuration; values below one are
-discarded. The public border-side arguments have a cross-field exception to
+discarded. The pinned `docs/page-format.qd` applicability table limits both
+`margin` and `columns` to `plain`, `paged`, and `slides`; `docs`
+is explicitly included for `background` and `alignment`, but not for those
+two layout fields. The public border-side arguments have a cross-field exception to
 that simple omission rule: if any of `bordertop`, `borderright`,
 `borderbottom`, or `borderleft` is supplied, `hasBorder` is true and the new
 `contentBorderWidth` is a non-null `Sizes` whose omitted side fields are
@@ -252,7 +255,12 @@ Selector-scoped positive columns are now retained in the ordered layer state as
 bounded state-only evidence. Scoped selector layers are state-only and must not leak into the flattened global fields consumed by current renderers. Geometry/alignment,
 selector-free global margins, global positive columns, selector-free global
 background, and the bounded standard-size selection have current Typst/PDF
-consumers, while row/column alignment inheritance remains unchanged;
+consumers. Final `docs` output now rejects selector-free global `margin`
+and `columns` before page setup instead of applying fields outside their
+pinned applicability domain; ordered state remains canonical and legacy
+flattened margin/columns receive the same guard. Supported `docs`
+background output remains unchanged, while row/column alignment inheritance
+remains unchanged;
 page-border decoration state now has one bounded Typst/PDF consumer when the
 final document is `paged` and explicit margin, committed border widths, and
 explicit border color are all present; selector-free implicit-margin,
