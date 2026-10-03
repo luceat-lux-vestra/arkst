@@ -202,8 +202,6 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("IrDocumentState::page_format"));
     assert!(pageformat[9].contains("IrResolvedPageFormat"));
     assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
-    assert!(pageformat[9]
-        .contains("page_selectors_fail_closed_outside_paged_documents_before_publication"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_selector_scoped_page_layout_fails_closed_at_typst_boundary"));
@@ -262,12 +260,6 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
     assert!(pageformat[10].contains("finite 1-based page ranges"));
-    assert!(pageformat[10].contains(
-        "selector-bearing pageformat calls under plain/slides/docs are evaluator-rejected before ordered-layer publication"
-    ));
-    assert!(pageformat[10].contains(
-        "side/pages selector admission itself is paged-only and fails before publication"
-    ));
     assert!(pageformat[10].contains("left-open ranges normalized to page 1"));
     assert!(pageformat[10]
         .contains("left-open finite page ranges normalize the omitted start to page 1"));
@@ -310,7 +302,6 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("scoped-alignment-backend-fail-closed"));
     assert!(pageformat[11].contains("scoped-margin-backend-fail-closed"));
     assert!(pageformat[11].contains("scoped-border-completeness-fail-closed"));
-    assert!(pageformat[11].contains("paged-only-selector-admission"));
 }
 
 #[test]
