@@ -722,6 +722,51 @@ fn integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_pageformat_docs_omitted_orientation_fails_closed_after_paged_mutation() {
+    let source = ".doctype {docs}\n\
+.pageformat size:{a4}\n\
+.doctype {paged}\n\
+Unresolved docs orientation basis\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-docs-orientation-basis.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-docs-orientation-basis.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat docs-orientation diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-free page dimensions without complete explicit axes or a resolvable standard-size base\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-docs-orientation-basis-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-docs-orientation-basis.qd".to_string(),
+            })
+            .expect_err("unresolved docs orientation basis must fail closed in Typst");
+        let message = error.to_string();
+        assert!(
+            message.contains(
+                "selector-free page dimensions without complete explicit axes or a resolvable standard-size base"
+            ),
+            "{message}"
+        );
+    });
+}
+
+#[test]
 fn integration_pageformat_ordered_global_dimensions_lower_to_valid_typst_and_pdf() {
     let source = ".doctype {paged}\n\
 .pageformat width:{10in} height:{5in}\n\
