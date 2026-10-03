@@ -355,16 +355,14 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     ));
     assert!(pageformat[10]
         .contains("effectless selectors do not trigger the non-paged Typst selector guard"));
-    assert!(pageformat[10].contains(
-        "pinned final rendering prepends the final document type's default page format"
-    ));
+    assert!(pageformat[10]
+        .contains("pinned final rendering prepends the final document type's default page format"));
     assert!(pageformat[10].contains(
         "final paged output therefore inherits the missing axis from A4 portrait regardless of call-time doctype"
     ));
     assert!(pageformat[10].contains("without fabricating size into the stored layer"));
-    assert!(pageformat[10].contains(
-        "final plain/docs/slides unresolved single-axis output fails closed"
-    ));
+    assert!(pageformat[10]
+        .contains("final plain/docs/slides unresolved single-axis output fails closed"));
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
