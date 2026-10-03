@@ -389,6 +389,25 @@ fn has_unsupported_non_paged_page_selector(doc: &IrDocument) -> bool {
         })
 }
 
+const UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-free page margin/columns for a final docs document\")\n";
+
+fn has_unsupported_docs_global_page_layout(doc: &IrDocument) -> bool {
+    let state = &doc.metadata.document_state;
+    if state.document_type != IrDocumentType::Docs {
+        return false;
+    }
+
+    if !state.page_format.layers.is_empty() {
+        return state
+            .page_format
+            .resolve_exact_selector(None)
+            .is_some_and(|global| global.margin.is_some() || global.columns.is_some());
+    }
+
+    state.page_margin.is_some() || state.page_columns.is_some()
+}
+
 const UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE: &str =
     "#panic(\"Arkst cannot lower selector-free page border for a non-paged final document\")\n";
 
@@ -541,6 +560,9 @@ fn has_unresolved_selector_free_page_dimensions(doc: &IrDocument) -> bool {
 fn document_prelude(doc: &IrDocument) -> String {
     if has_unsupported_non_paged_page_selector(doc) {
         return UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE.to_string();
+    }
+    if has_unsupported_docs_global_page_layout(doc) {
+        return UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE.to_string();
     }
     if has_unsupported_non_paged_page_border(doc) {
         return UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE.to_string();
@@ -984,6 +1006,73 @@ mod tests {
             "{code}"
         );
         assert!(!code.starts_with("#set page(width:"), "{code}");
+    }
+
+    #[test]
+    fn final_docs_rejects_selector_free_margin_and_columns() {
+        let margin = IrPageMargins {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Cm,
+            },
+            right: IrSize {
+                value: 2.0,
+                unit: IrSizeUnit::Cm,
+            },
+            bottom: IrSize {
+                value: 3.0,
+                unit: IrSizeUnit::Cm,
+            },
+            left: IrSize {
+                value: 4.0,
+                unit: IrSizeUnit::Cm,
+            },
+        };
+
+        let mut doc = document(IrDocumentType::Docs, None, None);
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer {
+            margin: Some(margin.clone()),
+            ..IrPageFormatLayer::default()
+        }];
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE));
+
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer {
+            columns: Some(2),
+            ..IrPageFormatLayer::default()
+        }];
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE));
+
+        doc.metadata.document_state.page_format.layers.clear();
+        doc.metadata.document_state.page_margin = Some(margin);
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE));
+
+        doc.metadata.document_state.page_margin = None;
+        doc.metadata.document_state.page_columns = Some(2);
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE));
+    }
+
+    #[test]
+    fn final_docs_keeps_supported_selector_free_background_output() {
+        let mut doc = document(IrDocumentType::Docs, None, None);
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer {
+            background: Some(IrColor {
+                red: 10,
+                green: 20,
+                blue: 30,
+                alpha: 1.0,
+            }),
+            ..IrPageFormatLayer::default()
+        }];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            !code.starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE),
+            "{code}"
+        );
+        assert!(
+            code.contains("#set page(fill: rgb(10, 20, 30, 100%))"),
+            "{code}"
+        );
     }
 
     #[test]
