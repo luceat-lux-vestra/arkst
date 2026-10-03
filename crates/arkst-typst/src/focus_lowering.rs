@@ -386,6 +386,32 @@ fn has_unsupported_scoped_page_margin(doc: &IrDocument) -> bool {
     })
 }
 
+const UNRESOLVED_SELECTOR_FREE_PAGE_DIMENSIONS_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-free page dimensions without complete explicit axes or a resolvable standard-size base\")\n";
+
+fn has_unresolved_selector_free_page_dimensions(doc: &IrDocument) -> bool {
+    let state = &doc.metadata.document_state;
+    if !matches!(
+        state.document_type,
+        IrDocumentType::Paged | IrDocumentType::Slides
+    ) {
+        return false;
+    }
+
+    if let Some(dimensions) = state.page_format.compose_global_page_dimensions() {
+        return dimensions
+            .resolve_concrete_page_geometry(state.document_type)
+            .is_none();
+    }
+
+    state.page_geometry.is_none()
+        && state.page_size.is_some_and(|selection| {
+            selection
+                .resolve_standard_page_geometry(state.document_type)
+                .is_none()
+        })
+}
+
 fn document_prelude(doc: &IrDocument) -> String {
     if has_unsupported_non_paged_page_selector(doc) {
         return UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE.to_string();
@@ -401,6 +427,9 @@ fn document_prelude(doc: &IrDocument) -> String {
     }
     if has_unsupported_scoped_page_margin(doc) {
         return UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE.to_string();
+    }
+    if has_unresolved_selector_free_page_dimensions(doc) {
+        return UNRESOLVED_SELECTOR_FREE_PAGE_DIMENSIONS_PRELUDE.to_string();
     }
 
     let state = &doc.metadata.document_state;
@@ -694,6 +723,16 @@ mod tests {
                 .resolve_standard_page_geometry(IrDocumentType::Paged)
                 .is_none(),
             "public evidence does not define an omitted docs orientation for this cross-doctype edge"
+        );
+
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_size = Some(selection);
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with(
+                "#panic(\"Arkst cannot lower selector-free page dimensions without complete explicit axes or a resolvable standard-size base\")\n"
+            ),
+            "{code}"
         );
     }
 
