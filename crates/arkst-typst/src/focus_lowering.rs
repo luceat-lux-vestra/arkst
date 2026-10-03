@@ -1350,7 +1350,10 @@ mod tests {
                 code.starts_with(UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE),
                 "{document_type:?}: {code}"
             );
-            assert!(!code.contains("#set page(background:"), "{document_type:?}: {code}");
+            assert!(
+                !code.contains("#set page(background:"),
+                "{document_type:?}: {code}"
+            );
         }
     }
 
