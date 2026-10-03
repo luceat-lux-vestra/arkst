@@ -1128,6 +1128,62 @@ fn resolved_page_dimensions_materialize_standard_base_without_widening_selector_
 }
 
 #[test]
+fn effectless_pageformat_layers_are_retained_without_effective_state() {
+    let result = compile_source(
+        ".pageformat\n\
+         .pageformat orientation:{landscape}\n\
+         .pageformat side:{left}\n\
+         .pageformat pages:{..2} orientation:{portrait}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    let layers = &state.page_format.layers;
+    assert_eq!(layers.len(), 4);
+
+    assert_eq!(layers[0], IrPageFormatLayer::default());
+    assert_eq!(
+        layers[1],
+        IrPageFormatLayer::default(),
+        "orientation without size has no stored payload"
+    );
+
+    let side_only = &layers[2];
+    let side_selector = side_only.selector.expect("side-only selector");
+    assert_eq!(side_selector.side, Some(IrPageSide::Left));
+    assert!(side_selector.pages.is_none());
+    assert_eq!(
+        IrPageFormatLayer {
+            selector: side_only.selector,
+            ..Default::default()
+        },
+        *side_only
+    );
+
+    let range_only = &layers[3];
+    let range_selector = range_only.selector.expect("range-only selector");
+    assert!(range_selector.side.is_none());
+    let pages = range_selector.pages.expect("finite normalized range");
+    assert_eq!((pages.start, pages.end), (1, 2));
+    assert_eq!(
+        IrPageFormatLayer {
+            selector: range_only.selector,
+            ..Default::default()
+        },
+        *range_only
+    );
+
+    assert!(state.page_alignment.is_none());
+    assert!(state.page_geometry.is_none());
+    assert!(state.page_columns.is_none());
+    assert!(state.page_size.is_none());
+    assert!(state.page_margin.is_none());
+    assert!(state.page_border_widths.is_none());
+    assert!(state.page_border_color.is_none());
+    assert!(state.page_background.is_none());
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
