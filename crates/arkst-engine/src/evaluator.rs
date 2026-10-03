@@ -6965,6 +6965,14 @@ impl Evaluator {
             None
         };
         let document_type = context.document_state.borrow().document_type;
+        if selector.is_some() && document_type != IrDocumentType::Paged {
+            diagnostics.push(function_error(
+                "`.pageformat` side/pages selectors are only supported in paged documents"
+                    .to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
         let mixed_global_dimensions = selector.is_none()
             && page_size_format.is_some()
             && (width.is_some() || height.is_some());
