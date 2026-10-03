@@ -490,6 +490,10 @@ fn has_unresolved_selector_free_page_dimensions(doc: &IrDocument) -> bool {
             .is_none();
     }
 
+    if !state.page_format.layers.is_empty() {
+        return false;
+    }
+
     state.page_geometry.is_none()
         && state.page_size.is_some_and(|selection| {
             selection
@@ -527,9 +531,10 @@ fn document_prelude(doc: &IrDocument) -> String {
 
     if let Some((width, height)) = ordered_dimensions {
         prelude.push_str(&format!("#set page(width: {width}, height: {height})\n"));
-    } else if global_dimensions.is_none() {
-        // Backward-compatible fallback for legacy/deserialized IR that
-        // predates ordered page-format layers.
+    } else if global_dimensions.is_none() && state.page_format.layers.is_empty() {
+        // Backward-compatible fallback only for legacy/deserialized IR that
+        // predates ordered page-format layers. Once ordered state exists it is
+        // canonical even when no dimension payload is present.
         if let Some(geometry) = state.page_geometry.as_ref() {
             let width = lowering_base::lower_size(&geometry.width);
             let height = lowering_base::lower_size(&geometry.height);
@@ -902,6 +907,50 @@ mod tests {
             !code.starts_with("#set page(width: 10in, height: 5in)"),
             "{code}"
         );
+    }
+
+    #[test]
+    fn ordered_pageformat_without_global_dimensions_does_not_revive_stale_flattened_geometry() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_geometry = Some(IrPageGeometry {
+            width: IrSize {
+                value: 10.0,
+                unit: IrSizeUnit::In,
+            },
+            height: IrSize {
+                value: 5.0,
+                unit: IrSizeUnit::In,
+            },
+        });
+        doc.metadata.document_state.page_size = Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Landscape),
+            document_type: IrDocumentType::Paged,
+        });
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer::default()];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(!code.starts_with("#set page(width:"), "{code}");
+        assert!(!code.contains("10in"), "{code}");
+        assert!(!code.contains("297mm"), "{code}");
+    }
+
+    #[test]
+    fn effectless_ordered_pageformat_ignores_stale_unresolvable_flattened_standard_size() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_size = Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: None,
+            document_type: IrDocumentType::Docs,
+        });
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer::default()];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            !code.starts_with(UNRESOLVED_SELECTOR_FREE_PAGE_DIMENSIONS_PRELUDE),
+            "{code}"
+        );
+        assert!(!code.starts_with("#set page(width:"), "{code}");
     }
 
     #[test]
