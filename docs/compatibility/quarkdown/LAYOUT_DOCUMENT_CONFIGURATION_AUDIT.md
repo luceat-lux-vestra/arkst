@@ -301,10 +301,17 @@ typed RGB/alpha color directly to page fill without changing border state.
 The bounded Typst/PDF border consumer uses page foreground coordinates to draw
 the explicit content-area rectangle only when all of margin, border widths, and
 border color are committed. It preserves four independent side widths and does
-not fabricate a renderer-default margin, width, or color.
-The ordered layer snapshot is a prerequisite only: current flattened fields
-remain the bounded renderer compatibility surface and no new output claim is
-made by recording layer order or selector identity. Because upstream records page
+not fabricate a renderer-default margin, width, or color. When ordered
+page-format state exists, selector-free border output now resolves the exact
+global selector group in source order and treats that ordered result as
+canonical for margin, border widths, border color, non-paged rejection, and
+unresolved-default rejection. Flattened border compatibility fields are used
+only when ordered page-format state is absent, preventing stale flattened state
+from overriding the canonical layer contract while preserving legacy IR.
+The ordered layer snapshot remains a prerequisite for unsupported selector-aware
+layout fields, but selector-free border output now consumes its exact-global
+merge directly; recording other layer fields or selector identity alone still
+does not widen renderer support. Because upstream records page
 selectors before final renderer applicability is known, the bounded state slice retains
 typed selector layers independently of the call-time document type. The current Typst
 boundary then requires the final document type to be `paged`; final
