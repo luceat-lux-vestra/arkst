@@ -1001,7 +1001,10 @@ mod tests {
             border_code.starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE),
             "{border_code}"
         );
-        assert!(!border_code.contains("#set page(foreground: context {"), "{border_code}");
+        assert!(
+            !border_code.contains("#set page(foreground: context {"),
+            "{border_code}"
+        );
     }
 
     #[test]
@@ -1081,7 +1084,10 @@ mod tests {
             code.contains("let __arkst_border_color = if __arkst_page >= 2 and __arkst_page <= 4"),
             "{code}"
         );
-        assert!(code.contains("let __arkst_margin = (top: 1pt, right: 2pt, bottom: 3pt, left: 4pt)"), "{code}");
+        assert!(
+            code.contains("let __arkst_margin = (top: 1pt, right: 2pt, bottom: 3pt, left: 4pt)"),
+            "{code}"
+        );
         assert!(code.contains("else { rgb(10, 20, 30, 100%) }"), "{code}");
         assert!(
             code.contains("thickness: __arkst_border_widths.top"),
