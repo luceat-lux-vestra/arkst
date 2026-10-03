@@ -1034,29 +1034,21 @@ mod tests {
             margin: Some(margin.clone()),
             ..IrPageFormatLayer::default()
         }];
-        assert!(
-            lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE)
-        );
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE));
 
         doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer {
             columns: Some(2),
             ..IrPageFormatLayer::default()
         }];
-        assert!(
-            lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE)
-        );
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE));
 
         doc.metadata.document_state.page_format.layers.clear();
         doc.metadata.document_state.page_margin = Some(margin);
-        assert!(
-            lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE)
-        );
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE));
 
         doc.metadata.document_state.page_margin = None;
         doc.metadata.document_state.page_columns = Some(2);
-        assert!(
-            lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE)
-        );
+        assert!(lower_to_typst_code(&doc).starts_with(UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE));
     }
 
     #[test]
