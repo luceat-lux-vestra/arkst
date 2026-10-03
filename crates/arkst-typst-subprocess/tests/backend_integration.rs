@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use arkst_core::ir::{
-    IrColor, IrComponent, IrDocumentAlignment, IrInline, IrNode, IrPageBorderWidths, IrPageGeometry,
-    IrPageMargins, IrSize, IrSizeUnit, NativeTarget,
+    IrColor, IrComponent, IrDocumentAlignment, IrInline, IrNode, IrPageBorderWidths,
+    IrPageGeometry, IrPageMargins, IrSize, IrSizeUnit, NativeTarget,
 };
 use arkst_core::{compile, CompileOptions, VirtualPathBuf, VirtualProjectBuilder};
 use arkst_typst::lowering::{lower_to_typst, lower_to_typst_code};
@@ -990,7 +990,13 @@ fn integration_effectless_ordered_pageformat_does_not_revive_stale_flattened_geo
         result.diagnostics
     );
     assert!(
-        !result.ir.metadata.document_state.page_format.layers.is_empty(),
+        !result
+            .ir
+            .metadata
+            .document_state
+            .page_format
+            .layers
+            .is_empty(),
         "effectless pageformat must retain ordered state"
     );
 
@@ -1006,7 +1012,10 @@ fn integration_effectless_ordered_pageformat_does_not_revive_stale_flattened_geo
     });
 
     let typst_code = lower_to_typst_code(&result.ir);
-    assert!(!typst_code.contains("#set page(width: 10in, height: 5in)"), "{typst_code}");
+    assert!(
+        !typst_code.contains("#set page(width: 10in, height: 5in)"),
+        "{typst_code}"
+    );
 
     with_typst("pageformat-effectless-dimension-fallback", |backend| {
         let output = backend
