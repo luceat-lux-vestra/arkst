@@ -205,8 +205,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_non_paged_page_selector_fails_closed_at_typst_boundary"));
-    assert!(pageformat[9]
-        .contains("integration_non_paged_selector_free_page_border_fails_closed_at_typst_boundary"));
+    assert!(pageformat[9].contains(
+        "integration_non_paged_selector_free_page_border_fails_closed_at_typst_boundary"
+    ));
     assert!(pageformat[9].contains(
         "integration_page_selector_declared_before_paged_doctype_uses_final_document_type"
     ));
