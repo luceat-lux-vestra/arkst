@@ -795,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn standard_size_applicability_uses_output_type_but_default_orientation_uses_call_time_basis() {
+    fn standard_size_uses_call_time_orientation_basis_across_final_document_types() {
         let mut doc = document(IrDocumentType::Paged, None, None);
         doc.metadata.document_state.page_size = Some(IrPageSizeSelection {
             format: IrPageSizeFormat::A4,
@@ -824,32 +824,29 @@ mod tests {
         });
         let code = lower_to_typst_code(&doc);
         assert!(
-            !code.starts_with("#set page(width: 297mm, height: 210mm)\n"),
-            "standard size must not apply to a final plain document: {code}"
+            code.starts_with("#set page(width: 297mm, height: 210mm)\n"),
+            "explicit standard size must preserve its concrete geometry in final plain output: {code}"
         );
     }
 
     #[test]
-    fn omitted_docs_orientation_basis_remains_fail_closed() {
+    fn omitted_docs_orientation_basis_uses_pinned_portrait_preference() {
         let selection = IrPageSizeSelection {
             format: IrPageSizeFormat::A4,
             orientation: None,
             document_type: IrDocumentType::Docs,
         };
-        assert!(
-            selection
-                .resolve_standard_page_geometry(IrDocumentType::Paged)
-                .is_none(),
-            "public evidence does not define an omitted docs orientation for this cross-doctype edge"
-        );
+        let geometry = selection
+            .resolve_standard_page_geometry(IrDocumentType::Paged)
+            .expect("docs preferred orientation is pinned portrait");
+        assert_eq!(geometry.width.value, 210.0);
+        assert_eq!(geometry.height.value, 297.0);
 
         let mut doc = document(IrDocumentType::Paged, None, None);
         doc.metadata.document_state.page_size = Some(selection);
         let code = lower_to_typst_code(&doc);
         assert!(
-            code.starts_with(
-                "#panic(\"Arkst cannot lower selector-free page dimensions without complete explicit axes or a resolvable standard-size base\")\n"
-            ),
+            code.starts_with("#set page(width: 210mm, height: 297mm)\n"),
             "{code}"
         );
     }
