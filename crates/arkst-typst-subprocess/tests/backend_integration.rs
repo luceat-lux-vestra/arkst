@@ -891,6 +891,51 @@ Explicit-base single-axis output\n";
 }
 
 #[test]
+fn integration_pageformat_global_nullable_axes_inherit_existing_dimensions() {
+    let source = ".doctype {paged}\n\
+.pageformat width:{10in} height:{5in}\n\
+.pageformat width:{.none} height:{4in}\n\
+.pageformat width:{8in} height:{.none}\n\
+Nullable axis output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-nullable-axis-inheritance.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-nullable-axis-inheritance.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat nullable-axis diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(width: 8in, height: 4in)"),
+        "{typst_code}"
+    );
+    assert!(
+        !typst_code.contains("#set page(width: 10in, height: 5in)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-nullable-axis-inheritance", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-nullable-axis-inheritance.qd".to_string(),
+            })
+            .expect("nullable page-axis inheritance Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf() {
     let source = ".doctype {paged}\n\
 .pageformat margin:{1cm 2cm 3cm 4cm}\n\
