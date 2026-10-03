@@ -437,9 +437,14 @@ base and therefore follows the same single-axis inheritance rule: it is accepted
 only when the prior composition supplies the missing axis. Explicit nullable
 `width`/`height` values likewise contribute no axis override, so the previously
 composed value for that axis is inherited. A remaining non-null single-axis
-override is accepted only when prior composition supplies the opposite explicit
-axis or a concrete standard-size base; truly base-less non-null single-axis calls
-remain fail-closed. The pinned PageFormatInfo merge contract also makes
+override is accepted when prior composition supplies the opposite explicit
+axis or a concrete standard-size base. The pinned `PAGED` document type also
+supplies an effective initial A4 portrait page format, so a selector-free
+single-axis mutation committed while the document is `paged` may inherit the
+missing axis from that document default without fabricating an implicit
+`size` field in the stored mutation. This bounded default-base admission is
+resolved only for final `paged` output; plain/slides/docs and cross-doctype
+cases without another concrete base remain fail-closed. The pinned PageFormatInfo merge contract also makes
 `alignment` nullable and applies later-non-null field precedence. Arkst therefore
 treats semantic `.none` alignment as no new override: selector-free state keeps
 the previously committed document alignment, and exact same-selector resolution

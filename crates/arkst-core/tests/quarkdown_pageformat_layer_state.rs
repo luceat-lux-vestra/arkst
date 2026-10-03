@@ -153,6 +153,46 @@ fn selector_free_mixed_standard_size_and_axis_publish_composable_state() {
 }
 
 #[test]
+fn paged_single_axis_layer_uses_document_default_without_fabricating_layer_size() {
+    let result = compile_source(".doctype {paged}\n.pageformat width:{8in}\n");
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert!(state.page_geometry.is_none());
+    assert!(state.page_size.is_none());
+
+    let layers = &state.page_format.layers;
+    assert_eq!(layers.len(), 1);
+    assert!(layers[0].selector.is_none());
+    assert!(
+        layers[0].size.is_none(),
+        "document default must not be fabricated into the stored mutation"
+    );
+    assert_eq!(
+        (
+            layers[0].width.as_ref().expect("width layer").value,
+            layers[0].width.as_ref().expect("width layer").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+    assert!(layers[0].height.is_none());
+
+    let composed = state
+        .page_format
+        .compose_global_page_dimensions()
+        .expect("raw ordered composition");
+    assert!(composed.size.is_none());
+    assert!(composed.height.is_none());
+    assert_eq!(
+        (
+            composed.width.as_ref().expect("composed width").value,
+            composed.width.as_ref().expect("composed width").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+}
+
+#[test]
 fn selector_free_single_axis_layers_require_existing_opposite_axis_or_standard_size_base() {
     let rejected = compile_source(".pageformat width:{8in}\n");
     assert!(

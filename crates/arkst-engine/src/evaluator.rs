@@ -6993,9 +6993,10 @@ impl Evaluator {
                     dimensions.width.is_some() || dimensions.size.is_some()
                 }
             });
-            if !has_opposite_axis_base {
+            let has_paged_default_base = document_type == arkst_ir::IrDocumentType::Paged;
+            if !has_opposite_axis_base && !has_paged_default_base {
                 diagnostics.push(function_error(
-                    "`.pageformat` single-axis global composition requires an existing opposite-axis or standard-size base"
+                    "`.pageformat` single-axis global composition requires an existing opposite-axis, standard-size, or paged document default base"
                         .to_string(),
                     *span,
                 ));

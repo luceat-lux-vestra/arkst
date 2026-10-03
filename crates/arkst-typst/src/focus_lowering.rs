@@ -7,7 +7,7 @@
 
 use arkst_ir::{
     IrComposedPageDimensions, IrDocument, IrDocumentType, IrPageFormatLayer, IrPageFormatSelector,
-    IrPageSide,
+    IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPageSizeSelection,
 };
 use arkst_source::SourceMapEntry;
 
@@ -60,6 +60,22 @@ fn lower_composed_page_dimensions(
         lowering_base::lower_size(&geometry.width),
         lowering_base::lower_size(&geometry.height),
     ))
+}
+
+fn effective_global_page_dimensions(doc: &IrDocument) -> Option<IrComposedPageDimensions> {
+    let state = &doc.metadata.document_state;
+    let mut dimensions = state.page_format.compose_global_page_dimensions()?;
+    if dimensions.size.is_none()
+        && (dimensions.width.is_some() != dimensions.height.is_some())
+        && state.document_type == IrDocumentType::Paged
+    {
+        dimensions.size = Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Portrait),
+            document_type: IrDocumentType::Paged,
+        });
+    }
+    Some(dimensions)
 }
 
 fn page_selector_condition(selector: IrPageFormatSelector) -> Option<String> {
@@ -484,7 +500,7 @@ fn has_unresolved_selector_free_page_dimensions(doc: &IrDocument) -> bool {
         return false;
     }
 
-    if let Some(dimensions) = state.page_format.compose_global_page_dimensions() {
+    if let Some(dimensions) = effective_global_page_dimensions(doc) {
         return dimensions
             .resolve_concrete_page_geometry(state.document_type)
             .is_none();
@@ -524,7 +540,7 @@ fn document_prelude(doc: &IrDocument) -> String {
 
     let state = &doc.metadata.document_state;
     let mut prelude = String::new();
-    let global_dimensions = state.page_format.compose_global_page_dimensions();
+    let global_dimensions = effective_global_page_dimensions(doc);
     let ordered_dimensions = global_dimensions
         .as_ref()
         .and_then(|dimensions| lower_composed_page_dimensions(dimensions, state.document_type));

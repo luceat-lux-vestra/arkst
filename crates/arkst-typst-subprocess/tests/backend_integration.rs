@@ -894,6 +894,91 @@ Ordered dimensions output\n";
 }
 
 #[test]
+fn integration_pageformat_paged_single_axis_uses_initial_a4_portrait_base() {
+    let source = ".doctype {paged}\n.pageformat width:{8in}\nPaged default single-axis output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-paged-default-single-axis.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-paged-default-single-axis.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat paged-default single-axis diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(width: 8in, height: 297mm)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-paged-default-single-axis", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-paged-default-single-axis.qd".to_string(),
+            })
+            .expect("paged default single-axis Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_pageformat_paged_default_single_axis_does_not_cross_into_slides() {
+    let source =
+        ".doctype {paged}\n.pageformat width:{8in}\n.doctype {slides}\nCross-doctype output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-paged-default-single-axis-cross-doctype.qd")
+        .expect("valid entry path")
+        .add_source(
+            "pageformat-paged-default-single-axis-cross-doctype.qd",
+            source,
+        )
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat cross-doctype diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-free page dimensions without complete explicit axes or a resolvable standard-size base\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst(
+        "pageformat-paged-default-single-axis-cross-doctype",
+        |backend| {
+            let error = backend
+                .compile(&TypstInput {
+                    source: typst_code,
+                    entry_path: "pageformat-paged-default-single-axis-cross-doctype.qd".to_string(),
+                })
+                .expect_err("cross-doctype single-axis default must remain fail-closed");
+            assert!(
+                error
+                    .to_string()
+                    .contains("selector-free page dimensions without complete explicit axes"),
+                "{error}"
+            );
+        },
+    );
+}
+
+#[test]
 fn integration_pageformat_global_single_axis_uses_existing_standard_size_base() {
     let source = ".doctype {paged}\n\
 .pageformat size:{a4} orientation:{portrait}\n\
