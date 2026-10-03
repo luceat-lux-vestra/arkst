@@ -249,6 +249,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     ));
     assert!(pageformat[9]
         .contains("integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9]
+        .contains("integration_pageformat_ordered_global_border_overrides_stale_flattened_state"));
     assert!(pageformat[10].contains("global positive columns"));
     assert!(pageformat[10].contains("selector-free global background"));
     assert!(pageformat[10].contains("Typst/PDF columns consumer"));
@@ -268,6 +270,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("left/even and right/odd physical-page parity"));
     assert!(pageformat[10].contains("explicit margin + committed widths + explicit color"));
     assert!(pageformat[10].contains("without fabricating renderer defaults"));
+    assert!(pageformat[10].contains("ordered page-format state exists"));
+    assert!(pageformat[10].contains("exact global selector group in source order"));
+    assert!(pageformat[10].contains("flattened border fields are a legacy fallback only"));
     assert!(pageformat[10].contains("gates standard-size output on the final paged/slides"));
     assert!(pageformat[10].contains("explicit physical millimeter bounds"));
     assert!(pageformat[10].contains("omitted-orientation basis"));
