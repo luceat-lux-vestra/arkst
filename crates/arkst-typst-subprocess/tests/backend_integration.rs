@@ -805,11 +805,49 @@ fn integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
-fn integration_pageformat_docs_omitted_orientation_fails_closed_after_paged_mutation() {
+fn integration_pageformat_standard_size_lowers_in_final_plain_output() {
+    let source =
+        ".doctype {plain}\n.pageformat size:{a4} orientation:{landscape}\nPlain standard size output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-standard-size-plain.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-standard-size-plain.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat final-plain standard-size diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(width: 297mm, height: 210mm)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-standard-size-plain", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-standard-size-plain.qd".to_string(),
+            })
+            .expect("final plain standard size Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_pageformat_docs_omitted_orientation_uses_portrait_after_paged_mutation() {
     let source = ".doctype {docs}\n\
 .pageformat size:{a4}\n\
 .doctype {paged}\n\
-Unresolved docs orientation basis\n";
+Docs orientation basis output\n";
     let project = VirtualProjectBuilder::new()
         .entry("pageformat-docs-orientation-basis.qd")
         .expect("valid entry path")
@@ -826,26 +864,21 @@ Unresolved docs orientation basis\n";
 
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(
-        typst_code.starts_with(
-            "#panic(\"Arkst cannot lower selector-free page dimensions without complete explicit axes or a resolvable standard-size base\")\n"
-        ),
+        typst_code.contains("#set page(width: 210mm, height: 297mm)"),
         "{typst_code}"
     );
 
-    with_typst("pageformat-docs-orientation-basis-fail-closed", |backend| {
-        let error = backend
+    with_typst("pageformat-docs-orientation-basis", |backend| {
+        let output = backend
             .compile(&TypstInput {
                 source: typst_code,
                 entry_path: "pageformat-docs-orientation-basis.qd".to_string(),
             })
-            .expect_err("unresolved docs orientation basis must fail closed in Typst");
-        let message = error.to_string();
-        assert!(
-            message.contains(
-                "selector-free page dimensions without complete explicit axes or a resolvable standard-size base"
-            ),
-            "{message}"
-        );
+            .expect("docs portrait orientation basis must lower to Typst");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
     });
 }
 
