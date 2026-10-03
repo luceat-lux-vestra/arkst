@@ -12,7 +12,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use arkst_core::ir::{IrComponent, IrInline, IrNode, NativeTarget};
+use arkst_core::ir::{
+    IrColor, IrComponent, IrInline, IrNode, IrPageBorderWidths, IrPageMargins, IrSize, IrSizeUnit,
+    NativeTarget,
+};
 use arkst_core::{compile, CompileOptions, VirtualPathBuf, VirtualProjectBuilder};
 use arkst_typst::lowering::{lower_to_typst, lower_to_typst_code};
 use arkst_typst::{TypstBackend, TypstInput};
@@ -1112,6 +1115,93 @@ Second page\n";
                 entry_path: "pageformat-range-background.qd".to_string(),
             })
             .expect("pageformat range background Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_pageformat_ordered_global_border_overrides_stale_flattened_state() {
+    let source = ".doctype {paged}\n\
+.pageformat margin:{1cm 2cm 3cm 4cm}\n\
+.pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
+Border output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-ordered-border.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-ordered-border.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let mut result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat ordered border diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    result.ir.metadata.document_state.page_margin = Some(IrPageMargins {
+        top: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        right: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        bottom: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        left: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+    });
+    result.ir.metadata.document_state.page_border_widths = Some(IrPageBorderWidths {
+        top: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        right: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        bottom: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        left: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+    });
+    result.ir.metadata.document_state.page_border_color = Some(IrColor {
+        red: 9,
+        green: 9,
+        blue: 9,
+        alpha: 1.0,
+    });
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("dx: 4cm"), "{typst_code}");
+    assert!(typst_code.contains("dy: 1cm"), "{typst_code}");
+    assert!(
+        typst_code.contains("top: (paint: rgb(255, 0, 0, 100%), thickness: 1pt)"),
+        "{typst_code}"
+    );
+    assert!(!typst_code.contains("rgb(9, 9, 9, 100%)"), "{typst_code}");
+    assert!(!typst_code.contains("dx: 9pt"), "{typst_code}");
+
+    with_typst("pageformat-ordered-border", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-ordered-border.qd".to_string(),
+            })
+            .expect("ordered pageformat border Typst must compile");
         assert!(output
             .pdf
             .expect("PDF output must be present")
