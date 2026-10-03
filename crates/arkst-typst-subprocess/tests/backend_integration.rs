@@ -280,8 +280,7 @@ fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
 
 #[test]
 fn integration_effectless_non_paged_page_selector_does_not_trigger_fail_closed_guard() {
-    let source =
-        ".pageformat side:{left} orientation:{landscape}\nEffectless selector output\n";
+    let source = ".pageformat side:{left} orientation:{landscape}\nEffectless selector output\n";
     let project = VirtualProjectBuilder::new()
         .entry("pageformat-effectless-non-paged-selector.qd")
         .expect("valid entry path")
@@ -298,7 +297,9 @@ fn integration_effectless_non_paged_page_selector_does_not_trigger_fail_closed_g
 
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(
-        !typst_code.contains("Arkst cannot lower page side/pages selectors for a non-paged final document"),
+        !typst_code.contains(
+            "Arkst cannot lower page side/pages selectors for a non-paged final document"
+        ),
         "{typst_code}"
     );
 
