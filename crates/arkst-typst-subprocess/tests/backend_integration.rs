@@ -1329,6 +1329,63 @@ Second page\n";
 }
 
 #[test]
+fn integration_pageformat_ordered_global_margin_overrides_stale_flattened_state() {
+    let source = ".doctype {paged}\n.pageformat margin:{1cm 2mm 3pt 8px}\nMargin output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-ordered-margin.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-ordered-margin.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let mut result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat ordered margin diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    result.ir.metadata.document_state.page_margin = Some(IrPageMargins {
+        top: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        right: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        bottom: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+        left: IrSize {
+            value: 9.0,
+            unit: IrSizeUnit::Pt,
+        },
+    });
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))"),
+        "{typst_code}"
+    );
+    assert!(!typst_code.contains("top: 9pt"), "{typst_code}");
+
+    with_typst("pageformat-ordered-margin", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-ordered-margin.qd".to_string(),
+            })
+            .expect("ordered pageformat margin Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat margin:{1cm 2mm 3pt 8px}\nMargin output\n";
     let project = VirtualProjectBuilder::new()
