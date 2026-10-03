@@ -240,8 +240,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .contains("integration_pageformat_side_decoration_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf"));
-    assert!(pageformat[9]
-        .contains("integration_pageformat_standard_size_lowers_in_final_plain_output"));
+    assert!(
+        pageformat[9].contains("integration_pageformat_standard_size_lowers_in_final_plain_output")
+    );
     assert!(pageformat[9].contains(
         "integration_pageformat_docs_omitted_orientation_uses_portrait_after_paged_mutation"
     ));
@@ -310,8 +311,11 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("flattened border fields are a legacy fallback only"));
     assert!(pageformat[10]
         .contains("resolves standard-size selections to explicit physical millimeter bounds for every final document type"));
-    assert!(pageformat[10].contains("pinned setter's concrete pageWidth/pageHeight materialization"));
-    assert!(pageformat[10].contains("omitted orientation uses the captured call-time document type preference"));
+    assert!(
+        pageformat[10].contains("pinned setter's concrete pageWidth/pageHeight materialization")
+    );
+    assert!(pageformat[10]
+        .contains("omitted orientation uses the captured call-time document type preference"));
     assert!(pageformat[10].contains("including docs portrait"));
     assert!(pageformat[10]
         .contains("remaining page-border semantics beyond the selector-free and per-page scoped completeness guards"));
