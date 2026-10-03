@@ -205,8 +205,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_non_paged_page_selector_fails_closed_at_typst_boundary"));
-    assert!(pageformat[9]
-        .contains("integration_page_selector_declared_before_paged_doctype_uses_final_document_type"));
+    assert!(pageformat[9].contains(
+        "integration_page_selector_declared_before_paged_doctype_uses_final_document_type"
+    ));
     assert!(pageformat[9]
         .contains("integration_selector_scoped_page_layout_fails_closed_at_typst_boundary"));
     assert!(pageformat[9]
@@ -263,15 +264,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-aware alignment/geometry/size/margin/columns output"));
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
-    assert!(pageformat[10].contains(
-        "selector state remains retained independently of the call-time document type"
-    ));
-    assert!(pageformat[10].contains(
-        "final document type is plain/slides/docs"
-    ));
-    assert!(pageformat[10].contains(
-        "selector declared before a later doctype:{paged} mutation"
-    ));
+    assert!(pageformat[10]
+        .contains("selector state remains retained independently of the call-time document type"));
+    assert!(pageformat[10].contains("final document type is plain/slides/docs"));
+    assert!(pageformat[10].contains("selector declared before a later doctype:{paged} mutation"));
     assert!(pageformat[10].contains("finite 1-based page ranges"));
     assert!(pageformat[10].contains("left-open ranges normalized to page 1"));
     assert!(pageformat[10]
