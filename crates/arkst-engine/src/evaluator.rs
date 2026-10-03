@@ -6978,31 +6978,6 @@ impl Evaluator {
                 orientation: page_orientation,
                 document_type,
             });
-        let standalone_global_axis =
-            selector.is_none() && page_size.is_none() && (width.is_some() != height.is_some());
-        if standalone_global_axis {
-            let existing_dimensions = context
-                .document_state
-                .borrow()
-                .page_format
-                .compose_global_page_dimensions();
-            let has_opposite_axis_base = existing_dimensions.as_ref().is_some_and(|dimensions| {
-                if width.is_some() {
-                    dimensions.height.is_some() || dimensions.size.is_some()
-                } else {
-                    dimensions.width.is_some() || dimensions.size.is_some()
-                }
-            });
-            let has_paged_default_base = document_type == arkst_ir::IrDocumentType::Paged;
-            if !has_opposite_axis_base && !has_paged_default_base {
-                diagnostics.push(function_error(
-                    "`.pageformat` single-axis global composition requires an existing opposite-axis, standard-size, or paged document default base"
-                        .to_string(),
-                    *span,
-                ));
-                return CallOutcome::Failed;
-            }
-        }
         let border_widths = if border_top.is_some()
             || border_right.is_some()
             || border_bottom.is_some()
