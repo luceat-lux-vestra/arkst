@@ -1820,6 +1820,88 @@ fn integration_pageformat_ordered_global_margin_overrides_stale_flattened_state(
 }
 
 #[test]
+fn integration_pageformat_docs_margin_fails_closed_at_typst_boundary() {
+    let source = ".doctype {docs}\n.pageformat margin:{1cm}\nDocs margin output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-docs-margin.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-docs-margin.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat docs-margin diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-free page margin/columns for a final docs document\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-docs-margin-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-docs-margin.qd".to_string(),
+            })
+            .expect_err("final docs margin must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("selector-free page margin/columns for a final docs document"),
+            "{error}"
+        );
+    });
+}
+
+#[test]
+fn integration_pageformat_docs_columns_fails_closed_at_typst_boundary() {
+    let source = ".doctype {docs}\n.pageformat columns:{2}\nDocs columns output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-docs-columns.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-docs-columns.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat docs-columns diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-free page margin/columns for a final docs document\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-docs-columns-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-docs-columns.qd".to_string(),
+            })
+            .expect_err("final docs columns must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("selector-free page margin/columns for a final docs document"),
+            "{error}"
+        );
+    });
+}
+
+#[test]
 fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
     let source = ".pageformat margin:{1cm 2mm 3pt 8px}\nMargin output\n";
     let project = VirtualProjectBuilder::new()
