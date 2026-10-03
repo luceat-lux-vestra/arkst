@@ -404,8 +404,12 @@ upstream later-non-null per-field merge for an earlier explicit width+height
 pair instead of requiring every later axis override to originate from a paper
 size. An explicit nullable `size:{.none}` contributes no new standard-size
 base and therefore follows the same single-axis inheritance rule: it is accepted
-only when the prior composition supplies the missing axis. Base-less single-axis
-calls and explicit nullable width/height candidates remain fail-closed. Selector-aware output outside the bounded background/border side+range subsets
+only when the prior composition supplies the missing axis. Explicit nullable
+`width`/`height` values likewise contribute no axis override, so the previously
+composed value for that axis is inherited. A remaining non-null single-axis
+override is accepted only when prior composition supplies the opposite explicit
+axis or a concrete standard-size base; truly base-less non-null single-axis calls
+remain fail-closed. Selector-aware output outside the bounded background/border side+range subsets
 remains paged-only at the current Typst boundary, with final non-paged selector state
 explicitly backend-fail-closed. Selector-free border requests are likewise rejected when
 the final document is non-paged, because the current bounded border consumer is paged-only

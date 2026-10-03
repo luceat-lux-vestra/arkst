@@ -312,6 +312,89 @@ fn selector_free_single_axis_layers_inherit_existing_explicit_geometry() {
 }
 
 #[test]
+fn selector_free_nullable_axes_inherit_existing_composed_dimensions() {
+    let result = compile_source(
+        ".pageformat width:{10in} height:{5in}\n\
+         .pageformat width:{.none} height:{4in}\n\
+         .pageformat width:{8in} height:{.none}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    let layers = &state.page_format.layers;
+    assert_eq!(layers.len(), 3);
+
+    assert!(layers[1].width.is_none());
+    assert_eq!(
+        (
+            layers[1].height.as_ref().expect("height override").value,
+            layers[1].height.as_ref().expect("height override").unit,
+        ),
+        (4.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (
+            layers[2].width.as_ref().expect("width override").value,
+            layers[2].width.as_ref().expect("width override").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+    assert!(layers[2].height.is_none());
+
+    let composed = state
+        .page_format
+        .compose_global_page_dimensions()
+        .expect("nullable-axis composition");
+    assert_eq!(
+        (
+            composed.width.as_ref().expect("composed width").value,
+            composed.width.as_ref().expect("composed width").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (
+            composed.height.as_ref().expect("composed height").value,
+            composed.height.as_ref().expect("composed height").unit,
+        ),
+        (4.0, IrSizeUnit::In)
+    );
+}
+
+#[test]
+fn selector_scoped_nullable_axis_inherits_same_selector_dimension() {
+    let result = compile_source(
+        ".pageformat pages:{2..2} width:{10in} height:{5in}\n\
+         .pageformat pages:{2..2} width:{.none} height:{4in}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(state.page_format.layers.len(), 2);
+    assert!(state.page_format.layers[1].width.is_none());
+
+    let selector = state.page_format.layers[0].selector;
+    let merged = state
+        .page_format
+        .resolve_exact_selector(selector)
+        .expect("same-selector nullable-axis merge");
+    assert_eq!(
+        (
+            merged.width.as_ref().expect("inherited width").value,
+            merged.width.as_ref().expect("inherited width").unit,
+        ),
+        (10.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (
+            merged.height.as_ref().expect("updated height").value,
+            merged.height.as_ref().expect("updated height").unit,
+        ),
+        (4.0, IrSizeUnit::In)
+    );
+}
+
+#[test]
 fn selector_scoped_margin_retains_side_and_pages_without_flattening_global_state() {
     let result = compile_source(
         ".pageformat margin:{1cm}\n\
