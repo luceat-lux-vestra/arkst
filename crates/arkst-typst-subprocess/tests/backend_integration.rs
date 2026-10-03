@@ -304,7 +304,7 @@ Second page\n";
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(
         typst_code.starts_with(
-            "#panic(\"Arkst cannot lower selector-scoped page size/width/height/columns to Typst without pagination-aware page setup\")\n"
+            "#panic(\"Arkst cannot lower selector-scoped page alignment/size/width/height/columns to Typst without selector-aware layout output\")\n"
         ),
         "{typst_code}"
     );
@@ -318,7 +318,53 @@ Second page\n";
             .expect_err("selector-scoped page layout must fail closed in Typst");
         let message = error.to_string();
         assert!(
-            message.contains("selector-scoped page size/width/height/columns"),
+            message.contains("selector-scoped page alignment/size/width/height/columns"),
+            "{message}"
+        );
+    });
+}
+
+#[test]
+fn integration_selector_scoped_page_alignment_fails_closed_at_typst_boundary() {
+    let source = ".doctype {paged}\n\
+.pageformat pages:{2..2} alignment:{center}\n\
+First page\n\
+\n\
+.pagebreak\n\
+\n\
+Second page\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-scoped-alignment.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-scoped-alignment.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "selector-scoped alignment diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-scoped page alignment/size/width/height/columns to Typst without selector-aware layout output\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-scoped-alignment-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-scoped-alignment.qd".to_string(),
+            })
+            .expect_err("selector-scoped page alignment must fail closed in Typst");
+        let message = error.to_string();
+        assert!(
+            message.contains("selector-scoped page alignment/size/width/height/columns"),
             "{message}"
         );
     });

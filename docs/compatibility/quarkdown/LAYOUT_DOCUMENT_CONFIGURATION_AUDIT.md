@@ -341,11 +341,16 @@ reuses this helper, while selector-aware dimension publication remains out of sc
 Typst page width/height and columns are page-setup parameters rather than contextual
 background/foreground content, and changing a page set rule establishes a new conforming
 page. Arkst therefore must not approximate selector-scoped size/width/height/columns by
-consulting `here().page()` after pagination. The Typst lowerer now detects those scoped
-fields and emits an explicit `panic(...)` before any page setup instead of silently
-falling back to global dimensions/columns. The real pinned Typst subprocess regression
-`integration_selector_scoped_page_layout_fails_closed_at_typst_boundary` proves that
-this boundary fails closed. This is an explicit unsupported-output guard, not
+consulting `here().page()` after pagination. Selector-scoped alignment has a separate
+unsupported boundary: the current bounded global `page_alignment` consumer determines
+compile-time row/column inherited main-axis alignment, while scoped alignment is retained
+only in ordered page-format state and has no selector-aware content-alignment consumer.
+The Typst lowerer therefore detects scoped alignment together with scoped
+size/width/height/columns and emits an explicit `panic(...)` before output instead of
+silently falling back to global layout state. The pinned Typst subprocess regressions
+`integration_selector_scoped_page_layout_fails_closed_at_typst_boundary` and
+`integration_selector_scoped_page_alignment_fails_closed_at_typst_boundary` prove
+these boundaries fail closed. This is an explicit unsupported-output guard, not
 selector-aware layout support. Selector-scoped content margin output remains a separate
 residual: #491 now rejects scoped margin-only `paged` output at the Typst boundary when
 ordered border widths and border color are absent, preventing silent loss through the
@@ -381,10 +386,10 @@ ordered global state already supplies a concrete standard-size base; without tha
 base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed; the
 `unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
 regression continues to pin that boundary. Selector-aware output outside the bounded background/border side+range subsets,
-remaining selector-aware geometry/size/margin/columns output (with scoped
-size/width/height/columns explicitly failing closed at the Typst boundary and scoped
-margin-only `paged` output outside an explicit ordered border decoration path likewise
-backend-rejected by #491 rather than being silently ignored), page-border semantics
+remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
+alignment/size/width/height/columns explicitly failing closed at the Typst boundary and
+scoped margin-only `paged` output outside an explicit ordered border decoration path
+likewise backend-rejected by #491 rather than being silently ignored), page-border semantics
 outside the bounded selector-free and per-page scoped completeness guards, and the
 remaining output consumption stay open, and Typst page objects must not enter evaluator/IR state. Status is
 conservatively `PARTIAL`
