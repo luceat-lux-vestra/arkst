@@ -203,6 +203,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("IrResolvedPageFormat"));
     assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
+    assert!(pageformat[9].contains(
+        "integration_pageformat_ordered_global_margin_overrides_stale_flattened_state"
+    ));
     assert!(pageformat[9]
         .contains("integration_non_paged_page_selector_fails_closed_at_typst_boundary"));
     assert!(pageformat[9].contains(
@@ -258,6 +261,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("named size binding"));
     assert!(pageformat[10].contains("selector-free global margin"));
     assert!(pageformat[10].contains("1/2/4-value Sizes shorthand"));
+    assert!(pageformat[10].contains("selector-free/global margin output"));
+    assert!(pageformat[10].contains("merged margin as canonical"));
+    assert!(pageformat[10].contains("flattened page_margin is a legacy fallback only"));
     assert!(pageformat[10].contains("selector-free global border/background"));
     assert!(pageformat[10].contains("partial-side zeroing"));
     assert!(pageformat[10].contains("bordercolor-only width inheritance/no-fabrication"));
