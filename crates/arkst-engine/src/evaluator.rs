@@ -6965,12 +6965,6 @@ impl Evaluator {
             None
         };
         let document_type = context.document_state.borrow().document_type;
-        let mixed_global_dimensions = selector.is_none()
-            && page_size_format.is_some()
-            && (width.is_some() || height.is_some());
-        let standalone_global_axis = selector.is_none()
-            && page_size_format.is_none()
-            && (width.is_some() != height.is_some());
         let page_size = page_size_format
             .flatten()
             .map(|format| IrPageSizeSelection {
@@ -6978,25 +6972,25 @@ impl Evaluator {
                 orientation: page_orientation,
                 document_type,
             });
-        if mixed_global_dimensions && page_size.is_none() {
-            diagnostics.push(function_error(
-                "`.pageformat` mixed global size/axis composition requires a concrete standard size"
-                    .to_string(),
-                *span,
-            ));
-            return CallOutcome::Failed;
-        }
+        let standalone_global_axis = selector.is_none()
+            && page_size.is_none()
+            && (width.is_some() != height.is_some());
         if standalone_global_axis {
-            let has_standard_size_base = context
+            let existing_dimensions = context
                 .document_state
                 .borrow()
                 .page_format
-                .compose_global_page_dimensions()
-                .and_then(|dimensions| dimensions.size)
-                .is_some();
-            if !has_standard_size_base {
+                .compose_global_page_dimensions();
+            let has_opposite_axis_base = existing_dimensions.as_ref().is_some_and(|dimensions| {
+                if width.is_some() {
+                    dimensions.height.is_some() || dimensions.size.is_some()
+                } else {
+                    dimensions.width.is_some() || dimensions.size.is_some()
+                }
+            });
+            if !has_opposite_axis_base {
                 diagnostics.push(function_error(
-                    "`.pageformat` single-axis global composition requires an existing concrete standard-size base"
+                    "`.pageformat` single-axis global composition requires an existing opposite-axis or standard-size base"
                         .to_string(),
                     *span,
                 ));
