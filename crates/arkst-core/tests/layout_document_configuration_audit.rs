@@ -381,9 +381,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains(
         "selector-free explicit-value page borders are supported for final paged and slides output"
     ));
-    assert!(pageformat[10].contains(
-        "incomplete slide borders sharing the unresolved-default fail-closed guard"
-    ));
+    assert!(pageformat[10]
+        .contains("incomplete slide borders sharing the unresolved-default fail-closed guard"));
     assert!(pageformat[10]
         .contains("final plain/docs selector-free borders remain backend-fail-closed"));
     assert!(pageformat[10].contains("global row/column inheritance consumer"));
