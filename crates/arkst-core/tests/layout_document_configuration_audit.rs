@@ -202,9 +202,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("IrDocumentState::page_format"));
     assert!(pageformat[9].contains("IrResolvedPageFormat"));
     assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
-    assert!(pageformat[9].contains(
-        "page_selectors_fail_closed_outside_paged_documents_before_publication"
-    ));
+    assert!(pageformat[9]
+        .contains("page_selectors_fail_closed_outside_paged_documents_before_publication"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_selector_scoped_page_layout_fails_closed_at_typst_boundary"));
