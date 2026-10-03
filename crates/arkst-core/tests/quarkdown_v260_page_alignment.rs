@@ -46,6 +46,31 @@ fn alignment_only_pageformat_commits_final_document_state() {
 }
 
 #[test]
+fn semantic_none_alignment_preserves_previous_global_state() {
+    let result = compile_source(
+        ".pageformat alignment:{center}\n\
+         .pageformat alignment:{.none}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+    let state = &result.ir.metadata.document_state;
+    assert_eq!(
+        state.page_alignment,
+        Some(IrDocumentAlignment::Center),
+        "nullable alignment must not erase the previous global value"
+    );
+    assert_eq!(state.page_format.layers.len(), 2);
+    assert_eq!(
+        state.page_format.layers[0].alignment,
+        Some(IrDocumentAlignment::Center)
+    );
+    assert!(
+        state.page_format.layers[1].alignment.is_none(),
+        "semantic None must publish no new alignment override"
+    );
+}
+
+#[test]
 fn unsupported_pageformat_shapes_do_not_claim_global_alignment_state() {
     for source in [
         ".pageformat side:{left} alignment:{end}\n",
