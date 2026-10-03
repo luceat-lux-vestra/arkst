@@ -231,6 +231,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9]
         .contains("integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
+        .contains("integration_pageformat_global_single_axis_uses_existing_standard_size_base"));
+    assert!(pageformat[9]
+        .contains("integration_pageformat_global_single_axis_inherits_explicit_geometry_base"));
+    assert!(pageformat[9]
         .contains("integration_pageformat_explicit_border_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[10].contains("global positive columns"));
     assert!(pageformat[10].contains("selector-free global background"));
@@ -283,7 +287,11 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("complete explicit axes remain valid for any output type"));
     assert!(pageformat[10].contains("current Typst/PDF global dimension path reuses this helper"));
     assert!(pageformat[10].contains("compose_global_page_dimensions"));
-    assert!(pageformat[10].contains("prior ordered global state"));
+    assert!(pageformat[10].contains("prior ordered global dimension state"));
+    assert!(pageformat[10].contains("opposite explicit axis or a concrete standard-size base"));
+    assert!(pageformat[10].contains("explicit nullable size:{.none}"));
+    assert!(pageformat[10].contains("base-less single-axis calls"));
+    assert!(pageformat[10].contains("explicit nullable width/height candidates remain fail-closed"));
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
@@ -301,6 +309,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10]
         .contains("current page requests a border but margin, widths, or color remain unresolved"));
     assert!(pageformat[11].contains("bounded-standard-size-state"));
+    assert!(pageformat[11].contains("bounded-global-explicit-axis-inheritance"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
     assert!(pageformat[11].contains("bounded-range-background-output"));

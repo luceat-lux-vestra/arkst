@@ -392,13 +392,17 @@ bounded drawing path.
 The bounded evaluator now also admits selector-scoped mixed size+axis and
 single-axis width/height layers as state-only evidence; those calls return
 before the legacy flattened global renderer fields are mutated. Selector-free
-mixed calls are now admitted only when they carry a concrete standard-size base,
-and the current Typst/PDF consumer resolves that base physically before applying
-same-layer explicit width/height as per-axis overrides. Selector-free width-only or height-only calls are now admitted only when prior
-ordered global state already supplies a concrete standard-size base; without that
-base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed; the
-`unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
-regression continues to pin that boundary. Selector-aware output outside the bounded background/border side+range subsets
+mixed calls with a concrete standard-size base remain supported, and the current
+Typst/PDF consumer resolves that base physically before applying same-layer
+explicit width/height as per-axis overrides. Selector-free single-axis calls are
+also admitted when prior ordered global dimension state already supplies the
+opposite explicit axis or a concrete standard-size base; this preserves the
+upstream later-non-null per-field merge for an earlier explicit width+height
+pair instead of requiring every later axis override to originate from a paper
+size. An explicit nullable `size:{.none}` contributes no new standard-size
+base and therefore follows the same single-axis inheritance rule: it is accepted
+only when the prior composition supplies the missing axis. Base-less single-axis
+calls and explicit nullable width/height candidates remain fail-closed. Selector-aware output outside the bounded background/border side+range subsets
 remains paged-only at the current Typst boundary, with final non-paged selector state
 explicitly backend-fail-closed. Remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
 alignment/size/width/height/columns explicitly failing closed at the Typst boundary and
