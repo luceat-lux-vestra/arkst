@@ -246,6 +246,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9]
         .contains("integration_pageformat_paged_single_axis_uses_initial_a4_portrait_base"));
     assert!(pageformat[9]
+        .contains("integration_pageformat_single_axis_declared_before_paged_uses_final_default"));
+    assert!(pageformat[9]
+        .contains("integration_pageformat_unresolved_single_axis_final_plain_fails_closed"));
+    assert!(pageformat[9]
         .contains("integration_pageformat_paged_default_single_axis_does_not_cross_into_slides"));
     assert!(pageformat[9]
         .contains("integration_pageformat_global_single_axis_uses_existing_standard_size_base"));
@@ -351,10 +355,15 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     ));
     assert!(pageformat[10]
         .contains("effectless selectors do not trigger the non-paged Typst selector guard"));
-    assert!(pageformat[10].contains("effective A4 portrait base"));
+    assert!(pageformat[10].contains(
+        "pinned final rendering prepends the final document type's default page format"
+    ));
+    assert!(pageformat[10].contains(
+        "final paged output therefore inherits the missing axis from A4 portrait regardless of call-time doctype"
+    ));
     assert!(pageformat[10].contains("without fabricating size into the stored layer"));
     assert!(pageformat[10].contains(
-        "final non-paged/cross-doctype cases without another concrete base remain fail-closed"
+        "final plain/docs/slides unresolved single-axis output fails closed"
     ));
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
@@ -381,6 +390,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("bounded-standard-size-state"));
     assert!(pageformat[11].contains("bounded-global-explicit-axis-inheritance"));
     assert!(pageformat[11].contains("bounded-paged-default-single-axis-base"));
+    assert!(pageformat[11].contains("final-type-default-axis-merge"));
     assert!(pageformat[11].contains("bounded-global-nullable-axis-inheritance"));
     assert!(pageformat[11].contains("bounded-nullable-alignment-inheritance"));
     assert!(pageformat[11].contains("bounded-effectless-pageformat-layers"));
