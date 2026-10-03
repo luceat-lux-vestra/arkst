@@ -937,7 +937,10 @@ fn integration_pageformat_paged_default_single_axis_does_not_cross_into_slides()
     let project = VirtualProjectBuilder::new()
         .entry("pageformat-paged-default-single-axis-cross-doctype.qd")
         .expect("valid entry path")
-        .add_source("pageformat-paged-default-single-axis-cross-doctype.qd", source)
+        .add_source(
+            "pageformat-paged-default-single-axis-cross-doctype.qd",
+            source,
+        )
         .expect("valid source path")
         .build()
         .expect("valid project");
@@ -956,20 +959,23 @@ fn integration_pageformat_paged_default_single_axis_does_not_cross_into_slides()
         "{typst_code}"
     );
 
-    with_typst("pageformat-paged-default-single-axis-cross-doctype", |backend| {
-        let error = backend
-            .compile(&TypstInput {
-                source: typst_code,
-                entry_path: "pageformat-paged-default-single-axis-cross-doctype.qd".to_string(),
-            })
-            .expect_err("cross-doctype single-axis default must remain fail-closed");
-        assert!(
-            error
-                .to_string()
-                .contains("selector-free page dimensions without complete explicit axes"),
-            "{error}"
-        );
-    });
+    with_typst(
+        "pageformat-paged-default-single-axis-cross-doctype",
+        |backend| {
+            let error = backend
+                .compile(&TypstInput {
+                    source: typst_code,
+                    entry_path: "pageformat-paged-default-single-axis-cross-doctype.qd".to_string(),
+                })
+                .expect_err("cross-doctype single-axis default must remain fail-closed");
+            assert!(
+                error
+                    .to_string()
+                    .contains("selector-free page dimensions without complete explicit axes"),
+                "{error}"
+            );
+        },
+    );
 }
 
 #[test]
