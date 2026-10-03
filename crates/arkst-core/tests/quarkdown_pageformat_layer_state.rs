@@ -1192,7 +1192,13 @@ fn invalid_effectless_pageformat_candidates_fail_before_layer_publication() {
         let result = compile_source(source);
         assert!(!result.diagnostics.is_empty(), "{source:?}");
         assert!(
-            result.ir.metadata.document_state.page_format.layers.is_empty(),
+            result
+                .ir
+                .metadata
+                .document_state
+                .page_format
+                .layers
+                .is_empty(),
             "invalid effectless candidate published a layer: {source:?}"
         );
     }
