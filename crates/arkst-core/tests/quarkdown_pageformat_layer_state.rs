@@ -1184,6 +1184,21 @@ fn effectless_pageformat_layers_are_retained_without_effective_state() {
 }
 
 #[test]
+fn invalid_effectless_pageformat_candidates_fail_before_layer_publication() {
+    for source in [
+        ".pageformat orientation:{diagonal}\n",
+        ".pageformat pages:{2..}\n",
+    ] {
+        let result = compile_source(source);
+        assert!(!result.diagnostics.is_empty(), "{source:?}");
+        assert!(
+            result.ir.metadata.document_state.page_format.layers.is_empty(),
+            "invalid effectless candidate published a layer: {source:?}"
+        );
+    }
+}
+
+#[test]
 fn semantic_none_is_retained_as_an_ordered_noop_layer() {
     let result = compile_source(".pageformat size:{a4}\n.pageformat size:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
