@@ -189,7 +189,10 @@ fn lower_page_border_widths_value(widths: &arkst_ir::IrPageBorderWidths) -> Stri
 
 fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     let state = &doc.metadata.document_state;
-    if state.document_type != IrDocumentType::Paged {
+    if !matches!(
+        state.document_type,
+        IrDocumentType::Paged | IrDocumentType::Slides
+    ) {
         return None;
     }
 
@@ -391,7 +394,10 @@ const UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE: &str =
 
 fn has_unsupported_non_paged_page_border(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
-    if state.document_type == IrDocumentType::Paged {
+    if matches!(
+        state.document_type,
+        IrDocumentType::Paged | IrDocumentType::Slides
+    ) {
         return false;
     }
 
@@ -433,7 +439,10 @@ const UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE: &str =
 
 fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
-    if state.document_type != IrDocumentType::Paged {
+    if !matches!(
+        state.document_type,
+        IrDocumentType::Paged | IrDocumentType::Slides
+    ) {
         return false;
     }
 
@@ -1274,14 +1283,24 @@ mod tests {
         assert!(lower_to_typst_code(&doc)
             .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
-        doc.metadata.document_state.page_margin = Some(margins);
+        doc.metadata.document_state.page_margin = Some(margins.clone());
         doc.metadata.document_state.document_type = IrDocumentType::Slides;
-        let slides_code = lower_to_typst_code(&doc);
+        let slides_incomplete = lower_to_typst_code(&doc);
         assert!(
-            !slides_code.starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE),
-            "{slides_code}"
+            slides_incomplete.starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE),
+            "{slides_incomplete}"
         );
-        assert!(!slides_code.contains("page(foreground:"), "{slides_code}");
+
+        doc.metadata.document_state.page_border_color = Some(color);
+        let slides_complete = lower_to_typst_code(&doc);
+        assert!(
+            !slides_complete.starts_with(UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE),
+            "{slides_complete}"
+        );
+        assert!(
+            slides_complete.contains("#set page(foreground: place("),
+            "{slides_complete}"
+        );
     }
 
     #[test]
