@@ -373,7 +373,12 @@ the standard-size base on final `paged`/`slides` applicability, resolves the clo
 domain to physical millimeter geometry, uses the captured call-time document type only for
 an omitted-orientation basis, keeps an omitted `docs` basis fail-closed, and then applies
 explicit single-axis overrides independently. The current Typst/PDF global dimension path
-reuses this helper, while selector-aware dimension publication remains out of scope.
+reuses this helper. Once any ordered page-format layer exists, that ordered state is
+canonical for global dimensions even when it contains no dimension payload; flattened
+`page_geometry` / `page_size` are legacy-IR fallbacks only when ordered page-format
+state is absent, so effectless or non-dimension ordered layers cannot revive stale
+flattened geometry or trigger stale unresolved-size failures. Selector-aware dimension
+publication remains out of scope.
 Typst page width/height and columns are page-setup parameters rather than contextual
 background/foreground content, and changing a page set rule establishes a new conforming
 page. Arkst therefore must not approximate selector-scoped size/width/height/columns by
