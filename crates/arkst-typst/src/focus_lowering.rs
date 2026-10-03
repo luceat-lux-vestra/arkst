@@ -291,6 +291,20 @@ fn scoped_page_background(doc: &IrDocument) -> Option<String> {
     ))
 }
 
+const UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower page side/pages selectors for a non-paged final document\")\n";
+
+fn has_unsupported_non_paged_page_selector(doc: &IrDocument) -> bool {
+    let state = &doc.metadata.document_state;
+    state.document_type != IrDocumentType::Paged
+        && state.page_format.layers.iter().any(|layer| {
+            matches!(
+                layer.selector,
+                Some(selector) if selector.side.is_some() || selector.pages.is_some()
+            )
+        })
+}
+
 const UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE: &str =
     "#panic(\"Arkst cannot lower selector-scoped page alignment/size/width/height/columns to Typst without selector-aware layout output\")\n";
 
@@ -364,6 +378,9 @@ fn has_unsupported_scoped_page_margin(doc: &IrDocument) -> bool {
 }
 
 fn document_prelude(doc: &IrDocument) -> String {
+    if has_unsupported_non_paged_page_selector(doc) {
+        return UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE.to_string();
+    }
     if has_unsupported_scoped_page_layout(doc) {
         return UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE.to_string();
     }
@@ -1302,6 +1319,42 @@ mod tests {
         assert!(code.contains("calc.even(__arkst_page)"), "{code}");
         assert!(code.contains("fill: rgb(7, 8, 9, 100%)"), "{code}");
         assert!(code.contains("fill: rgb(1, 2, 3, 100%)"), "{code}");
+    }
+
+    #[test]
+    fn non_paged_final_document_with_page_selector_fails_closed_before_output() {
+        let selector = Some(IrPageFormatSelector {
+            side: Some(IrPageSide::Left),
+            pages: Some(IrPageRange { start: 2, end: 4 }),
+        });
+
+        for document_type in [
+            IrDocumentType::Plain,
+            IrDocumentType::Slides,
+            IrDocumentType::Docs,
+        ] {
+            let mut doc = document(document_type, None, None);
+            doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer {
+                selector,
+                background: Some(IrColor {
+                    red: 7,
+                    green: 8,
+                    blue: 9,
+                    alpha: 1.0,
+                }),
+                ..IrPageFormatLayer::default()
+            }];
+
+            let code = lower_to_typst_code(&doc);
+            assert!(
+                code.starts_with(UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE),
+                "{document_type:?}: {code}"
+            );
+            assert!(
+                !code.contains("#set page(background:"),
+                "{document_type:?}: {code}"
+            );
+        }
     }
 
     #[test]

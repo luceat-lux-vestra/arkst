@@ -254,7 +254,14 @@ final document is `paged` and explicit margin, committed border widths, and
 explicit border color are all present; selector-free implicit-margin,
 width-only, and color-only cases are explicitly backend-rejected with a
 generated panic before page setup instead of silently omitting the requested
-border. Slides/plain/docs and border cases outside the bounded explicit-value
+border. The pinned public contract documents `side`/`pages` selectors as paged-only,
+but the upstream setter stores selector layers without rejecting the document type in
+effect at the call site. Arkst therefore retains selector state until the final document
+type is known. The Typst lowerer now rejects any selector-bearing `.pageformat` when
+the final document type is `plain`, `slides`, or `docs`, preventing scoped state
+from silently disappearing without imposing a stricter call-time rule. A selector may
+still be declared before a later `.doctype {paged}` mutation and participate in the
+existing bounded paged side/range output. Border cases outside the bounded explicit-value
 page-side/range subset remain fail-closed. The size slice
 preserves the closed standard-format domain, named size binding, and an
 explicit portrait/landscape orientation when supplied; when orientation is
@@ -294,8 +301,13 @@ border color are committed. It preserves four independent side widths and does
 not fabricate a renderer-default margin, width, or color.
 The ordered layer snapshot is a prerequisite only: current flattened fields
 remain the bounded renderer compatibility surface and no new output claim is
-made by recording layer order or selector identity. The bounded selector slice
-accepts typed `left`/`right`, explicit finite positive page ranges, and
+made by recording layer order or selector identity. Because upstream records page
+selectors before final renderer applicability is known, the bounded state slice retains
+typed selector layers independently of the call-time document type. The current Typst
+boundary then requires the final document type to be `paged`; final
+`plain`/`slides`/`docs` selector output fails explicitly, while selectors declared
+before a later `.doctype {paged}` remain usable. Within that final paged boundary, the
+selector slice accepts typed `left`/`right`, explicit finite positive page ranges, and
 left-open ranges with a finite positive end. A left-open `pages:{..N}` range
 normalizes its omitted start to page 1, matching the public 1-based inclusive
 page contract while preserving the existing finite `IrPageRange` boundary.
@@ -386,8 +398,9 @@ same-layer explicit width/height as per-axis overrides. Selector-free width-only
 ordered global state already supplies a concrete standard-size base; without that
 base they remain fail-closed. Nullable mixed bases remain deliberately unclaimed; the
 `unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state`
-regression continues to pin that boundary. Selector-aware output outside the bounded background/border side+range subsets,
-remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
+regression continues to pin that boundary. Selector-aware output outside the bounded background/border side+range subsets
+remains paged-only at the current Typst boundary, with final non-paged selector state
+explicitly backend-fail-closed. Remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
 alignment/size/width/height/columns explicitly failing closed at the Typst boundary and
 every scoped `paged` margin likewise backend-rejected rather than being consumed only as
 border geometry), page-border semantics

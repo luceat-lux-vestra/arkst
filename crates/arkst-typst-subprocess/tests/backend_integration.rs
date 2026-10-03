@@ -279,6 +279,99 @@ fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_non_paged_page_selector_fails_closed_at_typst_boundary() {
+    let source = ".pageformat pages:{1..1} background:{red}\nPlain output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-non-paged-selector.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-non-paged-selector.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "non-paged selector state diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower page side/pages selectors for a non-paged final document\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-non-paged-selector-fail-closed", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-non-paged-selector.qd".to_string(),
+            })
+            .expect_err("non-paged final page selector must fail closed in Typst");
+        let message = error.to_string();
+        assert!(
+            message.contains("page side/pages selectors for a non-paged final document"),
+            "{message}"
+        );
+    });
+}
+
+#[test]
+fn integration_page_selector_declared_before_paged_doctype_uses_final_document_type() {
+    let source = ".pageformat pages:{2..2} background:{red}\n\
+.doctype {paged}\n\
+First page\n\
+\n\
+.pagebreak\n\
+\n\
+Second page\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-selector-before-paged-doctype.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-selector-before-paged-doctype.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "selector-before-paged-doctype diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        !typst_code.starts_with(
+            "#panic(\"Arkst cannot lower page side/pages selectors for a non-paged final document\")\n"
+        ),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("#set page(background: context {"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("__arkst_page >= 2 and __arkst_page <= 2"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-selector-before-paged-doctype", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-selector-before-paged-doctype.qd".to_string(),
+            })
+            .expect("final paged selector Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_selector_scoped_page_layout_fails_closed_at_typst_boundary() {
     let source = ".doctype {paged}\n\
 .pageformat pages:{2..2} columns:{2}\n\
