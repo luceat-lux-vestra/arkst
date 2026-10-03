@@ -346,7 +346,7 @@ fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
 }
 
 const UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE: &str =
-    "#panic(\"Arkst cannot lower selector-scoped page margin to Typst content layout outside the explicit border decoration path\")\n";
+    "#panic(\"Arkst cannot lower selector-scoped page margin to Typst content layout\")\n";
 
 fn has_unsupported_scoped_page_margin(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
@@ -354,29 +354,13 @@ fn has_unsupported_scoped_page_margin(doc: &IrDocument) -> bool {
         return false;
     }
 
-    let has_scoped_margin = state.page_format.layers.iter().any(|layer| {
+    state.page_format.layers.iter().any(|layer| {
         let scoped = matches!(
             layer.selector,
             Some(selector) if selector.side.is_some() || selector.pages.is_some()
         );
         scoped && layer.margin.is_some()
-    });
-    if !has_scoped_margin {
-        return false;
-    }
-
-    let has_ordered_border_widths = state
-        .page_format
-        .layers
-        .iter()
-        .any(|layer| layer.border_widths.is_some());
-    let has_ordered_border_color = state
-        .page_format
-        .layers
-        .iter()
-        .any(|layer| layer.border_color.is_some());
-
-    !(has_ordered_border_widths && has_ordered_border_color)
+    })
 }
 
 fn document_prelude(doc: &IrDocument) -> String {
@@ -909,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn selector_scoped_margin_without_explicit_border_path_fails_closed() {
+    fn selector_scoped_margin_fails_closed_even_with_complete_border_path() {
         let margin = IrPageMargins {
             top: IrSize {
                 value: 1.0,
@@ -1014,11 +998,11 @@ mod tests {
 
         let border_code = lower_to_typst_code(&doc);
         assert!(
-            !border_code.starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE),
+            border_code.starts_with(UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE),
             "{border_code}"
         );
         assert!(
-            border_code.contains("#set page(foreground: context {"),
+            !border_code.contains("#set page(foreground: context {"),
             "{border_code}"
         );
     }
@@ -1091,31 +1075,6 @@ mod tests {
                 }),
                 ..IrPageFormatLayer::default()
             },
-            IrPageFormatLayer {
-                selector: Some(IrPageFormatSelector {
-                    side: None,
-                    pages: Some(IrPageRange { start: 3, end: 3 }),
-                }),
-                margin: Some(IrPageMargins {
-                    top: IrSize {
-                        value: 9.0,
-                        unit: IrSizeUnit::Pt,
-                    },
-                    right: IrSize {
-                        value: 2.0,
-                        unit: IrSizeUnit::Pt,
-                    },
-                    bottom: IrSize {
-                        value: 3.0,
-                        unit: IrSizeUnit::Pt,
-                    },
-                    left: IrSize {
-                        value: 4.0,
-                        unit: IrSizeUnit::Pt,
-                    },
-                }),
-                ..IrPageFormatLayer::default()
-            },
         ];
 
         let code = lower_to_typst_code(&doc);
@@ -1126,7 +1085,7 @@ mod tests {
             "{code}"
         );
         assert!(
-            code.contains("let __arkst_margin = if __arkst_page >= 3 and __arkst_page <= 3"),
+            code.contains("let __arkst_margin = (top: 1pt, right: 2pt, bottom: 3pt, left: 4pt)"),
             "{code}"
         );
         assert!(code.contains("else { rgb(10, 20, 30, 100%) }"), "{code}");
