@@ -315,9 +315,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains(
         "empty/orientation-only/selector-only pageformat calls are retained as effectless ordered layers"
     ));
-    assert!(pageformat[10].contains(
-        "effectless selectors do not trigger the non-paged Typst selector guard"
-    ));
+    assert!(pageformat[10]
+        .contains("effectless selectors do not trigger the non-paged Typst selector guard"));
     assert!(
         pageformat[10].contains("truly base-less non-null single-axis calls remain fail-closed")
     );
