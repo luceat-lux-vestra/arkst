@@ -15399,7 +15399,19 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
         && !margin
         && (width || height)
         && (!orientation || page_size);
-    let payload_supported = base_payload_supported || selector_scoped_dimension_payload;
+    // The pinned setter also accepts effectless layers: an empty call,
+    // selector-only call, or orientation-only call stores no PageFormatInfo
+    // payload. Orientation is still evaluated and validated, but it has no
+    // effect unless a standard size is present.
+    let effectless_payload = decorations.is_empty()
+        && !width
+        && !height
+        && !alignment
+        && !columns
+        && !page_size
+        && !margin;
+    let payload_supported =
+        base_payload_supported || selector_scoped_dimension_payload || effectless_payload;
 
     // A selector may now scope the already-typed positive column count.
     // Selector-scoped layers return before legacy flattened renderer fields
