@@ -205,6 +205,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_selector_scoped_page_layout_fails_closed_at_typst_boundary"));
+    assert!(pageformat[9]
+        .contains("integration_selector_scoped_page_alignment_fails_closed_at_typst_boundary"));
     assert!(pageformat[9].contains(
         "integration_selector_scoped_margin_without_border_fails_closed_at_typst_boundary"
     ));
@@ -254,7 +256,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         "selector-free implicit-margin/width-only/color-only cases are explicitly backend-rejected"
     ));
     assert!(pageformat[10].contains("instead of silently omitting the requested border"));
-    assert!(pageformat[10].contains("selector-aware geometry/size/margin/columns output"));
+    assert!(pageformat[10].contains("selector-aware alignment/geometry/size/margin/columns output"));
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
     assert!(pageformat[10].contains("finite 1-based page ranges"));
@@ -276,7 +278,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
-    assert!(pageformat[10].contains("selector-scoped size/width/height/columns"));
+    assert!(pageformat[10].contains("selector-scoped alignment/size/width/height/columns"));
     assert!(pageformat[10].contains("generated panic before page setup"));
     assert!(pageformat[10]
         .contains("unsupported scoped layout cannot silently degrade to global output"));
@@ -294,6 +296,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("bounded-side-decoration-output"));
     assert!(pageformat[11].contains("selector-aware-layering"));
     assert!(pageformat[11].contains("scoped-layout-backend-fail-closed"));
+    assert!(pageformat[11].contains("scoped-alignment-backend-fail-closed"));
     assert!(pageformat[11].contains("scoped-margin-backend-fail-closed"));
     assert!(pageformat[11].contains("scoped-border-completeness-fail-closed"));
 }
