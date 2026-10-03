@@ -763,7 +763,6 @@ Single-axis dimensions output\n";
     });
 }
 
-
 #[test]
 fn integration_pageformat_global_single_axis_inherits_explicit_geometry_base() {
     let source = ".doctype {paged}\n\
