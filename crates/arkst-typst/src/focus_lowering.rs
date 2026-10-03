@@ -493,17 +493,28 @@ const UNRESOLVED_SELECTOR_FREE_PAGE_DIMENSIONS_PRELUDE: &str =
 
 fn has_unresolved_selector_free_page_dimensions(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
+    if let Some(dimensions) = effective_global_page_dimensions(doc) {
+        let unresolved = dimensions
+            .resolve_concrete_page_geometry(state.document_type)
+            .is_none();
+        let incomplete_explicit_axes = dimensions.width.is_some() != dimensions.height.is_some();
+        if incomplete_explicit_axes {
+            return unresolved;
+        }
+        if matches!(
+            state.document_type,
+            IrDocumentType::Paged | IrDocumentType::Slides
+        ) {
+            return unresolved;
+        }
+        return false;
+    }
+
     if !matches!(
         state.document_type,
         IrDocumentType::Paged | IrDocumentType::Slides
     ) {
         return false;
-    }
-
-    if let Some(dimensions) = effective_global_page_dimensions(doc) {
-        return dimensions
-            .resolve_concrete_page_geometry(state.document_type)
-            .is_none();
     }
 
     if !state.page_format.layers.is_empty() {
