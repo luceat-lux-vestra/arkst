@@ -545,17 +545,11 @@ fn audit_pageformat_standard_size_contract_matches_post_510_semantics() {
     assert!(AUDIT.contains(
         "resolves to closed-domain physical millimeter geometry for every final document type"
     ));
-    assert!(AUDIT.contains(
-        "(`plain`/`paged`/`docs` portrait, `slides` landscape)"
-    ));
-    assert!(AUDIT.contains(
-        "The unresolved-dimension panic is reserved for genuinely incomplete"
-    ));
+    assert!(AUDIT.contains("(`plain`/`paged`/`docs` portrait, `slides` landscape)"));
+    assert!(AUDIT.contains("The unresolved-dimension panic is reserved for genuinely incomplete"));
     assert!(AUDIT.contains(
         "explicit-axis state that has neither both axes nor a resolvable standard-size base"
     ));
-    assert!(!AUDIT.contains(
-        "the standard-size base on final `paged`/`slides` applicability"
-    ));
+    assert!(!AUDIT.contains("the standard-size base on final `paged`/`slides` applicability"));
     assert!(!AUDIT.contains("keeps an omitted `docs` basis fail-closed"));
 }
