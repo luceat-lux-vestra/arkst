@@ -353,7 +353,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .contains("effectless selectors do not trigger the non-paged Typst selector guard"));
     assert!(pageformat[10].contains("effective A4 portrait base"));
     assert!(pageformat[10].contains("without fabricating size into the stored layer"));
-    assert!(pageformat[10].contains("final non-paged/cross-doctype cases without another concrete base remain fail-closed"));
+    assert!(pageformat[10].contains(
+        "final non-paged/cross-doctype cases without another concrete base remain fail-closed"
+    ));
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
