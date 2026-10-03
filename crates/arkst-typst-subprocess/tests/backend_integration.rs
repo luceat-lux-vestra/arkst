@@ -931,6 +931,85 @@ fn integration_pageformat_paged_single_axis_uses_initial_a4_portrait_base() {
 }
 
 #[test]
+fn integration_pageformat_single_axis_declared_before_paged_uses_final_default() {
+    let source =
+        ".pageformat width:{8in}\n.doctype {paged}\nFinal paged default single-axis output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-final-paged-default-single-axis.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-final-paged-default-single-axis.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "final paged default single-axis diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(width: 8in, height: 297mm)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-final-paged-default-single-axis", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-final-paged-default-single-axis.qd".to_string(),
+            })
+            .expect("final paged default single-axis Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_pageformat_unresolved_single_axis_final_plain_fails_closed() {
+    let source = ".pageformat width:{8in}\nFinal plain incomplete dimensions\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-final-plain-single-axis.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-final-plain-single-axis.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "final plain single-axis diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with(
+            "#panic(\"Arkst cannot lower selector-free page dimensions without complete explicit axes or a resolvable standard-size base\")\n"
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-final-plain-single-axis", |backend| {
+        let error = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-final-plain-single-axis.qd".to_string(),
+            })
+            .expect_err("final plain incomplete single-axis geometry must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("selector-free page dimensions without complete explicit axes"),
+            "{error}"
+        );
+    });
+}
+
+#[test]
 fn integration_pageformat_paged_default_single_axis_does_not_cross_into_slides() {
     let source =
         ".doctype {paged}\n.pageformat width:{8in}\n.doctype {slides}\nCross-doctype output\n";
