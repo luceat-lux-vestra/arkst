@@ -18,10 +18,6 @@ fn compile_source(source: &str) -> arkst_core::CompileResult {
     compile(&project, &CompileOptions::default())
 }
 
-fn compile_paged_source(source: &str) -> arkst_core::CompileResult {
-    compile_source(&format!(".doctype {{paged}}\n{source}"))
-}
-
 #[test]
 fn ordered_pageformat_layers_preserve_supported_global_source_order() {
     let result = compile_source(
@@ -237,7 +233,7 @@ fn selector_free_single_axis_layers_require_existing_standard_size_base() {
 
 #[test]
 fn selector_scoped_margin_retains_side_and_pages_without_flattening_global_state() {
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat margin:{1cm}\n\
          .pageformat side:{LEFT} pages:{2..5} margin:{2cm}\n",
     );
@@ -267,7 +263,7 @@ fn selector_scoped_margin_retains_side_and_pages_without_flattening_global_state
 
 #[test]
 fn selector_scoped_columns_publish_ordered_state_without_flattening_global_columns() {
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat columns:{2}\n\
          .pageformat side:{left} pages:{2..4} columns:{3}\n",
     );
@@ -300,7 +296,7 @@ fn selector_scoped_columns_publish_ordered_state_without_flattening_global_colum
         "selector-scoped columns must not apply outside their selector"
     );
 
-    let non_positive = compile_paged_source(
+    let non_positive = compile_source(
         ".pageformat columns:{2}\n\
          .pageformat side:{left} columns:{0}\n",
     );
@@ -322,7 +318,7 @@ fn selector_scoped_columns_publish_ordered_state_without_flattening_global_colum
 
 #[test]
 fn selector_scoped_size_is_retained_without_replacing_flattened_global_size() {
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat size:{a4}\n\
          .pageformat side:{right} size:{legal} orientation:{landscape}\n",
     );
@@ -348,7 +344,7 @@ fn selector_scoped_size_is_retained_without_replacing_flattened_global_size() {
 
 #[test]
 fn left_open_page_selector_normalizes_to_first_page_and_preserves_scope() {
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat margin:{1cm}\n\
          .pageformat side:{left} pages:{..2} margin:{2cm}\n",
     );
@@ -409,43 +405,6 @@ fn left_open_page_selector_normalizes_to_first_page_and_preserves_scope() {
 }
 
 #[test]
-fn page_selectors_fail_closed_outside_paged_documents_before_publication() {
-    for (doctype, expected_type) in [
-        ("", IrDocumentType::Plain),
-        (".doctype {slides}\n", IrDocumentType::Slides),
-        (".doctype {docs}\n", IrDocumentType::Docs),
-    ] {
-        for selector in ["side:{left}", "pages:{1..2}"] {
-            let result = compile_source(&format!(
-                "{doctype}.pageformat {selector} background:{{red}}\n"
-            ));
-            assert!(
-                !result.diagnostics.is_empty(),
-                "{expected_type:?} {selector} must fail closed"
-            );
-            assert!(
-                result.diagnostics.iter().any(|diagnostic| diagnostic
-                    .message
-                    .contains("side/pages selectors are only supported in paged documents")),
-                "missing paged-only selector diagnostic for {expected_type:?} {selector}: {:?}",
-                result.diagnostics
-            );
-
-            let state = &result.ir.metadata.document_state;
-            assert_eq!(state.document_type, expected_type);
-            assert!(
-                state.page_format.layers.is_empty(),
-                "{expected_type:?} {selector} published unsupported selector state"
-            );
-            assert!(
-                state.page_background.is_none(),
-                "{expected_type:?} {selector} leaked into flattened background state"
-            );
-        }
-    }
-}
-
-#[test]
 fn invalid_or_unbounded_page_selectors_fail_before_layer_publication() {
     for invalid_selector in [
         "pages:{2..}",
@@ -474,7 +433,7 @@ fn invalid_or_unbounded_page_selectors_fail_before_layer_publication() {
 
 #[test]
 fn exact_selector_resolution_merges_non_null_fields_without_cross_selector_precedence() {
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat margin:{4cm}\n\
          .pageformat side:{left} pages:{2..5} margin:{1cm}\n\
          .pageformat side:{right} pages:{2..5} margin:{9cm}\n\
@@ -540,7 +499,7 @@ fn exact_selector_resolution_merges_non_null_fields_without_cross_selector_prece
 
 #[test]
 fn page_applicability_filters_selectors_in_source_order_without_merging() {
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat margin:{1cm}\n\
          .pageformat side:{left} margin:{2cm}\n\
          .pageformat pages:{2..4} margin:{3cm}\n\
@@ -596,7 +555,7 @@ fn page_applicability_filters_selectors_in_source_order_without_merging() {
 
 #[test]
 fn page_field_merge_uses_source_order_across_selector_scopes() {
-    let scoped = compile_paged_source(
+    let scoped = compile_source(
         ".pageformat size:{a4}\n\
          .pageformat margin:{1cm}\n\
          .pageformat side:{left} margin:{2cm}\n\
@@ -622,7 +581,7 @@ fn page_field_merge_uses_source_order_across_selector_scopes() {
         IrPageSizeFormat::A4
     );
 
-    let later_global = compile_paged_source(
+    let later_global = compile_source(
         ".pageformat size:{a4}\n\
          .pageformat margin:{1cm}\n\
          .pageformat side:{left} margin:{2cm}\n\
@@ -671,7 +630,7 @@ fn page_field_merge_uses_source_order_across_selector_scopes() {
 
 #[test]
 fn selector_scoped_mixed_and_single_axis_dimensions_publish_state_only() {
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat size:{a4}\n\
          .pageformat width:{10in} height:{5in}\n\
          .pageformat side:{left} pages:{2..4} size:{letter} orientation:{landscape} width:{8in}\n\
@@ -763,7 +722,7 @@ fn selector_scoped_mixed_and_single_axis_dimensions_publish_state_only() {
 fn page_dimension_composition_respects_layer_order_and_per_axis_overrides() {
     // Use only currently bounded source-level shapes here: standard-size-only
     // layers and complete explicit width+height pairs.
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat width:{10in} height:{5in}\n\
          .pageformat pages:{2..4} size:{a4}\n\
          .pageformat side:{left} pages:{2..4} width:{8in} height:{4in}\n",
@@ -851,7 +810,7 @@ fn page_dimension_composition_respects_layer_order_and_per_axis_overrides() {
 
 #[test]
 fn explicit_page_resolution_combines_field_merge_with_dimension_composition() {
-    let result = compile_paged_source(
+    let result = compile_source(
         ".pageformat size:{a4}\n\
          .pageformat width:{10in} height:{5in}\n\
          .pageformat margin:{1cm}\n\
@@ -1029,7 +988,7 @@ fn pageformat_layer_wire_defaults_for_old_ir_and_roundtrips_when_present() {
         serde_json::from_value(legacy_shape).expect("deserialize legacy-shaped state");
     assert!(restored.page_format.layers.is_empty());
 
-    let compiled = compile_paged_source(".pageformat side:{left} pages:{2..3} margin:{1cm}\n");
+    let compiled = compile_source(".pageformat side:{left} pages:{2..3} margin:{1cm}\n");
     assert!(compiled.diagnostics.is_empty(), "{compiled:?}");
     let explicit = compiled.ir.metadata.document_state;
     let value = serde_json::to_value(&explicit).expect("serialize pageformat state");
