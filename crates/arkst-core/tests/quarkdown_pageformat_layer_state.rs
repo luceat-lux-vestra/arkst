@@ -153,11 +153,11 @@ fn selector_free_mixed_standard_size_and_axis_publish_composable_state() {
 }
 
 #[test]
-fn selector_free_single_axis_layers_require_existing_standard_size_base() {
+fn selector_free_single_axis_layers_require_existing_opposite_axis_or_standard_size_base() {
     let rejected = compile_source(".pageformat width:{8in}\n");
     assert!(
         !rejected.diagnostics.is_empty(),
-        "single-axis global pageformat without a standard-size base must fail closed"
+        "single-axis global pageformat without an opposite-axis or standard-size base must fail closed"
     );
     assert!(rejected
         .ir
@@ -228,6 +228,66 @@ fn selector_free_single_axis_layers_require_existing_standard_size_base() {
             composed.height.as_ref().expect("composed height").unit,
         ),
         (10.0, IrSizeUnit::In)
+    );
+}
+
+
+#[test]
+fn selector_free_single_axis_layers_inherit_existing_explicit_geometry() {
+    let result = compile_source(
+        ".pageformat width:{10in} height:{5in}\n\
+         .pageformat width:{8in}\n\
+         .pageformat size:{.none} height:{4in}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+
+    let state = &result.ir.metadata.document_state;
+    let legacy = state
+        .page_geometry
+        .as_ref()
+        .expect("initial complete geometry remains legacy fallback");
+    assert_eq!((legacy.width.value, legacy.width.unit), (10.0, IrSizeUnit::In));
+    assert_eq!((legacy.height.value, legacy.height.unit), (5.0, IrSizeUnit::In));
+
+    let layers = &state.page_format.layers;
+    assert_eq!(layers.len(), 3);
+    assert!(layers[1].size.is_none());
+    assert_eq!(
+        (
+            layers[1].width.as_ref().expect("later width override").value,
+            layers[1].width.as_ref().expect("later width override").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+    assert!(layers[1].height.is_none());
+    assert!(layers[2].size.is_none(), "explicit nullable size must not fabricate a base");
+    assert!(layers[2].width.is_none());
+    assert_eq!(
+        (
+            layers[2].height.as_ref().expect("nullable-size height override").value,
+            layers[2].height.as_ref().expect("nullable-size height override").unit,
+        ),
+        (4.0, IrSizeUnit::In)
+    );
+
+    let composed = state
+        .page_format
+        .compose_global_page_dimensions()
+        .expect("explicit geometry composition");
+    assert!(composed.size.is_none());
+    assert_eq!(
+        (
+            composed.width.as_ref().expect("composed width").value,
+            composed.width.as_ref().expect("composed width").unit,
+        ),
+        (8.0, IrSizeUnit::In)
+    );
+    assert_eq!(
+        (
+            composed.height.as_ref().expect("composed height").value,
+            composed.height.as_ref().expect("composed height").unit,
+        ),
+        (4.0, IrSizeUnit::In)
     );
 }
 
