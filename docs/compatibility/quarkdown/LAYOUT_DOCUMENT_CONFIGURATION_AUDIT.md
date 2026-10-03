@@ -254,10 +254,8 @@ final document is `paged` and explicit margin, committed border widths, and
 explicit border color are all present; selector-free implicit-margin,
 width-only, and color-only cases are explicitly backend-rejected with a
 generated panic before page setup instead of silently omitting the requested
-border. Selector-bearing `.pageformat` calls under slides/plain/docs are rejected
-at evaluator publication because upstream documents page selectors as paged-only;
-remaining border cases outside the bounded explicit-value page-side/range subset
-remain fail-closed. The size slice
+border. Slides/plain/docs and border cases outside the bounded explicit-value
+page-side/range subset remain fail-closed. The size slice
 preserves the closed standard-format domain, named size binding, and an
 explicit portrait/landscape orientation when supplied; when orientation is
 omitted it records the document type in effect at commit time as the downstream
@@ -296,12 +294,9 @@ border color are committed. It preserves four independent side widths and does
 not fabricate a renderer-default margin, width, or color.
 The ordered layer snapshot is a prerequisite only: current flattened fields
 remain the bounded renderer compatibility surface and no new output claim is
-made by recording layer order or selector identity. The pinned public contract
-restricts `side` and `pages` selectors to `paged` documents, so Arkst now
-rejects any selector-bearing `.pageformat` call under `plain`, `slides`, or
-`docs` before ordered-layer publication. The bounded selector slice therefore
+made by recording layer order or selector identity. The bounded selector slice
 accepts typed `left`/`right`, explicit finite positive page ranges, and
-left-open ranges with a finite positive end only for `paged` documents. A left-open `pages:{..N}` range
+left-open ranges with a finite positive end. A left-open `pages:{..N}` range
 normalizes its omitted start to page 1, matching the public 1-based inclusive
 page contract while preserving the existing finite `IrPageRange` boundary.
 Ranges without a finite end, page zero, and invalid sides still fail before
