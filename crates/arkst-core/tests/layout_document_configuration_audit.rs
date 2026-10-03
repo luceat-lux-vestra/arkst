@@ -249,6 +249,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .contains("integration_pageformat_global_single_axis_inherits_explicit_geometry_base"));
     assert!(pageformat[9]
         .contains("integration_pageformat_global_nullable_axes_inherit_existing_dimensions"));
+    assert!(pageformat[9].contains(
+        "integration_effectless_ordered_pageformat_does_not_revive_stale_flattened_geometry"
+    ));
     assert!(pageformat[9]
         .contains("integration_pageformat_nullable_alignment_preserves_final_page_state"));
     assert!(pageformat[9]
@@ -269,6 +272,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-free/global columns output"));
     assert!(pageformat[10].contains("merged positive count as canonical"));
     assert!(pageformat[10].contains("flattened page_columns is a legacy fallback only"));
+    assert!(pageformat[10].contains("canonical for global dimensions even when no dimension payload"));
+    assert!(pageformat[10].contains("flattened page_geometry/page_size are legacy fallbacks only"));
     assert!(pageformat[10].contains("typed standard size/orientation"));
     assert!(pageformat[10].contains("named size binding"));
     assert!(pageformat[10].contains("selector-free global margin"));
