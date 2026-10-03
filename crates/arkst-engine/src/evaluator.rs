@@ -6768,6 +6768,9 @@ impl Evaluator {
                     }
                 }
                 "alignment" => {
+                    if matches!(&value.value, IrValue::None) {
+                        continue;
+                    }
                     alignment = Some(
                         match value_conversion::convert_document_alignment_with_origin(&value) {
                             Ok(value) => value,
