@@ -320,7 +320,9 @@ fn integration_non_paged_page_selector_fails_closed_at_typst_boundary() {
 
 #[test]
 fn integration_non_paged_selector_free_page_border_fails_closed_at_typst_boundary() {
-    let source = ".pageformat margin:{1cm} bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\nPlain border output\n";
+    let source = ".pageformat margin:{1cm}\n\
+.pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
+Plain border output\n";
     let project = VirtualProjectBuilder::new()
         .entry("pageformat-non-paged-border.qd")
         .expect("valid entry path")
