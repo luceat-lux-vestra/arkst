@@ -193,19 +193,32 @@ fn paged_single_axis_layer_uses_document_default_without_fabricating_layer_size(
 }
 
 #[test]
-fn selector_free_single_axis_layers_require_existing_opposite_axis_or_standard_size_base() {
-    let rejected = compile_source(".pageformat width:{8in}\n");
-    assert!(
-        !rejected.diagnostics.is_empty(),
-        "single-axis global pageformat without an opposite-axis or standard-size base must fail closed"
+fn selector_free_single_axis_layers_are_retained_until_final_default_resolution() {
+    let retained = compile_source(".pageformat width:{8in}\n");
+    assert!(retained.diagnostics.is_empty(), "{retained:?}");
+
+    let retained_state = &retained.ir.metadata.document_state;
+    assert!(retained_state.page_geometry.is_none());
+    assert!(retained_state.page_size.is_none());
+    assert_eq!(retained_state.page_format.layers.len(), 1);
+    assert!(retained_state.page_format.layers[0].selector.is_none());
+    assert!(retained_state.page_format.layers[0].size.is_none());
+    assert_eq!(
+        (
+            retained_state.page_format.layers[0]
+                .width
+                .as_ref()
+                .expect("retained width")
+                .value,
+            retained_state.page_format.layers[0]
+                .width
+                .as_ref()
+                .expect("retained width")
+                .unit,
+        ),
+        (8.0, IrSizeUnit::In)
     );
-    assert!(rejected
-        .ir
-        .metadata
-        .document_state
-        .page_format
-        .layers
-        .is_empty());
+    assert!(retained_state.page_format.layers[0].height.is_none());
 
     let result = compile_source(
         ".pageformat size:{a4} orientation:{portrait}\n\

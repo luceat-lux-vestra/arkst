@@ -202,11 +202,15 @@ documentType.preferredOrientation, width: Size? = null, height: Size? = null,
 margin: Sizes? = null, bordertop/right/bottom/left: Size? = null,
 bordercolor: Color? = null, background: Color? = null, columns: Int? = null,
 alignment: NodeStyle.TextAlignment? = null)` appends a page-format layer and
-returns no output. The stored list starts empty; the effective initial format
-is supplied by the document type (A4 portrait for paged, none for plain/docs,
-and slide-specific behavior). A null side/range is global; `side` and a
-finite, 1-based inclusive `pages` range select subsets of paged pages. An open
-range end fails before mutation.
+returns no output. The stored list starts empty. At rendering time,
+`DocumentLayoutInfo.getPageFormatsWithDefault` prepends the final document
+type's `defaultPageFormat` to the stored layers and then merges selector groups
+with later non-null fields taking priority. The HTML document builder passes
+`document.type.defaultPageFormat` at that final rendering boundary. The
+effective initial format is therefore A4 portrait for final `paged`, none for
+plain/docs, and slide-specific behavior. A null side/range is global; `side`
+and a finite, 1-based inclusive `pages` range select subsets of paged pages.
+An open range end fails before mutation.
 
 When `size` is present, its standard closed `PageSizeFormat` bounds are
 rotated to the selected orientation. Explicit width/height override those
@@ -437,14 +441,16 @@ base and therefore follows the same single-axis inheritance rule: it is accepted
 only when the prior composition supplies the missing axis. Explicit nullable
 `width`/`height` values likewise contribute no axis override, so the previously
 composed value for that axis is inherited. A remaining non-null single-axis
-override is accepted when prior composition supplies the opposite explicit
-axis or a concrete standard-size base. The pinned `PAGED` document type also
-supplies an effective initial A4 portrait page format, so a selector-free
-single-axis mutation committed while the document is `paged` may inherit the
-missing axis from that document default without fabricating an implicit
-`size` field in the stored mutation. This bounded default-base admission is
-resolved only for final `paged` output; plain/slides/docs and cross-doctype
-cases without another concrete base remain fail-closed. The pinned PageFormatInfo merge contract also makes
+override is retained even when no prior ordered layer supplies the opposite
+axis, because the pinned setter stores the layer before renderer defaults are
+applied. At the final rendering boundary, a final `paged` document prepends
+its A4 portrait `defaultPageFormat`, allowing a selector-free width-only or
+height-only layer to inherit the missing axis regardless of the document type
+that was active when the layer was committed. The default is effective state
+only and is not fabricated into the stored `IrPageFormatLayer.size`. Final
+plain/docs/slides output has no compatible page-format default for such an
+incomplete explicit-axis layer, so Arkst fails closed there instead of silently
+dropping the unresolved dimension request. The pinned PageFormatInfo merge contract also makes
 `alignment` nullable and applies later-non-null field precedence. Arkst therefore
 treats semantic `.none` alignment as no new override: selector-free state keeps
 the previously committed document alignment, and exact same-selector resolution
