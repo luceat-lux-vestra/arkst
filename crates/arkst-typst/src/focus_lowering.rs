@@ -127,6 +127,18 @@ fn lower_page_margins_value(margin: &arkst_ir::IrPageMargins) -> String {
     format!("(top: {top}, right: {right}, bottom: {bottom}, left: {left})")
 }
 
+fn selector_free_page_margin(doc: &IrDocument) -> Option<arkst_ir::IrPageMargins> {
+    let state = &doc.metadata.document_state;
+    if !state.page_format.layers.is_empty() {
+        return state
+            .page_format
+            .resolve_exact_selector(None)
+            .and_then(|global| global.margin);
+    }
+
+    state.page_margin.clone()
+}
+
 fn lower_page_border_widths_value(widths: &arkst_ir::IrPageBorderWidths) -> String {
     let top = lowering_base::lower_size(&widths.top);
     let right = lowering_base::lower_size(&widths.right);
@@ -513,7 +525,7 @@ fn document_prelude(doc: &IrDocument) -> String {
             "#set page(width: {SLIDES_PAGE_WIDTH_PT}pt, height: {SLIDES_PAGE_HEIGHT_PT}pt)\n"
         ));
     }
-    if let Some(margin) = state.page_margin.as_ref() {
+    if let Some(margin) = selector_free_page_margin(doc) {
         let top = lowering_base::lower_size(&margin.top);
         let right = lowering_base::lower_size(&margin.right);
         let bottom = lowering_base::lower_size(&margin.bottom);
@@ -1654,6 +1666,87 @@ mod tests {
             code.starts_with("#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))\n"),
             "{code}"
         );
+    }
+
+    #[test]
+    fn ordered_selector_free_margin_overrides_stale_flattened_compatibility_field() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_margin = Some(IrPageMargins {
+            top: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+        });
+        doc.metadata.document_state.page_format.layers = vec![
+            IrPageFormatLayer {
+                margin: Some(IrPageMargins {
+                    top: IrSize {
+                        value: 1.0,
+                        unit: IrSizeUnit::Cm,
+                    },
+                    right: IrSize {
+                        value: 2.0,
+                        unit: IrSizeUnit::Mm,
+                    },
+                    bottom: IrSize {
+                        value: 3.0,
+                        unit: IrSizeUnit::Pt,
+                    },
+                    left: IrSize {
+                        value: 8.0,
+                        unit: IrSizeUnit::Px,
+                    },
+                }),
+                ..IrPageFormatLayer::default()
+            },
+            IrPageFormatLayer::default(),
+        ];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(
+            code.starts_with("#set page(margin: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))\n"),
+            "{code}"
+        );
+        assert!(!code.contains("top: 9pt"), "{code}");
+    }
+
+    #[test]
+    fn ordered_pageformat_without_global_margin_does_not_revive_stale_flattened_margin() {
+        let mut doc = document(IrDocumentType::Paged, None, None);
+        doc.metadata.document_state.page_margin = Some(IrPageMargins {
+            top: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            right: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            bottom: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 9.0,
+                unit: IrSizeUnit::Pt,
+            },
+        });
+        doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer::default()];
+
+        let code = lower_to_typst_code(&doc);
+        assert!(!code.contains("#set page(margin:"), "{code}");
     }
 
     #[test]

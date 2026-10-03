@@ -285,9 +285,14 @@ a backward-compatible fallback when ordered dimension state is absent. The margi
 `Sizes` shorthand into explicit top/right/bottom/left state: one value applies
 to every side, two values map vertical/horizontal, and four values map TRBL.
 Three-value or otherwise malformed groups fail closed, and semantic `None`
-preserves the previously committed effective global margin. The current Typst
-consumer lowers those four explicit sides through the shared size conversion
-boundary, with real pinned-backend PDF integration coverage. Non-positive or
+preserves the previously committed effective global margin. When ordered
+page-format state exists, the current Typst/PDF margin consumer resolves only
+the exact selector-free/global layer group in source order and treats that
+merged margin as canonical. Flattened `page_margin` remains a legacy-IR
+fallback only when ordered page-format state is absent, so stale compatibility
+state cannot diverge content margin from the ordered margin already used by the
+border consumer. The four explicit sides still lower through the shared size
+conversion boundary, with real pinned-backend PDF integration coverage. Non-positive or
 semantic-None column inputs are discarded without replacing an earlier
 positive global value. The current Typst consumer maps the committed positive
 column count directly to the page column configuration, with real
