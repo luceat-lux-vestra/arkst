@@ -204,9 +204,13 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("quarkdown_pageformat_layer_state.rs"));
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
+        .contains("integration_pageformat_docs_columns_fails_closed_at_typst_boundary"));
+    assert!(pageformat[9]
         .contains("integration_pageformat_ordered_global_columns_override_stale_flattened_state"));
     assert!(pageformat[9]
         .contains("integration_pageformat_ordered_global_margin_overrides_stale_flattened_state"));
+    assert!(pageformat[9]
+        .contains("integration_pageformat_docs_margin_fails_closed_at_typst_boundary"));
     assert!(pageformat[9]
         .contains("integration_non_paged_page_selector_fails_closed_at_typst_boundary"));
     assert!(pageformat[9].contains(
@@ -376,6 +380,11 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
+    assert!(pageformat[10].contains(
+        "Final docs output rejects selector-free global margin/columns before page setup"
+    ));
+    assert!(pageformat[10]
+        .contains("pinned applicability limits those fields to plain/paged/slides"));
     assert!(pageformat[10].contains("selector-scoped alignment/size/width/height/columns"));
     assert!(pageformat[10].contains("generated panic before page setup"));
     assert!(pageformat[10].contains(
@@ -409,6 +418,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("bounded-effectless-pageformat-layers"));
     assert!(pageformat[11].contains("unresolved-global-page-dimensions-backend-fail-closed"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));
+    assert!(pageformat[11].contains("docs-global-layout-applicability-fail-closed"));
     assert!(pageformat[11].contains("bounded-global-decoration-state"));
     assert!(pageformat[11].contains("bounded-range-background-output"));
     assert!(pageformat[11].contains("bounded-range-border-output"));
