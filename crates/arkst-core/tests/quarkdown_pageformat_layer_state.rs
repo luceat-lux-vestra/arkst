@@ -1155,11 +1155,16 @@ fn resolved_page_dimensions_materialize_standard_base_without_widening_selector_
         }),
         ..Default::default()
     };
-    assert!(
-        docs_basis
-            .resolve_concrete_page_geometry(IrDocumentType::Paged)
-            .is_none(),
-        "omitted docs orientation basis must remain fail-closed"
+    let docs_geometry = docs_basis
+        .resolve_concrete_page_geometry(IrDocumentType::Paged)
+        .expect("docs omitted orientation uses portrait call-time preference");
+    assert_eq!(
+        (docs_geometry.width.value, docs_geometry.width.unit),
+        (210.0, IrSizeUnit::Mm)
+    );
+    assert_eq!(
+        (docs_geometry.height.value, docs_geometry.height.unit),
+        (297.0, IrSizeUnit::Mm)
     );
 
     let explicit = arkst_core::ir::IrComposedPageDimensions {
