@@ -205,6 +205,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains("integration_pageformat_columns_lowers_to_valid_typst_and_pdf"));
     assert!(pageformat[9]
         .contains("integration_non_paged_page_selector_fails_closed_at_typst_boundary"));
+    assert!(pageformat[9]
+        .contains("integration_non_paged_selector_free_page_border_fails_closed_at_typst_boundary"));
     assert!(pageformat[9].contains(
         "integration_page_selector_declared_before_paged_doctype_uses_final_document_type"
     ));
@@ -298,6 +300,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-scoped alignment/size/width/height/columns"));
     assert!(pageformat[10].contains("generated panic before page setup"));
     assert!(pageformat[10].contains(
+        "selector-free page borders on final non-paged documents explicitly backend-fail-closed"
+    ));
+    assert!(pageformat[10].contains(
         "scoped alignment cannot silently disappear through the global-only page_alignment/stack-inheritance consumer"
     ));
     assert!(pageformat[10].contains("every selector-scoped paged margin"));
@@ -321,6 +326,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("scoped-margin-backend-fail-closed"));
     assert!(pageformat[11].contains("scoped-border-completeness-fail-closed"));
     assert!(pageformat[11].contains("non-paged-selector-backend-fail-closed"));
+    assert!(pageformat[11].contains("non-paged-border-backend-fail-closed"));
 }
 
 #[test]
