@@ -6972,9 +6972,8 @@ impl Evaluator {
                 orientation: page_orientation,
                 document_type,
             });
-        let standalone_global_axis = selector.is_none()
-            && page_size.is_none()
-            && (width.is_some() != height.is_some());
+        let standalone_global_axis =
+            selector.is_none() && page_size.is_none() && (width.is_some() != height.is_some());
         if standalone_global_axis {
             let existing_dimensions = context
                 .document_state
