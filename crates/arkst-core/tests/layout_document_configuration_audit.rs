@@ -462,6 +462,58 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
 }
 
 #[test]
+fn audit_final_175_status_reconciliation_is_pinned() {
+    let rows = rows();
+    for name in [
+        "numbering",
+        "nonumbering",
+        "font",
+        "paragraphstyle",
+        "pageformat",
+        "autopagebreak",
+        "noautopagebreak",
+    ] {
+        let row = rows
+            .iter()
+            .find(|row| row[1] == name)
+            .unwrap_or_else(|| panic!("missing #175 row: {name}"));
+        assert_eq!(row[5], "PARTIAL", "{name} must remain conservatively PARTIAL");
+        assert!(
+            row[11].contains("final-175-status-reconciliation"),
+            "{name} missing final #175 reconciliation marker"
+        );
+    }
+
+    let auto = rows
+        .iter()
+        .find(|row| row[1] == "autopagebreak")
+        .expect("autopagebreak row");
+    assert!(auto[9].contains("typst-inprocess/tests/auto_page_break.rs"));
+    assert!(auto[10].contains("global autoPageBreakHeadingMaxDepth=1"));
+    assert!(auto[10].contains("plain=0/paged=1/slides=2/docs=0"));
+    assert!(auto[10].contains("implicit-default version divergence"));
+
+    let no_auto = rows
+        .iter()
+        .find(|row| row[1] == "noautopagebreak")
+        .expect("noautopagebreak row");
+    assert!(no_auto[10].contains("exact shorthand for explicit zero"));
+    assert!(no_auto[10].contains("global threshold 1"));
+
+    assert!(AUDIT.contains("### #175 final reconciliation snapshot — 2026-10-04"));
+    assert!(AUDIT.contains("MutableContextOptions.autoPageBreakHeadingMaxDepth"));
+    assert!(AUDIT.contains("non-null `Int` initialized to `1`"));
+    assert!(AUDIT.contains("`DocumentType` has no per-document-type"));
+    assert!(AUDIT.contains("later v2.6 adaptation changed the implicit default contract"));
+    assert!(AUDIT.contains(
+        "No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim"
+    ));
+    assert!(AUDIT.contains("ordered font"));
+    assert!(AUDIT.contains("paragraph style"));
+    assert!(AUDIT.contains("ordered page-format"));
+}
+
+#[test]
 fn audit_records_pinned_pagination_renderer_divergences() {
     assert!(AUDIT.contains("does not implement that full grammar"));
     assert!(AUDIT.contains("transforms only the exact strings"));
