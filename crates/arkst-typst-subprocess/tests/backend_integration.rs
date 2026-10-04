@@ -593,6 +593,54 @@ Second page\n";
 }
 
 #[test]
+fn integration_selector_free_justify_alignment_lowers_to_valid_typst_and_pdf() {
+    let source = ".pageformat alignment:{justify}\n\
+# Heading\n\
+\n\
+Paragraph content that should use local paragraph justification.\n\
+\n\
+- List content\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-justify-alignment.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-justify-alignment.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "selector-free justify alignment diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set par(justify: true)"),
+        "{typst_code}"
+    );
+    assert!(
+        !typst_code.contains("#set align(left)")
+            && !typst_code.contains("#set align(center)")
+            && !typst_code.contains("#set align(right)"),
+        "justify must not fabricate document-global alignment: {typst_code}"
+    );
+
+    with_typst("pageformat-justify-alignment", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-justify-alignment.qd".to_string(),
+            })
+            .expect("selector-free justify alignment Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_selector_scoped_page_alignment_fails_closed_at_typst_boundary() {
     let source = ".doctype {paged}\n\
 .pageformat pages:{2..2} alignment:{center}\n\
