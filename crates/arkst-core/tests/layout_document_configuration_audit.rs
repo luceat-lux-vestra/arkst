@@ -376,8 +376,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         "final paged output therefore inherits the missing axis from A4 portrait regardless of call-time doctype"
     ));
     assert!(pageformat[10].contains("without fabricating size into the stored layer"));
-    assert!(pageformat[10]
-        .contains("final plain/docs/slides unresolved single-axis output fails closed"));
+    assert!(pageformat[10].contains(
+        "final plain/docs selector-free width-only output is lowered without fabricating height"
+    ));
+    assert!(pageformat[10].contains("height-only remains fail-closed"));
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
@@ -540,15 +542,32 @@ fn captionposition_revalidation_links_existing_slice() {
 }
 
 #[test]
+fn audit_pageformat_plain_docs_width_only_contract_is_explicit() {
+    let pageformat = rows()
+        .into_iter()
+        .find(|row| row[1] == "pageformat")
+        .expect("pageformat row");
+    assert!(pageformat[10].contains("final plain/docs selector-free width-only output is lowered"));
+    assert!(pageformat[11].contains("bounded-plain-docs-width-only-output"));
+    assert!(AUDIT.contains(
+        "pinned public applicability table explicitly permits width while excluding height"
+    ));
+    assert!(AUDIT.contains("height-only remains fail-closed"));
+    assert!(!AUDIT.contains("plain/docs/slides output has no compatible page-format default"));
+}
+
+#[test]
 fn audit_pageformat_standard_size_contract_matches_post_510_semantics() {
     assert!(AUDIT.contains("A standard-size base likewise"));
     assert!(AUDIT.contains(
         "resolves to closed-domain physical millimeter geometry for every final document type"
     ));
     assert!(AUDIT.contains("(`plain`/`paged`/`docs` portrait, `slides` landscape)"));
-    assert!(AUDIT.contains("The unresolved-dimension panic is reserved for genuinely incomplete"));
     assert!(AUDIT.contains(
-        "explicit-axis state that has neither both axes nor a resolvable standard-size base"
+        "The unresolved-dimension panic is reserved for genuinely unsupported or incomplete"
+    ));
+    assert!(AUDIT.contains(
+        "`paged`/`slides` still require complete geometry or a resolvable standard-size base"
     ));
     assert!(!AUDIT.contains("the standard-size base on final `paged`/`slides` applicability"));
     assert!(!AUDIT.contains("keeps an omitted `docs` basis fail-closed"));
