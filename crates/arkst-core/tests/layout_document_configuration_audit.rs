@@ -404,11 +404,18 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         pageformat[10].contains("slides requires widths+color, uses a zero-inset full-slide frame")
     );
     assert!(pageformat[10].contains("final docs selector-free borders remain backend-fail-closed"));
-    assert!(pageformat[10].contains("global row/column inheritance consumer"));
+    assert!(pageformat[10]
+        .contains("pinned TextAlignment separates local justify from global start/center/end"));
+    assert!(pageformat[10].contains(
+        "selector-free justify now lowers to Typst paragraph justification without fabricating document-global alignment"
+    ));
+    assert!(pageformat[10]
+        .contains("start/center/end remain bounded to row/column inherited main-axis consumption"));
+    assert!(pageformat[10].contains("both bounded selector-free alignment consumers"));
     assert!(pageformat[10].contains("merged alignment as canonical"));
     assert!(pageformat[10].contains("flattened page_alignment remains a legacy fallback only"));
     assert!(pageformat[10].contains(
-        "scoped alignment cannot silently disappear through the global-only page_alignment/stack-inheritance consumer"
+        "scoped alignment cannot silently disappear through the selector-free-only alignment consumers"
     ));
     assert!(pageformat[10].contains("every selector-scoped paged margin"));
     assert!(pageformat[10]
@@ -425,6 +432,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("final-type-default-axis-merge"));
     assert!(pageformat[11].contains("bounded-global-nullable-axis-inheritance"));
     assert!(pageformat[11].contains("bounded-nullable-alignment-inheritance"));
+    assert!(pageformat[11].contains("bounded-global-justify-text-output"));
     assert!(pageformat[11].contains("bounded-effectless-pageformat-layers"));
     assert!(pageformat[11].contains("unresolved-global-page-dimensions-backend-fail-closed"));
     assert!(pageformat[11].contains("bounded-global-margin-state"));

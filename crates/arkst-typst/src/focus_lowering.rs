@@ -6,8 +6,8 @@
 //! source-map ranges by the generated prelude length.
 
 use arkst_ir::{
-    IrComposedPageDimensions, IrDocument, IrDocumentType, IrPageFormatLayer, IrPageFormatSelector,
-    IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPageSizeSelection,
+    IrComposedPageDimensions, IrDocument, IrDocumentAlignment, IrDocumentType, IrPageFormatLayer,
+    IrPageFormatSelector, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPageSizeSelection,
 };
 use arkst_source::SourceMapEntry;
 
@@ -186,6 +186,18 @@ fn selector_free_page_columns(doc: &IrDocument) -> Option<u32> {
     }
 
     state.page_columns
+}
+
+fn selector_free_page_alignment(doc: &IrDocument) -> Option<IrDocumentAlignment> {
+    let state = &doc.metadata.document_state;
+    if !state.page_format.layers.is_empty() {
+        return state
+            .page_format
+            .resolve_exact_selector(None)
+            .and_then(|global| global.alignment);
+    }
+
+    state.page_alignment
 }
 
 fn selector_free_page_background(doc: &IrDocument) -> Option<arkst_ir::IrColor> {
@@ -706,6 +718,17 @@ fn document_prelude(doc: &IrDocument) -> String {
     } else if let Some(background) = selector_free_page_background(doc) {
         let fill = lowering_base::lower_color(&background);
         prelude.push_str(&format!("#set page(fill: {fill})\n"));
+    }
+    if matches!(
+        selector_free_page_alignment(doc),
+        Some(IrDocumentAlignment::Justify)
+    ) {
+        // Pinned v2.5.1 treats justify as local text alignment rather than
+        // document-global alignment: paragraphs/list-like text justify while
+        // headings retain the document-type global alignment. Typst paragraph
+        // justification is the bounded output analogue and deliberately does
+        // not broaden start/center/end document-text semantics.
+        prelude.push_str("#set par(justify: true)\n");
     }
     if state.document_type == IrDocumentType::Slides {
         match state.slides.and_then(|slides| slides.center) {
