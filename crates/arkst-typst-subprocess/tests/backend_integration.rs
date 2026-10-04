@@ -1047,19 +1047,89 @@ fn integration_pageformat_single_axis_declared_before_paged_uses_final_default()
 }
 
 #[test]
-fn integration_pageformat_unresolved_single_axis_final_plain_fails_closed() {
-    let source = ".pageformat width:{8in}\nFinal plain incomplete dimensions\n";
+fn integration_pageformat_width_only_final_plain_lowers_to_valid_typst_and_pdf() {
+    let source = ".pageformat width:{8in}\nFinal plain width-only dimensions\n";
     let project = VirtualProjectBuilder::new()
-        .entry("pageformat-final-plain-single-axis.qd")
+        .entry("pageformat-final-plain-width-only.qd")
         .expect("valid entry path")
-        .add_source("pageformat-final-plain-single-axis.qd", source)
+        .add_source("pageformat-final-plain-width-only.qd", source)
         .expect("valid source path")
         .build()
         .expect("valid project");
     let result = compile(&project, &CompileOptions::default());
     assert!(
         result.diagnostics.is_empty(),
-        "final plain single-axis diagnostics: {:?}",
+        "final plain width-only diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.starts_with("#set page(width: 8in)\n"), "{typst_code}");
+    assert!(!typst_code.starts_with("#panic("), "{typst_code}");
+
+    with_typst("pageformat-final-plain-width-only", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-final-plain-width-only.qd".to_string(),
+            })
+            .expect("final plain width-only Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_pageformat_width_only_final_docs_lowers_to_valid_typst_and_pdf() {
+    let source = ".doctype {docs}\n.pageformat width:{8in}\nFinal docs width-only dimensions\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-final-docs-width-only.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-final-docs-width-only.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "final docs width-only diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.starts_with("#set page(width: 8in)\n"), "{typst_code}");
+    assert!(!typst_code.starts_with("#panic("), "{typst_code}");
+
+    with_typst("pageformat-final-docs-width-only", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-final-docs-width-only.qd".to_string(),
+            })
+            .expect("final docs width-only Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_pageformat_height_only_final_plain_fails_closed() {
+    let source = ".pageformat height:{8in}\nFinal plain unsupported height-only dimensions\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-final-plain-height-only.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-final-plain-height-only.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "final plain height-only diagnostics: {:?}",
         result.diagnostics
     );
 
@@ -1071,13 +1141,13 @@ fn integration_pageformat_unresolved_single_axis_final_plain_fails_closed() {
         "{typst_code}"
     );
 
-    with_typst("pageformat-final-plain-single-axis", |backend| {
+    with_typst("pageformat-final-plain-height-only", |backend| {
         let error = backend
             .compile(&TypstInput {
                 source: typst_code,
-                entry_path: "pageformat-final-plain-single-axis.qd".to_string(),
+                entry_path: "pageformat-final-plain-height-only.qd".to_string(),
             })
-            .expect_err("final plain incomplete single-axis geometry must fail closed");
+            .expect_err("final plain unsupported height-only geometry must fail closed");
         assert!(
             error
                 .to_string()
