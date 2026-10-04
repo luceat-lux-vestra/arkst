@@ -719,7 +719,8 @@ fn document_prelude(doc: &IrDocument) -> String {
         let fill = lowering_base::lower_color(&background);
         prelude.push_str(&format!("#set page(fill: {fill})\n"));
     }
-    match selector_free_page_alignment(doc) {
+    let page_alignment = selector_free_page_alignment(doc);
+    match page_alignment {
         Some(IrDocumentAlignment::Justify) => {
             // Pinned v2.5.1 treats justify as local text alignment rather than
             // document-global alignment: paragraphs/list-like text justify while
@@ -741,10 +742,28 @@ fn document_prelude(doc: &IrDocument) -> String {
         | None => {}
     }
     if state.document_type == IrDocumentType::Slides {
-        match state.slides.and_then(|slides| slides.center) {
-            Some(true) => prelude.push_str("#set align(horizon)\n"),
-            Some(false) => prelude.push_str("#set align(top)\n"),
-            None => {}
+        let horizontal = match page_alignment {
+            Some(IrDocumentAlignment::Start) => Some("start"),
+            Some(IrDocumentAlignment::Center) => Some("center"),
+            Some(IrDocumentAlignment::End) => Some("end"),
+            Some(IrDocumentAlignment::Justify) | None => None,
+        };
+        let vertical = match state.slides.and_then(|slides| slides.center) {
+            Some(true) => Some("horizon"),
+            Some(false) => Some("top"),
+            None => None,
+        };
+        match (horizontal, vertical) {
+            (Some(horizontal), Some(vertical)) => {
+                prelude.push_str(&format!("#set align({horizontal} + {vertical})\n"));
+            }
+            (Some(horizontal), None) => {
+                prelude.push_str(&format!("#set align({horizontal})\n"));
+            }
+            (None, Some(vertical)) => {
+                prelude.push_str(&format!("#set align({vertical})\n"));
+            }
+            (None, None) => {}
         }
     }
     if let Some(focus) = focus_prelude(doc) {
