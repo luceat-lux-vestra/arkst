@@ -551,9 +551,7 @@ fn audit_pageformat_plain_docs_width_only_contract_is_explicit() {
         "pinned public applicability table explicitly permits width while excluding height"
     ));
     assert!(AUDIT.contains("height-only remains fail-closed"));
-    assert!(!AUDIT.contains(
-        "plain/docs/slides output has no compatible page-format default"
-    ));
+    assert!(!AUDIT.contains("plain/docs/slides output has no compatible page-format default"));
 }
 
 #[test]
