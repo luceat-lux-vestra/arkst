@@ -410,9 +410,11 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         "selector-free justify lowers to Typst paragraph justification without fabricating document-global alignment"
     ));
     assert!(pageformat[10].contains(
-        "selector-free start/center/end lower to Typst global alignment for final plain/paged/docs"
+        "selector-free start/center/end lower to Typst global alignment for every final document type"
     ));
-    assert!(pageformat[10].contains("final slides horizontal document-text alignment remains open"));
+    assert!(pageformat[10].contains(
+        "final slides composes horizontal start/center/end with explicit .slides center true/false vertical horizon/top"
+    ));
     assert!(pageformat[10].contains("both bounded selector-free alignment consumers"));
     assert!(pageformat[10].contains("merged alignment as canonical"));
     assert!(pageformat[10].contains("flattened page_alignment remains a legacy fallback only"));
