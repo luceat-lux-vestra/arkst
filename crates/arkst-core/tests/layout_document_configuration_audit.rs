@@ -396,7 +396,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         pageformat[10].contains("pinned applicability limits those fields to plain/paged/slides")
     );
     assert!(pageformat[10].contains("selector-scoped alignment/size/width/height/columns"));
-    assert!(pageformat[10].contains("generated panic before page setup"));
+    assert!(pageformat[10].contains("generated panic before output"));
     assert!(pageformat[10].contains(
         "selector-free explicit-value page borders are supported for final plain, paged, and slides output"
     ));
