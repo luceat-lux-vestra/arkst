@@ -337,15 +337,11 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains(
         "selector-aware alignment/geometry/size/margin/columns output is deliberately unsupported at the current Typst boundary"
     ));
-    assert!(pageformat[10].contains(
-        "must not be approximated with here().page()"
-    ));
+    assert!(pageformat[10].contains("must not be approximated with here().page()"));
     assert!(pageformat[10].contains(
         "Color-only or otherwise implicit border-width output is likewise intentionally fail-closed"
     ));
-    assert!(pageformat[10].contains(
-        "must not fabricate a Typst thickness"
-    ));
+    assert!(pageformat[10].contains("must not fabricate a Typst thickness"));
     assert!(pageformat[10].contains(
         "No further bounded pageformat output widening is authorized under #175 without new backend capability or pinned evidence"
     ));
