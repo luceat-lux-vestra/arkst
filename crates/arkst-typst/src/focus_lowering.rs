@@ -1485,6 +1485,7 @@ mod tests {
         );
 
         doc.metadata.document_state.document_type = IrDocumentType::Docs;
+        doc.metadata.document_state.page_margin = None;
         let docs = lower_to_typst_code(&doc);
         assert!(
             docs.starts_with(UNSUPPORTED_DOCS_PAGE_BORDER_PRELUDE),
