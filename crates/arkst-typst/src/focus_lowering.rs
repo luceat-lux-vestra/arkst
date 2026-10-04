@@ -62,6 +62,22 @@ fn lower_composed_page_dimensions(
     ))
 }
 
+fn lower_supported_width_only_page_dimension(
+    dimensions: &IrComposedPageDimensions,
+    output_document_type: IrDocumentType,
+) -> Option<String> {
+    if !matches!(
+        output_document_type,
+        IrDocumentType::Plain | IrDocumentType::Docs
+    ) || dimensions.size.is_some()
+        || dimensions.height.is_some()
+    {
+        return None;
+    }
+
+    dimensions.width.as_ref().map(lowering_base::lower_size)
+}
+
 fn effective_global_page_dimensions(doc: &IrDocument) -> Option<IrComposedPageDimensions> {
     let state = &doc.metadata.document_state;
     let mut dimensions = state.page_format.compose_global_page_dimensions()?;
@@ -527,6 +543,15 @@ fn has_unresolved_selector_free_page_dimensions(doc: &IrDocument) -> bool {
             .is_none();
         let incomplete_explicit_axes = dimensions.width.is_some() != dimensions.height.is_some();
         if incomplete_explicit_axes {
+            let supported_width_only = matches!(
+                state.document_type,
+                IrDocumentType::Plain | IrDocumentType::Docs
+            ) && dimensions.size.is_none()
+                && dimensions.width.is_some()
+                && dimensions.height.is_none();
+            if supported_width_only {
+                return false;
+            }
             return unresolved;
         }
         if matches!(
@@ -586,9 +611,14 @@ fn document_prelude(doc: &IrDocument) -> String {
     let ordered_dimensions = global_dimensions
         .as_ref()
         .and_then(|dimensions| lower_composed_page_dimensions(dimensions, state.document_type));
+    let ordered_width_only = global_dimensions.as_ref().and_then(|dimensions| {
+        lower_supported_width_only_page_dimension(dimensions, state.document_type)
+    });
 
     if let Some((width, height)) = ordered_dimensions {
         prelude.push_str(&format!("#set page(width: {width}, height: {height})\n"));
+    } else if let Some(width) = ordered_width_only {
+        prelude.push_str(&format!("#set page(width: {width})\n"));
     } else if global_dimensions.is_none() && state.page_format.layers.is_empty() {
         // Backward-compatible fallback only for legacy/deserialized IR that
         // predates ordered page-format layers. Once ordered state exists it is
@@ -1006,6 +1036,47 @@ mod tests {
             "{code}"
         );
         assert!(!code.starts_with("#set page(width:"), "{code}");
+    }
+
+    #[test]
+    fn final_plain_and_docs_lower_supported_width_only_page_dimension() {
+        for document_type in [IrDocumentType::Plain, IrDocumentType::Docs] {
+            let mut doc = document(document_type, None, None);
+            doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer {
+                width: Some(IrSize {
+                    value: 8.0,
+                    unit: IrSizeUnit::In,
+                }),
+                ..IrPageFormatLayer::default()
+            }];
+
+            let code = lower_to_typst_code(&doc);
+            assert!(code.starts_with("#set page(width: 8in)\n"), "{code}");
+            assert!(
+                !code.starts_with(UNRESOLVED_SELECTOR_FREE_PAGE_DIMENSIONS_PRELUDE),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn final_plain_and_docs_keep_height_only_page_dimension_fail_closed() {
+        for document_type in [IrDocumentType::Plain, IrDocumentType::Docs] {
+            let mut doc = document(document_type, None, None);
+            doc.metadata.document_state.page_format.layers = vec![IrPageFormatLayer {
+                height: Some(IrSize {
+                    value: 8.0,
+                    unit: IrSizeUnit::In,
+                }),
+                ..IrPageFormatLayer::default()
+            }];
+
+            let code = lower_to_typst_code(&doc);
+            assert!(
+                code.starts_with(UNRESOLVED_SELECTOR_FREE_PAGE_DIMENSIONS_PRELUDE),
+                "{code}"
+            );
+        }
     }
 
     #[test]
