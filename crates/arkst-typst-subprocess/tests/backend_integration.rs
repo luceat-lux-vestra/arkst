@@ -363,7 +363,6 @@ fn integration_non_paged_page_selector_fails_closed_at_typst_boundary() {
 #[test]
 fn integration_slides_selector_free_page_border_defaults_fail_closed_at_typst_boundary() {
     let source = ".doctype {slides}\n\
-.pageformat margin:{1cm}\n\
 .pageformat bordertop:{1pt}\n\
 Incomplete slide border output\n";
     let project = VirtualProjectBuilder::new()
@@ -383,7 +382,7 @@ Incomplete slide border output\n";
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(
         typst_code.starts_with(
-            "#panic(\"Arkst cannot lower selector-free page border without explicit margin, border widths, and border color\")\n"
+            "#panic(\"Arkst cannot lower selector-free slide border without explicit border widths and border color\")\n"
         ),
         "{typst_code}"
     );
@@ -398,7 +397,7 @@ Incomplete slide border output\n";
         let message = error.to_string();
         assert!(
             message.contains(
-                "selector-free page border without explicit margin, border widths, and border color"
+                "selector-free slide border without explicit border widths and border color"
             ),
             "{message}"
         );
@@ -1444,7 +1443,6 @@ Nullable axis output\n";
 #[test]
 fn integration_pageformat_explicit_border_lowers_on_slides_to_valid_typst_and_pdf() {
     let source = ".doctype {slides}\n\
-.pageformat margin:{1cm 2cm 3cm 4cm}\n\
 .pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
 Slide border output\n";
     let project = VirtualProjectBuilder::new()
@@ -1466,9 +1464,15 @@ Slide border output\n";
         typst_code.contains("#set page(foreground: place("),
         "{typst_code}"
     );
+    assert!(typst_code.contains("dx: 0pt"), "{typst_code}");
+    assert!(typst_code.contains("dy: 0pt"), "{typst_code}");
     assert!(
-        typst_code.contains("width: (100% - 4cm - 2cm)"),
+        typst_code.contains("width: (100% - 0pt - 0pt)"),
         "{typst_code}"
+    );
+    assert!(
+        !typst_code.contains("#set page(margin:"),
+        "slide border output must not invent a slide page inset: {typst_code}"
     );
     assert!(
         typst_code.contains("top: (paint: rgb(255, 0, 0, 100%), thickness: 1pt)"),
@@ -2054,6 +2058,45 @@ fn integration_pageformat_margin_lowers_to_valid_typst_and_pdf() {
                 entry_path: "pageformat-margin.qd".to_string(),
             })
             .expect("pageformat margin Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_pageformat_slides_global_margin_is_renderer_noop() {
+    let source = ".doctype {slides}\n\
+.pageformat margin:{1cm 2mm 3pt 8px}\n\
+Slide margin runtime contract\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-slides-margin-noop.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-slides-margin-noop.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "pageformat slides-margin diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        !typst_code.contains("#set page(margin:"),
+        "pinned slide runtime does not consume global margin into the slide frame: {typst_code}"
+    );
+
+    with_typst("pageformat-slides-margin-noop", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-slides-margin-noop.qd".to_string(),
+            })
+            .expect("slide margin no-op Typst must compile");
         assert!(output
             .pdf
             .expect("PDF output must be present")
