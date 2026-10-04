@@ -735,7 +735,9 @@ fn document_prelude(doc: &IrDocument) -> String {
         Some(IrDocumentAlignment::End) if state.document_type != IrDocumentType::Slides => {
             prelude.push_str("#set align(end)\n");
         }
-        Some(IrDocumentAlignment::Start | IrDocumentAlignment::Center | IrDocumentAlignment::End)
+        Some(
+            IrDocumentAlignment::Start | IrDocumentAlignment::Center | IrDocumentAlignment::End,
+        )
         | None => {}
     }
     if state.document_type == IrDocumentType::Slides {
