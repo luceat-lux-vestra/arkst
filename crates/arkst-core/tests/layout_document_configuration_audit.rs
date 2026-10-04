@@ -322,7 +322,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("plain/paged require explicit margin, widths, and color"));
     assert!(pageformat[10].contains("slides requires explicit widths and color"));
     assert!(pageformat[10].contains("full Reveal frame with zero inset"));
-    assert!(pageformat[10].contains("without fabricating renderer defaults"));
+    assert!(pageformat[10].contains("without fabricating unresolved renderer defaults"));
     assert!(pageformat[10].contains("ordered page-format state exists"));
     assert!(pageformat[10].contains("exact global selector group in source order"));
     assert!(pageformat[10].contains("flattened border fields are a legacy fallback only"));
