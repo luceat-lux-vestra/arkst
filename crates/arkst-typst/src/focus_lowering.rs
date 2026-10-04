@@ -490,11 +490,35 @@ fn has_unsupported_scoped_page_layout(doc: &IrDocument) -> bool {
 const UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE: &str =
     "#panic(\"Arkst cannot lower selector-free page border without explicit margin, border widths, and border color\")\n";
 
+const UNSUPPORTED_SLIDES_PAGE_BORDER_DEFAULTS_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-free slide border without explicit border widths and border color\")\n";
+
+fn has_unresolved_selector_free_slide_border_defaults(doc: &IrDocument) -> bool {
+    let state = &doc.metadata.document_state;
+    if state.document_type != IrDocumentType::Slides {
+        return false;
+    }
+
+    if !state.page_format.layers.is_empty() {
+        let Some(global) = state.page_format.resolve_exact_selector(None) else {
+            return false;
+        };
+        let has_border_request = global.border_widths.is_some() || global.border_color.is_some();
+        return has_border_request
+            && (global.border_widths.is_none() || global.border_color.is_none());
+    }
+
+    let has_border_request =
+        state.page_border_widths.is_some() || state.page_border_color.is_some();
+    has_border_request
+        && (state.page_border_widths.is_none() || state.page_border_color.is_none())
+}
+
 fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
     if !matches!(
         state.document_type,
-        IrDocumentType::Plain | IrDocumentType::Paged | IrDocumentType::Slides
+        IrDocumentType::Plain | IrDocumentType::Paged
     ) {
         return false;
     }
@@ -519,17 +543,17 @@ fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
         };
         let has_border_request = global.border_widths.is_some() || global.border_color.is_some();
         return has_border_request
-            && (global.border_widths.is_none()
-                || global.border_color.is_none()
-                || (state.document_type != IrDocumentType::Slides && global.margin.is_none()));
+            && (global.margin.is_none()
+                || global.border_widths.is_none()
+                || global.border_color.is_none());
     }
 
     let has_border_request =
         state.page_border_widths.is_some() || state.page_border_color.is_some();
     has_border_request
-        && (state.page_border_widths.is_none()
-            || state.page_border_color.is_none()
-            || (state.document_type != IrDocumentType::Slides && state.page_margin.is_none()))
+        && (state.page_margin.is_none()
+            || state.page_border_widths.is_none()
+            || state.page_border_color.is_none())
 }
 
 const UNSUPPORTED_SCOPED_PAGE_MARGIN_PRELUDE: &str =
@@ -612,6 +636,9 @@ fn document_prelude(doc: &IrDocument) -> String {
     }
     if has_unsupported_scoped_page_layout(doc) {
         return UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE.to_string();
+    }
+    if has_unresolved_selector_free_slide_border_defaults(doc) {
+        return UNSUPPORTED_SLIDES_PAGE_BORDER_DEFAULTS_PRELUDE.to_string();
     }
     if has_unresolved_selector_free_page_border_defaults(doc) {
         return UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE.to_string();
