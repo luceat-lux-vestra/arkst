@@ -337,9 +337,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10]
         .contains("remaining page-border semantics beyond the selector-free and per-page scoped completeness guards"));
     assert!(pageformat[10].contains(
-        "selector-free implicit-margin/width-only/color-only cases are explicitly backend-rejected"
+        "Unresolved renderer-default width/color (and plain/paged margin) cases are explicitly backend-rejected"
     ));
-    assert!(pageformat[10].contains("instead of silently omitting the requested border"));
+    assert!(pageformat[10].contains("instead of silently fabricating defaults"));
     assert!(pageformat[10].contains("selector-aware alignment/geometry/size/margin/columns output"));
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
