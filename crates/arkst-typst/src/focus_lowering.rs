@@ -1488,26 +1488,36 @@ mod tests {
         assert!(lower_to_typst_code(&doc)
             .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
-        doc.metadata.document_state.page_margin = Some(margins.clone());
+        doc.metadata.document_state.page_margin = None;
         doc.metadata.document_state.page_border_color = None;
         doc.metadata.document_state.document_type = IrDocumentType::Slides;
         let slides_incomplete = lower_to_typst_code(&doc);
         assert!(
-            slides_incomplete.starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE),
+            slides_incomplete.starts_with(UNSUPPORTED_SLIDES_PAGE_BORDER_DEFAULTS_PRELUDE),
             "{slides_incomplete}"
         );
 
         doc.metadata.document_state.page_border_color = Some(color);
         let slides_complete = lower_to_typst_code(&doc);
         assert!(
-            !slides_complete.starts_with(UNSUPPORTED_DOCS_PAGE_BORDER_PRELUDE),
+            !slides_complete.starts_with(UNSUPPORTED_SLIDES_PAGE_BORDER_DEFAULTS_PRELUDE),
             "{slides_complete}"
         );
         assert!(
             slides_complete.contains("#set page(foreground: place("),
             "{slides_complete}"
         );
+        assert!(slides_complete.contains("dx: 0pt"), "{slides_complete}");
+        assert!(
+            slides_complete.contains("width: (100% - 0pt - 0pt)"),
+            "{slides_complete}"
+        );
+        assert!(
+            !slides_complete.contains("#set page(margin:"),
+            "{slides_complete}"
+        );
 
+        doc.metadata.document_state.page_margin = Some(margins.clone());
         doc.metadata.document_state.document_type = IrDocumentType::Plain;
         doc.metadata.document_state.page_border_color = None;
         let plain_incomplete = lower_to_typst_code(&doc);
