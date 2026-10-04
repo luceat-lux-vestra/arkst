@@ -540,6 +540,23 @@ fn captionposition_revalidation_links_existing_slice() {
 }
 
 #[test]
+fn audit_pageformat_plain_docs_width_only_contract_is_explicit() {
+    let pageformat = rows()
+        .into_iter()
+        .find(|row| row[1] == "pageformat")
+        .expect("pageformat row");
+    assert!(pageformat[10].contains("final plain/docs selector-free width-only output is lowered"));
+    assert!(pageformat[11].contains("bounded-plain-docs-width-only-output"));
+    assert!(AUDIT.contains(
+        "pinned public applicability table explicitly permits width while excluding height"
+    ));
+    assert!(AUDIT.contains("height-only remains fail-closed"));
+    assert!(!AUDIT.contains(
+        "plain/docs/slides output has no compatible page-format default"
+    ));
+}
+
+#[test]
 fn audit_pageformat_standard_size_contract_matches_post_510_semantics() {
     assert!(AUDIT.contains("A standard-size base likewise"));
     assert!(AUDIT.contains(
