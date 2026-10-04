@@ -215,7 +215,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9]
         .contains("integration_non_paged_page_selector_fails_closed_at_typst_boundary"));
     assert!(pageformat[9].contains(
-        "integration_non_paged_selector_free_page_border_fails_closed_at_typst_boundary"
+        "integration_pageformat_explicit_border_lowers_on_plain_to_valid_typst_and_pdf"
+    ));
+    assert!(pageformat[9].contains(
+        "integration_docs_selector_free_page_border_fails_closed_at_typst_boundary"
     ));
     assert!(pageformat[9].contains(
         "integration_page_selector_declared_before_paged_doctype_uses_final_document_type"
@@ -392,12 +395,12 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-scoped alignment/size/width/height/columns"));
     assert!(pageformat[10].contains("generated panic before page setup"));
     assert!(pageformat[10].contains(
-        "selector-free explicit-value page borders are supported for final paged and slides output"
+        "selector-free explicit-value page borders are supported for final plain, paged, and slides output"
     ));
     assert!(pageformat[10]
-        .contains("incomplete slide borders sharing the unresolved-default fail-closed guard"));
+        .contains("incomplete border state sharing the unresolved-default fail-closed guard"));
     assert!(pageformat[10]
-        .contains("final plain/docs selector-free borders remain backend-fail-closed"));
+        .contains("final docs selector-free borders remain backend-fail-closed"));
     assert!(pageformat[10].contains("global row/column inheritance consumer"));
     assert!(pageformat[10].contains("merged alignment as canonical"));
     assert!(pageformat[10].contains("flattened page_alignment remains a legacy fallback only"));
@@ -434,7 +437,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("scoped-border-completeness-fail-closed"));
     assert!(pageformat[11].contains("non-paged-selector-backend-fail-closed"));
     assert!(pageformat[11].contains("slides-global-border-output"));
-    assert!(pageformat[11].contains("plain-docs-border-backend-fail-closed"));
+    assert!(pageformat[11].contains("plain-global-border-output"));
+    assert!(pageformat[11].contains("docs-border-backend-fail-closed"));
 }
 
 #[test]
