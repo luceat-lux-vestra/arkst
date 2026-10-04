@@ -281,8 +281,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains(
         "integration_pageformat_explicit_border_lowers_on_slides_to_valid_typst_and_pdf"
     ));
-    assert!(pageformat[9]
-        .contains("integration_pageformat_slides_global_margin_is_renderer_noop"));
+    assert!(pageformat[9].contains("integration_pageformat_slides_global_margin_is_renderer_noop"));
     assert!(pageformat[9].contains(
         "integration_slides_selector_free_page_border_defaults_fail_closed_at_typst_boundary"
     ));
@@ -401,8 +400,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains(
         "selector-free explicit-value page borders are supported for final plain, paged, and slides output"
     ));
-    assert!(pageformat[10]
-        .contains("slides requires widths+color, uses a zero-inset full-slide frame"));
+    assert!(
+        pageformat[10].contains("slides requires widths+color, uses a zero-inset full-slide frame")
+    );
     assert!(pageformat[10].contains("final docs selector-free borders remain backend-fail-closed"));
     assert!(pageformat[10].contains("global row/column inheritance consumer"));
     assert!(pageformat[10].contains("merged alignment as canonical"));
