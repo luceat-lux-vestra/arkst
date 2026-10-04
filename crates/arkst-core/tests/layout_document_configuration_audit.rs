@@ -334,13 +334,17 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10]
         .contains("omitted orientation uses the captured call-time document type preference"));
     assert!(pageformat[10].contains("including docs portrait"));
-    assert!(pageformat[10]
-        .contains("remaining page-border semantics beyond the selector-free and per-page scoped completeness guards"));
     assert!(pageformat[10].contains(
-        "Unresolved renderer-default width/color (and plain/paged margin) cases are explicitly backend-rejected"
+        "selector-aware alignment/geometry/size/margin/columns output is deliberately unsupported at the current Typst boundary"
     ));
-    assert!(pageformat[10].contains("instead of silently fabricating defaults"));
-    assert!(pageformat[10].contains("selector-aware alignment/geometry/size/margin/columns output"));
+    assert!(pageformat[10].contains("must not be approximated with here().page()"));
+    assert!(pageformat[10].contains(
+        "Color-only or otherwise implicit border-width output is likewise intentionally fail-closed"
+    ));
+    assert!(pageformat[10].contains("must not fabricate a Typst thickness"));
+    assert!(pageformat[10].contains(
+        "No further bounded pageformat output widening is authorized under #175 without new backend capability or pinned evidence"
+    ));
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
     assert!(pageformat[10]

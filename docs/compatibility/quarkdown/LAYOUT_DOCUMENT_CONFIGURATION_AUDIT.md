@@ -497,22 +497,27 @@ so the non-paged Typst selector guard ignores it; selector-bearing layers with a
 effective payload remain fail-closed as before. This does not widen selector-aware
 alignment rendering; non-null scoped alignment remains explicitly fail-closed at the
 Typst boundary. Selector-aware output outside the bounded background/border side+range subsets
-remains paged-only at the current Typst boundary, with final non-paged selector state
-explicitly backend-fail-closed. Selector-free explicit-value border requests are supported for final `plain`,
-`paged`, and `slides`. Final `plain`/`paged` require complete margin + widths +
-color; final `slides` requires complete widths + color and draws the pinned full-slide
-frame without using margin. Missing slide width/color defaults fail closed under a
-slide-specific unresolved-default guard, while plain/paged retain the existing
-margin/width/color completeness guard. Final `docs` remains rejected because the pinned
-docs viewport does not apply the content-area border mixin to its main content. Selector-scoped non-paged border
-state remains fail-closed under the existing selector guard. Remaining selector-aware alignment/geometry/size/margin/columns output (with scoped
-alignment/size/width/height/columns explicitly failing closed at the Typst boundary and
-every scoped `paged` margin likewise backend-rejected rather than being consumed only as
-border geometry), page-border semantics
-outside the bounded selector-free and per-page scoped completeness guards, and the
-remaining output consumption stay open, and Typst page objects must not enter evaluator/IR state. Status is
-conservatively `PARTIAL`
-under #175.
+is deliberately unsupported at the current Typst boundary, with final non-paged selector
+state explicitly backend-fail-closed. Selector-scoped size/width/height/columns/margin and
+global/local alignment change page setup or content layout before pagination in pinned
+v2.5.1; Arkst must not approximate those semantics with post-pagination
+`here().page()` inspection. The existing scoped-layout, scoped-alignment, and scoped-margin
+panics are therefore the terminal safety boundary for the current Typst backend, not a
+pending #175 renderer-widening task. Selector-free explicit-value border requests are
+supported for final `plain`, `paged`, and `slides`. Final `plain`/`paged` require
+complete margin + widths + color; final `slides` requires complete widths + color and
+draws the pinned full-slide frame without using margin. Missing slide width/color defaults
+fail closed under a slide-specific unresolved-default guard, while plain/paged retain the
+existing margin/width/color completeness guard. Final `docs` remains rejected because the
+pinned docs viewport does not apply the content-area border mixin to its main content.
+Color-only or otherwise implicit border-width output is also an intentional fail-closed
+boundary: pinned v2.5.1 stores no concrete width for a color-only layer and leaves the HTML
+renderer/CSS variable at `unset`, so Arkst cannot invent a Typst thickness without
+fabricating state. Selector-scoped non-paged border state remains fail-closed under the
+existing selector guard. No further bounded `.pageformat` output widening is authorized
+under #175 without new backend capability or pinned evidence; complete cross-renderer
+v2.5.1 output equivalence therefore remains conservatively `PARTIAL`, and Typst page
+objects must not enter evaluator/IR state.
 
 ### Caption state
 
