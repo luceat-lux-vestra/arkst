@@ -142,7 +142,9 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(AUDIT.contains("No additional #153-owned public callable was found"));
     assert!(AUDIT.contains("A preserved `IrNode::FunctionCall`"));
     assert!(AUDIT.contains("is not a successful setter, typed node, state mutation"));
-    assert!(AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim"));
+    assert!(
+        AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim")
+    );
     assert!(AUDIT.contains("nine conservative `PARTIAL` rows"));
 }
 
