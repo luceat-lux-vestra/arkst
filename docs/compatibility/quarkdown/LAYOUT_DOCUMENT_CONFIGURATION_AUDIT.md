@@ -413,10 +413,12 @@ background/foreground content, and changing a page set rule establishes a new co
 page. Arkst therefore must not approximate selector-scoped size/width/height/columns by
 consulting `here().page()` after pagination. Selector-scoped alignment has a separate
 unsupported boundary. The current bounded selector-free alignment consumers are split by
-the pinned `NodeStyle.TextAlignment` contract: `justify` is local-only and now lowers to
-Typst paragraph justification, while `start`/`center`/`end` continue to determine
-compile-time row/column inherited main-axis alignment but do not yet claim complete
-document-text alignment semantics. Scoped alignment remains retained only in ordered
+the pinned `NodeStyle.TextAlignment` contract: `justify` is local-only and lowers to
+Typst paragraph justification, while `start`/`center`/`end` determine compile-time
+row/column inherited main-axis alignment and now also lower to Typst global alignment for
+final `plain`, `paged`, and `docs`. Final `slides` horizontal document-text alignment
+remains open because it must compose with the existing slide vertical alignment contract
+rather than overwrite it. Scoped alignment remains retained only in ordered
 page-format state and has no selector-aware content-alignment consumer. When ordered
 page-format state exists, both bounded selector-free consumers resolve the exact global
 layer group in source order and treat the merged alignment as canonical; flattened

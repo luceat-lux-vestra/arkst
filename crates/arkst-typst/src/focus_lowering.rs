@@ -719,16 +719,26 @@ fn document_prelude(doc: &IrDocument) -> String {
         let fill = lowering_base::lower_color(&background);
         prelude.push_str(&format!("#set page(fill: {fill})\n"));
     }
-    if matches!(
-        selector_free_page_alignment(doc),
-        Some(IrDocumentAlignment::Justify)
-    ) {
-        // Pinned v2.5.1 treats justify as local text alignment rather than
-        // document-global alignment: paragraphs/list-like text justify while
-        // headings retain the document-type global alignment. Typst paragraph
-        // justification is the bounded output analogue and deliberately does
-        // not broaden start/center/end document-text semantics.
-        prelude.push_str("#set par(justify: true)\n");
+    match selector_free_page_alignment(doc) {
+        Some(IrDocumentAlignment::Justify) => {
+            // Pinned v2.5.1 treats justify as local text alignment rather than
+            // document-global alignment: paragraphs/list-like text justify while
+            // headings retain the document-type global alignment.
+            prelude.push_str("#set par(justify: true)\n");
+        }
+        Some(IrDocumentAlignment::Start) if state.document_type != IrDocumentType::Slides => {
+            prelude.push_str("#set align(start)\n");
+        }
+        Some(IrDocumentAlignment::Center) if state.document_type != IrDocumentType::Slides => {
+            prelude.push_str("#set align(center)\n");
+        }
+        Some(IrDocumentAlignment::End) if state.document_type != IrDocumentType::Slides => {
+            prelude.push_str("#set align(end)\n");
+        }
+        Some(
+            IrDocumentAlignment::Start | IrDocumentAlignment::Center | IrDocumentAlignment::End,
+        )
+        | None => {}
     }
     if state.document_type == IrDocumentType::Slides {
         match state.slides.and_then(|slides| slides.center) {
