@@ -83,6 +83,27 @@ For the 20 #153-owned rows:
 | `NOT_APPLICABLE` | 0 |
 | `UNKNOWN` | 0 |
 
+### #175 final reconciliation snapshot — 2026-10-04
+
+The seven #175-owned configuration surfaces remain intentionally conservative
+under the pinned v2.5.1 target:
+
+| Surface | Canonical status | Current-main boundary |
+|---|---|---|
+| `.numbering` | `PARTIAL` | Typed mutation/IR semantics are present; numbering-aware producers/output and complete default consumption remain downstream consumer work. |
+| `.nonumbering` | `PARTIAL` | Atomic reset semantics are present; observable numbering output remains downstream consumer work. |
+| `.font` | `PARTIAL` | Size-only ordered state is present; family classification/resource registration, fallback/default resolution, and renderer lowering remain unsupported here. |
+| `.paragraphstyle` | `PARTIAL` | Typed partial-merge state is present; renderer/locale defaults and output lowering remain open. |
+| `.pageformat` | `PARTIAL` | The implemented global and bounded decoration slices are retained; selector-scoped pre-pagination layout and unresolved renderer defaults intentionally fail closed at the current Typst boundary. |
+| `.autopagebreak` | `PARTIAL` | Explicit setter semantics are implemented, but current output defaults follow the later v2.6 document-type contract and are not equivalent to pinned v2.5.1's global initial threshold of 1. |
+| `.noautopagebreak` | `PARTIAL` | Explicit zero-disable semantics are implemented, while the same implicit-default version drift prevents a pinned-v2.5.1 end-to-end claim. |
+
+This reconciliation does not downgrade implemented safety or state semantics.
+It prevents later v2.6 adaptation evidence from being misread as pinned-v2.5.1
+equivalence, and it records which remaining gaps are downstream-owned versus
+intentional backend fail-closed boundaries. No row is promoted merely because
+its current implementation is richer than the original audit baseline.
+
 `PARSED_ONLY` is used deliberately for the 11 rows that still have only
 recognition/source-retention evidence. A preserved `IrNode::FunctionCall` or
 inline directive is not a successful setter, typed node, state mutation, or
@@ -639,16 +660,29 @@ or node; status is `PARSED_ONLY` under #176.
 
 #### `.autopagebreak` and `.noautopagebreak`
 
-`autopagebreak(maxdepth: Int)` writes a global context option. The pinned
-option field starts at `1`; effective behavior is document-type/renderer
-dependent. A heading at depth less than or equal to the threshold can force a
-break. Negative values fail before mutation, while zero disables automatic
-breaks. `noautopagebreak()` is the zero-threshold shorthand. These are
-document/pipeline configuration, not component-local layout. Arkst now has a
-typed document-state threshold and bounded heading/page-break consumption in
-the current Typst path, including zero-disable behavior. Complete pinned-v2.5.1
-reconciliation across document types and all error/default cases remains open;
-both rows are `PARTIAL` under #175.
+`autopagebreak(maxdepth: Int)` writes a global context option. At the pinned
+v2.5.1 commit, `MutableContextOptions.autoPageBreakHeadingMaxDepth` is a
+non-null `Int` initialized to `1`; `DocumentType` has no per-document-type
+automatic-page-break default field. The pinned `Context.shouldAutoPageBreak`
+therefore tests a heading against that one current threshold. Negative values
+fail before mutation, zero disables automatic breaks, and
+`noautopagebreak()` is exact shorthand for setting zero.
+
+Arkst implements explicit threshold mutation, negative rollback,
+source-defined shadowing, serde-compatible IR state, top-level-heading
+consumption, weak Typst breaks, and real PDF evidence. However, later v2.6
+adaptation changed the implicit default contract: when no explicit override is
+stored, current Typst lowering derives `plain=0`, `paged=1`, `slides=2`,
+and `docs=0` from the final document type. That behavior is intentionally
+covered by the v2.6 compatibility evidence, but it is not pinned-v2.5.1
+equivalence because v2.5.1 starts from global threshold `1` for every
+document type.
+
+Consequently explicit `.autopagebreak` and `.noautopagebreak` behavior is
+implemented and safely consumed, but the rows remain canonical `PARTIAL`
+rather than `SUPPORTED_END_TO_END`. The residual is an explicit
+version-contract divergence in implicit defaults, not missing setter state or
+a reason to reimplement the existing v2.6 path under #175.
 
 ### Navigation, outline, and table of contents
 
@@ -709,19 +743,24 @@ under #178.
 
 ## 5. Arkst pipeline and architecture boundary
 
-The current path for the 13 still-unresolved rows is:
+The unresolved #153 rows no longer share one uniform pipeline. The 11
+`PARSED_ONLY` rows still follow the unresolved-call path:
 
 ```text
 source call with source span
   -> Markdown/Quarkdown frontend call representation
   -> IrNode::FunctionCall or IrInline::DirectiveCall
-  -> evaluator lookup finds no #153 native owner
+  -> evaluator lookup finds no completed native semantic owner
   -> unresolved call is structurally preserved
-  -> no typed binding/conversion or DocumentState mutation
-  -> no #153-specific IR snapshot
-  -> Typst lowering sees no supported semantic node/state
+  -> no row-specific typed state/node
   -> no rendered output equivalence claim
 ```
+
+The nine `PARTIAL` rows instead have bounded typed semantics and/or output
+evidence and must be judged individually against their recorded residual
+contract. In particular, #175-owned numbering/font/paragraph/page-format and
+automatic-page-break state must not be described as absent merely because
+complete pinned-v2.5.1 end-to-end equivalence is not claimed.
 
 The existing evaluator explicitly preserves unresolved block and inline calls
 with their arguments/body and spans. This is useful compatibility evidence for
@@ -733,21 +772,23 @@ not establish document-wide `.pageformat`, `.font`, `.paragraphstyle`, or
 
 `DocumentState` remains evaluator-owned and shared by callable child contexts.
 In addition to the #152 metadata families and bounded caption state, current
-bounded implementations now carry numbering mutation state,
-automatic-page-break depth, page alignment/geometry, and bounded slides
-configuration. Successful evaluation snapshots those backend-neutral values
-into `IrDocumentState`.
+bounded implementations now carry numbering mutation state, ordered font
+layers, paragraph style, automatic-page-break depth, ordered page-format
+selectors/layers plus compatibility fields, and bounded slides configuration.
+Successful evaluation snapshots those backend-neutral values into
+`IrDocumentState`.
 
 `IrDocumentState` remains immutable, backend-neutral, and serde-serializable.
 The numbering representation stores parsed tokens, source-order mutation
 intent, duplicate `extra` entries, and call-time document type without
-renderer objects. Font layers, paragraph style, full page-format
-selectors/layers, TeX macros, page counters, navigation/TOC derived state, and
-slide transition domains remain absent until their separately owned contracts
-are implemented.
+renderer objects. Font-family/resource identity beyond the bounded size layer,
+locale/renderer paragraph defaults, unsupported page-format renderer cases,
+TeX macros, page counters, navigation/TOC derived state, and slide transition
+domains remain outside the implemented boundary or fail closed as recorded by
+their canonical rows.
 
 Typst lowering consumes normalized IR/state, not unresolved evaluator calls.
-No #153-owned row has complete v2.5.1 output equivalence. Bounded output
+No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim. Bounded output
 evidence does exist for current page geometry/alignment, automatic page breaks,
 and slides/PDF behavior; numbering and caption position intentionally have no
 numbering/caption renderer consumer in this slice.
