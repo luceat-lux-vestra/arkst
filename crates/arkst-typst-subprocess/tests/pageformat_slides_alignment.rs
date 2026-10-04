@@ -92,7 +92,10 @@ fn slides_global_horizontal_alignment_composes_with_explicit_vertical_alignment(
         for (center, vertical) in [(true, "horizon"), (false, "top")] {
             let typst = compile_slides_alignment(alignment, Some(center));
             let expected = format!("#set align({alignment} + {vertical})\n");
-            assert!(typst.contains(&expected), "slides/{alignment}/{center}: {typst}");
+            assert!(
+                typst.contains(&expected),
+                "slides/{alignment}/{center}: {typst}"
+            );
             assert!(
                 !typst.contains(&format!("#set align({alignment})\n")),
                 "horizontal-only rule must not precede composition: {typst}"
