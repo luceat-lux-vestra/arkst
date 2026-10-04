@@ -1064,7 +1064,10 @@ fn integration_pageformat_width_only_final_plain_lowers_to_valid_typst_and_pdf()
     );
 
     let typst_code = lower_to_typst_code(&result.ir);
-    assert!(typst_code.starts_with("#set page(width: 8in)\n"), "{typst_code}");
+    assert!(
+        typst_code.starts_with("#set page(width: 8in)\n"),
+        "{typst_code}"
+    );
     assert!(!typst_code.starts_with("#panic("), "{typst_code}");
 
     with_typst("pageformat-final-plain-width-only", |backend| {
@@ -1099,7 +1102,10 @@ fn integration_pageformat_width_only_final_docs_lowers_to_valid_typst_and_pdf() 
     );
 
     let typst_code = lower_to_typst_code(&result.ir);
-    assert!(typst_code.starts_with("#set page(width: 8in)\n"), "{typst_code}");
+    assert!(
+        typst_code.starts_with("#set page(width: 8in)\n"),
+        "{typst_code}"
+    );
     assert!(!typst_code.starts_with("#panic("), "{typst_code}");
 
     with_typst("pageformat-final-docs-width-only", |backend| {
