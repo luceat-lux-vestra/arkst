@@ -207,7 +207,7 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     let state = &doc.metadata.document_state;
     if !matches!(
         state.document_type,
-        IrDocumentType::Paged | IrDocumentType::Slides
+        IrDocumentType::Plain | IrDocumentType::Paged | IrDocumentType::Slides
     ) {
         return None;
     }
@@ -424,15 +424,12 @@ fn has_unsupported_docs_global_page_layout(doc: &IrDocument) -> bool {
     state.page_margin.is_some() || state.page_columns.is_some()
 }
 
-const UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE: &str =
-    "#panic(\"Arkst cannot lower selector-free page border for a non-paged final document\")\n";
+const UNSUPPORTED_DOCS_PAGE_BORDER_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-free page border for a final docs document\")\n";
 
-fn has_unsupported_non_paged_page_border(doc: &IrDocument) -> bool {
+fn has_unsupported_docs_page_border(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
-    if matches!(
-        state.document_type,
-        IrDocumentType::Paged | IrDocumentType::Slides
-    ) {
+    if state.document_type != IrDocumentType::Docs {
         return false;
     }
 
@@ -476,7 +473,7 @@ fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
     if !matches!(
         state.document_type,
-        IrDocumentType::Paged | IrDocumentType::Slides
+        IrDocumentType::Plain | IrDocumentType::Paged | IrDocumentType::Slides
     ) {
         return false;
     }
@@ -589,8 +586,8 @@ fn document_prelude(doc: &IrDocument) -> String {
     if has_unsupported_docs_global_page_layout(doc) {
         return UNSUPPORTED_DOCS_GLOBAL_PAGE_LAYOUT_PRELUDE.to_string();
     }
-    if has_unsupported_non_paged_page_border(doc) {
-        return UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE.to_string();
+    if has_unsupported_docs_page_border(doc) {
+        return UNSUPPORTED_DOCS_PAGE_BORDER_PRELUDE.to_string();
     }
     if has_unsupported_scoped_page_layout(doc) {
         return UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE.to_string();
@@ -1455,12 +1452,43 @@ mod tests {
         doc.metadata.document_state.page_border_color = Some(color);
         let slides_complete = lower_to_typst_code(&doc);
         assert!(
-            !slides_complete.starts_with(UNSUPPORTED_NON_PAGED_PAGE_BORDER_PRELUDE),
+            !slides_complete.starts_with(UNSUPPORTED_DOCS_PAGE_BORDER_PRELUDE),
             "{slides_complete}"
         );
         assert!(
             slides_complete.contains("#set page(foreground: place("),
             "{slides_complete}"
+        );
+
+        doc.metadata.document_state.document_type = IrDocumentType::Plain;
+        doc.metadata.document_state.page_border_color = None;
+        let plain_incomplete = lower_to_typst_code(&doc);
+        assert!(
+            plain_incomplete.starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE),
+            "{plain_incomplete}"
+        );
+
+        doc.metadata.document_state.page_border_color = Some(IrColor {
+            red: 255,
+            green: 0,
+            blue: 0,
+            alpha: 1.0,
+        });
+        let plain_complete = lower_to_typst_code(&doc);
+        assert!(
+            !plain_complete.starts_with(UNSUPPORTED_DOCS_PAGE_BORDER_PRELUDE),
+            "{plain_complete}"
+        );
+        assert!(
+            plain_complete.contains("#set page(foreground: place("),
+            "{plain_complete}"
+        );
+
+        doc.metadata.document_state.document_type = IrDocumentType::Docs;
+        let docs = lower_to_typst_code(&doc);
+        assert!(
+            docs.starts_with(UNSUPPORTED_DOCS_PAGE_BORDER_PRELUDE),
+            "{docs}"
         );
     }
 
