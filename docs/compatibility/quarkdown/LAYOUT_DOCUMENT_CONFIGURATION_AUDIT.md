@@ -288,8 +288,10 @@ preferred-orientation basis instead of a later `.doctype` mutation: pinned
 `plain`, `paged`, and `docs` prefer portrait while `slides` prefers
 landscape. Because a valid explicit standard-size selection is materialized to complete physical
 geometry for every final document type, it does not depend on final `paged`/`slides`
-applicability. The unresolved-dimension panic is reserved for genuinely incomplete
-explicit-axis state that has neither both axes nor a resolvable standard-size base. Ordered selector-free dimension layers now determine current Typst/PDF
+applicability. The unresolved-dimension panic is reserved for genuinely unsupported or incomplete
+explicit-axis state: final `plain`/`docs` width-only is preserved because the pinned public
+applicability table explicitly supports `width` there, while height-only remains unsupported;
+`paged`/`slides` still require complete geometry or a resolvable standard-size base. Ordered selector-free dimension layers now determine current Typst/PDF
 size-versus-axis precedence. `IrPageFormatState::compose_global_page_dimensions`
 folds only global dimension-bearing layers in source order: a later standard
 size clears both earlier explicit axes, then explicit width/height in that same
@@ -461,9 +463,11 @@ its A4 portrait `defaultPageFormat`, allowing a selector-free width-only or
 height-only layer to inherit the missing axis regardless of the document type
 that was active when the layer was committed. The default is effective state
 only and is not fabricated into the stored `IrPageFormatLayer.size`. Final
-plain/docs/slides output has no compatible page-format default for such an
-incomplete explicit-axis layer, so Arkst fails closed there instead of silently
-dropping the unresolved dimension request. The pinned PageFormatInfo merge contract also makes
+`plain`/`docs` have no page-format default to supply a missing opposite axis, but the
+pinned public applicability table explicitly permits width while excluding height there. Arkst
+therefore lowers a selector-free width-only layer directly as page width for final `plain`/`docs`
+without fabricating a height; height-only remains fail-closed. Final `slides` still requires
+complete geometry or a resolvable standard-size base. The pinned PageFormatInfo merge contract also makes
 `alignment` nullable and applies later-non-null field precedence. Arkst therefore
 treats semantic `.none` alignment as no new override: selector-free state keeps
 the previously committed document alignment, and exact same-selector resolution
