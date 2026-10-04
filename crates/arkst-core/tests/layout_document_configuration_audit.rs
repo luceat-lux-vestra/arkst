@@ -505,9 +505,9 @@ fn audit_final_175_status_reconciliation_is_pinned() {
     assert!(AUDIT.contains("non-null `Int` initialized to `1`"));
     assert!(AUDIT.contains("`DocumentType` has no per-document-type"));
     assert!(AUDIT.contains("later v2.6 adaptation changed the implicit default contract"));
-    assert!(AUDIT.contains(
-        "No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim"
-    ));
+    assert!(
+        AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim")
+    );
     assert!(AUDIT.contains("ordered font"));
     assert!(AUDIT.contains("paragraph style"));
     assert!(AUDIT.contains("ordered page-format"));
