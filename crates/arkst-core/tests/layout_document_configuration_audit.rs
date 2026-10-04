@@ -404,13 +404,13 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         pageformat[10].contains("slides requires widths+color, uses a zero-inset full-slide frame")
     );
     assert!(pageformat[10].contains("final docs selector-free borders remain backend-fail-closed"));
-    assert!(pageformat[10].contains("pinned TextAlignment separates local justify from global start/center/end"));
+    assert!(pageformat[10]
+        .contains("pinned TextAlignment separates local justify from global start/center/end"));
     assert!(pageformat[10].contains(
         "selector-free justify now lowers to Typst paragraph justification without fabricating document-global alignment"
     ));
-    assert!(pageformat[10].contains(
-        "start/center/end remain bounded to row/column inherited main-axis consumption"
-    ));
+    assert!(pageformat[10]
+        .contains("start/center/end remain bounded to row/column inherited main-axis consumption"));
     assert!(pageformat[10].contains("both bounded selector-free alignment consumers"));
     assert!(pageformat[10].contains("merged alignment as canonical"));
     assert!(pageformat[10].contains("flattened page_alignment remains a legacy fallback only"));
