@@ -477,7 +477,10 @@ fn audit_final_175_status_reconciliation_is_pinned() {
             .iter()
             .find(|row| row[1] == name)
             .unwrap_or_else(|| panic!("missing #175 row: {name}"));
-        assert_eq!(row[5], "PARTIAL", "{name} must remain conservatively PARTIAL");
+        assert_eq!(
+            row[5], "PARTIAL",
+            "{name} must remain conservatively PARTIAL"
+        );
         assert!(
             row[11].contains("final-175-status-reconciliation"),
             "{name} missing final #175 reconciliation marker"
