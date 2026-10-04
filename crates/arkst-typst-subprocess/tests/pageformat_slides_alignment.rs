@@ -66,10 +66,7 @@ fn slides_global_horizontal_alignment_preserves_renderer_owned_vertical_default(
             "slides/{alignment}: {typst}"
         );
         assert!(!typst.contains(" + top"), "slides/{alignment}: {typst}");
-        assert!(
-            !typst.contains(" + horizon"),
-            "slides/{alignment}: {typst}"
-        );
+        assert!(!typst.contains(" + horizon"), "slides/{alignment}: {typst}");
 
         with_typst(&format!("slides-{alignment}-default-vertical"), |backend| {
             let output = backend
