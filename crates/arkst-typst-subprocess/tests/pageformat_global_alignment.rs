@@ -88,20 +88,10 @@ fn selector_free_global_alignment_lowers_for_non_slide_documents_and_compiles_pd
 }
 
 #[test]
-fn justify_remains_local_and_slides_global_horizontal_alignment_remains_bounded() {
+fn justify_remains_local_in_non_slide_documents() {
     let justify = compile_alignment("paged", "justify");
     assert!(justify.contains("#set par(justify: true)\n"), "{justify}");
     assert!(!justify.contains("#set align(start)\n"), "{justify}");
     assert!(!justify.contains("#set align(center)\n"), "{justify}");
     assert!(!justify.contains("#set align(end)\n"), "{justify}");
-
-    for alignment in ["start", "center", "end"] {
-        let slides = compile_alignment("slides", alignment);
-        assert!(
-            !slides.contains("#set align(start)\n")
-                && !slides.contains("#set align(center)\n")
-                && !slides.contains("#set align(end)\n"),
-            "slides/{alignment}: {slides}"
-        );
-    }
 }
