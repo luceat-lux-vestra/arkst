@@ -142,7 +142,7 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(AUDIT.contains("No additional #153-owned public callable was found"));
     assert!(AUDIT.contains("A preserved `IrNode::FunctionCall`"));
     assert!(AUDIT.contains("is not a successful setter, typed node, state mutation"));
-    assert!(AUDIT.contains("No #153-owned row has complete v2.5.1 output equivalence"));
+    assert!(AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim"));
     assert!(AUDIT.contains("nine conservative `PARTIAL` rows"));
 }
 
@@ -507,7 +507,7 @@ fn audit_final_175_status_reconciliation_is_pinned() {
     assert!(AUDIT.contains("MutableContextOptions.autoPageBreakHeadingMaxDepth"));
     assert!(AUDIT.contains("non-null `Int` initialized to `1`"));
     assert!(AUDIT.contains("`DocumentType` has no per-document-type"));
-    assert!(AUDIT.contains("later v2.6 adaptation changed the implicit default contract"));
+    assert!(AUDIT.contains("However, later v2.6"));\n    assert!(AUDIT.contains("adaptation changed the implicit default contract"));
     assert!(
         AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim")
     );
