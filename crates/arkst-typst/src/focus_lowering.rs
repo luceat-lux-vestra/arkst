@@ -510,8 +510,7 @@ fn has_unresolved_selector_free_slide_border_defaults(doc: &IrDocument) -> bool 
 
     let has_border_request =
         state.page_border_widths.is_some() || state.page_border_color.is_some();
-    has_border_request
-        && (state.page_border_widths.is_none() || state.page_border_color.is_none())
+    has_border_request && (state.page_border_widths.is_none() || state.page_border_color.is_none())
 }
 
 fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
