@@ -161,6 +161,11 @@ fn lower_page_margins_value(margin: &arkst_ir::IrPageMargins) -> String {
 
 fn selector_free_page_margin(doc: &IrDocument) -> Option<arkst_ir::IrPageMargins> {
     let state = &doc.metadata.document_state;
+    // Pinned v2.5.1 slide rendering never consumes global page-format margin
+    // into the Reveal content box. Do not reinterpret it as a Typst page inset.
+    if state.document_type == IrDocumentType::Slides {
+        return None;
+    }
     if !state.page_format.layers.is_empty() {
         return state
             .page_format
@@ -298,22 +303,38 @@ fn page_border_foreground(doc: &IrDocument) -> Option<String> {
     let (margin, widths, color) = if !state.page_format.layers.is_empty() {
         let global = ordered_global.as_ref()?;
         (
-            global.margin.as_ref()?,
+            global.margin.as_ref(),
             global.border_widths.as_ref()?,
             global.border_color.as_ref()?,
         )
     } else {
         (
-            state.page_margin.as_ref()?,
+            state.page_margin.as_ref(),
             state.page_border_widths.as_ref()?,
             state.page_border_color.as_ref()?,
         )
     };
 
-    let margin_top = lowering_base::lower_size(&margin.top);
-    let margin_right = lowering_base::lower_size(&margin.right);
-    let margin_bottom = lowering_base::lower_size(&margin.bottom);
-    let margin_left = lowering_base::lower_size(&margin.left);
+    // Pinned v2.5.1 applies slide borders directly to the Reveal content frame,
+    // while global slide margin is not consumed by that frame. Preserve margin
+    // in backend-neutral state, but do not use it as a slide border inset.
+    let (margin_top, margin_right, margin_bottom, margin_left) =
+        if state.document_type == IrDocumentType::Slides {
+            (
+                "0pt".to_string(),
+                "0pt".to_string(),
+                "0pt".to_string(),
+                "0pt".to_string(),
+            )
+        } else {
+            let margin = margin?;
+            (
+                lowering_base::lower_size(&margin.top),
+                lowering_base::lower_size(&margin.right),
+                lowering_base::lower_size(&margin.bottom),
+                lowering_base::lower_size(&margin.left),
+            )
+        };
     let border_top = lowering_base::lower_size(&widths.top);
     let border_right = lowering_base::lower_size(&widths.right);
     let border_bottom = lowering_base::lower_size(&widths.bottom);
@@ -469,11 +490,34 @@ fn has_unsupported_scoped_page_layout(doc: &IrDocument) -> bool {
 const UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE: &str =
     "#panic(\"Arkst cannot lower selector-free page border without explicit margin, border widths, and border color\")\n";
 
+const UNSUPPORTED_SLIDES_PAGE_BORDER_DEFAULTS_PRELUDE: &str =
+    "#panic(\"Arkst cannot lower selector-free slide border without explicit border widths and border color\")\n";
+
+fn has_unresolved_selector_free_slide_border_defaults(doc: &IrDocument) -> bool {
+    let state = &doc.metadata.document_state;
+    if state.document_type != IrDocumentType::Slides {
+        return false;
+    }
+
+    if !state.page_format.layers.is_empty() {
+        let Some(global) = state.page_format.resolve_exact_selector(None) else {
+            return false;
+        };
+        let has_border_request = global.border_widths.is_some() || global.border_color.is_some();
+        return has_border_request
+            && (global.border_widths.is_none() || global.border_color.is_none());
+    }
+
+    let has_border_request =
+        state.page_border_widths.is_some() || state.page_border_color.is_some();
+    has_border_request && (state.page_border_widths.is_none() || state.page_border_color.is_none())
+}
+
 fn has_unresolved_selector_free_page_border_defaults(doc: &IrDocument) -> bool {
     let state = &doc.metadata.document_state;
     if !matches!(
         state.document_type,
-        IrDocumentType::Plain | IrDocumentType::Paged | IrDocumentType::Slides
+        IrDocumentType::Plain | IrDocumentType::Paged
     ) {
         return false;
     }
@@ -591,6 +635,9 @@ fn document_prelude(doc: &IrDocument) -> String {
     }
     if has_unsupported_scoped_page_layout(doc) {
         return UNSUPPORTED_SCOPED_PAGE_LAYOUT_PRELUDE.to_string();
+    }
+    if has_unresolved_selector_free_slide_border_defaults(doc) {
+        return UNSUPPORTED_SLIDES_PAGE_BORDER_DEFAULTS_PRELUDE.to_string();
     }
     if has_unresolved_selector_free_page_border_defaults(doc) {
         return UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE.to_string();
@@ -1440,26 +1487,36 @@ mod tests {
         assert!(lower_to_typst_code(&doc)
             .starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE));
 
-        doc.metadata.document_state.page_margin = Some(margins.clone());
+        doc.metadata.document_state.page_margin = None;
         doc.metadata.document_state.page_border_color = None;
         doc.metadata.document_state.document_type = IrDocumentType::Slides;
         let slides_incomplete = lower_to_typst_code(&doc);
         assert!(
-            slides_incomplete.starts_with(UNSUPPORTED_SELECTOR_FREE_PAGE_BORDER_DEFAULTS_PRELUDE),
+            slides_incomplete.starts_with(UNSUPPORTED_SLIDES_PAGE_BORDER_DEFAULTS_PRELUDE),
             "{slides_incomplete}"
         );
 
         doc.metadata.document_state.page_border_color = Some(color);
         let slides_complete = lower_to_typst_code(&doc);
         assert!(
-            !slides_complete.starts_with(UNSUPPORTED_DOCS_PAGE_BORDER_PRELUDE),
+            !slides_complete.starts_with(UNSUPPORTED_SLIDES_PAGE_BORDER_DEFAULTS_PRELUDE),
             "{slides_complete}"
         );
         assert!(
             slides_complete.contains("#set page(foreground: place("),
             "{slides_complete}"
         );
+        assert!(slides_complete.contains("dx: 0pt"), "{slides_complete}");
+        assert!(
+            slides_complete.contains("width: (100% - 0pt - 0pt)"),
+            "{slides_complete}"
+        );
+        assert!(
+            !slides_complete.contains("#set page(margin:"),
+            "{slides_complete}"
+        );
 
+        doc.metadata.document_state.page_margin = Some(margins.clone());
         doc.metadata.document_state.document_type = IrDocumentType::Plain;
         doc.metadata.document_state.page_border_color = None;
         let plain_incomplete = lower_to_typst_code(&doc);

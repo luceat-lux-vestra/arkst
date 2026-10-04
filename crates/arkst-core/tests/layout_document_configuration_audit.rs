@@ -281,6 +281,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[9].contains(
         "integration_pageformat_explicit_border_lowers_on_slides_to_valid_typst_and_pdf"
     ));
+    assert!(pageformat[9].contains("integration_pageformat_slides_global_margin_is_renderer_noop"));
     assert!(pageformat[9].contains(
         "integration_slides_selector_free_page_border_defaults_fail_closed_at_typst_boundary"
     ));
@@ -304,6 +305,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("selector-free global margin"));
     assert!(pageformat[10].contains("1/2/4-value Sizes shorthand"));
     assert!(pageformat[10].contains("selector-free/global margin output"));
+    assert!(pageformat[10].contains("slide-margin documentation/runtime divergence"));
+    assert!(pageformat[10].contains("does not reinterpret it as a Typst page inset"));
     assert!(pageformat[10].contains("merged margin as canonical"));
     assert!(pageformat[10].contains("flattened page_margin is a legacy fallback only"));
     assert!(pageformat[10].contains("selector-free global border/background"));
@@ -316,8 +319,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10].contains("combined side+range margin/border-width/border-color layers"));
     assert!(pageformat[10].contains("independently in source order"));
     assert!(pageformat[10].contains("left/even and right/odd physical-page parity"));
-    assert!(pageformat[10].contains("explicit margin + committed widths + explicit color"));
-    assert!(pageformat[10].contains("without fabricating renderer defaults"));
+    assert!(pageformat[10].contains("plain/paged require explicit margin, widths, and color"));
+    assert!(pageformat[10].contains("slides requires explicit widths and color"));
+    assert!(pageformat[10].contains("full Reveal frame with zero inset"));
+    assert!(pageformat[10].contains("without fabricating unresolved renderer defaults"));
     assert!(pageformat[10].contains("ordered page-format state exists"));
     assert!(pageformat[10].contains("exact global selector group in source order"));
     assert!(pageformat[10].contains("flattened border fields are a legacy fallback only"));
@@ -332,9 +337,9 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[10]
         .contains("remaining page-border semantics beyond the selector-free and per-page scoped completeness guards"));
     assert!(pageformat[10].contains(
-        "selector-free implicit-margin/width-only/color-only cases are explicitly backend-rejected"
+        "Unresolved renderer-default width/color (and plain/paged margin) cases are explicitly backend-rejected"
     ));
-    assert!(pageformat[10].contains("instead of silently omitting the requested border"));
+    assert!(pageformat[10].contains("instead of silently fabricating defaults"));
     assert!(pageformat[10].contains("selector-aware alignment/geometry/size/margin/columns output"));
     assert!(pageformat[10].contains("ordered selector snapshot"));
     assert!(pageformat[10].contains("typed left/right page-side selectors"));
@@ -391,12 +396,13 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         pageformat[10].contains("pinned applicability limits those fields to plain/paged/slides")
     );
     assert!(pageformat[10].contains("selector-scoped alignment/size/width/height/columns"));
-    assert!(pageformat[10].contains("generated panic before page setup"));
+    assert!(pageformat[10].contains("generated panic before output"));
     assert!(pageformat[10].contains(
         "selector-free explicit-value page borders are supported for final plain, paged, and slides output"
     ));
-    assert!(pageformat[10]
-        .contains("incomplete border state sharing the unresolved-default fail-closed guard"));
+    assert!(
+        pageformat[10].contains("slides requires widths+color, uses a zero-inset full-slide frame")
+    );
     assert!(pageformat[10].contains("final docs selector-free borders remain backend-fail-closed"));
     assert!(pageformat[10].contains("global row/column inheritance consumer"));
     assert!(pageformat[10].contains("merged alignment as canonical"));
@@ -434,6 +440,7 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(pageformat[11].contains("scoped-border-completeness-fail-closed"));
     assert!(pageformat[11].contains("non-paged-selector-backend-fail-closed"));
     assert!(pageformat[11].contains("slides-global-border-output"));
+    assert!(pageformat[11].contains("slides-global-margin-runtime-noop"));
     assert!(pageformat[11].contains("plain-global-border-output"));
     assert!(pageformat[11].contains("docs-border-backend-fail-closed"));
 }
