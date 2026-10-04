@@ -406,42 +406,89 @@ Incomplete slide border output\n";
 }
 
 #[test]
-fn integration_non_paged_selector_free_page_border_fails_closed_at_typst_boundary() {
-    let source = ".pageformat margin:{1cm}\n\
+fn integration_pageformat_explicit_border_lowers_on_plain_to_valid_typst_and_pdf() {
+    let source = ".pageformat margin:{1cm 2cm 3cm 4cm}\n\
 .pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
 Plain border output\n";
     let project = VirtualProjectBuilder::new()
-        .entry("pageformat-non-paged-border.qd")
+        .entry("pageformat-plain-border.qd")
         .expect("valid entry path")
-        .add_source("pageformat-non-paged-border.qd", source)
+        .add_source("pageformat-plain-border.qd", source)
         .expect("valid source path")
         .build()
         .expect("valid project");
     let result = compile(&project, &CompileOptions::default());
     assert!(
         result.diagnostics.is_empty(),
-        "non-paged selector-free border diagnostics: {:?}",
+        "plain selector-free border diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#set page(foreground: place("),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("width: (100% - 4cm - 2cm)"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("top: (paint: rgb(255, 0, 0, 100%), thickness: 1pt)"),
+        "{typst_code}"
+    );
+
+    with_typst("pageformat-plain-border", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "pageformat-plain-border.qd".to_string(),
+            })
+            .expect("selector-free plain border Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_docs_selector_free_page_border_fails_closed_at_typst_boundary() {
+    let source = ".doctype {docs}\n\
+.pageformat bordertop:{1pt} borderright:{2pt} borderbottom:{3pt} borderleft:{4pt} bordercolor:{red}\n\
+Docs border output\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("pageformat-docs-border.qd")
+        .expect("valid entry path")
+        .add_source("pageformat-docs-border.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "docs selector-free border diagnostics: {:?}",
         result.diagnostics
     );
 
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(
         typst_code.starts_with(
-            "#panic(\"Arkst cannot lower selector-free page border for a non-paged final document\")\n"
+            "#panic(\"Arkst cannot lower selector-free page border for a final docs document\")\n"
         ),
         "{typst_code}"
     );
 
-    with_typst("pageformat-non-paged-border-fail-closed", |backend| {
+    with_typst("pageformat-docs-border-fail-closed", |backend| {
         let error = backend
             .compile(&TypstInput {
                 source: typst_code,
-                entry_path: "pageformat-non-paged-border.qd".to_string(),
+                entry_path: "pageformat-docs-border.qd".to_string(),
             })
-            .expect_err("selector-free border on a non-paged final document must fail closed");
+            .expect_err("selector-free border on final docs must fail closed");
         let message = error.to_string();
         assert!(
-            message.contains("selector-free page border for a non-paged final document"),
+            message.contains("selector-free page border for a final docs document"),
             "{message}"
         );
     });
