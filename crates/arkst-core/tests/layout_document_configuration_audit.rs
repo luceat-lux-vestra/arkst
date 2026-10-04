@@ -376,8 +376,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         "final paged output therefore inherits the missing axis from A4 portrait regardless of call-time doctype"
     ));
     assert!(pageformat[10].contains("without fabricating size into the stored layer"));
-    assert!(pageformat[10]
-        .contains("final plain/docs/slides unresolved single-axis output fails closed"));
+    assert!(pageformat[10].contains(
+        "final plain/docs selector-free width-only output is lowered without fabricating height"
+    ));
+    assert!(pageformat[10].contains("height-only remains fail-closed"));
     assert!(pageformat[10].contains("selector-scoped mixed size+axis"));
     assert!(pageformat[10].contains("selector-scoped positive columns"));
     assert!(pageformat[10].contains("current Typst/PDF column lowering remains global-only"));
@@ -561,9 +563,11 @@ fn audit_pageformat_standard_size_contract_matches_post_510_semantics() {
         "resolves to closed-domain physical millimeter geometry for every final document type"
     ));
     assert!(AUDIT.contains("(`plain`/`paged`/`docs` portrait, `slides` landscape)"));
-    assert!(AUDIT.contains("The unresolved-dimension panic is reserved for genuinely incomplete"));
     assert!(AUDIT.contains(
-        "explicit-axis state that has neither both axes nor a resolvable standard-size base"
+        "The unresolved-dimension panic is reserved for genuinely unsupported or incomplete"
+    ));
+    assert!(AUDIT.contains(
+        "`paged`/`slides` still require complete geometry or a resolvable standard-size base"
     ));
     assert!(!AUDIT.contains("the standard-size base on final `paged`/`slides` applicability"));
     assert!(!AUDIT.contains("keeps an omitted `docs` basis fail-closed"));
