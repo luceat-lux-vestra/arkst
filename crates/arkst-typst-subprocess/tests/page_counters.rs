@@ -96,17 +96,20 @@ fn plain_and_docs_keep_the_pinned_unresolved_page_counter_placeholder() {
         assert!(typst.contains("Page - of -."), "{document_type}: {typst}");
         assert!(typst.contains("Next -."), "{document_type}: {typst}");
 
-        with_typst(&format!("{document_type}-page-counter-placeholder"), |backend| {
-            let output = backend
-                .compile(&TypstInput {
-                    source: typst,
-                    entry_path: "page-counters.qd".to_string(),
-                })
-                .expect("plain/docs placeholder output must compile");
-            assert!(output
-                .pdf
-                .expect("PDF output must be present")
-                .starts_with(b"%PDF-"));
-        });
+        with_typst(
+            &format!("{document_type}-page-counter-placeholder"),
+            |backend| {
+                let output = backend
+                    .compile(&TypstInput {
+                        source: typst,
+                        entry_path: "page-counters.qd".to_string(),
+                    })
+                    .expect("plain/docs placeholder output must compile");
+                assert!(output
+                    .pdf
+                    .expect("PDF output must be present")
+                    .starts_with(b"%PDF-"));
+            },
+        );
     }
 }
