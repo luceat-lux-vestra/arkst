@@ -799,6 +799,29 @@ impl LoweringContext {
         }
     }
 
+    /// Lower the pinned v2.5.1 page-level formatter/reset state machine.
+    ///
+    /// Quarkdown's HTML handler scans all markers on a physical page before it
+    /// renders any current-page placeholder. Querying by physical page rather
+    /// than mutating a counter at source position preserves that behavior,
+    /// including a marker that appears later in source on the same page.
+    fn lower_current_page_number(&mut self) {
+        self.push_str("#context {\n");
+        self.push_str("  let arkst-page = here().page()\n");
+        self.push_str("  let arkst-resets = query(<arkst-page-number-reset>).filter(it => it.location().page() <= arkst-page and it.value > 0)\n");
+        self.push_str("  let arkst-reset = if arkst-resets.len() > 0 { arkst-resets.last() } else { none }\n");
+        self.push_str("  let arkst-number = if arkst-reset == none { arkst-page } else { arkst-reset.value + arkst-page - arkst-reset.location().page() }\n");
+        self.push_str("  let arkst-formats = query(<arkst-page-number-format>).filter(it => it.location().page() <= arkst-page)\n");
+        self.push_str("  let arkst-format = if arkst-formats.len() > 0 { arkst-formats.last().value } else { \"1\" }\n");
+        self.push_str("  if arkst-format == \"1\" { str(arkst-number) }\n");
+        self.push_str("  else if arkst-format == \"a\" { str.from-unicode(96 + arkst-number) }\n");
+        self.push_str("  else if arkst-format == \"A\" { str.from-unicode(64 + arkst-number) }\n");
+        self.push_str("  else if arkst-format == \"i\" { numbering(\"i\", arkst-number) }\n");
+        self.push_str("  else if arkst-format == \"I\" { numbering(\"I\", arkst-number) }\n");
+        self.push_str("  else { arkst-format }\n");
+        self.push_str("}");
+    }
+
     fn lower_inline(&mut self, inline: &IrInline) {
         match inline {
             IrInline::Text { content, span } => {
@@ -835,14 +858,34 @@ impl LoweringContext {
                 let before = self.output.len();
                 match self.document_type {
                     IrDocumentType::Paged | IrDocumentType::Slides => match target {
-                        IrPageCounterTarget::Current => {
-                            self.push_str("#context counter(page).get().first()");
-                        }
+                        IrPageCounterTarget::Current => self.lower_current_page_number(),
                         IrPageCounterTarget::Total => {
                             self.push_str("#context counter(page).final().first()");
                         }
                     },
                     IrDocumentType::Plain | IrDocumentType::Docs => self.push('-'),
+                }
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrInline::PageNumberFormat { format, span } => {
+                let before = self.output.len();
+                if matches!(self.document_type, IrDocumentType::Paged | IrDocumentType::Slides) {
+                    self.push_str("#metadata(\"");
+                    self.push_str(&escape_typst_string(format));
+                    self.push_str("\") <arkst-page-number-format>");
+                }
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrInline::PageNumberReset { start, span } => {
+                let before = self.output.len();
+                if matches!(self.document_type, IrDocumentType::Paged | IrDocumentType::Slides) {
+                    self.push_str("#metadata(");
+                    self.push_str(&start.to_string());
+                    self.push_str(") <arkst-page-number-reset>");
                 }
                 if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
