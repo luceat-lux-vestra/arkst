@@ -16484,6 +16484,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::ExplicitError { .. }
         | IrInline::Code { .. }
         | IrInline::Whitespace { .. }
+        | IrInline::PageCounter { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
     }
     Some(())
