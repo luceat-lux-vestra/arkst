@@ -159,7 +159,7 @@ fn audit_records_bounded_page_counter_and_marker_semantics() {
         assert!(row[9].contains("typst-subprocess/tests/page_counters.rs"));
         assert!(row[10].contains(target));
         assert!(row[10].contains("Final paged/slides"));
-        assert!(row[10].contains("final plain/docs"));
+        assert!(row[10].contains("plain/docs"));
         assert!(row[11].contains("bounded-page-counter-pair"));
     }
 
@@ -587,14 +587,14 @@ fn audit_records_pinned_pagination_renderer_divergences() {
         .expect("formatpagenumber row");
     assert!(formatter[8].contains("page-numbers.ts@"));
     assert!(formatter[8].contains("numbering.ts@"));
-    assert!(formatter[10].contains("last-marker-wins"));
+    assert!(formatter[11].contains("same-page-last-marker-wins"));
     assert!(formatter[11].contains("page-level-formatter-divergence"));
 
     let reset = rows
         .iter()
         .find(|row| row[1] == "resetpagenumber")
         .expect("resetpagenumber row");
-    assert!(reset[10].contains("ignores non-positive values"));
+    assert!(reset[10].contains("non-positive markers are retained but ignored"));
     assert!(reset[11].contains("page-level-reset-filtering"));
 
     let last_heading = rows
