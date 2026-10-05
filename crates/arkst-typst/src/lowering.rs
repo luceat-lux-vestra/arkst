@@ -809,7 +809,9 @@ impl LoweringContext {
         self.push_str("#context {\n");
         self.push_str("  let arkst-page = here().page()\n");
         self.push_str("  let arkst-resets = query(<arkst-page-number-reset>).filter(it => it.location().page() <= arkst-page and it.value > 0)\n");
-        self.push_str("  let arkst-reset = if arkst-resets.len() > 0 { arkst-resets.last() } else { none }\n");
+        self.push_str(
+            "  let arkst-reset = if arkst-resets.len() > 0 { arkst-resets.last() } else { none }\n",
+        );
         self.push_str("  let arkst-number = if arkst-reset == none { arkst-page } else { arkst-reset.value + arkst-page - arkst-reset.location().page() }\n");
         self.push_str("  let arkst-formats = query(<arkst-page-number-format>).filter(it => it.location().page() <= arkst-page)\n");
         self.push_str("  let arkst-format = if arkst-formats.len() > 0 { arkst-formats.last().value } else { \"1\" }\n");
@@ -871,7 +873,10 @@ impl LoweringContext {
             }
             IrInline::PageNumberFormat { format, span } => {
                 let before = self.output.len();
-                if matches!(self.document_type, IrDocumentType::Paged | IrDocumentType::Slides) {
+                if matches!(
+                    self.document_type,
+                    IrDocumentType::Paged | IrDocumentType::Slides
+                ) {
                     self.push_str("#metadata(\"");
                     self.push_str(&escape_typst_string(format));
                     self.push_str("\") <arkst-page-number-format>");
@@ -882,7 +887,10 @@ impl LoweringContext {
             }
             IrInline::PageNumberReset { start, span } => {
                 let before = self.output.len();
-                if matches!(self.document_type, IrDocumentType::Paged | IrDocumentType::Slides) {
+                if matches!(
+                    self.document_type,
+                    IrDocumentType::Paged | IrDocumentType::Slides
+                ) {
                     self.push_str("#metadata(");
                     self.push_str(&start.to_string());
                     self.push_str(") <arkst-page-number-reset>");
