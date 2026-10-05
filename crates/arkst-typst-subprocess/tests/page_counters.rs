@@ -113,7 +113,6 @@ fn plain_and_docs_keep_the_pinned_unresolved_page_counter_placeholder() {
     }
 }
 
-
 fn lower_marker_document(document_type: &str) -> String {
     let doctype = if document_type == "plain" {
         String::new()
