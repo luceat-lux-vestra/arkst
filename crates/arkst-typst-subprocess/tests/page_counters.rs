@@ -38,9 +38,8 @@ fn lower_document(document_type: &str) -> String {
     } else {
         format!(".doctype {{{document_type}}}\n")
     };
-    let source = format!(
-        "{doctype}Page .currentpage of .totalpages.\n\n.pagebreak\n\nNext .currentpage.\n"
-    );
+    let source =
+        format!("{doctype}Page .currentpage of .totalpages.\n\n.pagebreak\n\nNext .currentpage.\n");
     let project = VirtualProjectBuilder::new()
         .entry("page-counters.qd")
         .expect("valid entry")
