@@ -149,7 +149,10 @@ fn page_counter_rejects_lambda_body_before_evaluating_nested_content() {
     let (evaluated, diagnostics) = Evaluator::new().evaluate(&document);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert!(diagnostics[0].message.contains("lambda"), "{diagnostics:?}");
-    assert!(!diagnostics[0].message.contains("boolean"), "{diagnostics:?}");
+    assert!(
+        !diagnostics[0].message.contains("boolean"),
+        "{diagnostics:?}"
+    );
     assert!(evaluated.nodes.is_empty(), "{evaluated:?}");
 }
 
