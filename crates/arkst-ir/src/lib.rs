@@ -1712,8 +1712,14 @@ enum WireInline {
         target: IrPageCounterTarget,
         span: SourceSpan,
     },
-    PageNumberFormat { format: String, span: SourceSpan },
-    PageNumberReset { start: i32, span: SourceSpan },
+    PageNumberFormat {
+        format: String,
+        span: SourceSpan,
+    },
+    PageNumberReset {
+        start: i32,
+        span: SourceSpan,
+    },
     Emphasis {
         content: Vec<WireInline>,
         span: SourceSpan,
