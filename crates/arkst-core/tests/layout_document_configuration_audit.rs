@@ -129,10 +129,7 @@ fn manifest_is_complete_and_machine_checkable() {
     assert_eq!(rows.iter().filter(|row| row[4] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[4] == "#154").count(), 27);
     assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 11);
-    assert_eq!(
-        rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(),
-        9
-    );
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 9);
     assert!(MANIFEST.contains(BASE_SHA));
     assert!(MANIFEST.contains("captionposition\tcaptionPosition\tcode"));
 }
