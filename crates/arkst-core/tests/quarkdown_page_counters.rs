@@ -159,7 +159,10 @@ fn source_defined_page_counter_names_keep_precedence() {
     let (result, _) = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(result.ir.nodes.len(), 1, "{result:?}");
-    assert_eq!(paragraph_text(&result.ir.nodes[0]), "custom-current custom-total");
+    assert_eq!(
+        paragraph_text(&result.ir.nodes[0]),
+        "custom-current custom-total"
+    );
 }
 
 #[test]
