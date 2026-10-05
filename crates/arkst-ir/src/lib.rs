@@ -271,6 +271,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             }
             IrInline::Text { .. }
             | IrInline::Whitespace { .. }
+            | IrInline::PageCounter { .. }
             | IrInline::Code { .. }
             | IrInline::SoftBreak { .. }
             | IrInline::HardBreak { .. }
@@ -1705,6 +1706,10 @@ enum WireInline {
         height: Option<IrSize>,
         span: SourceSpan,
     },
+    PageCounter {
+        target: IrPageCounterTarget,
+        span: SourceSpan,
+    },
     Emphasis {
         content: Vec<WireInline>,
         span: SourceSpan,
@@ -2108,6 +2113,10 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
         } => WireInline::Whitespace {
             width: width.clone(),
             height: height.clone(),
+            span: *span,
+        },
+        IrInline::PageCounter { target, span } => WireInline::PageCounter {
+            target: *target,
             span: *span,
         },
         IrInline::Emphasis { content, span } => WireInline::Emphasis {
@@ -2574,6 +2583,7 @@ fn wire_inline_to_ir(
             height,
             span,
         },
+        WireInline::PageCounter { target, span } => IrInline::PageCounter { target, span },
         WireInline::Emphasis { content, span } => IrInline::Emphasis {
             content: inlines_from_wire(content, sources)?,
             span,
@@ -2974,6 +2984,14 @@ pub enum IrNode {
     },
 }
 
+/// Backend-neutral page-counter target used by Quarkdown `.currentpage`
+/// and `.totalpages`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrPageCounterTarget {
+    Current,
+    Total,
+}
+
 /// An inline fragment within a block-level IR node.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IrInline {
@@ -2987,6 +3005,12 @@ pub enum IrInline {
     Whitespace {
         width: Option<IrSize>,
         height: Option<IrSize>,
+        span: SourceSpan,
+    },
+    /// Quarkdown page-counter placeholder. The backend decides whether the
+    /// final document type has a pagination runtime capable of resolving it.
+    PageCounter {
+        target: IrPageCounterTarget,
         span: SourceSpan,
     },
     /// Emphasized (italic) inline fragment.
