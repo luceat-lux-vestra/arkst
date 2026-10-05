@@ -7,9 +7,8 @@ use arkst_ir::{
     IrCallSegment, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
     IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
     IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
-    IrPageCounterTarget, IrSize,
-    IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-    IrTaskStatus, IrValue,
+    IrPageCounterTarget, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+    IrTableCell, IrTableRow, IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
