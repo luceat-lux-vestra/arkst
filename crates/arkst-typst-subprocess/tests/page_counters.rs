@@ -57,12 +57,28 @@ fn lower_document(document_type: &str) -> String {
 }
 
 #[test]
-fn paged_and_slides_page_counters_lower_to_typst_logical_page_counters() {
+fn paged_and_slides_page_counters_use_marker_aware_current_and_physical_total() {
     for document_type in ["paged", "slides"] {
         let typst = lower_document(document_type);
         assert!(
-            typst.contains("#context counter(page).get().first()"),
+            typst.contains("let arkst-page = here().page()"),
             "{document_type}: {typst}"
+        );
+        assert!(
+            typst.contains(
+                "query(<arkst-page-number-reset>).filter(it => it.location().page() <= arkst-page and it.value > 0)"
+            ),
+            "{document_type}: {typst}"
+        );
+        assert!(
+            typst.contains(
+                "query(<arkst-page-number-format>).filter(it => it.location().page() <= arkst-page)"
+            ),
+            "{document_type}: {typst}"
+        );
+        assert!(
+            !typst.contains("#context counter(page).get().first()"),
+            "{document_type} current page must flow through the marker-aware state machine: {typst}"
         );
         assert!(
             typst.contains("#context counter(page).final().first()"),
