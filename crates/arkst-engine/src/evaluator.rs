@@ -4772,6 +4772,20 @@ impl Evaluator {
             );
         }
 
+        if is_page_number_marker(name) {
+            return self.evaluate_page_number_marker(
+                name,
+                positional_args,
+                named_args,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+            );
+        }
+
         if is_whitespace(name) {
             return self.evaluate_whitespace(
                 positional_args,
@@ -5620,6 +5634,135 @@ impl Evaluator {
                 target,
                 span: *span,
             }],
+            span: *span,
+        }]))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_page_number_marker(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(function_error(
+                format!("'.{name}' does not accept a lambda body"),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let bound = match bind_evaluated_arguments(
+            binding_plan,
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+            None,
+            *span,
+        ) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let marker = match name {
+            "formatpagenumber" => {
+                let Some(BoundSlot::Explicit {
+                    value: argument,
+                    span: argument_span,
+                }) = bound.slots.into_iter().next()
+                else {
+                    return CallOutcome::Failed;
+                };
+                let format = match builtins::scalar_string_conversion(&argument) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some("format"),
+                                parameter_span,
+                                *span,
+                            ),
+                            Some("'.formatpagenumber'"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                IrInline::PageNumberFormat {
+                    format,
+                    span: *span,
+                }
+            }
+            "resetpagenumber" => {
+                let start = match bound.slots.into_iter().next() {
+                    Some(BoundSlot::Explicit {
+                        value: argument,
+                        span: argument_span,
+                    }) => match value_conversion::convert_integer_with_origin(&argument) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            diagnostics.push(conversion_failure_diagnostic(
+                                value_conversion::ConversionFailure::new(
+                                    error,
+                                    Some(argument_span),
+                                    Some("start"),
+                                    parameter_span,
+                                    *span,
+                                ),
+                                Some("'.resetpagenumber'"),
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    },
+                    Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => 1,
+                };
+                IrInline::PageNumberReset {
+                    start,
+                    span: *span,
+                }
+            }
+            _ => unreachable!("page-number marker owner must validate the function name"),
+        };
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![marker],
             span: *span,
         }]))
     }
@@ -14967,6 +15110,7 @@ pub(crate) enum NativeDispatchOwner {
     Landscape,
     Br,
     PageCounter,
+    PageNumberMarker,
     PageBreak,
     Whitespace,
     StackedLayout,
@@ -15030,6 +15174,7 @@ const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
 const PAGE_COUNTER_NATIVE_NAMES: &[&str] = &["currentpage", "totalpages"];
+const PAGE_NUMBER_MARKER_NATIVE_NAMES: &[&str] = &["formatpagenumber", "resetpagenumber"];
 const PAGE_BREAK_NATIVE_NAMES: &[&str] = &["pagebreak"];
 const WHITESPACE_NATIVE_NAMES: &[&str] = &["whitespace"];
 const STACKED_LAYOUT_NATIVE_NAMES: &[&str] = &["row", "column", "grid"];
@@ -15127,6 +15272,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::PageCounter,
         names: PAGE_COUNTER_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::PageNumberMarker,
+        names: PAGE_NUMBER_MARKER_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::PageBreak,
@@ -15237,6 +15386,10 @@ fn is_br(name: &str) -> bool {
 
 fn is_page_counter(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::PageCounter)
+}
+
+fn is_page_number_marker(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::PageNumberMarker)
 }
 
 fn is_page_break(name: &str) -> bool {
@@ -16485,6 +16638,8 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::Code { .. }
         | IrInline::Whitespace { .. }
         | IrInline::PageCounter { .. }
+        | IrInline::PageNumberFormat { .. }
+        | IrInline::PageNumberReset { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
     }
     Some(())
@@ -16682,6 +16837,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
         "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
         "br" | "currentpage" | "totalpages" => (Vec::new(), BodyPolicy::Reject),
+        "formatpagenumber" => (
+            vec![ParameterMetadata::required("format")],
+            BodyPolicy::Reject,
+        ),
+        "resetpagenumber" => (
+            vec![ParameterMetadata::defaulted("start")],
+            BodyPolicy::Reject,
+        ),
         "align" => (
             vec![ParameterMetadata::required("alignment")],
             BodyPolicy::AllowSeparate,
