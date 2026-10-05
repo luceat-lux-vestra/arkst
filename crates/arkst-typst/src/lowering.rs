@@ -6,9 +6,9 @@
 use arkst_ir::{
     IrCallSegment, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
     IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
-    IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrSize,
-    IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-    IrTaskStatus, IrValue,
+    IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
+    IrPageCounterTarget, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+    IrTableCell, IrTableRow, IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -60,6 +60,9 @@ fn is_local_resource_reference(value: &str) -> bool {
 struct LoweringContext {
     output: String,
     source_map: Vec<SourceMapEntry>,
+    /// Final document type used by output contracts whose runtime behavior
+    /// differs across Quarkdown document kinds.
+    document_type: IrDocumentType,
     /// Current list nesting level (0 = top-level, 1 = nested, etc.)
     list_nesting: usize,
     /// Indentation string for the current list level (used for nested items)
@@ -98,6 +101,7 @@ impl LoweringContext {
         Self {
             output: String::new(),
             source_map: Vec::new(),
+            document_type: IrDocumentType::Plain,
             list_nesting: 0,
             list_indent: String::new(),
             list_item_indent: String::new(),
@@ -121,6 +125,7 @@ impl LoweringContext {
     }
 
     fn lower_document(&mut self, doc: &IrDocument) {
+        self.document_type = doc.metadata.document_state.document_type;
         self.inherited_stack_main_axis = match selector_free_page_alignment(doc) {
             Some(IrDocumentAlignment::Center) => IrMainAxisAlignment::Center,
             Some(IrDocumentAlignment::End) => IrMainAxisAlignment::End,
@@ -821,6 +826,23 @@ impl LoweringContext {
                     self.push_str(", height: ");
                     self.push_str(&lower_size(height.as_ref().unwrap_or(&zero)));
                     self.push_str(")[]");
+                }
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrInline::PageCounter { target, span } => {
+                let before = self.output.len();
+                match self.document_type {
+                    IrDocumentType::Paged | IrDocumentType::Slides => match target {
+                        IrPageCounterTarget::Current => {
+                            self.push_str("#context counter(page).get().first()");
+                        }
+                        IrPageCounterTarget::Total => {
+                            self.push_str("#context counter(page).final().first()");
+                        }
+                    },
+                    IrDocumentType::Plain | IrDocumentType::Docs => self.push('-'),
                 }
                 if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);

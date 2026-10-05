@@ -128,11 +128,8 @@ fn manifest_is_complete_and_machine_checkable() {
     assert_eq!(rows.len(), 47);
     assert_eq!(rows.iter().filter(|row| row[4] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[4] == "#154").count(), 27);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 9);
-    assert_eq!(
-        rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(),
-        11
-    );
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 11);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 9);
     assert!(MANIFEST.contains(BASE_SHA));
     assert!(MANIFEST.contains("captionposition\tcaptionPosition\tcode"));
 }
@@ -145,7 +142,44 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(
         AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim")
     );
-    assert!(AUDIT.contains("nine conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("11 conservative `PARTIAL` rows"));
+}
+
+#[test]
+fn audit_records_bounded_page_counter_pair_without_claiming_formatter_reset() {
+    let rows = rows();
+    for (name, target) in [("currentpage", "CURRENT"), ("totalpages", "TOTAL")] {
+        let row = rows
+            .iter()
+            .find(|row| row[1] == name)
+            .unwrap_or_else(|| panic!("missing page-counter row: {name}"));
+        assert_eq!(row[5], "PARTIAL");
+        assert!(row[9].contains("IrPageCounterTarget"));
+        assert!(row[9].contains("quarkdown_page_counters.rs"));
+        assert!(row[9].contains("typst-subprocess/tests/page_counters.rs"));
+        assert!(row[10].contains(target));
+        assert!(row[10].contains("Final paged/slides"));
+        assert!(row[10].contains("final plain/docs"));
+        assert!(row[11].contains("bounded-page-counter-pair"));
+        assert!(row[11].contains("formatter/reset remains"));
+    }
+
+    for name in ["formatpagenumber", "resetpagenumber"] {
+        let row = rows
+            .iter()
+            .find(|row| row[1] == name)
+            .unwrap_or_else(|| panic!("missing page-number residual row: {name}"));
+        assert_eq!(row[5], "PARSED_ONLY");
+    }
+
+    assert!(AUDIT.contains("IrInline::PageCounter"));
+    assert!(AUDIT.contains("logical `counter(page)` only for final `paged`"));
+    assert!(
+        AUDIT.contains("Final `plain` and `docs` preserve the pinned unresolved `-` placeholder")
+    );
+    assert!(AUDIT.contains(
+        "`.formatpagenumber` and `.resetpagenumber` still lack backend-neutral event/state"
+    ));
 }
 
 #[test]

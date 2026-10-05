@@ -614,9 +614,22 @@ status for both is `PARSED_ONLY` and the grouped pagination follow-up is #176.
 
 #### `.currentpage`, `.totalpages`, `.formatpagenumber`, and `.resetpagenumber`
 
-`.currentpage()` and `.totalpages()` create typed page-counter nodes. Plain
-documents display `-` at rendering time because they do not support page
-counting.
+`.currentpage()` and `.totalpages()` create one typed `PageCounter` inline node with
+closed `CURRENT` / `TOTAL` targets and accept no arguments or body. The pinned HTML
+renderer always emits `-` as the initial placeholder. Its page-number handler is attached
+to paged and slides document implementations and replaces those placeholders after
+pagination; plain keeps the placeholder, and docs inherits the plain document path rather
+than a page-number handler.
+
+Arkst now implements the bounded counter pair as backend-neutral
+`IrInline::PageCounter` + `IrPageCounterTarget`, including no-argument/no-body
+binding, source-defined shadowing, source-span preservation, serde, and source-order inline
+materialization. Typst lowering uses the logical `counter(page)` only for final `paged`
+and `slides`: `CURRENT` reads the current page counter and `TOTAL` reads its final
+value. Final `plain` and `docs` preserve the pinned unresolved `-` placeholder instead
+of fabricating pagination runtime semantics. These two rows are therefore bounded
+`PARTIAL`, not complete page-numbering support; formatter/reset behavior below remains a
+separate #176 residual.
 
 For `.formatpagenumber(format: String)`, the public `Document.kt` KDoc says
 the format accepts the same syntax as `.numbering`, but pinned v2.5.1 HTML
@@ -637,11 +650,10 @@ time rather than rejected by the function; when multiple valid resets occur on
 a page, the last valid marker wins. The reset is therefore page-level for
 observable HTML numbering rather than an intra-page source-position split.
 
-All four return nodes/no direct output at evaluation time. They need
-backend-neutral typed nodes or an equivalent event representation plus
-backend-specific conformance that preserves these page-level precedence and
-renderer rules. Arkst has no such representation or lowering; all four are
-`PARSED_ONLY` under #176.
+`.formatpagenumber` and `.resetpagenumber` still lack backend-neutral event/state
+representation and renderer behavior in Arkst, so both remain `PARSED_ONLY` under #176.
+The bounded current/total counter implementation deliberately does not synthesize either
+formatter or reset semantics.
 
 #### `.lastheading`
 
@@ -756,11 +768,12 @@ source call with source span
   -> no rendered output equivalence claim
 ```
 
-The nine `PARTIAL` rows instead have bounded typed semantics and/or output
+The 11 `PARTIAL` rows instead have bounded typed semantics and/or output
 evidence and must be judged individually against their recorded residual
 contract. In particular, #175-owned numbering/font/paragraph/page-format and
-automatic-page-break state must not be described as absent merely because
-complete pinned-v2.5.1 end-to-end equivalence is not claimed.
+automatic-page-break state plus the #176 bounded current/total page-counter
+pair must not be described as absent merely because complete pinned-v2.5.1
+end-to-end equivalence is not claimed.
 
 The existing evaluator explicitly preserves unresolved block and inline calls
 with their arguments/body and spans. This is useful compatibility evidence for
@@ -884,9 +897,10 @@ follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 ## 8. Audit conclusion
 
 The canonical #153 result remains a 20-row owned inventory. Current status is
-nine conservative `PARTIAL` rows (`captionposition`,
+11 conservative `PARTIAL` rows (`captionposition`,
 `numbering`/`nonumbering`, bounded size-only `font`, `paragraphstyle`,
-bounded `pageformat`, `autopagebreak`/`noautopagebreak`, and bounded
-`slides`) plus 11 `PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
+bounded `pageformat`, bounded `currentpage`/`totalpages`,
+`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 9
+`PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
 or justify a generalized document-wide style system. Residual ownership remains
 #175–#178 and the applicable #154 content/output consumers.

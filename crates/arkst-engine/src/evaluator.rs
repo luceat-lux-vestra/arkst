@@ -62,11 +62,12 @@ use arkst_ir::{
     IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageFormatLayer, IrPageFormatSelector,
-    IrPageFormatState, IrPageGeometry, IrPageMargins, IrPageOrientation, IrPageRange, IrPageSide,
-    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
+    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMargins, IrPageOrientation,
+    IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
+    TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -4761,6 +4762,16 @@ impl Evaluator {
             );
         }
 
+        if is_page_counter(name) {
+            return self.evaluate_page_counter(
+                name,
+                lambda_parameters,
+                span,
+                diagnostics,
+                native_binding_plan.as_ref(),
+            );
+        }
+
         if is_whitespace(name) {
             return self.evaluate_whitespace(
                 positional_args,
@@ -5570,6 +5581,45 @@ impl Evaluator {
         }
         CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
             content: vec![IrInline::HardBreak { span: *span }],
+            span: *span,
+        }]))
+    }
+
+    fn evaluate_page_counter(
+        &self,
+        name: &str,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        binding_plan: Option<&BindingPlan>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if binding_plan
+            .bind::<InvocationValue>(&[], None, *span)
+            .is_err()
+        {
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(function_error(
+                format!("`.{name}` does not accept a lambda body"),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let target = match name {
+            "currentpage" => IrPageCounterTarget::Current,
+            "totalpages" => IrPageCounterTarget::Total,
+            _ => unreachable!("page-counter owner must validate the function name"),
+        };
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::PageCounter {
+                target,
+                span: *span,
+            }],
             span: *span,
         }]))
     }
@@ -14916,6 +14966,7 @@ pub(crate) enum NativeDispatchOwner {
     Container,
     Landscape,
     Br,
+    PageCounter,
     PageBreak,
     Whitespace,
     StackedLayout,
@@ -14978,6 +15029,7 @@ const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
 const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
+const PAGE_COUNTER_NATIVE_NAMES: &[&str] = &["currentpage", "totalpages"];
 const PAGE_BREAK_NATIVE_NAMES: &[&str] = &["pagebreak"];
 const WHITESPACE_NATIVE_NAMES: &[&str] = &["whitespace"];
 const STACKED_LAYOUT_NATIVE_NAMES: &[&str] = &["row", "column", "grid"];
@@ -15071,6 +15123,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Br,
         names: BR_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::PageCounter,
+        names: PAGE_COUNTER_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::PageBreak,
@@ -15177,6 +15233,10 @@ fn is_landscape(name: &str) -> bool {
 
 fn is_br(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Br)
+}
+
+fn is_page_counter(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::PageCounter)
 }
 
 fn is_page_break(name: &str) -> bool {
@@ -16188,6 +16248,7 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
     match inline {
         IrInline::Text { span, .. }
         | IrInline::Whitespace { span, .. }
+        | IrInline::PageCounter { span, .. }
         | IrInline::Emphasis { span, .. }
         | IrInline::Strong { span, .. }
         | IrInline::Strikethrough { span, .. }
@@ -16423,6 +16484,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::ExplicitError { .. }
         | IrInline::Code { .. }
         | IrInline::Whitespace { .. }
+        | IrInline::PageCounter { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
     }
     Some(())
@@ -16619,7 +16681,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
         "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
-        "br" => (Vec::new(), BodyPolicy::Reject),
+        "br" | "currentpage" | "totalpages" => (Vec::new(), BodyPolicy::Reject),
         "align" => (
             vec![ParameterMetadata::required("alignment")],
             BodyPolicy::AllowSeparate,
@@ -16832,7 +16894,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
 }
 
 fn lambda_body_span(name: &str, parameters: Option<&[IrParameter]>) -> Option<SourceSpan> {
-    (name == "br")
+    matches!(name, "br" | "currentpage" | "totalpages")
         .then(|| {
             parameters.and_then(|parameters| parameters.first().map(|parameter| parameter.span))
         })
@@ -20496,6 +20558,7 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
         match inline {
             IrInline::Text { span, .. }
             | IrInline::Whitespace { span, .. }
+            | IrInline::PageCounter { span, .. }
             | IrInline::Code { span, .. }
             | IrInline::SoftBreak { span }
             | IrInline::HardBreak { span }

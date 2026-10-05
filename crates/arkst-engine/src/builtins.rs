@@ -1088,6 +1088,7 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         IrInline::SoftBreak { .. } | IrInline::HardBreak { .. } => output.push('\n'),
         IrInline::DirectiveCall { .. }
         | IrInline::ChainedDirectiveCall { .. }
+        | IrInline::PageCounter { .. }
         | IrInline::RawHtml { .. }
         | IrInline::ExplicitError { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
@@ -1146,6 +1147,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             IrInline::HardBreak { .. } | IrInline::Image { .. } | IrInline::Whitespace { .. } => {}
             IrInline::DirectiveCall { .. }
             | IrInline::ChainedDirectiveCall { .. }
+            | IrInline::PageCounter { .. }
             | IrInline::RawHtml { .. }
             | IrInline::ExplicitError { .. }
             | IrInline::TargetSpecificContent { .. } => {
