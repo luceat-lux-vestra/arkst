@@ -192,9 +192,7 @@ fn audit_records_bounded_page_counter_and_marker_semantics() {
     assert!(AUDIT.contains("last positive reset"));
     assert!(AUDIT.contains("String.fromCharCode"));
     assert!(AUDIT.contains("move from `PARSED_ONLY` to"));
-    assert!(
-        AUDIT.contains("Final `plain` and `docs` emit neither marker runtime")
-    );
+    assert!(AUDIT.contains("Final `plain` and `docs` emit neither marker runtime"));
 }
 
 #[test]
