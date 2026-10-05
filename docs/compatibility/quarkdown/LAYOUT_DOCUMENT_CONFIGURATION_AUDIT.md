@@ -768,11 +768,12 @@ source call with source span
   -> no rendered output equivalence claim
 ```
 
-The nine `PARTIAL` rows instead have bounded typed semantics and/or output
+The 11 `PARTIAL` rows instead have bounded typed semantics and/or output
 evidence and must be judged individually against their recorded residual
 contract. In particular, #175-owned numbering/font/paragraph/page-format and
-automatic-page-break state must not be described as absent merely because
-complete pinned-v2.5.1 end-to-end equivalence is not claimed.
+automatic-page-break state plus the #176 bounded current/total page-counter
+pair must not be described as absent merely because complete pinned-v2.5.1
+end-to-end equivalence is not claimed.
 
 The existing evaluator explicitly preserves unresolved block and inline calls
 with their arguments/body and spans. This is useful compatibility evidence for
