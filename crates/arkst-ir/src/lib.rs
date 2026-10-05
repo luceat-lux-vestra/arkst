@@ -272,6 +272,8 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             IrInline::Text { .. }
             | IrInline::Whitespace { .. }
             | IrInline::PageCounter { .. }
+            | IrInline::PageNumberFormat { .. }
+            | IrInline::PageNumberReset { .. }
             | IrInline::Code { .. }
             | IrInline::SoftBreak { .. }
             | IrInline::HardBreak { .. }
@@ -1710,6 +1712,14 @@ enum WireInline {
         target: IrPageCounterTarget,
         span: SourceSpan,
     },
+    PageNumberFormat {
+        format: String,
+        span: SourceSpan,
+    },
+    PageNumberReset {
+        start: i32,
+        span: SourceSpan,
+    },
     Emphasis {
         content: Vec<WireInline>,
         span: SourceSpan,
@@ -2117,6 +2127,14 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
         },
         IrInline::PageCounter { target, span } => WireInline::PageCounter {
             target: *target,
+            span: *span,
+        },
+        IrInline::PageNumberFormat { format, span } => WireInline::PageNumberFormat {
+            format: format.clone(),
+            span: *span,
+        },
+        IrInline::PageNumberReset { start, span } => WireInline::PageNumberReset {
+            start: *start,
             span: *span,
         },
         IrInline::Emphasis { content, span } => WireInline::Emphasis {
@@ -2584,6 +2602,10 @@ fn wire_inline_to_ir(
             span,
         },
         WireInline::PageCounter { target, span } => IrInline::PageCounter { target, span },
+        WireInline::PageNumberFormat { format, span } => {
+            IrInline::PageNumberFormat { format, span }
+        }
+        WireInline::PageNumberReset { start, span } => IrInline::PageNumberReset { start, span },
         WireInline::Emphasis { content, span } => IrInline::Emphasis {
             content: inlines_from_wire(content, sources)?,
             span,
@@ -3011,6 +3033,22 @@ pub enum IrInline {
     /// final document type has a pagination runtime capable of resolving it.
     PageCounter {
         target: IrPageCounterTarget,
+        span: SourceSpan,
+    },
+    /// Invisible page-level formatter marker produced by `.formatpagenumber`.
+    ///
+    /// Backends with page introspection resolve all formatter markers on the
+    /// containing physical page before rendering any page counter on that page.
+    PageNumberFormat {
+        format: String,
+        span: SourceSpan,
+    },
+    /// Invisible page-level reset marker produced by `.resetpagenumber`.
+    ///
+    /// The authored signed value is retained. Renderer policy decides whether
+    /// it is an applicable reset; pinned v2.5.1 ignores non-positive values.
+    PageNumberReset {
+        start: i32,
         span: SourceSpan,
     },
     /// Emphasized (italic) inline fragment.
