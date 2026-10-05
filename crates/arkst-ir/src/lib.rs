@@ -3033,18 +3033,12 @@ pub enum IrInline {
     ///
     /// Backends with page introspection resolve all formatter markers on the
     /// containing physical page before rendering any page counter on that page.
-    PageNumberFormat {
-        format: String,
-        span: SourceSpan,
-    },
+    PageNumberFormat { format: String, span: SourceSpan },
     /// Invisible page-level reset marker produced by `.resetpagenumber`.
     ///
     /// The authored signed value is retained. Renderer policy decides whether
     /// it is an applicable reset; pinned v2.5.1 ignores non-positive values.
-    PageNumberReset {
-        start: i32,
-        span: SourceSpan,
-    },
+    PageNumberReset { start: i32, span: SourceSpan },
     /// Emphasized (italic) inline fragment.
     Emphasis {
         content: Vec<IrInline>,
