@@ -177,7 +177,9 @@ fn audit_records_bounded_page_counter_pair_without_claiming_formatter_reset() {
 
     assert!(AUDIT.contains("IrInline::PageCounter"));
     assert!(AUDIT.contains("logical `counter(page)` only for final `paged`"));
-    assert!(AUDIT.contains("Final `plain` and `docs` preserve the pinned unresolved `-` placeholder"));
+    assert!(
+        AUDIT.contains("Final `plain` and `docs` preserve the pinned unresolved `-` placeholder")
+    );
     assert!(AUDIT.contains(
         "`.formatpagenumber` and `.resetpagenumber` still lack backend-neutral event/state"
     ));
