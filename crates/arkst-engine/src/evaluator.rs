@@ -5753,10 +5753,7 @@ impl Evaluator {
                     },
                     Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => 1,
                 };
-                IrInline::PageNumberReset {
-                    start,
-                    span: *span,
-                }
+                IrInline::PageNumberReset { start, span: *span }
             }
             _ => unreachable!("page-number marker owner must validate the function name"),
         };
