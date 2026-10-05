@@ -16399,6 +16399,8 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         IrInline::Text { span, .. }
         | IrInline::Whitespace { span, .. }
         | IrInline::PageCounter { span, .. }
+        | IrInline::PageNumberFormat { span, .. }
+        | IrInline::PageNumberReset { span, .. }
         | IrInline::Emphasis { span, .. }
         | IrInline::Strong { span, .. }
         | IrInline::Strikethrough { span, .. }
@@ -20719,6 +20721,8 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             IrInline::Text { span, .. }
             | IrInline::Whitespace { span, .. }
             | IrInline::PageCounter { span, .. }
+            | IrInline::PageNumberFormat { span, .. }
+            | IrInline::PageNumberReset { span, .. }
             | IrInline::Code { span, .. }
             | IrInline::SoftBreak { span }
             | IrInline::HardBreak { span }
