@@ -7,7 +7,8 @@ use arkst_ir::{
     IrCallSegment, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
     IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
     IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
-    IrPageCounterTarget, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+    IrPageCounterTarget, IrPageMarginComponent, IrPageMarginPosition, IrSize, IrSizeUnit,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment,
     IrTableCell, IrTableRow, IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
@@ -55,6 +56,65 @@ fn is_local_resource_reference(value: &str) -> bool {
     }
 
     false
+}
+
+const BOUNDED_FOOTER_LABEL: &str = "arkst-page-margin-bottom-center";
+
+fn nodes_contain_page_margin(nodes: &[IrNode]) -> bool {
+    nodes.iter().any(node_contains_page_margin)
+}
+
+fn node_contains_page_margin(node: &IrNode) -> bool {
+    match node {
+        IrNode::Component {
+            component: IrComponent::PageMargin(_),
+        } => true,
+        IrNode::Component {
+            component:
+                IrComponent::Stacked(IrStackedComponent { children, .. })
+                | IrComponent::Container(IrContainerComponent { children, .. })
+                | IrComponent::Landscape(IrLandscapeComponent { children, .. }),
+        } => nodes_contain_page_margin(children),
+        IrNode::Blockquote { content, .. } => nodes_contain_page_margin(content),
+        IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => items
+            .iter()
+            .any(|item| nodes_contain_page_margin(&item.nodes)),
+        IrNode::FunctionCall { body, .. } | IrNode::ChainedFunctionCall { body, .. } => body
+            .as_deref()
+            .is_some_and(nodes_contain_page_margin),
+        IrNode::FunctionDeclaration { body, .. } => nodes_contain_page_margin(body),
+        IrNode::Heading { .. }
+        | IrNode::Paragraph { .. }
+        | IrNode::Table { .. }
+        | IrNode::CodeBlock { .. }
+        | IrNode::RawHtml { .. }
+        | IrNode::TargetSpecificContent { .. }
+        | IrNode::ThematicBreak { .. }
+        | IrNode::PageBreak { .. }
+        | IrNode::Math { .. }
+        | IrNode::Component {
+            component: IrComponent::ExplicitError(_),
+        } => false,
+    }
+}
+
+fn bounded_footer_prelude(document_type: IrDocumentType, has_footer: bool) -> Option<String> {
+    if !has_footer {
+        return None;
+    }
+    if document_type != IrDocumentType::Paged {
+        return Some(
+            "#panic(\"Arkst bounded footer output currently supports only final paged documents\")\n"
+                .to_string(),
+        );
+    }
+    Some(format!(
+        "#set page(footer: context {{\n\
+  let arkst-page = here().page()\n\
+  let arkst-footers = query(<{BOUNDED_FOOTER_LABEL}>).filter(it => it.location().page() <= arkst-page)\n\
+  if arkst-footers.len() > 0 {{ arkst-footers.last().value }} else {{ none }}\n\
+}})\n"
+    ))
 }
 
 struct LoweringContext {
@@ -133,6 +193,12 @@ impl LoweringContext {
                 IrMainAxisAlignment::Start
             }
         };
+
+        if let Some(prelude) =
+            bounded_footer_prelude(self.document_type, nodes_contain_page_margin(&doc.nodes))
+        {
+            self.push_str(&prelude);
+        }
 
         // Emit metadata as Typst set-rules
         if let Some(ref title) = doc.metadata.title {
@@ -404,7 +470,31 @@ impl LoweringContext {
             IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
             IrComponent::Container(container) => self.lower_container(container),
             IrComponent::Landscape(landscape) => self.lower_landscape(landscape),
+            IrComponent::PageMargin(page_margin) => self.lower_page_margin(page_margin),
             IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
+        }
+    }
+
+    fn lower_page_margin(&mut self, component: &IrPageMarginComponent) {
+        if self.document_type != IrDocumentType::Paged {
+            return;
+        }
+        match component.position {
+            IrPageMarginPosition::BottomCenter => {
+                let before = self.output.len();
+                self.push_str("#metadata([");
+                let saved_item = std::mem::take(&mut self.list_item_indent);
+                for node in &component.children {
+                    self.lower_node(node);
+                }
+                self.list_item_indent = saved_item;
+                self.push_str("]) <");
+                self.push_str(BOUNDED_FOOTER_LABEL);
+                self.push_str(">");
+                if component.span.source_id != SourceId(0) {
+                    self.record_span(component.span, self.output.len() - before);
+                }
+            }
         }
     }
 
