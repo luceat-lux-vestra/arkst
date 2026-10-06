@@ -432,35 +432,106 @@ static PAGE_SIDE_SPEC: ClosedEnumSpec<'static, IrPageSide> = ClosedEnumSpec {
     ],
 };
 
-static PAGE_MARGIN_POSITION_SPEC: ClosedEnumSpec<'static, IrPageMarginPosition> =
-    ClosedEnumSpec {
-        variants: &[
-            ClosedEnumVariant { declaration_name: "TOP_LEFT_CORNER", value: IrPageMarginPosition::TopLeftCorner },
-            ClosedEnumVariant { declaration_name: "TOP_LEFT", value: IrPageMarginPosition::TopLeft },
-            ClosedEnumVariant { declaration_name: "TOP_CENTER", value: IrPageMarginPosition::TopCenter },
-            ClosedEnumVariant { declaration_name: "TOP_RIGHT", value: IrPageMarginPosition::TopRight },
-            ClosedEnumVariant { declaration_name: "TOP_RIGHT_CORNER", value: IrPageMarginPosition::TopRightCorner },
-            ClosedEnumVariant { declaration_name: "RIGHT_TOP", value: IrPageMarginPosition::RightTop },
-            ClosedEnumVariant { declaration_name: "RIGHT_MIDDLE", value: IrPageMarginPosition::RightMiddle },
-            ClosedEnumVariant { declaration_name: "RIGHT_BOTTOM", value: IrPageMarginPosition::RightBottom },
-            ClosedEnumVariant { declaration_name: "BOTTOM_RIGHT_CORNER", value: IrPageMarginPosition::BottomRightCorner },
-            ClosedEnumVariant { declaration_name: "BOTTOM_RIGHT", value: IrPageMarginPosition::BottomRight },
-            ClosedEnumVariant { declaration_name: "BOTTOM_CENTER", value: IrPageMarginPosition::BottomCenter },
-            ClosedEnumVariant { declaration_name: "BOTTOM_LEFT", value: IrPageMarginPosition::BottomLeft },
-            ClosedEnumVariant { declaration_name: "BOTTOM_LEFT_CORNER", value: IrPageMarginPosition::BottomLeftCorner },
-            ClosedEnumVariant { declaration_name: "LEFT_BOTTOM", value: IrPageMarginPosition::LeftBottom },
-            ClosedEnumVariant { declaration_name: "LEFT_MIDDLE", value: IrPageMarginPosition::LeftMiddle },
-            ClosedEnumVariant { declaration_name: "LEFT_TOP", value: IrPageMarginPosition::LeftTop },
-            ClosedEnumVariant { declaration_name: "TOP_OUTSIDE_CORNER", value: IrPageMarginPosition::TopOutsideCorner },
-            ClosedEnumVariant { declaration_name: "TOP_OUTSIDE", value: IrPageMarginPosition::TopOutside },
-            ClosedEnumVariant { declaration_name: "BOTTOM_OUTSIDE_CORNER", value: IrPageMarginPosition::BottomOutsideCorner },
-            ClosedEnumVariant { declaration_name: "BOTTOM_OUTSIDE", value: IrPageMarginPosition::BottomOutside },
-            ClosedEnumVariant { declaration_name: "TOP_INSIDE_CORNER", value: IrPageMarginPosition::TopInsideCorner },
-            ClosedEnumVariant { declaration_name: "TOP_INSIDE", value: IrPageMarginPosition::TopInside },
-            ClosedEnumVariant { declaration_name: "BOTTOM_INSIDE_CORNER", value: IrPageMarginPosition::BottomInsideCorner },
-            ClosedEnumVariant { declaration_name: "BOTTOM_INSIDE", value: IrPageMarginPosition::BottomInside },
-        ],
-    };
+static PAGE_MARGIN_POSITION_SPEC: ClosedEnumSpec<'static, IrPageMarginPosition> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "TOP_LEFT_CORNER",
+            value: IrPageMarginPosition::TopLeftCorner,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TOP_LEFT",
+            value: IrPageMarginPosition::TopLeft,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TOP_CENTER",
+            value: IrPageMarginPosition::TopCenter,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TOP_RIGHT",
+            value: IrPageMarginPosition::TopRight,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TOP_RIGHT_CORNER",
+            value: IrPageMarginPosition::TopRightCorner,
+        },
+        ClosedEnumVariant {
+            declaration_name: "RIGHT_TOP",
+            value: IrPageMarginPosition::RightTop,
+        },
+        ClosedEnumVariant {
+            declaration_name: "RIGHT_MIDDLE",
+            value: IrPageMarginPosition::RightMiddle,
+        },
+        ClosedEnumVariant {
+            declaration_name: "RIGHT_BOTTOM",
+            value: IrPageMarginPosition::RightBottom,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_RIGHT_CORNER",
+            value: IrPageMarginPosition::BottomRightCorner,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_RIGHT",
+            value: IrPageMarginPosition::BottomRight,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_CENTER",
+            value: IrPageMarginPosition::BottomCenter,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_LEFT",
+            value: IrPageMarginPosition::BottomLeft,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_LEFT_CORNER",
+            value: IrPageMarginPosition::BottomLeftCorner,
+        },
+        ClosedEnumVariant {
+            declaration_name: "LEFT_BOTTOM",
+            value: IrPageMarginPosition::LeftBottom,
+        },
+        ClosedEnumVariant {
+            declaration_name: "LEFT_MIDDLE",
+            value: IrPageMarginPosition::LeftMiddle,
+        },
+        ClosedEnumVariant {
+            declaration_name: "LEFT_TOP",
+            value: IrPageMarginPosition::LeftTop,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TOP_OUTSIDE_CORNER",
+            value: IrPageMarginPosition::TopOutsideCorner,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TOP_OUTSIDE",
+            value: IrPageMarginPosition::TopOutside,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_OUTSIDE_CORNER",
+            value: IrPageMarginPosition::BottomOutsideCorner,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_OUTSIDE",
+            value: IrPageMarginPosition::BottomOutside,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TOP_INSIDE_CORNER",
+            value: IrPageMarginPosition::TopInsideCorner,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TOP_INSIDE",
+            value: IrPageMarginPosition::TopInside,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_INSIDE_CORNER",
+            value: IrPageMarginPosition::BottomInsideCorner,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM_INSIDE",
+            value: IrPageMarginPosition::BottomInside,
+        },
+    ],
+};
 
 static CAPTION_POSITION_SPEC: ClosedEnumSpec<'static, IrCaptionPosition> = ClosedEnumSpec {
     variants: &[
@@ -1051,9 +1122,9 @@ pub(crate) fn convert_domain_with_origin(
                 }),
             },
             ClosedEnumTarget::PageMarginPosition => match &argument.value {
-                IrValue::Enum(IrEnumValue::PageMarginPosition(value)) => Ok(DomainValue::Enum(
-                    IrEnumValue::PageMarginPosition(*value),
-                )),
+                IrValue::Enum(IrEnumValue::PageMarginPosition(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::PageMarginPosition(*value)))
+                }
                 IrValue::String(value) | IrValue::Identifier(value)
                     if argument.origin == ValueOrigin::Dynamic =>
                 {
