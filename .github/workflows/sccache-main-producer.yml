@@ -47,11 +47,6 @@ jobs:
         with:
           toolchain: 1.98.0
 
-      - name: Restore dependency-only Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-targets: false
-
       - name: Install Typst 0.15.1 (pinned)
         uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
         with:
@@ -67,7 +62,6 @@ jobs:
           env_hash="$(
             {
               rustc -Vv
-              cargo -V
               printf 'runner_os=%s\n' "$RUNNER_OS"
               printf 'runner_arch=%s\n' "$RUNNER_ARCH"
               printf 'rustflags=%s\n' "$RUSTFLAGS"
