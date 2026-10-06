@@ -567,6 +567,46 @@ fn audit_final_175_status_reconciliation_is_pinned() {
 }
 
 #[test]
+fn audit_records_bounded_page_margin_content_slice() {
+    let rows = rows();
+    for name in ["pagemargin", "footer"] {
+        let row = rows
+            .iter()
+            .find(|row| row[1] == name)
+            .unwrap_or_else(|| panic!("missing page-margin row: {name}"));
+        assert_eq!(row[5], "PARTIAL");
+        assert!(row[9].contains("quarkdown_page_margin_content.rs"));
+        assert!(row[9].contains("typst-subprocess/tests/page_margin_content.rs"));
+        assert!(row[11].contains("bounded-paged-central-repeated-content"));
+    }
+
+    let pagemargin = rows
+        .iter()
+        .find(|row| row[1] == "pagemargin")
+        .expect("pagemargin row");
+    assert!(pagemargin[9].contains("IrPageMarginPosition"));
+    assert!(pagemargin[9].contains("IrNode::PageMarginContent"));
+    assert!(pagemargin[10].contains("All 24 public positions"));
+    assert!(pagemargin[10].contains("same-page last-wins"));
+    assert!(pagemargin[10].contains("other 22 positions"));
+
+    let footer = rows
+        .iter()
+        .find(|row| row[1] == "footer")
+        .expect("footer row");
+    assert!(footer[10].contains("BottomCenter"));
+
+    assert!(AUDIT.contains("16 fixed corner/edge positions plus eight mirrored"));
+    assert!(AUDIT.contains("last same-page initializer wins"));
+    assert!(AUDIT.contains("location().page()"));
+    assert!(AUDIT.contains("current physical `here().page()`"));
+    assert!(AUDIT.contains("other 22"));
+    assert!(AUDIT.contains("final `plain`/`slides`/`docs`"));
+    assert!(AUDIT.contains("15 conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("plus 5"));
+}
+
+#[test]
 fn audit_records_pinned_pagination_renderer_divergences() {
     assert!(AUDIT.contains("does not implement that full grammar"));
     assert!(AUDIT.contains("transforms only the exact strings"));
