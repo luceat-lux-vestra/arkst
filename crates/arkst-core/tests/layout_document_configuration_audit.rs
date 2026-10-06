@@ -641,8 +641,13 @@ fn audit_records_pinned_pagination_renderer_divergences() {
         .iter()
         .find(|row| row[1] == "lastheading")
         .expect("lastheading row");
+    assert_eq!(last_heading[5], "PARTIAL");
     assert!(last_heading[8].contains("persistent-headings.ts@"));
+    assert!(last_heading[9].contains("IrInline::LastHeading"));
+    assert!(last_heading[9].contains("quarkdown_last_heading.rs"));
     assert!(last_heading[10].contains("no call-time depth range validation"));
+    assert!(last_heading[10].contains("page-aware persistent heading history"));
+    assert!(last_heading[11].contains("bounded-lastheading-semantic-node"));
     assert!(last_heading[11].contains("documented-vs-runtime-depth"));
 }
 

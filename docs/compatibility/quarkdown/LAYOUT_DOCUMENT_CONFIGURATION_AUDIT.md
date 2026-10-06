@@ -707,8 +707,19 @@ heading history with `depth - 1` and falls back to empty content when no entry
 exists, including out-of-range or non-positive depths. Therefore 1–6 is a
 documented/intended heading range, not an upstream call-time validation rule
 to reproduce. This behavior is derived from page/heading traversal rather than
-a generic mutable document field. Arkst has no page-aware heading history
-or node; status is `PARSED_ONLY` under #176.
+a generic mutable document field.
+
+Arkst now materializes a typed `IrInline::LastHeading` carrying the authored
+signed Kotlin-`Int`-compatible depth and source span. The evaluator rejects
+the call for final/current `plain` document state, preserves source-defined
+shadowing, and deliberately accepts non-positive and greater-than-six depths
+without a call-time 1-6 range check. Serde round-trip evidence covers the
+backend-neutral node.
+
+The current Typst backend deliberately fails closed for this node rather than
+inventing page-aware history semantics. Persistent heading traversal,
+shallower-heading reset, and the pinned empty fallback therefore remain open;
+the bounded semantic node is `PARTIAL` under #176.
 
 #### `.autopagebreak` and `.noautopagebreak`
 

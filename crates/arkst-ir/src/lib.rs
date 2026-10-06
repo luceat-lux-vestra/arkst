@@ -277,6 +277,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             | IrInline::PageCounter { .. }
             | IrInline::PageNumberFormat { .. }
             | IrInline::PageNumberReset { .. }
+            | IrInline::LastHeading { .. }
             | IrInline::Code { .. }
             | IrInline::SoftBreak { .. }
             | IrInline::HardBreak { .. }
@@ -1762,6 +1763,10 @@ enum WireInline {
         start: i32,
         span: SourceSpan,
     },
+    LastHeading {
+        depth: i32,
+        span: SourceSpan,
+    },
     Emphasis {
         content: Vec<WireInline>,
         span: SourceSpan,
@@ -2186,6 +2191,10 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
         },
         IrInline::PageNumberReset { start, span } => WireInline::PageNumberReset {
             start: *start,
+            span: *span,
+        },
+        IrInline::LastHeading { depth, span } => WireInline::LastHeading {
+            depth: *depth,
             span: *span,
         },
         IrInline::Emphasis { content, span } => WireInline::Emphasis {
@@ -2666,6 +2675,7 @@ fn wire_inline_to_ir(
             IrInline::PageNumberFormat { format, span }
         }
         WireInline::PageNumberReset { start, span } => IrInline::PageNumberReset { start, span },
+        WireInline::LastHeading { depth, span } => IrInline::LastHeading { depth, span },
         WireInline::Emphasis { content, span } => IrInline::Emphasis {
             content: inlines_from_wire(content, sources)?,
             span,
@@ -3114,6 +3124,11 @@ pub enum IrInline {
     /// The authored signed value is retained. Renderer policy decides whether
     /// it is an applicable reset; pinned v2.5.1 ignores non-positive values.
     PageNumberReset { start: i32, span: SourceSpan },
+    /// Page-aware persistent heading lookup produced by `.lastheading`.
+    ///
+    /// The authored signed depth is retained without a call-time 1-6 range
+    /// restriction. Backends own heading-history traversal and empty fallback.
+    LastHeading { depth: i32, span: SourceSpan },
     /// Emphasized (italic) inline fragment.
     Emphasis {
         content: Vec<IrInline>,

@@ -930,6 +930,15 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::LastHeading { span, .. } => {
+                let before = self.output.len();
+                self.push_str(
+                    "#panic(\"Arkst .lastheading requires page-aware heading history that is not implemented by the Typst backend\")",
+                );
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrInline::ExplicitError { component } => {
                 self.lower_inline_explicit_error(component);
             }

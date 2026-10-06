@@ -4802,6 +4802,19 @@ impl Evaluator {
             );
         }
 
+        if is_last_heading(name) {
+            return self.evaluate_last_heading(
+                positional_args,
+                named_args,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+            );
+        }
+
         if is_whitespace(name) {
             return self.evaluate_whitespace(
                 positional_args,
@@ -5911,6 +5924,104 @@ impl Evaluator {
 
         CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
             content: vec![marker],
+            span: *span,
+        }]))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_last_heading(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if context.document_state.borrow().document_type == arkst_ir::IrDocumentType::Plain {
+            diagnostics.push(document_state_conversion_error(
+                "`.lastheading` is not available for plain documents".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(function_error(
+                "`.lastheading` does not accept a lambda body".to_string(),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let bound = match bind_evaluated_arguments(
+            binding_plan,
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+            None,
+            *span,
+        ) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let Some(BoundSlot::Explicit {
+            value: argument,
+            span: argument_span,
+        }) = bound.slots.into_iter().next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let depth = match value_conversion::convert_integer_with_origin(&argument) {
+            Ok(value) => value,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(argument_span),
+                        Some("depth"),
+                        parameter_span,
+                        *span,
+                    ),
+                    Some("`.lastheading`"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::LastHeading { depth, span: *span }],
             span: *span,
         }]))
     }
@@ -15260,6 +15371,7 @@ pub(crate) enum NativeDispatchOwner {
     PageMargin,
     PageCounter,
     PageNumberMarker,
+    LastHeading,
     PageBreak,
     Whitespace,
     StackedLayout,
@@ -15325,6 +15437,7 @@ const BR_NATIVE_NAMES: &[&str] = &["br"];
 const PAGE_MARGIN_NATIVE_NAMES: &[&str] = &["pagemargin", "footer"];
 const PAGE_COUNTER_NATIVE_NAMES: &[&str] = &["currentpage", "totalpages"];
 const PAGE_NUMBER_MARKER_NATIVE_NAMES: &[&str] = &["formatpagenumber", "resetpagenumber"];
+const LAST_HEADING_NATIVE_NAMES: &[&str] = &["lastheading"];
 const PAGE_BREAK_NATIVE_NAMES: &[&str] = &["pagebreak"];
 const WHITESPACE_NATIVE_NAMES: &[&str] = &["whitespace"];
 const STACKED_LAYOUT_NATIVE_NAMES: &[&str] = &["row", "column", "grid"];
@@ -15430,6 +15543,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::PageNumberMarker,
         names: PAGE_NUMBER_MARKER_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::LastHeading,
+        names: LAST_HEADING_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::PageBreak,
@@ -15548,6 +15665,10 @@ fn is_page_counter(name: &str) -> bool {
 
 fn is_page_number_marker(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::PageNumberMarker)
+}
+
+fn is_last_heading(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::LastHeading)
 }
 
 fn is_page_break(name: &str) -> bool {
@@ -17008,6 +17129,10 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "resetpagenumber" => (
             vec![ParameterMetadata::defaulted("start")],
+            BodyPolicy::Reject,
+        ),
+        "lastheading" => (
+            vec![ParameterMetadata::required("depth")],
             BodyPolicy::Reject,
         ),
         "align" => (
