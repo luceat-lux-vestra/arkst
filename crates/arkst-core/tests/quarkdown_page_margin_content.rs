@@ -17,7 +17,10 @@ fn page_margin(result: &arkst_core::CompileResult) -> (&IrPageMarginPosition, &[
         position, children, ..
     }] = result.ir.nodes.as_slice()
     else {
-        panic!("expected one page-margin initializer, got {:?}", result.ir.nodes);
+        panic!(
+            "expected one page-margin initializer, got {:?}",
+            result.ir.nodes
+        );
     };
     (position, children)
 }
@@ -43,11 +46,17 @@ fn page_margin_position_domain_materializes_all_pinned_variants() {
         ("lefttop", IrPageMarginPosition::LeftTop),
         ("topoutsidecorner", IrPageMarginPosition::TopOutsideCorner),
         ("topoutside", IrPageMarginPosition::TopOutside),
-        ("bottomoutsidecorner", IrPageMarginPosition::BottomOutsideCorner),
+        (
+            "bottomoutsidecorner",
+            IrPageMarginPosition::BottomOutsideCorner,
+        ),
         ("bottomoutside", IrPageMarginPosition::BottomOutside),
         ("topinsidecorner", IrPageMarginPosition::TopInsideCorner),
         ("topinside", IrPageMarginPosition::TopInside),
-        ("bottominsidecorner", IrPageMarginPosition::BottomInsideCorner),
+        (
+            "bottominsidecorner",
+            IrPageMarginPosition::BottomInsideCorner,
+        ),
         ("bottominside", IrPageMarginPosition::BottomInside),
     ];
 
