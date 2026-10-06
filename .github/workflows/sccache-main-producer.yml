@@ -24,7 +24,6 @@ jobs:
     name: ubuntu-final-sccache-producer
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    cache-mode: write
     steps:
       - name: Check out protected main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
