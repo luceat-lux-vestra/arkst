@@ -16683,6 +16683,7 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::PageCounter { span, .. }
         | IrInline::PageNumberFormat { span, .. }
         | IrInline::PageNumberReset { span, .. }
+        | IrInline::LastHeading { span, .. }
         | IrInline::Emphasis { span, .. }
         | IrInline::Strong { span, .. }
         | IrInline::Strikethrough { span, .. }
@@ -16921,6 +16922,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::PageCounter { .. }
         | IrInline::PageNumberFormat { .. }
         | IrInline::PageNumberReset { .. }
+        | IrInline::LastHeading { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
     }
     Some(())
@@ -21018,6 +21020,7 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             | IrInline::PageCounter { span, .. }
             | IrInline::PageNumberFormat { span, .. }
             | IrInline::PageNumberReset { span, .. }
+            | IrInline::LastHeading { span, .. }
             | IrInline::Code { span, .. }
             | IrInline::SoftBreak { span }
             | IrInline::HardBreak { span }
