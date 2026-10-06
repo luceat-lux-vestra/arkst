@@ -63,12 +63,11 @@ use arkst_ir::{
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
     IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
-    IrPageMarginComponent, IrPageMarginPosition,
-    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMargins, IrPageOrientation,
-    IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
-    TargetSpecificContent,
+    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginComponent,
+    IrPageMarginPosition, IrPageMargins, IrPageOrientation, IrPageRange, IrPageSide,
+    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
+    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -3877,10 +3876,7 @@ impl Evaluator {
             return Vec::new();
         }
         if is_footer(name) && context.get_function(name).is_none() {
-            diagnostics.push(function_error(
-                "`.footer` is block-only".to_string(),
-                *span,
-            ));
+            diagnostics.push(function_error("`.footer` is block-only".to_string(), *span));
             return Vec::new();
         }
         let unit_is_observable_value_reference = is_variable_reference_call(
