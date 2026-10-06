@@ -2400,13 +2400,11 @@ fn component_to_wire(
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
-        IrComponent::PageMargin(component) => {
-            WireComponent::PageMargin(WirePageMarginComponent {
-                position: component.position,
-                children: wire_nodes(&component.children, sources)?,
-                span: component.span,
-            })
-        }
+        IrComponent::PageMargin(component) => WireComponent::PageMargin(WirePageMarginComponent {
+            position: component.position,
+            children: wire_nodes(&component.children, sources)?,
+            span: component.span,
+        }),
         IrComponent::ExplicitError(component) => WireComponent::ExplicitError(component.clone()),
     })
 }
