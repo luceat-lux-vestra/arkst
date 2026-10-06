@@ -227,6 +227,9 @@ fn collect_component_sources(
         IrComponent::Landscape(component) => {
             collect_document_sources(&component.children, sources)?;
         }
+        IrComponent::PageMargin(component) => {
+            collect_document_sources(&component.children, sources)?;
+        }
         IrComponent::ExplicitError(_) => {}
     }
     Ok(())
@@ -1347,6 +1350,7 @@ pub enum IrComponent {
     Stacked(IrStackedComponent),
     Container(IrContainerComponent),
     Landscape(IrLandscapeComponent),
+    PageMargin(IrPageMarginComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
 
@@ -1357,6 +1361,7 @@ impl IrComponent {
             Self::Stacked(component) => component.span,
             Self::Container(component) => component.span,
             Self::Landscape(component) => component.span,
+            Self::PageMargin(component) => component.span,
             Self::ExplicitError(component) => component.span,
         }
     }
@@ -1382,6 +1387,28 @@ pub struct IrExplicitErrorComponent {
 /// angle, page, and backend-specific rendering details stay out of the IR.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrLandscapeComponent {
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
+/// Bounded page-margin positions currently published by native semantics.
+///
+/// The first #176 slice implements `.footer`, which is pinned upstream as
+/// exact sugar for `.pagemargin(bottomcenter, ...)`. General page-margin
+/// position conversion, including mirrored inside/outside positions, remains
+/// a later #176 slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrPageMarginPosition {
+    BottomCenter,
+}
+
+/// Backend-neutral repeated page-margin content.
+///
+/// The children remain ordinary structured document content. Physical-page
+/// repetition and final-document-type applicability are renderer concerns.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrPageMarginComponent {
+    pub position: IrPageMarginPosition,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -1859,6 +1886,7 @@ enum WireComponent {
     Stacked(WireStackedComponent),
     Container(WireContainerComponent),
     Landscape(WireLandscapeComponent),
+    PageMargin(WirePageMarginComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
 
@@ -1897,6 +1925,13 @@ struct WireContainerComponent {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireLandscapeComponent {
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WirePageMarginComponent {
+    position: IrPageMarginPosition,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2365,6 +2400,13 @@ fn component_to_wire(
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
+        IrComponent::PageMargin(component) => {
+            WireComponent::PageMargin(WirePageMarginComponent {
+                position: component.position,
+                children: wire_nodes(&component.children, sources)?,
+                span: component.span,
+            })
+        }
         IrComponent::ExplicitError(component) => WireComponent::ExplicitError(component.clone()),
     })
 }
@@ -2818,6 +2860,11 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::Landscape(component) => IrComponent::Landscape(IrLandscapeComponent {
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+        WireComponent::PageMargin(component) => IrComponent::PageMargin(IrPageMarginComponent {
+            position: component.position,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
