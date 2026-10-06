@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: arkst-525-sccache-benchmark-\${{ github.sha }}
+  group: arkst-525-sccache-benchmark-${{ github.sha }}
   cancel-in-progress: false
 
 env:
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
-      cache_key: \${{ steps.cache-id.outputs.key }}
+      cache_key: ${{ steps.cache-id.outputs.key }}
     steps:
       - name: Check out experiment
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
           toolchain_hash="$(sha256sum rust-toolchain.toml | awk '{print $1}')"
           lock_hash="$(sha256sum Cargo.lock | awk '{print $1}')"
-          key="arkst-525-sccache-v1-linux-\${toolchain_hash}-\${lock_hash}-\${SOURCE_BASE_SHA}"
+          key="arkst-525-sccache-v1-linux-${toolchain_hash}-${lock_hash}-${SOURCE_BASE_SHA}"
           echo "key=$key" >> "$GITHUB_OUTPUT"
           echo "compiler cache key: $key"
 
@@ -72,11 +72,11 @@ jobs:
         id: restore-sccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: \${{ runner.temp }}/arkst-525-sccache
-          key: \${{ steps.cache-id.outputs.key }}
+          path: ${{ runner.temp }}/arkst-525-sccache
+          key: ${{ steps.cache-id.outputs.key }}
 
       - name: Install verified sccache 0.18.0
-        if: \${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
+        if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -100,10 +100,10 @@ jobs:
           PY
 
       - name: Prime exact-source compiler outputs
-        if: \${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
+        if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
         shell: bash
         env:
-          SCCACHE_DIR: \${{ runner.temp }}/arkst-525-sccache
+          SCCACHE_DIR: ${{ runner.temp }}/arkst-525-sccache
           RUSTC_WRAPPER: sccache
         run: |
           set -euo pipefail
@@ -130,7 +130,7 @@ jobs:
           PY
 
       - name: Record prime cache size
-        if: \${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
+        if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -139,11 +139,11 @@ jobs:
           du -sh "$RUNNER_TEMP/arkst-525-sccache" | tee "$BENCH_DIR/prime-cache-size-human.txt"
 
       - name: Save exact experiment compiler cache
-        if: \${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
+        if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: \${{ runner.temp }}/arkst-525-sccache
-          key: \${{ steps.cache-id.outputs.key }}
+          path: ${{ runner.temp }}/arkst-525-sccache
+          key: ${{ steps.cache-id.outputs.key }}
 
       - name: Retain prime evidence
         if: always()
@@ -155,7 +155,7 @@ jobs:
           retention-days: 30
 
   test:
-    name: paired / replicate \${{ matrix.replicate }} / \${{ matrix.first }}-first
+    name: paired / replicate ${{ matrix.replicate }} / ${{ matrix.first }}-first
     needs: [prime]
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -177,10 +177,10 @@ jobs:
             second: baseline
 
     env:
-      REPLICATE: \${{ matrix.replicate }}
-      ORDER_FIRST: \${{ matrix.first }}
-      ORDER_SECOND: \${{ matrix.second }}
-      SCCACHE_DIR: \${{ runner.temp }}/arkst-525-sccache
+      REPLICATE: ${{ matrix.replicate }}
+      ORDER_FIRST: ${{ matrix.first }}
+      ORDER_SECOND: ${{ matrix.second }}
+      SCCACHE_DIR: ${{ runner.temp }}/arkst-525-sccache
       SCCACHE_LOCAL_RW_MODE: READ_ONLY
 
     steps:
@@ -205,7 +205,7 @@ jobs:
 
       - name: Capture existing GitHub cache inventory
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -257,8 +257,8 @@ jobs:
         id: restore-sccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: \${{ runner.temp }}/arkst-525-sccache
-          key: \${{ needs.prime.outputs.cache_key }}
+          path: ${{ runner.temp }}/arkst-525-sccache
+          key: ${{ needs.prime.outputs.cache_key }}
 
       - name: Prepare identical target seed and environment evidence
         shell: bash
@@ -279,18 +279,18 @@ jobs:
             echo "source_base_sha=$SOURCE_BASE_SHA"
             echo "replicate=$REPLICATE"
             echo "order=$ORDER_FIRST,$ORDER_SECOND"
-            echo "rust_cache_hit=\${{ steps.rust-cache.outputs.cache-hit }}"
-            echo "sccache_cache_hit=\${{ steps.restore-sccache.outputs.cache-hit }}"
+            echo "rust_cache_hit=${{ steps.rust-cache.outputs.cache-hit }}"
+            echo "sccache_cache_hit=${{ steps.restore-sccache.outputs.cache-hit }}"
             echo "runner_os=$RUNNER_OS"
-            echo "image_os=\${ImageOS:-unknown}"
-            echo "image_version=\${ImageVersion:-unknown}"
+            echo "image_os=${ImageOS:-unknown}"
+            echo "image_version=${ImageVersion:-unknown}"
             echo "cpu=$(lscpu | sed -n 's/^Model name:[[:space:]]*//p' | head -1)"
             echo "cores=$(nproc)"
-            echo "CARGO_HOME=\${CARGO_HOME:-}"
-            echo "CARGO_INCREMENTAL=\${CARGO_INCREMENTAL:-}"
-            echo "CARGO_TERM_COLOR=\${CARGO_TERM_COLOR:-}"
-            echo "RUSTFLAGS=\${RUSTFLAGS:-}"
-            echo "RUSTUP_TOOLCHAIN=\${RUSTUP_TOOLCHAIN:-}"
+            echo "CARGO_HOME=${CARGO_HOME:-}"
+            echo "CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-}"
+            echo "CARGO_TERM_COLOR=${CARGO_TERM_COLOR:-}"
+            echo "RUSTFLAGS=${RUSTFLAGS:-}"
+            echo "RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-}"
             rustc -Vv
             cargo -V
             typst --version
@@ -330,10 +330,10 @@ jobs:
             set +e
             ARKST_REQUIRE_TYPST=1 /usr/bin/time \
               -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\nmax_rss_kb=%M' \
-              -o "$BENCH_DIR/\${variant}.time" \
+              -o "$BENCH_DIR/${variant}.time" \
               cargo test --locked --workspace --all-targets --all-features \
-              > >(tee "$BENCH_DIR/\${variant}.log") 2>&1
-            status="\${PIPESTATUS[0]}"
+              > >(tee "$BENCH_DIR/${variant}.log") 2>&1
+            status="${PIPESTATUS[0]}"
             set -e
             end_ns="$(date +%s%N)"
 
@@ -392,8 +392,8 @@ jobs:
               echo
               echo "Order: $ORDER_FIRST -> $ORDER_SECOND"
               echo
-              echo "rust-cache hit: \${{ steps.rust-cache.outputs.cache-hit }}"
-              echo "sccache hit: \${{ steps.restore-sccache.outputs.cache-hit }}"
+              echo "rust-cache hit: ${{ steps.rust-cache.outputs.cache-hit }}"
+              echo "sccache hit: ${{ steps.restore-sccache.outputs.cache-hit }}"
               echo
               echo '~~~json'
               cat "$BENCH_DIR/results.jsonl"
@@ -408,7 +408,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: arkst-525-cache-paired-replicate-\${{ matrix.replicate }}
+          name: arkst-525-cache-paired-replicate-${{ matrix.replicate }}
           path: benchmark-evidence/sccache-rust-cache
           if-no-files-found: error
           retention-days: 30
