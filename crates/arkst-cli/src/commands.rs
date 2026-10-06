@@ -609,6 +609,9 @@ fn collect_unevidenced_explicit_errors_from_node<'a>(
         IrNode::Component {
             component: IrComponent::Landscape(component),
         } => collect_unevidenced_explicit_errors(&component.children, components),
+        IrNode::Component {
+            component: IrComponent::PageMargin(component),
+        } => collect_unevidenced_explicit_errors(&component.children, components),
         IrNode::Blockquote { content, .. } => {
             collect_unevidenced_explicit_errors(content, components);
         }
@@ -664,6 +667,12 @@ fn collect_evidenced_nested_explicit_errors<'a>(
             IrNode::Component {
                 component: IrComponent::Landscape(component),
             } => collect_evidenced_nested_explicit_errors(&component.children, collection),
+            IrNode::Component {
+                component: IrComponent::PageMargin(component),
+            } => collect_unevidenced_explicit_errors(
+                &component.children,
+                &mut collection.unevidenced,
+            ),
             IrNode::Blockquote { content, .. } => {
                 collect_evidenced_nested_explicit_errors(content, collection);
             }
