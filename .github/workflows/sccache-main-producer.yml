@@ -1,0 +1,217 @@
+name: Ubuntu Final compiler cache producer
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ubuntu-final-sccache-producer-main
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SCCACHE_VERSION: 0.18.0
+  SCCACHE_CACHE_SIZE: 1G
+
+jobs:
+  produce:
+    name: ubuntu-final-sccache-producer
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    cache-mode: write
+    steps:
+      - name: Check out protected main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify protected-main authority
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git log -1 --check
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Restore dependency-only Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-targets: false
+
+      - name: Install Typst 0.15.1 (pinned)
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Resolve bounded compiler-cache identity
+        id: cache-id
+        shell: bash
+        run: |
+          set -euo pipefail
+          lock_hash="$(sha256sum Cargo.lock | awk '{print $1}')"
+          cargo_config_hash="$(sha256sum .cargo/config.toml | awk '{print $1}')"
+          env_hash="$(
+            {
+              rustc -Vv
+              cargo -V
+              printf 'runner_os=%s\n' "$RUNNER_OS"
+              printf 'runner_arch=%s\n' "$RUNNER_ARCH"
+              printf 'rustflags=%s\n' "$RUSTFLAGS"
+              printf 'cargo_incremental=%s\n' "$CARGO_INCREMENTAL"
+              printf 'cargo_term_color=%s\n' "$CARGO_TERM_COLOR"
+              printf 'sccache_version=%s\n' "$SCCACHE_VERSION"
+              printf 'cargo_config_sha256=%s\n' "$cargo_config_hash"
+            } | sha256sum | awk '{print $1}'
+          )"
+          [[ "$lock_hash" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$env_hash" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          root_prefix="arkst-final-sccache-v1-linux-"
+          family="${root_prefix}${env_hash}"
+          lock_prefix="${family}-${lock_hash}-"
+          key="${lock_prefix}${GITHUB_SHA}"
+
+          {
+            echo "root_prefix=$root_prefix"
+            echo "family=$family"
+            echo "lock_prefix=$lock_prefix"
+            echo "key=$key"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Protected-main compiler-cache key: $key"
+
+      - name: Restore newest compatible protected-main compiler cache
+        id: restore-sccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/arkst-final-sccache
+          key: ${{ steps.cache-id.outputs.key }}
+          restore-keys: |
+            ${{ steps.cache-id.outputs.lock_prefix }}
+            ${{ steps.cache-id.outputs.family }}-
+
+      - name: Install verified sccache 0.18.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz"
+          install_dir="$RUNNER_TEMP/sccache-v0.18.0"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz" \
+            --output "$archive"
+          echo "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1
+          test -x "$install_dir/sccache"
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Enable writable protected-main sccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "SCCACHE_DIR=$RUNNER_TEMP/arkst-final-sccache"
+            echo "RUSTC_WRAPPER=sccache"
+          } >> "$GITHUB_ENV"
+          echo "exact protected-main cache hit: ${{ steps.restore-sccache.outputs.cache-hit }}"
+
+      - name: Zero compiler cache stats
+        run: sccache --zero-stats
+
+      - name: Test default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Test workspace (Typst required)
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Test Typst backend parity
+        run: cargo test --locked -p arkst-typst-inprocess --test backend_parity --all-features -- --nocapture
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Verify CLI dependency feature boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          default_tree="$(mktemp)"
+          feature_tree="$(mktemp)"
+          trap 'rm -f "$default_tree" "$feature_tree"' EXIT
+          cargo tree --locked -p arkst-cli --no-default-features > "$default_tree"
+          if grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v|arkst-typst-inprocess' "$default_tree"; then
+            echo "default arkst-cli unexpectedly contains the in-process Typst graph"
+            sed -n '1,240p' "$default_tree"
+            exit 1
+          fi
+          cargo tree --locked -p arkst-cli --no-default-features --features typst-inprocess > "$feature_tree"
+          grep -Eq 'arkst-typst-inprocess' "$feature_tree"
+          grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v' "$feature_tree"
+
+      - name: Smoke-test public examples
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p arkst-cli
+          mkdir -p target/example-smoke
+          for input in \
+            examples/markdown/basic.md \
+            examples/markdown/gfm.md \
+            examples/markdown/bounded-html.md \
+            examples/hello/main.qd
+          do
+            name="$(basename "${input%.*}")"
+            target/debug/arkst check "$input"
+            target/debug/arkst build "$input" --output "target/example-smoke/${name}.typ"
+            target/debug/arkst build "$input" --format pdf --output "target/example-smoke/${name}.pdf"
+          done
+
+      - name: Verify compiler cache health
+        id: sccache-stats
+        shell: bash
+        run: |
+          set -euo pipefail
+          stats="$RUNNER_TEMP/arkst-final-sccache-stats.json"
+          sccache --show-stats --stats-format=json | tee "$stats"
+          python3 - "$stats" <<'PY'
+          import json
+          import sys
+
+          stats = json.load(open(sys.argv[1], encoding="utf-8")).get("stats", {})
+          rust_hits = stats.get("cache_hits", {}).get("counts", {}).get("Rust", 0)
+          rust_misses = stats.get("cache_misses", {}).get("counts", {}).get("Rust", 0)
+          read_errors = stats.get("cache_read_errors", 0)
+          write_errors = stats.get("cache_write_errors", 0)
+          successful_writes = stats.get("cache_writes", 0)
+
+          print(
+              f"producer rust_hits={rust_hits} rust_misses={rust_misses} "
+              f"read_errors={read_errors} write_errors={write_errors} "
+              f"successful_writes={successful_writes}"
+          )
+          if read_errors != 0 or write_errors != 0:
+              raise SystemExit("protected-main compiler-cache producer recorded cache I/O errors")
+          PY
+
+      - name: Save exact protected-main compiler cache
+        if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/arkst-final-sccache
+          key: ${{ steps.cache-id.outputs.key }}
