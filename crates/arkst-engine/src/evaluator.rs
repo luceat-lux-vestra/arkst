@@ -63,6 +63,7 @@ use arkst_ir::{
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
     IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
+    IrPageMarginComponent, IrPageMarginPosition,
     IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMargins, IrPageOrientation,
     IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
     IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
@@ -3875,6 +3876,13 @@ impl Evaluator {
             diagnostics.push(landscape_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_footer(name) && context.get_function(name).is_none() {
+            diagnostics.push(function_error(
+                "`.footer` is block-only".to_string(),
+                *span,
+            ));
+            return Vec::new();
+        }
         let unit_is_observable_value_reference = is_variable_reference_call(
             name,
             positional_args,
@@ -4750,6 +4758,17 @@ impl Evaluator {
             );
         }
 
+        if is_footer(name) {
+            return self.evaluate_footer(
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+            );
+        }
+
         if is_br(name) {
             return self.evaluate_br(
                 positional_args,
@@ -5559,6 +5578,62 @@ impl Evaluator {
 
         CallOutcome::Value(IrValue::Component(IrComponent::Landscape(
             IrLandscapeComponent {
+                children,
+                span: *span,
+            },
+        )))
+    }
+
+    fn evaluate_footer(
+        &self,
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if binding_plan
+            .bind::<InvocationValue>(&[], None, *span)
+            .is_err()
+        {
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(function_error(
+                "`.footer` body is Markdown content, not a lambda".to_string(),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(function_error("`.footer` is block-only".to_string(), *span));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(function_error(
+                    "`.footer` requires a Markdown block body".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::PageMargin(
+            IrPageMarginComponent {
+                position: IrPageMarginPosition::BottomCenter,
                 children,
                 span: *span,
             },
@@ -15105,6 +15180,7 @@ pub(crate) enum NativeDispatchOwner {
     Align,
     Container,
     Landscape,
+    Footer,
     Br,
     PageCounter,
     PageNumberMarker,
@@ -15169,6 +15245,7 @@ const CENTER_NATIVE_NAMES: &[&str] = &["center"];
 const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
 const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
+const FOOTER_NATIVE_NAMES: &[&str] = &["footer"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
 const PAGE_COUNTER_NATIVE_NAMES: &[&str] = &["currentpage", "totalpages"];
 const PAGE_NUMBER_MARKER_NATIVE_NAMES: &[&str] = &["formatpagenumber", "resetpagenumber"];
@@ -15261,6 +15338,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Landscape,
         names: LANDSCAPE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Footer,
+        names: FOOTER_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Br,
@@ -15375,6 +15456,10 @@ fn is_container(name: &str) -> bool {
 
 fn is_landscape(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Landscape)
+}
+
+fn is_footer(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Footer)
 }
 
 fn is_br(name: &str) -> bool {
@@ -16834,7 +16919,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             BodyPolicy::AllowSeparate,
         ),
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
-        "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
+        "center" | "landscape" | "footer" => (Vec::new(), BodyPolicy::AllowSeparate),
         "br" | "currentpage" | "totalpages" => (Vec::new(), BodyPolicy::Reject),
         "formatpagenumber" => (
             vec![ParameterMetadata::required("format")],
@@ -20896,6 +20981,10 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
             rebase_dynamic_nodes(&mut component.children, source_span);
         }
         IrComponent::Landscape(component) => {
+            component.span = source_span;
+            rebase_dynamic_nodes(&mut component.children, source_span);
+        }
+        IrComponent::PageMargin(component) => {
             component.span = source_span;
             rebase_dynamic_nodes(&mut component.children, source_span);
         }
