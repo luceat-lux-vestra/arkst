@@ -38,8 +38,7 @@ fn paragraph_text(node: &IrNode) -> String {
 
 #[test]
 fn lastheading_materializes_signed_depth_without_documented_range_validation() {
-    let source =
-        ".doctype {paged}\n.lastheading {0} .lastheading {-2} .lastheading {7}\n";
+    let source = ".doctype {paged}\n.lastheading {0} .lastheading {-2} .lastheading {7}\n";
     let (result, source_id) = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
 
@@ -56,11 +55,11 @@ fn lastheading_materializes_signed_depth_without_documented_range_validation() {
         observed.iter().map(|(depth, _)| *depth).collect::<Vec<_>>(),
         vec![0, -2, 7]
     );
-    for ((depth, span), spelling) in observed.iter().zip([
-        ".lastheading {0}",
-        ".lastheading {-2}",
-        ".lastheading {7}",
-    ]) {
+    for ((depth, span), spelling) in
+        observed
+            .iter()
+            .zip([".lastheading {0}", ".lastheading {-2}", ".lastheading {7}"])
+    {
         let start = source.find(spelling).expect("call source");
         assert_eq!(span.source_id, source_id, "depth={depth}");
         assert_eq!(span.start, start, "depth={depth}");

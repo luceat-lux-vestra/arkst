@@ -1154,7 +1154,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             | IrInline::PageCounter { .. }
             | IrInline::PageNumberFormat { .. }
             | IrInline::PageNumberReset { .. }
-        | IrInline::LastHeading { .. }
+            | IrInline::LastHeading { .. }
             | IrInline::RawHtml { .. }
             | IrInline::ExplicitError { .. }
             | IrInline::TargetSpecificContent { .. } => {
