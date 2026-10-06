@@ -128,8 +128,8 @@ fn manifest_is_complete_and_machine_checkable() {
     assert_eq!(rows.len(), 47);
     assert_eq!(rows.iter().filter(|row| row[4] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[4] == "#154").count(), 27);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 13);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 7);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 14);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 6);
     assert!(MANIFEST.contains(BASE_SHA));
     assert!(MANIFEST.contains("captionposition\tcaptionPosition\tcode"));
 }
@@ -142,7 +142,37 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(
         AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim")
     );
-    assert!(AUDIT.contains("13 conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("14 conservative `PARTIAL` rows"));
+}
+
+#[test]
+fn audit_records_bounded_paged_footer_semantics() {
+    let rows = rows();
+    let footer = rows
+        .iter()
+        .find(|row| row[1] == "footer")
+        .expect("footer row");
+    assert_eq!(footer[5], "PARTIAL");
+    assert!(footer[9].contains("IrPageMarginComponent"));
+    assert!(footer[9].contains("quarkdown_footer.rs"));
+    assert!(footer[9].contains("typst-subprocess/tests/page_footer.rs"));
+    assert!(footer[10].contains("BottomCenter"));
+    assert!(footer[10].contains("Final paged output"));
+    assert!(footer[10].contains("last footer marker through the current page"));
+    assert!(footer[10].contains("Final plain/slides/docs footer output is explicitly fail-closed"));
+    assert!(footer[11].contains("bounded-footer-bottom-center"));
+    assert!(footer[11].contains("same-page-last-footer-wins"));
+
+    let pagemargin = rows
+        .iter()
+        .find(|row| row[1] == "pagemargin")
+        .expect("pagemargin row");
+    assert_eq!(pagemargin[5], "PARSED_ONLY");
+
+    assert!(AUDIT.contains("The bounded `.footer` sugar now has an independent `PARTIAL` slice"));
+    assert!(AUDIT.contains("physical `location().page()` is less than or equal"));
+    assert!(AUDIT.contains("last same-page footer wins"));
+    assert!(AUDIT.contains("Final `plain`, `slides`, and `docs` currently fail closed"));
 }
 
 #[test]
