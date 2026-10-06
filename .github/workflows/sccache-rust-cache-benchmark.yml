@@ -1,4 +1,4 @@
-name: Arkst sccache paired benchmark
+name: Arkst sccache paired benchmark round 2
 
 on:
   push:
@@ -243,13 +243,58 @@ jobs:
           du -sb "$seed" | tee "$BENCH_DIR/rust-cache-target-seed-size-bytes.txt"
           du -sb "$SCCACHE_DIR" | tee "$BENCH_DIR/sccache-restored-size-bytes.txt"
 
-      - name: Run paired local-change benchmark
+      - name: Run paired private-item full Final-test benchmark
         shell: bash
         run: |
           set -euo pipefail
           seed="$RUNNER_TEMP/arkst-target-seed"
           source_file="crates/arkst-core/src/lib.rs"
           original_sha256="$(sha256sum "$source_file" | awk '{print $1}')"
+          surface_script="$RUNNER_TEMP/arkst-525-ubuntu-final-test-surface.sh"
+
+          cat > "$surface_script" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          cargo test --locked -p arkst-cli --no-default-features
+
+          ARKST_REQUIRE_TYPST=1 \
+            cargo test --locked --workspace --all-targets --all-features
+
+          ARKST_REQUIRE_TYPST=1 \
+            cargo test --locked -p arkst-typst-inprocess \
+              --test backend_parity --all-features -- --nocapture
+
+          default_tree="$(mktemp)"
+          feature_tree="$(mktemp)"
+          trap 'rm -f "$default_tree" "$feature_tree"' EXIT
+
+          cargo tree --locked -p arkst-cli --no-default-features > "$default_tree"
+          if grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v|arkst-typst-inprocess' "$default_tree"; then
+            echo "default arkst-cli unexpectedly contains the in-process Typst graph" >&2
+            sed -n '1,240p' "$default_tree" >&2
+            exit 1
+          fi
+
+          cargo tree --locked -p arkst-cli --no-default-features --features typst-inprocess > "$feature_tree"
+          grep -Eq 'arkst-typst-inprocess' "$feature_tree"
+          grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v' "$feature_tree"
+
+          cargo build --locked -p arkst-cli
+          mkdir -p target/example-smoke
+          for input in \
+            examples/markdown/basic.md \
+            examples/markdown/gfm.md \
+            examples/markdown/bounded-html.md \
+            examples/hello/main.qd
+          do
+            name="$(basename "${input%.*}")"
+            target/debug/arkst check "$input"
+            target/debug/arkst build "$input" --output "target/example-smoke/${name}.typ"
+            target/debug/arkst build "$input" --format pdf --output "target/example-smoke/${name}.pdf"
+          done
+          SH
+          chmod +x "$surface_script"
 
           measure_variant() {
             variant="$1"
@@ -257,7 +302,7 @@ jobs:
             mkdir -p target
             cp -a "$seed/." target/
 
-            printf '\n// #525 paired cache benchmark no-op; never committed.\n' >> "$source_file"
+            printf '\n#[allow(dead_code)]\nconst __ARKST_525_CACHE_BENCHMARK_PRIVATE_ITEM: usize = 525;\n' >> "$source_file"
             test "$(sha256sum "$source_file" | awk '{print $1}')" != "$original_sha256"
 
             unset RUSTC_WRAPPER
@@ -268,10 +313,10 @@ jobs:
 
             start_ns="$(date +%s%N)"
             set +e
-            ARKST_REQUIRE_TYPST=1 /usr/bin/time \
+            /usr/bin/time \
               -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\nmax_rss_kb=%M' \
               -o "$BENCH_DIR/${variant}.time" \
-              cargo test --locked --workspace --all-targets --all-features \
+              "$surface_script" \
               > >(tee "$BENCH_DIR/${variant}.log") 2>&1
             status="${PIPESTATUS[0]}"
             set -e
@@ -286,6 +331,8 @@ jobs:
               "order": [os.environ["ORDER_FIRST"], os.environ["ORDER_SECOND"]],
               "wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
               "exit_code": int(status),
+              "surface": "ubuntu-final-test-full",
+              "mutation": "private-rust-item",
           }, sort_keys=True))
           PY
 
@@ -324,7 +371,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: arkst-525-cache-paired-replicate-${{ matrix.replicate }}
+          name: arkst-525-round2-paired-replicate-${{ matrix.replicate }}
           path: benchmark-evidence/sccache-rust-cache
           if-no-files-found: error
           retention-days: 30
