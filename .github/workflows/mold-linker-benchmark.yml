@@ -1,0 +1,350 @@
+name: Linux mold linker paired benchmark
+
+on:
+  push:
+    branches:
+      - exp/524-linux-mold-benchmark
+    paths:
+      - .github/workflows/mold-linker-benchmark.yml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+      - rust-toolchain.toml
+      - .cargo/config.toml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-mold-linker-benchmark-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: paired / replicate ${{ matrix.replicate }} / ${{ matrix.first }}-first
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - replicate: 1
+            first: system
+            second: mold
+          - replicate: 2
+            first: mold
+            second: system
+          - replicate: 3
+            first: system
+            second: mold
+          - replicate: 4
+            first: mold
+            second: system
+
+    env:
+      CARGO_TERM_COLOR: never
+      RUSTUP_TOOLCHAIN: 1.98.0
+      RUSTFLAGS: "-D warnings"
+      ARKST_REQUIRE_TYPST: "1"
+      BENCH_DIR: benchmark-evidence/mold-linker-benchmark
+      REPLICATE: ${{ matrix.replicate }}
+      ORDER_FIRST: ${{ matrix.first }}
+      ORDER_SECOND: ${{ matrix.second }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Check exact experiment identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          git diff --exit-code
+          git log -1 --check
+
+      - name: Install verified mold 3.0.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+
+          mkdir -p "$BENCH_DIR"
+          archive="$RUNNER_TEMP/mold-3.0.0-x86_64-linux.tar.gz"
+          install_dir="$RUNNER_TEMP/mold-3.0.0"
+          start_ns="$(date +%s%N)"
+
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/rui314/mold/releases/download/v3.0.0/mold-3.0.0-x86_64-linux.tar.gz" \
+            --output "$archive"
+
+          echo "6c90d4a474c7c0409dfb575be03a5345878ac14fdba18de8b40fa58c60121189  $archive" \
+            | sha256sum --check --strict
+
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1
+
+          end_ns="$(date +%s%N)"
+          python3 - "$start_ns" "$end_ns" > "$BENCH_DIR/mold-install.json" <<'PY'
+          import json
+          import sys
+
+          start_ns = int(sys.argv[1])
+          end_ns = int(sys.argv[2])
+          print(json.dumps({
+              "mold_version": "3.0.0",
+              "asset_sha256": "6c90d4a474c7c0409dfb575be03a5345878ac14fdba18de8b40fa58c60121189",
+              "install_wall_ms": (end_ns - start_ns) / 1_000_000,
+          }, sort_keys=True))
+          PY
+
+          echo "$install_dir/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare instrumented linker wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BENCH_DIR"
+
+          wrapper="$RUNNER_TEMP/linker-wrapper.sh"
+          cat > "$wrapper" <<'SH'
+          #!/usr/bin/env bash
+          set -u
+
+          variant="${ACTIVE_LINKER:?}"
+          phase="${LINK_PHASE:-unclassified}"
+          start_ns="$(date +%s%N)"
+          set +e
+          if [ "$variant" = "mold" ]; then
+            /usr/bin/cc -fuse-ld=mold "$@"
+          elif [ "$variant" = "system" ]; then
+            /usr/bin/cc "$@"
+          else
+            echo "unknown linker variant: $variant" >&2
+            exit 97
+          fi
+          status="$?"
+          set -e
+          end_ns="$(date +%s%N)"
+
+          printf '%s\t%s\t%s\t%s\t%s\n' \
+            "$variant" "$phase" "$start_ns" "$end_ns" "$status" \
+            >> "${LINKER_TIMINGS_FILE:?}"
+          exit "$status"
+          SH
+          chmod +x "$wrapper"
+
+          echo "LINKER_TIMINGS_FILE=$GITHUB_WORKSPACE/$BENCH_DIR/linker-invocations.tsv" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=-D warnings -C linker=$wrapper" >> "$GITHUB_ENV"
+
+      - name: Capture environment and prove both linker selections
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BENCH_DIR"
+
+          {
+            echo "sha=$GITHUB_SHA"
+            echo "base_sha=641cee703daecc6b1a0c719a3f878ffb1bb06dc0"
+            echo "replicate=$REPLICATE"
+            echo "order=$ORDER_FIRST,$ORDER_SECOND"
+            echo "runner_os=$RUNNER_OS"
+            echo "image_os=${ImageOS:-unknown}"
+            echo "image_version=${ImageVersion:-unknown}"
+            echo "uname=$(uname -a)"
+            echo "cpu=$(lscpu | sed -n 's/^Model name:[[:space:]]*//p' | head -1)"
+            echo "cores=$(nproc)"
+            echo "rustflags=${RUSTFLAGS:-}"
+            rustc -Vv
+            cargo -V
+            typst --version
+            cc --version | head -1
+            ld --version | head -1
+            mold --version
+          } | tee "$BENCH_DIR/environment.txt"
+
+          printf 'int main(void) { return 0; }\n' > "$RUNNER_TEMP/linker-probe.c"
+
+          cc -Wl,-v "$RUNNER_TEMP/linker-probe.c" \
+            -o "$RUNNER_TEMP/linker-probe-system" 2>&1 \
+            | tee "$BENCH_DIR/linker-probe-system.txt"
+          test -x "$RUNNER_TEMP/linker-probe-system"
+          if grep -Eiq 'mold[[:space:]]+[0-9]' "$BENCH_DIR/linker-probe-system.txt"; then
+            echo "system baseline unexpectedly resolved to mold" >&2
+            exit 1
+          fi
+
+          cc -fuse-ld=mold -Wl,-v "$RUNNER_TEMP/linker-probe.c" \
+            -o "$RUNNER_TEMP/linker-probe-mold" 2>&1 \
+            | tee "$BENCH_DIR/linker-probe-mold.txt"
+          test -x "$RUNNER_TEMP/linker-probe-mold"
+          grep -Eiq 'mold[[:space:]]+3\.0\.0|mold.*3\.0\.0' "$BENCH_DIR/linker-probe-mold.txt"
+
+      - name: Fetch dependencies outside measurement
+        run: cargo fetch --locked
+
+      - name: Run paired cold, warm, and correctness benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BENCH_DIR"
+
+          measure() {
+            label="$1"
+            shift
+
+            start_ns="$(date +%s%N)"
+            export LINK_PHASE="$label"
+            set +e
+            /usr/bin/time \
+              -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\nmax_rss_kb=%M' \
+              -o "$BENCH_DIR/${label}.time" \
+              "$@" 2>&1 | tee "$BENCH_DIR/${label}.log"
+            status="${PIPESTATUS[0]}"
+            set -e
+            unset LINK_PHASE
+            end_ns="$(date +%s%N)"
+
+            python3 - "$label" "$start_ns" "$end_ns" "$status" >> "$BENCH_DIR/results.jsonl" <<'PY'
+          import json
+          import os
+          import sys
+
+          label, start_ns, end_ns, status = sys.argv[1:]
+          print(json.dumps({
+              "sha": os.environ["GITHUB_SHA"],
+              "linker": os.environ["ACTIVE_LINKER"],
+              "replicate": int(os.environ["REPLICATE"]),
+              "order": [os.environ["ORDER_FIRST"], os.environ["ORDER_SECOND"]],
+              "phase": label,
+              "wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
+              "exit_code": int(status),
+              "rustflags": os.environ.get("RUSTFLAGS", ""),
+          }, sort_keys=True))
+          PY
+
+            test "$status" -eq 0
+          }
+
+          run_variant() {
+            variant="$1"
+            export ACTIVE_LINKER="$variant"
+            export CARGO_TARGET_DIR="$RUNNER_TEMP/arkst-mold-linker-target-$variant"
+
+            rm -rf "$CARGO_TARGET_DIR"
+            source_file="crates/arkst-core/src/lib.rs"
+            original_sha256="$(sha256sum "$source_file" | awk '{print $1}')"
+
+            measure "${variant}-cold-build-link" \
+              cargo test --locked --workspace --all-targets --all-features --no-run
+
+            printf '\n// paired mold linker benchmark no-op; never committed.\n' >> "$source_file"
+            changed_sha256="$(sha256sum "$source_file" | awk '{print $1}')"
+            test "$changed_sha256" != "$original_sha256"
+
+            measure "${variant}-warm-local-change-build-link" \
+              cargo test --locked --workspace --all-targets --all-features --no-run
+
+            measure "${variant}-warm-test-execution" \
+              cargo test --locked --workspace --all-targets --all-features
+
+            git checkout -- "$source_file"
+            restored_sha256="$(sha256sum "$source_file" | awk '{print $1}')"
+            test "$restored_sha256" = "$original_sha256"
+            git diff --exit-code -- "$source_file"
+
+            du -sh "$CARGO_TARGET_DIR" \
+              | tee "$BENCH_DIR/${variant}-target-size.txt"
+          }
+
+          run_variant "$ORDER_FIRST"
+          run_variant "$ORDER_SECOND"
+
+          git diff --exit-code
+
+          python3 - "$LINKER_TIMINGS_FILE" > "$BENCH_DIR/linker-summary.json" <<'PY'
+          import collections
+          import json
+          import statistics
+          import sys
+
+          source = sys.argv[1]
+          grouped = collections.defaultdict(list)
+          failures = []
+
+          with open(source, encoding="utf-8") as handle:
+              for raw in handle:
+                  variant, phase, start_ns, end_ns, status = raw.rstrip("\n").split("\t")
+                  elapsed_ms = (int(end_ns) - int(start_ns)) / 1_000_000
+                  grouped[(variant, phase)].append(elapsed_ms)
+                  if int(status) != 0:
+                      failures.append({
+                          "variant": variant,
+                          "phase": phase,
+                          "elapsed_ms": elapsed_ms,
+                          "exit_code": int(status),
+                      })
+
+          summary = {}
+          for (variant, phase), values in sorted(grouped.items()):
+              summary.setdefault(variant, {})[phase] = {
+                  "count": len(values),
+                  "total_linker_wall_ms": sum(values),
+                  "median_linker_wall_ms": statistics.median(values),
+                  "max_linker_wall_ms": max(values),
+                  "min_linker_wall_ms": min(values),
+              }
+
+          print(json.dumps({
+              "failures": failures,
+              "variants": summary,
+          }, indent=2, sort_keys=True))
+          if failures:
+              raise SystemExit("linker invocation failure recorded")
+          PY
+
+          cat "$BENCH_DIR/linker-summary.json"
+
+      - name: Summarize measurements
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$BENCH_DIR/results.jsonl" ]; then
+            {
+              echo "### Arkst paired mold linker benchmark: replicate $REPLICATE"
+              echo
+              echo "Order: \`$ORDER_FIRST -> $ORDER_SECOND\`"
+              echo
+              echo '~~~json'
+              cat "$BENCH_DIR/results.jsonl"
+              echo '~~~'
+              if [ -f "$BENCH_DIR/linker-summary.json" ]; then
+                echo
+                echo '~~~json'
+                cat "$BENCH_DIR/linker-summary.json"
+                echo '~~~'
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Retain benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-mold-linker-paired-replicate-${{ matrix.replicate }}
+          path: benchmark-evidence/mold-linker-benchmark
+          if-no-files-found: error
+          retention-days: 30
