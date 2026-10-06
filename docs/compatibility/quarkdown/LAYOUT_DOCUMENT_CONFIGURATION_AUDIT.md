@@ -601,16 +601,36 @@ remaining in #149/#165–#167 and math/content coordination in #154.
 
 `pagemargin(position: PageMarginPosition, content: MarkdownContent)` creates
 an invisible page-margin initializer. `PageMarginPosition` is a closed enum
-with fixed corner/edge positions plus mirrored `inside`/`outside` positions
-that resolve differently on left and right pages. The content is lazy body
-content and the initializer displays it on every page, with distinct
-plain/paged/slides behavior. `footer(content)` is exact sugar for
-`pagemargin(bottomcenter, content)`; it is not a separate state field.
+with 16 fixed corner/edge positions plus eight mirrored `inside`/`outside`
+positions that resolve differently on left and right pages. The pinned
+post-rendering handler processes physical pages in order: every initializer
+first becomes active on the physical page containing it, remains active on
+later pages, and a later initializer for the same authored position replaces
+the earlier one. Same-page initializers are collected before margin content is
+applied, so the last same-page initializer wins. `footer(content)` is exact
+sugar for `pagemargin(bottomcenter, content)`; it is not separate document
+state.
 
-These are AST/output primitives, not `DocumentInfo` fields. They require typed
-body/content retention, closed position conversion, repeated-page semantics,
-and renderer support. Arkst currently preserves unresolved calls only;
-status for both is `PARSED_ONLY` and the grouped pagination follow-up is #176.
+Arkst now has a bounded typed slice. The evaluator converts all 24 public
+positions to `IrPageMarginPosition`, preserves the initializer as
+`IrNode::PageMarginContent` in source order, evaluates an indented Markdown
+block body structurally, preserves source-defined shadowing and serde, and
+maps `.footer` exactly to `BottomCenter`. For final `paged` output,
+`topcenter` and `bottomcenter` lower to locatable Typst metadata markers.
+The page header/footer queries markers whose `location().page()` is less than
+or equal to the current physical `here().page()`, then takes the last match.
+That preserves the pinned start-page, persistence, and same-page last-wins
+contract without reducing repeated content to one document-global static
+header/footer value. Real Typst/PDF integration covers both central positions.
+
+This is deliberately not complete page-margin equivalence. The other 22
+positions, left/right mirror resolution, and final `plain`/`slides`/`docs`
+renderer behavior remain unsupported and fail closed at the current Typst
+boundary. The bounded evaluator also accepts the evidenced indented block-body
+form only; complete explicit/inline `MarkdownContent` argument adaptation
+remains part of the shared content-conversion boundary. Canonical status for
+both rows is therefore `PARTIAL` under #176, not
+`SUPPORTED_END_TO_END`.
 
 #### `.currentpage`, `.totalpages`, `.formatpagenumber`, and `.resetpagenumber`
 
@@ -917,10 +937,11 @@ follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 ## 8. Audit conclusion
 
 The canonical #153 result remains a 20-row owned inventory. Current status is
-13 conservative `PARTIAL` rows (`captionposition`,
+15 conservative `PARTIAL` rows (`captionposition`,
 `numbering`/`nonumbering`, bounded size-only `font`, `paragraphstyle`,
-bounded `pageformat`, bounded `currentpage`/`totalpages`, bounded
-`formatpagenumber`/`resetpagenumber`, `autopagebreak`/`noautopagebreak`, and
-bounded `slides`) plus 7 `PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
+bounded `pageformat`, bounded `pagemargin`/`footer`, bounded
+`currentpage`/`totalpages`, bounded `formatpagenumber`/`resetpagenumber`,
+`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 5
+`PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
 or justify a generalized document-wide style system. Residual ownership remains
 #175–#178 and the applicable #154 content/output consumers.
