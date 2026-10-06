@@ -621,15 +621,16 @@ to paged and slides document implementations and replaces those placeholders aft
 pagination; plain keeps the placeholder, and docs inherits the plain document path rather
 than a page-number handler.
 
-Arkst now implements the bounded counter pair as backend-neutral
+Arkst implements the bounded counter pair as backend-neutral
 `IrInline::PageCounter` + `IrPageCounterTarget`, including no-argument/no-body
 binding, source-defined shadowing, source-span preservation, serde, and source-order inline
-materialization. Typst lowering uses the logical `counter(page)` only for final `paged`
-and `slides`: `CURRENT` reads the current page counter and `TOTAL` reads its final
-value. Final `plain` and `docs` preserve the pinned unresolved `-` placeholder instead
-of fabricating pagination runtime semantics. These two rows are therefore bounded
-`PARTIAL`, not complete page-numbering support; formatter/reset behavior below remains a
-separate #176 residual.
+materialization. Final `paged` and `slides` keep `TOTAL` tied to Typst's final
+physical page counter, matching pinned `pages.length`. `CURRENT` now resolves the
+bounded formatter/reset marker state described below from the physical page containing the
+placeholder; with no applicable marker this is ordinary physical page numbering. Final
+`plain` and `docs` preserve the pinned unresolved `-` placeholder instead of
+fabricating pagination runtime semantics. These rows remain bounded `PARTIAL`, not a
+complete page-numbering equivalence claim.
 
 For `.formatpagenumber(format: String)`, the public `Document.kt` KDoc says
 the format accepts the same syntax as `.numbering`, but pinned v2.5.1 HTML
@@ -650,10 +651,29 @@ time rather than rejected by the function; when multiple valid resets occur on
 a page, the last valid marker wins. The reset is therefore page-level for
 observable HTML numbering rather than an intra-page source-position split.
 
-`.formatpagenumber` and `.resetpagenumber` still lack backend-neutral event/state
-representation and renderer behavior in Arkst, so both remain `PARSED_ONLY` under #176.
-The bounded current/total counter implementation deliberately does not synthesize either
-formatter or reset semantics.
+Arkst now represents both initializers as typed invisible inline markers:
+`IrInline::PageNumberFormat` stores the authored format string and
+`IrInline::PageNumberReset` stores the signed Kotlin-`Int`-compatible reset value,
+including zero and negatives. Binding/default conversion, source-defined shadowing,
+source-span preservation, and serde are covered independently. For final `paged` and
+`slides`, Typst lowers the markers to locatable `metadata` and every `CURRENT`
+placeholder queries all markers whose physical `location().page()` is less than or equal
+to its own `here().page()`. Taking the last matching formatter and the last positive reset
+therefore reproduces the pinned page-level ordering: a marker later in source on the same
+physical page affects counters earlier on that page, the last same-page marker wins, reset
+positivity is filtered only at render time, and selected state persists to later pages.
+`TOTAL` remains formatter/reset-independent.
+
+The formatter consumer has explicit branches for `1`, `a`, `A`, `i`, and `I`
+and returns every other format string literally. Lowercase/uppercase alphabetic output uses
+the pinned one-codepoint offset model and Roman output uses Typst's corresponding numbering
+systems. This is intentionally classified as bounded `PARTIAL`: exact extreme-value
+equivalence with JavaScript `String.fromCharCode` UTF-16 wrapping and the external
+`romans` package is not claimed. Final `plain` and `docs` emit neither marker runtime
+and continue to expose the pinned unresolved `-` current/total placeholders. Both
+`.formatpagenumber` and `.resetpagenumber` therefore move from `PARSED_ONLY` to
+bounded `PARTIAL` under #176 without widening the remaining page-margin/footer or
+last-heading residuals.
 
 #### `.lastheading`
 
@@ -755,7 +775,7 @@ under #178.
 
 ## 5. Arkst pipeline and architecture boundary
 
-The unresolved #153 rows no longer share one uniform pipeline. The 11
+The unresolved #153 rows no longer share one uniform pipeline. The 7
 `PARSED_ONLY` rows still follow the unresolved-call path:
 
 ```text
@@ -768,12 +788,12 @@ source call with source span
   -> no rendered output equivalence claim
 ```
 
-The 11 `PARTIAL` rows instead have bounded typed semantics and/or output
+The 13 `PARTIAL` rows instead have bounded typed semantics and/or output
 evidence and must be judged individually against their recorded residual
 contract. In particular, #175-owned numbering/font/paragraph/page-format and
-automatic-page-break state plus the #176 bounded current/total page-counter
-pair must not be described as absent merely because complete pinned-v2.5.1
-end-to-end equivalence is not claimed.
+automatic-page-break state plus the #176 bounded current/total counter and
+page-number formatter/reset marker slices must not be described as absent merely
+because complete pinned-v2.5.1 end-to-end equivalence is not claimed.
 
 The existing evaluator explicitly preserves unresolved block and inline calls
 with their arguments/body and spans. This is useful compatibility evidence for
@@ -897,10 +917,10 @@ follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 ## 8. Audit conclusion
 
 The canonical #153 result remains a 20-row owned inventory. Current status is
-11 conservative `PARTIAL` rows (`captionposition`,
+13 conservative `PARTIAL` rows (`captionposition`,
 `numbering`/`nonumbering`, bounded size-only `font`, `paragraphstyle`,
-bounded `pageformat`, bounded `currentpage`/`totalpages`,
-`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 9
-`PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
+bounded `pageformat`, bounded `currentpage`/`totalpages`, bounded
+`formatpagenumber`/`resetpagenumber`, `autopagebreak`/`noautopagebreak`, and
+bounded `slides`) plus 7 `PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
 or justify a generalized document-wide style system. Residual ownership remains
 #175–#178 and the applicable #154 content/output consumers.

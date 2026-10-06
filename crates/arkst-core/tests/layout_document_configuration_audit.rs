@@ -128,8 +128,8 @@ fn manifest_is_complete_and_machine_checkable() {
     assert_eq!(rows.len(), 47);
     assert_eq!(rows.iter().filter(|row| row[4] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[4] == "#154").count(), 27);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 11);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 9);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 13);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 7);
     assert!(MANIFEST.contains(BASE_SHA));
     assert!(MANIFEST.contains("captionposition\tcaptionPosition\tcode"));
 }
@@ -142,11 +142,11 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(
         AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim")
     );
-    assert!(AUDIT.contains("11 conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("13 conservative `PARTIAL` rows"));
 }
 
 #[test]
-fn audit_records_bounded_page_counter_pair_without_claiming_formatter_reset() {
+fn audit_records_bounded_page_counter_and_marker_semantics() {
     let rows = rows();
     for (name, target) in [("currentpage", "CURRENT"), ("totalpages", "TOTAL")] {
         let row = rows
@@ -159,27 +159,40 @@ fn audit_records_bounded_page_counter_pair_without_claiming_formatter_reset() {
         assert!(row[9].contains("typst-subprocess/tests/page_counters.rs"));
         assert!(row[10].contains(target));
         assert!(row[10].contains("Final paged/slides"));
-        assert!(row[10].contains("final plain/docs"));
+        assert!(row[10].contains("plain/docs"));
         assert!(row[11].contains("bounded-page-counter-pair"));
-        assert!(row[11].contains("formatter/reset remains"));
     }
 
-    for name in ["formatpagenumber", "resetpagenumber"] {
-        let row = rows
-            .iter()
-            .find(|row| row[1] == name)
-            .unwrap_or_else(|| panic!("missing page-number residual row: {name}"));
-        assert_eq!(row[5], "PARSED_ONLY");
-    }
+    let format = rows
+        .iter()
+        .find(|row| row[1] == "formatpagenumber")
+        .expect("formatpagenumber row");
+    assert_eq!(format[5], "PARTIAL");
+    assert!(format[9].contains("IrInline::PageNumberFormat"));
+    assert!(format[9].contains("quarkdown_page_number_markers.rs"));
+    assert!(format[10].contains("last marker in document order"));
+    assert!(format[10].contains("unknown formats literally"));
+    assert!(format[11].contains("same-page-last-marker-wins"));
+
+    let reset = rows
+        .iter()
+        .find(|row| row[1] == "resetpagenumber")
+        .expect("resetpagenumber row");
+    assert_eq!(reset[5], "PARTIAL");
+    assert!(reset[9].contains("IrInline::PageNumberReset"));
+    assert!(reset[10].contains("render time to positive values"));
+    assert!(reset[10].contains("non-positive markers are retained but ignored"));
+    assert!(reset[11].contains("same-page-last-valid-reset-wins"));
 
     assert!(AUDIT.contains("IrInline::PageCounter"));
-    assert!(AUDIT.contains("logical `counter(page)` only for final `paged`"));
-    assert!(
-        AUDIT.contains("Final `plain` and `docs` preserve the pinned unresolved `-` placeholder")
-    );
-    assert!(AUDIT.contains(
-        "`.formatpagenumber` and `.resetpagenumber` still lack backend-neutral event/state"
-    ));
+    assert!(AUDIT.contains("IrInline::PageNumberFormat"));
+    assert!(AUDIT.contains("IrInline::PageNumberReset"));
+    assert!(AUDIT.contains("physical `location().page()`"));
+    assert!(AUDIT.contains("later in source on the same"));
+    assert!(AUDIT.contains("last positive reset"));
+    assert!(AUDIT.contains("String.fromCharCode"));
+    assert!(AUDIT.contains("move from `PARSED_ONLY` to"));
+    assert!(AUDIT.contains("Final `plain` and `docs` emit neither marker runtime"));
 }
 
 #[test]
@@ -574,14 +587,14 @@ fn audit_records_pinned_pagination_renderer_divergences() {
         .expect("formatpagenumber row");
     assert!(formatter[8].contains("page-numbers.ts@"));
     assert!(formatter[8].contains("numbering.ts@"));
-    assert!(formatter[10].contains("last-marker-wins"));
+    assert!(formatter[11].contains("same-page-last-marker-wins"));
     assert!(formatter[11].contains("page-level-formatter-divergence"));
 
     let reset = rows
         .iter()
         .find(|row| row[1] == "resetpagenumber")
         .expect("resetpagenumber row");
-    assert!(reset[10].contains("ignores non-positive values"));
+    assert!(reset[10].contains("non-positive markers are retained but ignored"));
     assert!(reset[11].contains("page-level-reset-filtering"));
 
     let last_heading = rows
