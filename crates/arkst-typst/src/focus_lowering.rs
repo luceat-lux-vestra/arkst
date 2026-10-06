@@ -6,9 +6,9 @@
 //! source-map ranges by the generated prelude length.
 
 use arkst_ir::{
-    IrComposedPageDimensions, IrComponent, IrDocument, IrDocumentAlignment, IrDocumentType,
-    IrNode, IrPageFormatLayer, IrPageFormatSelector, IrPageMarginPosition, IrPageOrientation,
-    IrPageSide, IrPageSizeFormat, IrPageSizeSelection,
+    IrComponent, IrComposedPageDimensions, IrDocument, IrDocumentAlignment, IrDocumentType, IrNode,
+    IrPageFormatLayer, IrPageFormatSelector, IrPageMarginPosition, IrPageOrientation, IrPageSide,
+    IrPageSizeFormat, IrPageSizeSelection,
 };
 use arkst_source::SourceMapEntry;
 
