@@ -7,8 +7,8 @@ use arkst_ir::{
     IrCallSegment, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
     IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
     IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
-    IrPageCounterTarget, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
-    IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+    IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -288,6 +288,27 @@ impl LoweringContext {
                 // omit both forms without creating source-map ranges.
             }
             IrNode::Component { component } => self.lower_component(component),
+            IrNode::PageMarginContent {
+                position,
+                children,
+                span,
+            } => {
+                let before = self.output.len();
+                match (self.document_type, position) {
+                    (IrDocumentType::Paged, IrPageMarginPosition::TopCenter) => {
+                        self.lower_page_margin_marker(children, "arkst-page-margin-top-center");
+                    }
+                    (IrDocumentType::Paged, IrPageMarginPosition::BottomCenter) => {
+                        self.lower_page_margin_marker(children, "arkst-page-margin-bottom-center");
+                    }
+                    _ => {
+                        self.push_str("#panic(\"Arkst page-margin position/document-type combination is not supported by the current bounded Typst backend\")\n");
+                    }
+                }
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrNode::FunctionDeclaration { .. } => {
                 // Declarations are consumed by the evaluator and are
                 // intentionally outputless. This arm keeps direct lowering of
@@ -397,6 +418,16 @@ impl LoweringContext {
                 }
             }
         }
+    }
+
+    fn lower_page_margin_marker(&mut self, children: &[IrNode], label: &str) {
+        self.push_str("#metadata([\n");
+        for child in children {
+            self.lower_node(child);
+        }
+        self.push_str("]) <");
+        self.push_str(label);
+        self.push_str(">\n");
     }
 
     fn lower_component(&mut self, component: &IrComponent) {

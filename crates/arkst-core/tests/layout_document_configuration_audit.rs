@@ -128,8 +128,8 @@ fn manifest_is_complete_and_machine_checkable() {
     assert_eq!(rows.len(), 47);
     assert_eq!(rows.iter().filter(|row| row[4] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[4] == "#154").count(), 27);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 13);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 7);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 15);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 5);
     assert!(MANIFEST.contains(BASE_SHA));
     assert!(MANIFEST.contains("captionposition\tcaptionPosition\tcode"));
 }
@@ -142,7 +142,7 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(
         AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim")
     );
-    assert!(AUDIT.contains("13 conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("15 conservative `PARTIAL` rows"));
 }
 
 #[test]
@@ -564,6 +564,46 @@ fn audit_final_175_status_reconciliation_is_pinned() {
     assert!(AUDIT.contains("ordered font"));
     assert!(AUDIT.contains("paragraph style"));
     assert!(AUDIT.contains("ordered page-format"));
+}
+
+#[test]
+fn audit_records_bounded_page_margin_content_slice() {
+    let rows = rows();
+    for name in ["pagemargin", "footer"] {
+        let row = rows
+            .iter()
+            .find(|row| row[1] == name)
+            .unwrap_or_else(|| panic!("missing page-margin row: {name}"));
+        assert_eq!(row[5], "PARTIAL");
+        assert!(row[9].contains("quarkdown_page_margin_content.rs"));
+        assert!(row[9].contains("typst-subprocess/tests/page_margin_content.rs"));
+        assert!(row[11].contains("bounded-paged-central-repeated-content"));
+    }
+
+    let pagemargin = rows
+        .iter()
+        .find(|row| row[1] == "pagemargin")
+        .expect("pagemargin row");
+    assert!(pagemargin[9].contains("IrPageMarginPosition"));
+    assert!(pagemargin[9].contains("IrNode::PageMarginContent"));
+    assert!(pagemargin[10].contains("All 24 public positions"));
+    assert!(pagemargin[10].contains("same-page last-wins"));
+    assert!(pagemargin[10].contains("other 22 positions"));
+
+    let footer = rows
+        .iter()
+        .find(|row| row[1] == "footer")
+        .expect("footer row");
+    assert!(footer[10].contains("BottomCenter"));
+
+    assert!(AUDIT.contains("16 fixed corner/edge positions plus eight mirrored"));
+    assert!(AUDIT.contains("last same-page initializer wins"));
+    assert!(AUDIT.contains("location().page()"));
+    assert!(AUDIT.contains("current physical `here().page()`"));
+    assert!(AUDIT.contains("other 22"));
+    assert!(AUDIT.contains("final `plain`/`slides`/`docs`"));
+    assert!(AUDIT.contains("15 conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("plus 5"));
 }
 
 #[test]

@@ -6,14 +6,17 @@
 //! source-map ranges by the generated prelude length.
 
 use arkst_ir::{
-    IrComposedPageDimensions, IrDocument, IrDocumentAlignment, IrDocumentType, IrPageFormatLayer,
-    IrPageFormatSelector, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPageSizeSelection,
+    IrComponent, IrComposedPageDimensions, IrDocument, IrDocumentAlignment, IrDocumentType, IrNode,
+    IrPageFormatLayer, IrPageFormatSelector, IrPageMarginPosition, IrPageOrientation, IrPageSide,
+    IrPageSizeFormat, IrPageSizeSelection,
 };
 use arkst_source::SourceMapEntry;
 
 use crate::lowering_base;
 
 const PRELUDE_MARKER: &str = "// Arkst Quarkdown v2.6 focus layout\n";
+const UNSUPPORTED_PAGE_MARGIN_PRELUDE: &str =
+    "#panic(\"Arkst page-margin output currently supports only paged topcenter/bottomcenter\")\n";
 
 /// Lower an Arkst IR document to Typst source, applying the bounded Quarkdown
 /// v2.6 `focus` layout adaptation when the evaluated document state requests it.
@@ -635,7 +638,100 @@ fn has_unresolved_selector_free_page_dimensions(doc: &IrDocument) -> bool {
         })
 }
 
+fn collect_page_margin_positions(nodes: &[IrNode], positions: &mut Vec<IrPageMarginPosition>) {
+    for node in nodes {
+        match node {
+            IrNode::PageMarginContent {
+                position, children, ..
+            } => {
+                positions.push(*position);
+                collect_page_margin_positions(children, positions);
+            }
+            IrNode::Blockquote { content, .. } => {
+                collect_page_margin_positions(content, positions);
+            }
+            IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+                for item in items {
+                    collect_page_margin_positions(&item.nodes, positions);
+                }
+            }
+            IrNode::Component { component } => match component {
+                IrComponent::Stacked(component) => {
+                    collect_page_margin_positions(&component.children, positions);
+                }
+                IrComponent::Container(component) => {
+                    collect_page_margin_positions(&component.children, positions);
+                }
+                IrComponent::Landscape(component) => {
+                    collect_page_margin_positions(&component.children, positions);
+                }
+                IrComponent::ExplicitError(_) => {}
+            },
+            IrNode::Heading { .. }
+            | IrNode::Paragraph { .. }
+            | IrNode::Table { .. }
+            | IrNode::CodeBlock { .. }
+            | IrNode::RawHtml { .. }
+            | IrNode::TargetSpecificContent { .. }
+            | IrNode::FunctionCall { .. }
+            | IrNode::ChainedFunctionCall { .. }
+            | IrNode::FunctionDeclaration { .. }
+            | IrNode::ThematicBreak { .. }
+            | IrNode::PageBreak { .. }
+            | IrNode::Math { .. } => {}
+        }
+    }
+}
+
+fn page_margin_positions(doc: &IrDocument) -> Vec<IrPageMarginPosition> {
+    let mut positions = Vec::new();
+    collect_page_margin_positions(&doc.nodes, &mut positions);
+    positions
+}
+
+fn has_unsupported_page_margin(doc: &IrDocument) -> bool {
+    let positions = page_margin_positions(doc);
+    !positions.is_empty()
+        && (doc.metadata.document_state.document_type != IrDocumentType::Paged
+            || positions.iter().any(|position| {
+                !matches!(
+                    position,
+                    IrPageMarginPosition::TopCenter | IrPageMarginPosition::BottomCenter
+                )
+            }))
+}
+
+fn page_margin_slot(label: &str) -> String {
+    format!(
+        "context {{\n  let __arkst_page = here().page()\n  let __arkst_margin = query(<{label}>).filter(it => it.location().page() <= __arkst_page)\n  if __arkst_margin.len() > 0 {{ align(center, __arkst_margin.last().value) }} else {{ none }}\n}}"
+    )
+}
+
+fn page_margin_prelude(doc: &IrDocument) -> String {
+    if doc.metadata.document_state.document_type != IrDocumentType::Paged {
+        return String::new();
+    }
+    let positions = page_margin_positions(doc);
+    if positions.is_empty() {
+        return String::new();
+    }
+
+    let mut prelude = String::new();
+    if positions.contains(&IrPageMarginPosition::TopCenter) {
+        let header = page_margin_slot("arkst-page-margin-top-center");
+        prelude.push_str(&format!("#set page(header: {header})\n"));
+    }
+    if positions.contains(&IrPageMarginPosition::BottomCenter) {
+        let footer = page_margin_slot("arkst-page-margin-bottom-center");
+        prelude.push_str(&format!("#set page(footer: {footer})\n"));
+    }
+    prelude
+}
+
 fn document_prelude(doc: &IrDocument) -> String {
+    if has_unsupported_page_margin(doc) {
+        return UNSUPPORTED_PAGE_MARGIN_PRELUDE.to_string();
+    }
     if has_unsupported_non_paged_page_selector(doc) {
         return UNSUPPORTED_NON_PAGED_PAGE_SELECTOR_PRELUDE.to_string();
     }
@@ -662,7 +758,7 @@ fn document_prelude(doc: &IrDocument) -> String {
     }
 
     let state = &doc.metadata.document_state;
-    let mut prelude = String::new();
+    let mut prelude = page_margin_prelude(doc);
     let global_dimensions = effective_global_page_dimensions(doc);
     let ordered_dimensions = global_dimensions
         .as_ref()

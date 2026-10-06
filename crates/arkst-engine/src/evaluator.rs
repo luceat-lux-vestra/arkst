@@ -63,11 +63,11 @@ use arkst_ir::{
     IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
     IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
-    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMargins, IrPageOrientation,
-    IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
-    TargetSpecificContent,
+    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins,
+    IrPageOrientation, IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair,
+    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -934,6 +934,7 @@ fn ir_node_source_span(node: &IrNode) -> SourceSpan {
         | IrNode::Table { span, .. }
         | IrNode::CodeBlock { span, .. }
         | IrNode::RawHtml { span, .. }
+        | IrNode::PageMarginContent { span, .. }
         | IrNode::FunctionCall { span, .. }
         | IrNode::ChainedFunctionCall { span, .. }
         | IrNode::FunctionDeclaration { span, .. }
@@ -4762,6 +4763,21 @@ impl Evaluator {
             );
         }
 
+        if is_page_margin(name) {
+            return self.evaluate_page_margin(
+                name,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+            );
+        }
+
         if is_page_counter(name) {
             return self.evaluate_page_counter(
                 name,
@@ -5595,6 +5611,141 @@ impl Evaluator {
         }
         CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
             content: vec![IrInline::HardBreak { span: *span }],
+            span: *span,
+        }]))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_page_margin(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(function_error(
+                format!("'.{name}' body is Markdown content, not a lambda"),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let bound = match bind_evaluated_arguments(
+            binding_plan,
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+            None,
+            *span,
+        ) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let position = if name == "footer" {
+            IrPageMarginPosition::BottomCenter
+        } else {
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
+            let Some(BoundSlot::Explicit {
+                value: argument,
+                span: argument_span,
+            }) = bound.slots.into_iter().next()
+            else {
+                return CallOutcome::Failed;
+            };
+            match value_conversion::convert_domain_with_origin(
+                &argument,
+                value_conversion::DomainTarget::ClosedEnum(
+                    value_conversion::ClosedEnumTarget::PageMarginPosition,
+                ),
+            ) {
+                Ok(value_conversion::DomainValue::Enum(IrEnumValue::PageMarginPosition(value))) => {
+                    value
+                }
+                Ok(_) => {
+                    diagnostics.push(function_error(
+                        "'.pagemargin' produced an unexpected page-margin position".to_string(),
+                        argument_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("position"),
+                            parameter_span,
+                            *span,
+                        ),
+                        Some("'.pagemargin'"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            }
+        };
+
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(function_error(
+                    format!("'.{name}' is block-body only in the current bounded implementation"),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(function_error(
+                    format!("'.{name}' requires a Markdown block body"),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::PageMarginContent {
+            position,
+            children,
             span: *span,
         }]))
     }
@@ -15106,6 +15257,7 @@ pub(crate) enum NativeDispatchOwner {
     Container,
     Landscape,
     Br,
+    PageMargin,
     PageCounter,
     PageNumberMarker,
     PageBreak,
@@ -15170,6 +15322,7 @@ const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
 const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
+const PAGE_MARGIN_NATIVE_NAMES: &[&str] = &["pagemargin", "footer"];
 const PAGE_COUNTER_NATIVE_NAMES: &[&str] = &["currentpage", "totalpages"];
 const PAGE_NUMBER_MARKER_NATIVE_NAMES: &[&str] = &["formatpagenumber", "resetpagenumber"];
 const PAGE_BREAK_NATIVE_NAMES: &[&str] = &["pagebreak"];
@@ -15265,6 +15418,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Br,
         names: BR_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::PageMargin,
+        names: PAGE_MARGIN_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::PageCounter,
@@ -15379,6 +15536,10 @@ fn is_landscape(name: &str) -> bool {
 
 fn is_br(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Br)
+}
+
+fn is_page_margin(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::PageMargin)
 }
 
 fn is_page_counter(name: &str) -> bool {
@@ -16836,6 +16997,11 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
         "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
         "br" | "currentpage" | "totalpages" => (Vec::new(), BodyPolicy::Reject),
+        "pagemargin" => (
+            vec![ParameterMetadata::required("position")],
+            BodyPolicy::AllowSeparate,
+        ),
+        "footer" => (Vec::new(), BodyPolicy::AllowSeparate),
         "formatpagenumber" => (
             vec![ParameterMetadata::required("format")],
             BodyPolicy::Reject,
@@ -20655,6 +20821,10 @@ fn rebase_dynamic_node(node: &mut IrNode, source_span: SourceSpan) {
         | IrNode::Math { span, .. } => *span = source_span,
         IrNode::TargetSpecificContent { content } => content.span = source_span,
         IrNode::Component { component } => rebase_dynamic_component(component, source_span),
+        IrNode::PageMarginContent { children, span, .. } => {
+            *span = source_span;
+            rebase_dynamic_nodes(children, source_span);
+        }
         IrNode::FunctionCall {
             positional_args,
             named_args,

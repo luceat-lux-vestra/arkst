@@ -165,6 +165,9 @@ fn collect_node_sources(node: &IrNode, sources: &mut SourceTable) -> Result<(), 
             }
         }
         IrNode::Component { component } => collect_component_sources(component, sources)?,
+        IrNode::PageMarginContent { children, .. } => {
+            collect_document_sources(children, sources)?;
+        }
         IrNode::FunctionCall {
             positional_args,
             named_args,
@@ -657,6 +660,39 @@ impl IrParagraphStyleInfo {
 pub enum IrPageSide {
     Left,
     Right,
+}
+
+/// Closed page-margin position domain accepted by `.pagemargin`.
+///
+/// Mirror positions preserve their authored identity in backend-neutral IR;
+/// a renderer with physical page-side information resolves them to the
+/// corresponding fixed position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrPageMarginPosition {
+    TopLeftCorner,
+    TopLeft,
+    TopCenter,
+    TopRight,
+    TopRightCorner,
+    RightTop,
+    RightMiddle,
+    RightBottom,
+    BottomRightCorner,
+    BottomRight,
+    BottomCenter,
+    BottomLeft,
+    BottomLeftCorner,
+    LeftBottom,
+    LeftMiddle,
+    LeftTop,
+    TopOutsideCorner,
+    TopOutside,
+    BottomOutsideCorner,
+    BottomOutside,
+    TopInsideCorner,
+    TopInside,
+    BottomInsideCorner,
+    BottomInside,
 }
 
 /// One validated finite, 1-based inclusive page range used by a page-format selector.
@@ -1464,6 +1500,7 @@ pub enum IrEnumValue {
     PageSizeFormat(IrPageSizeFormat),
     PageOrientation(IrPageOrientation),
     PageSide(IrPageSide),
+    PageMarginPosition(IrPageMarginPosition),
     CaptionPosition(IrCaptionPosition),
     StackedMainAxisAlignment(IrMainAxisAlignment),
     StackedCrossAxisAlignment(IrCrossAxisAlignment),
@@ -1656,6 +1693,11 @@ enum WireNode {
     },
     Component {
         component: WireComponent,
+    },
+    PageMarginContent {
+        position: IrPageMarginPosition,
+        children: Vec<WireNode>,
+        span: SourceSpan,
     },
     FunctionCall {
         name: String,
@@ -2034,6 +2076,15 @@ fn node_to_wire(node: &IrNode, sources: &SourceTable) -> Result<WireNode, String
         },
         IrNode::Component { component } => WireNode::Component {
             component: component_to_wire(component, sources)?,
+        },
+        IrNode::PageMarginContent {
+            position,
+            children,
+            span,
+        } => WireNode::PageMarginContent {
+            position: *position,
+            children: wire_nodes(children, sources)?,
+            span: *span,
         },
         IrNode::FunctionCall {
             name,
@@ -2515,6 +2566,15 @@ fn wire_node_to_ir(node: WireNode, sources: Option<&[SourceText]>) -> Result<IrN
         WireNode::Component { component } => IrNode::Component {
             component: component_from_wire(component, sources)?,
         },
+        WireNode::PageMarginContent {
+            position,
+            children,
+            span,
+        } => IrNode::PageMarginContent {
+            position,
+            children: nodes_from_wire(children, sources)?,
+            span,
+        },
         WireNode::FunctionCall {
             name,
             positional_args,
@@ -2944,6 +3004,15 @@ pub enum IrNode {
     TargetSpecificContent { content: TargetSpecificContent },
     /// A completed, typed backend-neutral semantic component.
     Component { component: IrComponent },
+    /// Invisible repeated page-margin initializer produced by `.pagemargin`
+    /// and `.footer`. The node remains in source order because the pinned
+    /// renderer activates an initializer from the physical page containing it
+    /// and keeps it active on later pages until the same position is replaced.
+    PageMarginContent {
+        position: IrPageMarginPosition,
+        children: Vec<IrNode>,
+        span: SourceSpan,
+    },
     /// A structurally preserved function/component call.
     ///
     /// Semantic evaluation normally consumes this form. It may remain in IR as
