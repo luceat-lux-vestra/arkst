@@ -116,13 +116,15 @@ jobs:
 
       - name: Enable writable protected-main sccache
         shell: bash
+        env:
+          CACHE_HIT: ${{ steps.restore-sccache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           {
             echo "SCCACHE_DIR=$RUNNER_TEMP/arkst-final-sccache"
             echo "RUSTC_WRAPPER=sccache"
           } >> "$GITHUB_ENV"
-          echo "exact protected-main cache hit: ${{ steps.restore-sccache.outputs.cache-hit }}"
+          echo "exact protected-main cache hit: $CACHE_HIT"
 
       - name: Zero compiler cache stats
         run: sccache --zero-stats
