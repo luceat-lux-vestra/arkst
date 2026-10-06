@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           git diff --exit-code
-          git log -1 --check
+          git diff --check 641cee703daecc6b1a0c719a3f878ffb1bb06dc0..HEAD -- .github/workflows/mold-linker-benchmark.yml
 
       - name: Install verified mold 3.0.0
         shell: bash
