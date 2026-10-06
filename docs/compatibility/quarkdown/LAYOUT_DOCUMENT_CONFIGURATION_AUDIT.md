@@ -806,7 +806,7 @@ under #178.
 
 ## 5. Arkst pipeline and architecture boundary
 
-The unresolved #153 rows no longer share one uniform pipeline. The 7
+The unresolved #153 rows no longer share one uniform pipeline. The 4
 `PARSED_ONLY` rows still follow the unresolved-call path:
 
 ```text
@@ -819,12 +819,13 @@ source call with source span
   -> no rendered output equivalence claim
 ```
 
-The 13 `PARTIAL` rows instead have bounded typed semantics and/or output
+The 16 `PARTIAL` rows instead have bounded typed semantics and/or output
 evidence and must be judged individually against their recorded residual
 contract. In particular, #175-owned numbering/font/paragraph/page-format and
-automatic-page-break state plus the #176 bounded current/total counter and
-page-number formatter/reset marker slices must not be described as absent merely
-because complete pinned-v2.5.1 end-to-end equivalence is not claimed.
+automatic-page-break state plus the #176 bounded page-margin/footer,
+current/total counter, page-number formatter/reset marker, and last-heading
+semantic slices must not be described as absent merely because complete
+pinned-v2.5.1 end-to-end equivalence is not claimed.
 
 The existing evaluator explicitly preserves unresolved block and inline calls
 with their arguments/body and spans. This is useful compatibility evidence for
@@ -948,11 +949,11 @@ follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 ## 8. Audit conclusion
 
 The canonical #153 result remains a 20-row owned inventory. Current status is
-15 conservative `PARTIAL` rows (`captionposition`,
+16 conservative `PARTIAL` rows (`captionposition`,
 `numbering`/`nonumbering`, bounded size-only `font`, `paragraphstyle`,
 bounded `pageformat`, bounded `pagemargin`/`footer`, bounded
 `currentpage`/`totalpages`, bounded `formatpagenumber`/`resetpagenumber`,
-`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 5
-`PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
+bounded `lastheading`, `autopagebreak`/`noautopagebreak`, and bounded `slides`)
+plus 4 `PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
 or justify a generalized document-wide style system. Residual ownership remains
 #175–#178 and the applicable #154 content/output consumers.
