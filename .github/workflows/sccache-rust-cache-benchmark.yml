@@ -20,7 +20,7 @@ env:
   RUSTFLAGS: "-D warnings"
   RUSTUP_TOOLCHAIN: 1.98.0
   SOURCE_BASE_SHA: 95255a3e68b9c29ca4dd051f289a6630a0208912
-  CURRENT_KEY: arkst-525-sccache-v1-95255a3e68b9c29ca4dd051f289a6630a0208912
+  CURRENT_KEY: arkst-525-sccache-currentprime-r4-95255a3e68b9c29ca4dd051f289a6630a0208912
   FULL_KEY: arkst-525-sccache-fullsurface-v1-95255a3e68b9c29ca4dd051f289a6630a0208912
   BENCH_DIR: benchmark-evidence/sccache-prime-coverage
 
@@ -49,6 +49,13 @@ jobs:
           test "$(git diff --name-only "$SOURCE_BASE_SHA"...HEAD)" = ".github/workflows/sccache-rust-cache-benchmark.yml"
           git diff --check "$SOURCE_BASE_SHA"...HEAD -- .github/workflows/sccache-rust-cache-benchmark.yml
 
+      - name: Restore current-prime compiler cache
+        id: restore_current
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/arkst-525-sccache-current
+          key: ${{ env.CURRENT_KEY }}
+
       - name: Restore full-surface compiler cache
         id: restore_full
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -57,7 +64,7 @@ jobs:
           key: ${{ env.FULL_KEY }}
 
       - name: Install verified sccache 0.18.0
-        if: steps.restore_full.outputs.cache-hit != 'true'
+        if: steps.restore_full.outputs.cache-hit != 'true' || steps.restore_current.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -69,6 +76,37 @@ jobs:
           tar -xzf "$archive" -C "$install_dir" --strip-components=1
           test -x "$install_dir/sccache"
           echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Prime current single-surface cache
+        if: steps.restore_current.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BENCH_DIR"
+          export SCCACHE_DIR="$RUNNER_TEMP/arkst-525-sccache-current"
+          export SCCACHE_CACHE_SIZE=2G
+          export RUSTC_WRAPPER=sccache
+          cargo fetch --locked
+          rm -rf target
+          sccache --zero-stats >/dev/null
+          start_ns="$(date +%s%N)"
+          cargo test --locked --workspace --all-targets --all-features --no-run
+          end_ns="$(date +%s%N)"
+          sccache --show-stats --stats-format=json > "$BENCH_DIR/current-prime-stats.json"
+          python3 - "$start_ns" "$end_ns" "$BENCH_DIR/current-prime-stats.json"             > "$BENCH_DIR/current-prime-summary.json" <<'PY'
+          import json, sys
+          start_ns, end_ns, stats_path = sys.argv[1:]
+          stats = json.load(open(stats_path, encoding="utf-8")).get("stats", {})
+          print(json.dumps({
+              "wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
+              "rust_hits": stats.get("cache_hits", {}).get("counts", {}).get("Rust", 0),
+              "rust_misses": stats.get("cache_misses", {}).get("counts", {}).get("Rust", 0),
+              "read_errors": stats.get("cache_read_errors", 0),
+              "write_errors": stats.get("cache_write_errors", 0),
+              "successful_writes": stats.get("cache_writes", 0),
+          }, sort_keys=True))
+          PY
+          du -sb "$SCCACHE_DIR" | tee "$BENCH_DIR/current-cache-size-bytes.txt"
 
       - name: Prime each exact compile surface
         if: steps.restore_full.outputs.cache-hit != 'true'
@@ -115,6 +153,13 @@ jobs:
           run_prime dev-cli             cargo build --locked -p arkst-cli
 
           du -sb "$SCCACHE_DIR" | tee "$BENCH_DIR/full-cache-size-bytes.txt"
+
+      - name: Save current-prime compiler cache
+        if: steps.restore_current.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/arkst-525-sccache-current
+          key: ${{ env.CURRENT_KEY }}
 
       - name: Save full-surface compiler cache
         if: steps.restore_full.outputs.cache-hit != 'true'
