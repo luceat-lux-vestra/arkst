@@ -419,7 +419,6 @@ jobs:
           env_hash="$(
             {
               rustc -Vv
-              cargo -V
               printf 'runner_os=%s\n' "$RUNNER_OS"
               printf 'runner_arch=%s\n' "$RUNNER_ARCH"
               printf 'rustflags=%s\n' "$RUSTFLAGS"
