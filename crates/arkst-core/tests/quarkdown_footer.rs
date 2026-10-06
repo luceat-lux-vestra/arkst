@@ -20,7 +20,10 @@ fn footer(result: &arkst_core::CompileResult) -> &IrPageMarginComponent {
         component: IrComponent::PageMargin(component),
     }] = result.ir.nodes.as_slice()
     else {
-        panic!("expected one page-margin component, got {:?}", result.ir.nodes);
+        panic!(
+            "expected one page-margin component, got {:?}",
+            result.ir.nodes
+        );
     };
     component
 }
@@ -126,6 +129,7 @@ fn footer_component_roundtrips_without_backend_state() {
         metadata: result.ir.metadata.clone(),
     };
     let encoded = serde_json::to_string(&document).expect("footer document serializes");
-    let decoded = serde_json::from_str::<IrDocument>(&encoded).expect("footer document deserializes");
+    let decoded =
+        serde_json::from_str::<IrDocument>(&encoded).expect("footer document deserializes");
     assert_eq!(decoded, document);
 }
