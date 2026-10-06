@@ -1,4 +1,4 @@
-name: Arkst sccache paired benchmark round 2
+name: Arkst rust-cache overlap benchmark round 3
 
 on:
   push:
@@ -8,10 +8,11 @@ on:
       - .github/workflows/sccache-rust-cache-benchmark.yml
 
 permissions:
+  actions: write
   contents: read
 
 concurrency:
-  group: arkst-525-sccache-${{ github.sha }}
+  group: arkst-525-round3-${{ github.sha }}
   cancel-in-progress: false
 
 env:
@@ -20,131 +21,48 @@ env:
   RUSTFLAGS: "-D warnings"
   RUSTUP_TOOLCHAIN: 1.98.0
   SOURCE_BASE_SHA: 95255a3e68b9c29ca4dd051f289a6630a0208912
-  CACHE_KEY: arkst-525-sccache-v1-95255a3e68b9c29ca4dd051f289a6630a0208912
-  BENCH_DIR: benchmark-evidence/sccache-rust-cache
+  SCCACHE_KEY: arkst-525-sccache-v1-95255a3e68b9c29ca4dd051f289a6630a0208912
+  RUST_CACHE_PREFIX: arkst-525-round3
+  BENCH_DIR: benchmark-evidence/rust-cache-overlap
 
 jobs:
-  prime:
-    name: prime exact-source sccache
+  compare:
+    name: ${{ matrix.variant }} / replicate ${{ matrix.replicate }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - name: Check out experiment
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
-        with:
-          toolchain: 1.98.0
-
-      - name: Verify bounded experiment identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git diff --name-only "$SOURCE_BASE_SHA"...HEAD)" = ".github/workflows/sccache-rust-cache-benchmark.yml"
-          git diff --check "$SOURCE_BASE_SHA"...HEAD -- .github/workflows/sccache-rust-cache-benchmark.yml
-
-      - name: Restore exact experiment compiler cache
-        id: restore_sccache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/arkst-525-sccache
-          key: ${{ env.CACHE_KEY }}
-
-      - name: Install verified sccache 0.18.0
-        if: steps.restore_sccache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$BENCH_DIR"
-          archive="$RUNNER_TEMP/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz"
-          install_dir="$RUNNER_TEMP/sccache-v0.18.0"
-          curl --fail --location --retry 3 --retry-delay 2 \
-            "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz" \
-            --output "$archive"
-          echo "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89  $archive" \
-            | sha256sum --check --strict
-          mkdir -p "$install_dir"
-          tar -xzf "$archive" -C "$install_dir" --strip-components=1
-          test -x "$install_dir/sccache"
-          echo "$install_dir" >> "$GITHUB_PATH"
-          echo "SCCACHE_DIR=$RUNNER_TEMP/arkst-525-sccache" >> "$GITHUB_ENV"
-
-      - name: Prime exact-source compiler outputs
-        if: steps.restore_sccache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$BENCH_DIR"
-          export RUSTC_WRAPPER=sccache
-          cargo fetch --locked
-          sccache --zero-stats
-          start_ns="$(date +%s%N)"
-          cargo test --locked --workspace --all-targets --all-features --no-run
-          end_ns="$(date +%s%N)"
-          sccache --show-stats --stats-format=json | tee "$BENCH_DIR/prime-stats.json"
-          python3 - "$BENCH_DIR/prime-stats.json" "$start_ns" "$end_ns" > "$BENCH_DIR/prime-summary.json" <<'PY'
-          import json, sys
-          stats = json.load(open(sys.argv[1], encoding="utf-8")).get("stats", {})
-          out = {
-              "wall_ms": (int(sys.argv[3]) - int(sys.argv[2])) / 1_000_000,
-              "rust_hits": stats.get("cache_hits", {}).get("counts", {}).get("Rust", 0),
-              "rust_misses": stats.get("cache_misses", {}).get("counts", {}).get("Rust", 0),
-              "read_errors": stats.get("cache_read_errors", 0),
-              "write_errors": stats.get("cache_write_errors", 0),
-          }
-          print(json.dumps(out, sort_keys=True))
-          if out["read_errors"] or out["write_errors"]:
-              raise SystemExit("prime cache I/O error")
-          PY
-          du -sb "$SCCACHE_DIR" | tee "$BENCH_DIR/prime-cache-size-bytes.txt"
-
-      - name: Save exact experiment compiler cache
-        if: steps.restore_sccache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/arkst-525-sccache
-          key: ${{ env.CACHE_KEY }}
-
-      - name: Retain prime evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: arkst-525-sccache-prime
-          path: benchmark-evidence/sccache-rust-cache
-          if-no-files-found: warn
-          retention-days: 30
-
-  test:
-    name: paired / replicate ${{ matrix.replicate }} / ${{ matrix.first }}-first
-    needs: [prime]
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
         include:
           - replicate: 1
-            first: baseline
-            second: candidate
+            variant: B-target
+            cache_targets: "true"
+          - replicate: 1
+            variant: C-deps
+            cache_targets: "false"
           - replicate: 2
-            first: candidate
-            second: baseline
+            variant: B-target
+            cache_targets: "true"
+          - replicate: 2
+            variant: C-deps
+            cache_targets: "false"
           - replicate: 3
-            first: baseline
-            second: candidate
+            variant: B-target
+            cache_targets: "true"
+          - replicate: 3
+            variant: C-deps
+            cache_targets: "false"
           - replicate: 4
-            first: candidate
-            second: baseline
+            variant: B-target
+            cache_targets: "true"
+          - replicate: 4
+            variant: C-deps
+            cache_targets: "false"
 
     env:
       REPLICATE: ${{ matrix.replicate }}
-      ORDER_FIRST: ${{ matrix.first }}
-      ORDER_SECOND: ${{ matrix.second }}
+      VARIANT: ${{ matrix.variant }}
+      CACHE_TARGETS: ${{ matrix.cache_targets }}
       SCCACHE_LOCAL_RW_MODE: READ_ONLY
 
     steps:
@@ -165,12 +83,18 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git diff --name-only "$SOURCE_BASE_SHA"...HEAD)" = ".github/workflows/sccache-rust-cache-benchmark.yml"
+          git diff --check "$SOURCE_BASE_SHA"...HEAD -- .github/workflows/sccache-rust-cache-benchmark.yml
 
-      - name: Restore current rust-cache topology
+      - name: Restore and later save experimental rust-cache
         id: rust_cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          save-if: false
+          prefix-key: arkst-525-round3
+          shared-key: ${{ matrix.variant }}
+          key: rep-${{ matrix.replicate }}-${{ github.sha }}
+          add-job-id-key: false
+          cache-targets: ${{ matrix.cache_targets }}
+          save-if: true
 
       - name: Install Typst 0.15.1
         uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
@@ -201,30 +125,25 @@ jobs:
           print(json.dumps({"install_wall_ms": (int(sys.argv[2]) - int(sys.argv[1])) / 1_000_000}, sort_keys=True))
           PY
 
-      - name: Restore exact sccache compiler outputs
+      - name: Restore exact compiler cache
         id: restore_sccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/arkst-525-sccache
-          key: ${{ env.CACHE_KEY }}
+          key: ${{ env.SCCACHE_KEY }}
 
-      - name: Prepare identical target seed
+      - name: Capture pre-run cache state
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$BENCH_DIR"
           cargo fetch --locked
-          seed="$RUNNER_TEMP/arkst-target-seed"
-          rm -rf "$seed"
-          mkdir -p "$seed"
-          if [ -d target ]; then
-            cp -a target/. "$seed/"
-          fi
           {
             echo "sha=$GITHUB_SHA"
             echo "source_base_sha=$SOURCE_BASE_SHA"
             echo "replicate=$REPLICATE"
-            echo "order=$ORDER_FIRST,$ORDER_SECOND"
+            echo "variant=$VARIANT"
+            echo "cache_targets=$CACHE_TARGETS"
             echo "rust_cache_hit=${{ steps.rust_cache.outputs.cache-hit }}"
             echo "sccache_cache_hit=${{ steps.restore_sccache.outputs.cache-hit }}"
             echo "runner_os=$RUNNER_OS"
@@ -232,35 +151,34 @@ jobs:
             echo "image_version=${ImageVersion:-unknown}"
             echo "cpu=$(lscpu | sed -n 's/^Model name:[[:space:]]*//p' | head -1)"
             echo "cores=$(nproc)"
-            echo "CARGO_HOME=${CARGO_HOME:-}"
-            echo "CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-}"
-            echo "CARGO_TERM_COLOR=${CARGO_TERM_COLOR:-}"
-            echo "RUSTFLAGS=${RUSTFLAGS:-}"
             rustc -Vv
             cargo -V
             typst --version
           } | tee "$BENCH_DIR/environment.txt"
-          du -sb "$seed" | tee "$BENCH_DIR/rust-cache-target-seed-size-bytes.txt"
+          if [ -d target ]; then
+            du -sb target | tee "$BENCH_DIR/pre-target-size-bytes.txt"
+          else
+            echo "0 target" | tee "$BENCH_DIR/pre-target-size-bytes.txt"
+          fi
           du -sb "$SCCACHE_DIR" | tee "$BENCH_DIR/sccache-restored-size-bytes.txt"
 
-      - name: Run paired private-item full Final-test benchmark
+      - name: Run full Final-test surface with warm sccache
         shell: bash
         run: |
           set -euo pipefail
-          seed="$RUNNER_TEMP/arkst-target-seed"
           source_file="crates/arkst-core/src/lib.rs"
           original_sha256="$(sha256sum "$source_file" | awk '{print $1}')"
           surface_script="$RUNNER_TEMP/arkst-525-ubuntu-final-test-surface.sh"
+
+          printf '\n#[allow(dead_code)]\nconst __ARKST_525_CACHE_BENCHMARK_PRIVATE_ITEM: usize = 525;\n' >> "$source_file"
+          test "$(sha256sum "$source_file" | awk '{print $1}')" != "$original_sha256"
 
           cat > "$surface_script" <<'SH'
           #!/usr/bin/env bash
           set -euo pipefail
 
           cargo test --locked -p arkst-cli --no-default-features
-
-          ARKST_REQUIRE_TYPST=1 \
-            cargo test --locked --workspace --all-targets --all-features
-
+          ARKST_REQUIRE_TYPST=1 cargo test --locked --workspace --all-targets --all-features
           ARKST_REQUIRE_TYPST=1 \
             cargo test --locked -p arkst-typst-inprocess \
               --test backend_parity --all-features -- --nocapture
@@ -268,14 +186,10 @@ jobs:
           default_tree="$(mktemp)"
           feature_tree="$(mktemp)"
           trap 'rm -f "$default_tree" "$feature_tree"' EXIT
-
           cargo tree --locked -p arkst-cli --no-default-features > "$default_tree"
           if grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v|arkst-typst-inprocess' "$default_tree"; then
-            echo "default arkst-cli unexpectedly contains the in-process Typst graph" >&2
-            sed -n '1,240p' "$default_tree" >&2
             exit 1
           fi
-
           cargo tree --locked -p arkst-cli --no-default-features --features typst-inprocess > "$feature_tree"
           grep -Eq 'arkst-typst-inprocess' "$feature_tree"
           grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v' "$feature_tree"
@@ -296,49 +210,33 @@ jobs:
           SH
           chmod +x "$surface_script"
 
-          measure_variant() {
-            variant="$1"
-            rm -rf target
-            mkdir -p target
-            cp -a "$seed/." target/
+          export RUSTC_WRAPPER=sccache
+          sccache --zero-stats
+          start_ns="$(date +%s%N)"
+          set +e
+          /usr/bin/time \
+            -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\nmax_rss_kb=%M' \
+            -o "$BENCH_DIR/surface.time" \
+            "$surface_script" \
+            > >(tee "$BENCH_DIR/surface.log") 2>&1
+          status="${PIPESTATUS[0]}"
+          set -e
+          end_ns="$(date +%s%N)"
 
-            printf '\n#[allow(dead_code)]\nconst __ARKST_525_CACHE_BENCHMARK_PRIVATE_ITEM: usize = 525;\n' >> "$source_file"
-            test "$(sha256sum "$source_file" | awk '{print $1}')" != "$original_sha256"
-
-            unset RUSTC_WRAPPER
-            if [ "$variant" = "candidate" ]; then
-              export RUSTC_WRAPPER=sccache
-              sccache --zero-stats
-            fi
-
-            start_ns="$(date +%s%N)"
-            set +e
-            /usr/bin/time \
-              -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\nmax_rss_kb=%M' \
-              -o "$BENCH_DIR/${variant}.time" \
-              "$surface_script" \
-              > >(tee "$BENCH_DIR/${variant}.log") 2>&1
-            status="${PIPESTATUS[0]}"
-            set -e
-            end_ns="$(date +%s%N)"
-
-            python3 - "$variant" "$start_ns" "$end_ns" "$status" >> "$BENCH_DIR/results.jsonl" <<'PY'
+          python3 - "$start_ns" "$end_ns" "$status" > "$BENCH_DIR/result.json" <<'PY'
           import json, os, sys
-          variant, start_ns, end_ns, status = sys.argv[1:]
+          start_ns, end_ns, status = sys.argv[1:]
           print(json.dumps({
-              "variant": variant,
+              "variant": os.environ["VARIANT"],
               "replicate": int(os.environ["REPLICATE"]),
-              "order": [os.environ["ORDER_FIRST"], os.environ["ORDER_SECOND"]],
+              "cache_targets": os.environ["CACHE_TARGETS"],
               "wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
               "exit_code": int(status),
-              "surface": "ubuntu-final-test-full",
-              "mutation": "private-rust-item",
           }, sort_keys=True))
           PY
 
-            if [ "$variant" = "candidate" ]; then
-              sccache --show-stats --stats-format=json | tee "$BENCH_DIR/candidate-sccache-stats.json"
-              python3 - "$BENCH_DIR/candidate-sccache-stats.json" > "$BENCH_DIR/candidate-sccache-summary.json" <<'PY'
+          sccache --show-stats --stats-format=json | tee "$BENCH_DIR/sccache-stats.json"
+          python3 - "$BENCH_DIR/sccache-stats.json" > "$BENCH_DIR/sccache-summary.json" <<'PY'
           import json, sys
           stats = json.load(open(sys.argv[1], encoding="utf-8")).get("stats", {})
           out = {
@@ -349,29 +247,52 @@ jobs:
               "successful_writes": stats.get("cache_writes", 0),
           }
           print(json.dumps(out, sort_keys=True))
-          if out["read_errors"] != 0:
-              raise SystemExit("candidate cache read error")
-          if out["successful_writes"] != 0:
-              raise SystemExit("restore-only candidate wrote cache entries")
+          if out["read_errors"] != 0 or out["successful_writes"] != 0:
+              raise SystemExit("unexpected sccache I/O behavior")
           if out["write_errors"] != out["rust_misses"]:
               raise SystemExit("READ_ONLY write-error accounting mismatch")
           PY
-            fi
 
-            git checkout -- "$source_file"
-            test "$(sha256sum "$source_file" | awk '{print $1}')" = "$original_sha256"
-            test "$status" -eq 0
-          }
-
-          measure_variant "$ORDER_FIRST"
-          measure_variant "$ORDER_SECOND"
+          du -sb target | tee "$BENCH_DIR/post-target-size-bytes.txt"
+          git checkout -- "$source_file"
+          test "$(sha256sum "$source_file" | awk '{print $1}')" = "$original_sha256"
+          test "$status" -eq 0
           git diff --exit-code
 
-      - name: Retain paired benchmark evidence
+      - name: Retain comparison evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: arkst-525-round2-paired-replicate-${{ matrix.replicate }}
-          path: benchmark-evidence/sccache-rust-cache
+          name: arkst-525-round3-${{ matrix.variant }}-rep${{ matrix.replicate }}
+          path: benchmark-evidence/rust-cache-overlap
           if-no-files-found: error
           retention-days: 30
+
+  cleanup:
+    name: cleanup experiment rust-cache entries
+    needs: [compare]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete round-3 rust-cache entries
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(
+            gh api --paginate --slurp -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100" \
+            | jq -r '
+                [.[].actions_caches[]
+                 | select(.key | startswith("arkst-525-round3"))]
+                | .[].id
+              '
+          )
+          for id in "${ids[@]}"; do
+            gh api --method DELETE -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/actions/caches/$id"
+          done
+          echo "deleted ${#ids[@]} round-3 cache entries"
