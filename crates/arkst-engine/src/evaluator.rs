@@ -474,6 +474,9 @@ fn component_contains_explicit_error(component: &IrComponent) -> bool {
         IrComponent::Landscape(component) => {
             component.children.iter().any(node_contains_explicit_error)
         }
+        IrComponent::PageMargin(component) => {
+            component.children.iter().any(node_contains_explicit_error)
+        }
     }
 }
 
