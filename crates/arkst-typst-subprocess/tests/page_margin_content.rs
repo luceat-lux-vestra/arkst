@@ -71,10 +71,17 @@ fn paged_top_and_bottom_center_use_persistent_page_query_state() {
         "one query label plus two source-order initializers: {typst}"
     );
 
-    let first_header = typst.find("#metadata([\nHeader A").expect("first header marker");
+    let first_header = typst
+        .find("#metadata([\nHeader A")
+        .expect("first header marker");
     let break_pos = typst.find("#pagebreak").expect("page break");
-    let second_header = typst.find("#metadata([\nHeader B").expect("second header marker");
-    assert!(first_header < break_pos && break_pos < second_header, "{typst}");
+    let second_header = typst
+        .find("#metadata([\nHeader B")
+        .expect("second header marker");
+    assert!(
+        first_header < break_pos && break_pos < second_header,
+        "{typst}"
+    );
 
     with_typst("paged-central-page-margin", |backend| {
         let output = backend
@@ -97,9 +104,15 @@ fn unsupported_page_margin_positions_and_document_types_fail_closed() {
             "paged-left",
             ".doctype {paged}\n.pagemargin {topleft}\n    Unsupported\nBody\n",
         ),
-        ("slides-footer", ".doctype {slides}\n.footer\n    Unsupported\nBody\n"),
+        (
+            "slides-footer",
+            ".doctype {slides}\n.footer\n    Unsupported\nBody\n",
+        ),
         ("plain-footer", ".footer\n    Unsupported\nBody\n"),
-        ("docs-footer", ".doctype {docs}\n.footer\n    Unsupported\nBody\n"),
+        (
+            "docs-footer",
+            ".doctype {docs}\n.footer\n    Unsupported\nBody\n",
+        ),
     ] {
         let typst = lower(source);
         assert!(
