@@ -112,7 +112,7 @@ fn bounded_footer_prelude(document_type: IrDocumentType, has_footer: bool) -> Op
         "#set page(footer: context {{\n\
   let arkst-page = here().page()\n\
   let arkst-footers = query(<{BOUNDED_FOOTER_LABEL}>).filter(it => it.location().page() <= arkst-page)\n\
-  if arkst-footers.len() > 0 {{ arkst-footers.last().value }} else {{ none }}\n\
+  if arkst-footers.len() > 0 {{ align(center, arkst-footers.last().value) }} else {{ none }}\n\
 }})\n"
     ))
 }
