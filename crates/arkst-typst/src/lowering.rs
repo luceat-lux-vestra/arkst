@@ -79,9 +79,9 @@ fn node_contains_page_margin(node: &IrNode) -> bool {
         IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => items
             .iter()
             .any(|item| nodes_contain_page_margin(&item.nodes)),
-        IrNode::FunctionCall { body, .. } | IrNode::ChainedFunctionCall { body, .. } => body
-            .as_deref()
-            .is_some_and(nodes_contain_page_margin),
+        IrNode::FunctionCall { body, .. } | IrNode::ChainedFunctionCall { body, .. } => {
+            body.as_deref().is_some_and(nodes_contain_page_margin)
+        }
         IrNode::FunctionDeclaration { body, .. } => nodes_contain_page_margin(body),
         IrNode::Heading { .. }
         | IrNode::Paragraph { .. }
