@@ -374,13 +374,107 @@ jobs:
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
         with:
           toolchain: 1.98.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
+      - name: Restore Rust cache (macOS/Windows)
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os != 'ubuntu-latest' }}
+      - name: Restore dependency-only Rust cache (Ubuntu)
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
+        with:
+          cache-targets: false
       - name: Install Typst 0.15.1 (pinned)
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
         uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
         with:
           typst-version: 0.15.1
+
+      - name: Install verified sccache 0.18.0 (Ubuntu)
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz"
+          install_dir="$RUNNER_TEMP/sccache-v0.18.0"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz" \
+            --output "$archive"
+          echo "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1
+          test -x "$install_dir/sccache"
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Resolve protected-main compiler-cache identity (Ubuntu)
+        id: final-cache-id
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          lock_hash="$(sha256sum Cargo.lock | awk '{print $1}')"
+          cargo_config_hash="$(sha256sum .cargo/config.toml | awk '{print $1}')"
+          env_hash="$(
+            {
+              rustc -Vv
+              printf 'runner_os=%s\n' "$RUNNER_OS"
+              printf 'runner_arch=%s\n' "$RUNNER_ARCH"
+              printf 'rustflags=%s\n' "$RUSTFLAGS"
+              printf 'cargo_incremental=%s\n' "$CARGO_INCREMENTAL"
+              printf 'cargo_term_color=%s\n' "$CARGO_TERM_COLOR"
+              printf 'sccache_version=0.18.0\n'
+              printf 'cargo_config_sha256=%s\n' "$cargo_config_hash"
+            } | sha256sum | awk '{print $1}'
+          )"
+          [[ "$lock_hash" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$env_hash" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          family="arkst-final-sccache-v1-linux-${env_hash}"
+          lock_prefix="${family}-${lock_hash}-"
+          key="${lock_prefix}${BASE_SHA}"
+
+          {
+            echo "family=$family"
+            echo "lock_prefix=$lock_prefix"
+            echo "key=$key"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Requested protected-main compiler-cache key: $key"
+
+      - name: Restore protected-main compiler cache read-only (Ubuntu)
+        id: final-restore-sccache
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/arkst-final-sccache
+          key: ${{ steps.final-cache-id.outputs.key }}
+          restore-keys: |
+            ${{ steps.final-cache-id.outputs.lock_prefix }}
+            ${{ steps.final-cache-id.outputs.family }}-
+
+      - name: Enable restore-only sccache (Ubuntu)
+        id: enable-final-sccache
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.final-restore-sccache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          {
+            echo "SCCACHE_DIR=$RUNNER_TEMP/arkst-final-sccache"
+            echo "SCCACHE_CACHE_SIZE=1G"
+            echo "SCCACHE_LOCAL_RW_MODE=READ_ONLY"
+            echo "RUSTC_WRAPPER=sccache"
+            echo "CARGO_INCREMENTAL=0"
+          } >> "$GITHUB_ENV"
+          echo "exact protected-main cache hit: $CACHE_HIT"
+
+      - name: Zero compiler cache stats (Ubuntu)
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
+        run: sccache --zero-stats
       - name: Test default CLI feature boundary
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
         run: cargo test --locked -p arkst-cli --no-default-features
@@ -426,6 +520,35 @@ jobs:
             target/debug/arkst build "$input" --output "target/example-smoke/${name}.typ"
             target/debug/arkst build "$input" --format pdf --output "target/example-smoke/${name}.pdf"
           done
+
+      - name: Verify restore-only compiler cache health (Ubuntu)
+        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' && steps.enable-final-sccache.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stats="$RUNNER_TEMP/arkst-final-sccache-stats.json"
+          sccache --show-stats --stats-format=json | tee "$stats"
+          python3 - "$stats" <<'PY'
+          import json
+          import sys
+
+          stats = json.load(open(sys.argv[1], encoding="utf-8")).get("stats", {})
+          rust_hits = stats.get("cache_hits", {}).get("counts", {}).get("Rust", 0)
+          rust_misses = stats.get("cache_misses", {}).get("counts", {}).get("Rust", 0)
+          read_errors = stats.get("cache_read_errors", 0)
+          write_errors = stats.get("cache_write_errors", 0)
+          successful_writes = stats.get("cache_writes", 0)
+
+          print(
+              f"consumer rust_hits={rust_hits} rust_misses={rust_misses} "
+              f"read_errors={read_errors} write_errors={write_errors} "
+              f"successful_writes={successful_writes}"
+          )
+          if read_errors != 0:
+              raise SystemExit("restore-only compiler-cache consumer recorded read errors")
+          if successful_writes != 0:
+              raise SystemExit("restore-only compiler-cache consumer wrote cache entries")
+          PY
 
   wasm:
     name: wasm
