@@ -93,6 +93,7 @@ jobs:
           tar -xzf "$archive" -C "$install_dir" --strip-components=1
           test -x "$install_dir/sccache"
           echo "$install_dir" >> "$GITHUB_PATH"
+          echo "SCCACHE_DIR=$RUNNER_TEMP/arkst-525-sccache" >> "$GITHUB_ENV"
           end_ns="$(date +%s%N)"
           python3 - "$start_ns" "$end_ns" > "$BENCH_DIR/sccache-install.json" <<'PY'
           import json, sys
@@ -103,8 +104,7 @@ jobs:
         if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
         shell: bash
         env:
-          SCCACHE_DIR: ${{ runner.temp }}/arkst-525-sccache
-          RUSTC_WRAPPER: sccache
+              RUSTC_WRAPPER: sccache
         run: |
           set -euo pipefail
           mkdir -p "$BENCH_DIR"
