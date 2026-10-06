@@ -934,6 +934,7 @@ fn ir_node_source_span(node: &IrNode) -> SourceSpan {
         | IrNode::Table { span, .. }
         | IrNode::CodeBlock { span, .. }
         | IrNode::RawHtml { span, .. }
+        | IrNode::PageMarginContent { span, .. }
         | IrNode::FunctionCall { span, .. }
         | IrNode::ChainedFunctionCall { span, .. }
         | IrNode::FunctionDeclaration { span, .. }
@@ -5698,7 +5699,7 @@ impl Evaluator {
                 }
                 Ok(_) => {
                     diagnostics.push(function_error(
-                        "'.pagemargin' produced an unexpected page-margin position",
+                        "'.pagemargin' produced an unexpected page-margin position".to_string(),
                         argument_span,
                     ));
                     return CallOutcome::Failed;
@@ -20820,6 +20821,10 @@ fn rebase_dynamic_node(node: &mut IrNode, source_span: SourceSpan) {
         | IrNode::Math { span, .. } => *span = source_span,
         IrNode::TargetSpecificContent { content } => content.span = source_span,
         IrNode::Component { component } => rebase_dynamic_component(component, source_span),
+        IrNode::PageMarginContent { children, span, .. } => {
+            *span = source_span;
+            rebase_dynamic_nodes(children, source_span);
+        }
         IrNode::FunctionCall {
             positional_args,
             named_args,
