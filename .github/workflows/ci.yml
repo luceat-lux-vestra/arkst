@@ -459,6 +459,8 @@ jobs:
         id: enable-final-sccache
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
         shell: bash
+        env:
+          CACHE_HIT: ${{ steps.final-restore-sccache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           {
@@ -468,7 +470,7 @@ jobs:
             echo "RUSTC_WRAPPER=sccache"
             echo "CARGO_INCREMENTAL=0"
           } >> "$GITHUB_ENV"
-          echo "exact protected-main cache hit: ${{ steps.final-restore-sccache.outputs.cache-hit }}"
+          echo "exact protected-main cache hit: $CACHE_HIT"
 
       - name: Zero compiler cache stats (Ubuntu)
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
