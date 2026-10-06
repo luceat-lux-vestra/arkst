@@ -609,8 +609,35 @@ plain/paged/slides behavior. `footer(content)` is exact sugar for
 
 These are AST/output primitives, not `DocumentInfo` fields. They require typed
 body/content retention, closed position conversion, repeated-page semantics,
-and renderer support. Arkst currently preserves unresolved calls only;
-status for both is `PARSED_ONLY` and the grouped pagination follow-up is #176.
+and renderer support. The general `.pagemargin` surface remains `PARSED_ONLY`:
+Arkst does not yet classify the 24 fixed/mirrored positions or implement their
+plain/slides/docs output contracts.
+
+The bounded `.footer` sugar now has an independent `PARTIAL` slice. Native
+block-body evaluation publishes `IrComponent::PageMargin` with the closed
+`BottomCenter` position and structured children, preserving source-defined
+shadowing, rollback, provenance, and serde. This first slice intentionally
+accepts only the Markdown block-body form; general explicit
+`MarkdownContent` argument conversion remains part of the broader body/value
+boundary.
+
+For final `paged` output, Typst lowers each footer initializer to locatable
+content `metadata`. One document-global page-footer query selects all footer
+markers whose physical `location().page()` is less than or equal to the
+current `here().page()`, takes the last marker in document order, and centers
+its content. A footer declared later on the same physical page therefore
+applies to that page, the last same-page footer wins, and the selected footer
+persists to following pages until another footer replaces it. This matches the
+pinned paged handler's per-position active initializer map for the exact
+`bottom-center` sugar case without introducing renderer page objects into IR.
+
+Final `plain`, `slides`, and `docs` currently fail closed for this bounded
+footer component. Their pinned renderers use materially different contracts
+(plain fixed positioning, slide-background insertion, and docs fixed
+header/footer containers), so Arkst does not reinterpret those modes as Typst
+paged footers. General `.pagemargin` position conversion, mirrored page-side
+resolution, non-paged footer output, and wider explicit-content binding remain
+open under #176.
 
 #### `.currentpage`, `.totalpages`, `.formatpagenumber`, and `.resetpagenumber`
 
@@ -672,8 +699,8 @@ equivalence with JavaScript `String.fromCharCode` UTF-16 wrapping and the extern
 `romans` package is not claimed. Final `plain` and `docs` emit neither marker runtime
 and continue to expose the pinned unresolved `-` current/total placeholders. Both
 `.formatpagenumber` and `.resetpagenumber` therefore move from `PARSED_ONLY` to
-bounded `PARTIAL` under #176 without widening the remaining page-margin/footer or
-last-heading residuals.
+bounded `PARTIAL` under #176 without widening the remaining general
+page-margin, non-paged footer, or last-heading residuals.
 
 #### `.lastheading`
 
@@ -917,10 +944,11 @@ follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 ## 8. Audit conclusion
 
 The canonical #153 result remains a 20-row owned inventory. Current status is
-13 conservative `PARTIAL` rows (`captionposition`,
+14 conservative `PARTIAL` rows (`captionposition`,
 `numbering`/`nonumbering`, bounded size-only `font`, `paragraphstyle`,
-bounded `pageformat`, bounded `currentpage`/`totalpages`, bounded
-`formatpagenumber`/`resetpagenumber`, `autopagebreak`/`noautopagebreak`, and
-bounded `slides`) plus 7 `PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
+bounded `pageformat`, bounded paged `footer`, bounded
+`currentpage`/`totalpages`, bounded `formatpagenumber`/`resetpagenumber`,
+`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 6
+`PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
 or justify a generalized document-wide style system. Residual ownership remains
 #175–#178 and the applicable #154 content/output consumers.
