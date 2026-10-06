@@ -1,4 +1,4 @@
-name: Arkst sccache prime coverage benchmark round 4
+name: Arkst sccache compression-density benchmark round 5A
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: arkst-525-round4-${{ github.sha }}
+  group: arkst-527-round5a-${{ github.sha }}
   cancel-in-progress: false
 
 env:
@@ -20,15 +20,22 @@ env:
   RUSTFLAGS: "-D warnings"
   RUSTUP_TOOLCHAIN: 1.98.0
   SOURCE_BASE_SHA: 95255a3e68b9c29ca4dd051f289a6630a0208912
-  CURRENT_KEY: arkst-525-sccache-currentprime-r4-95255a3e68b9c29ca4dd051f289a6630a0208912
-  FULL_KEY: arkst-525-sccache-fullsurface-v1-95255a3e68b9c29ca4dd051f289a6630a0208912
-  BENCH_DIR: benchmark-evidence/sccache-prime-coverage
+  BENCH_DIR: benchmark-evidence/sccache-compression-density
 
 jobs:
-  prime-full:
-    name: prime full compile surface
+  prime:
+    name: zstd level ${{ matrix.level }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        level: [3, 10, 22]
+
+    env:
+      SCCACHE_CACHE_ZSTD_LEVEL: ${{ matrix.level }}
+      SCCACHE_CACHE_SIZE: 2G
+
     steps:
       - name: Check out experiment
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,86 +56,45 @@ jobs:
           test "$(git diff --name-only "$SOURCE_BASE_SHA"...HEAD)" = ".github/workflows/sccache-rust-cache-benchmark.yml"
           git diff --check "$SOURCE_BASE_SHA"...HEAD -- .github/workflows/sccache-rust-cache-benchmark.yml
 
-      - name: Restore current-prime compiler cache
-        id: restore_current
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/arkst-525-sccache-current
-          key: ${{ env.CURRENT_KEY }}
-
-      - name: Restore full-surface compiler cache
-        id: restore_full
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/arkst-525-sccache-full
-          key: ${{ env.FULL_KEY }}
-
       - name: Install verified sccache 0.18.0
-        if: steps.restore_full.outputs.cache-hit != 'true' || steps.restore_current.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz"
           install_dir="$RUNNER_TEMP/sccache-v0.18.0"
-          curl --fail --location --retry 3 --retry-delay 2             "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz"             --output "$archive"
-          echo "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89  $archive"             | sha256sum --check --strict
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz" \
+            --output "$archive"
+          echo "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89  $archive" \
+            | sha256sum --check --strict
           mkdir -p "$install_dir"
           tar -xzf "$archive" -C "$install_dir" --strip-components=1
           test -x "$install_dir/sccache"
           echo "$install_dir" >> "$GITHUB_PATH"
 
-      - name: Prime current single-surface cache
-        if: steps.restore_current.outputs.cache-hit != 'true'
+      - name: Prime exact full compile surface
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$BENCH_DIR"
-          export SCCACHE_DIR="$RUNNER_TEMP/arkst-525-sccache-current"
-          export SCCACHE_CACHE_SIZE=2G
+          export SCCACHE_DIR="$RUNNER_TEMP/arkst-527-sccache-zstd-$SCCACHE_CACHE_ZSTD_LEVEL"
           export RUSTC_WRAPPER=sccache
-          cargo fetch --locked
-          rm -rf target
-          sccache --zero-stats >/dev/null
-          start_ns="$(date +%s%N)"
-          cargo test --locked --workspace --all-targets --all-features --no-run
-          end_ns="$(date +%s%N)"
-          sccache --show-stats --stats-format=json > "$BENCH_DIR/current-prime-stats.json"
-          python3 - "$start_ns" "$end_ns" "$BENCH_DIR/current-prime-stats.json"             > "$BENCH_DIR/current-prime-summary.json" <<'PY'
-          import json, sys
-          start_ns, end_ns, stats_path = sys.argv[1:]
-          stats = json.load(open(stats_path, encoding="utf-8")).get("stats", {})
-          print(json.dumps({
-              "wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
-              "rust_hits": stats.get("cache_hits", {}).get("counts", {}).get("Rust", 0),
-              "rust_misses": stats.get("cache_misses", {}).get("counts", {}).get("Rust", 0),
-              "read_errors": stats.get("cache_read_errors", 0),
-              "write_errors": stats.get("cache_write_errors", 0),
-              "successful_writes": stats.get("cache_writes", 0),
-          }, sort_keys=True))
-          PY
-          du -sb "$SCCACHE_DIR" | tee "$BENCH_DIR/current-cache-size-bytes.txt"
-
-      - name: Prime each exact compile surface
-        if: steps.restore_full.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$BENCH_DIR"
-          export SCCACHE_DIR="$RUNNER_TEMP/arkst-525-sccache-full"
-          export SCCACHE_CACHE_SIZE=2G
-          export RUSTC_WRAPPER=sccache
+          rm -rf "$SCCACHE_DIR" target
+          mkdir -p "$SCCACHE_DIR"
           cargo fetch --locked
 
           run_prime() {
             phase="$1"
             shift
             rm -rf target
+            sccache --stop-server >/dev/null 2>&1 || true
             sccache --zero-stats >/dev/null
             start_ns="$(date +%s%N)"
             "$@"
             end_ns="$(date +%s%N)"
-            sccache --show-stats --stats-format=json > "$BENCH_DIR/prime-${phase}-stats.json"
-            python3 - "$phase" "$start_ns" "$end_ns" "$BENCH_DIR/prime-${phase}-stats.json"               > "$BENCH_DIR/prime-${phase}-summary.json" <<'PY'
+            sccache --show-stats --stats-format=json > "$BENCH_DIR/$phase-stats.json"
+            python3 - "$phase" "$start_ns" "$end_ns" "$BENCH_DIR/$phase-stats.json" \
+              >> "$BENCH_DIR/phase-results.jsonl" <<'PY'
           import json, sys
           phase, start_ns, end_ns, stats_path = sys.argv[1:]
           stats = json.load(open(stats_path, encoding="utf-8")).get("stats", {})
@@ -144,271 +110,64 @@ jobs:
           PY
           }
 
-          run_prime no-default             cargo test --locked -p arkst-cli --no-default-features --no-run
+          total_start_ns="$(date +%s%N)"
 
-          run_prime workspace-all             env ARKST_REQUIRE_TYPST=1             cargo test --locked --workspace --all-targets --all-features --no-run
+          run_prime no-default \
+            cargo test --locked -p arkst-cli --no-default-features --no-run
 
-          run_prime backend-parity             env ARKST_REQUIRE_TYPST=1             cargo test --locked -p arkst-typst-inprocess               --test backend_parity --all-features --no-run
+          run_prime workspace-all \
+            env ARKST_REQUIRE_TYPST=1 \
+            cargo test --locked --workspace --all-targets --all-features --no-run
 
-          run_prime dev-cli             cargo build --locked -p arkst-cli
+          run_prime backend-parity \
+            env ARKST_REQUIRE_TYPST=1 \
+            cargo test --locked -p arkst-typst-inprocess \
+              --test backend_parity --all-features --no-run
 
-          du -sb "$SCCACHE_DIR" | tee "$BENCH_DIR/full-cache-size-bytes.txt"
+          run_prime dev-cli \
+            cargo build --locked -p arkst-cli
 
-      - name: Save current-prime compiler cache
-        if: steps.restore_current.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/arkst-525-sccache-current
-          key: ${{ env.CURRENT_KEY }}
-
-      - name: Save full-surface compiler cache
-        if: steps.restore_full.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/arkst-525-sccache-full
-          key: ${{ env.FULL_KEY }}
-
-      - name: Retain prime evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: arkst-525-round4-full-prime
-          path: benchmark-evidence/sccache-prime-coverage
-          if-no-files-found: warn
-          retention-days: 30
-
-  paired:
-    name: paired / replicate ${{ matrix.replicate }} / ${{ matrix.first }}-first
-    needs: [prime-full]
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - replicate: 1
-            first: current
-            second: full
-          - replicate: 2
-            first: full
-            second: current
-          - replicate: 3
-            first: current
-            second: full
-          - replicate: 4
-            first: full
-            second: current
-
-    env:
-      REPLICATE: ${{ matrix.replicate }}
-      ORDER_FIRST: ${{ matrix.first }}
-      ORDER_SECOND: ${{ matrix.second }}
-      SCCACHE_LOCAL_RW_MODE: READ_ONLY
-
-    steps:
-      - name: Check out experiment
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
-        with:
-          toolchain: 1.98.0
-
-      - name: Verify bounded experiment identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git diff --name-only "$SOURCE_BASE_SHA"...HEAD)" = ".github/workflows/sccache-rust-cache-benchmark.yml"
-
-      - name: Restore dependency-only rust-cache topology
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-targets: false
-          save-if: false
-
-      - name: Install Typst 0.15.1
-        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
-        with:
-          typst-version: 0.15.1
-
-      - name: Install verified sccache 0.18.0
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$BENCH_DIR"
-          archive="$RUNNER_TEMP/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz"
-          install_dir="$RUNNER_TEMP/sccache-v0.18.0"
-          curl --fail --location --retry 3 --retry-delay 2             "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz"             --output "$archive"
-          echo "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89  $archive"             | sha256sum --check --strict
-          mkdir -p "$install_dir"
-          tar -xzf "$archive" -C "$install_dir" --strip-components=1
-          test -x "$install_dir/sccache"
-          echo "$install_dir" >> "$GITHUB_PATH"
-
-      - name: Restore current-prime compiler cache
-        id: restore_current
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/arkst-525-sccache-current
-          key: ${{ env.CURRENT_KEY }}
-
-      - name: Restore full-surface compiler cache
-        id: restore_full
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/arkst-525-sccache-full
-          key: ${{ env.FULL_KEY }}
-
-      - name: Verify exact cache availability and environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "${{ steps.restore_current.outputs.cache-hit }}" = "true"
-          test "${{ steps.restore_full.outputs.cache-hit }}" = "true"
-          cargo fetch --locked
-          {
-            echo "sha=$GITHUB_SHA"
-            echo "source_base_sha=$SOURCE_BASE_SHA"
-            echo "replicate=$REPLICATE"
-            echo "order=$ORDER_FIRST,$ORDER_SECOND"
-            echo "runner_os=$RUNNER_OS"
-            echo "image_os=${ImageOS:-unknown}"
-            echo "image_version=${ImageVersion:-unknown}"
-            echo "cpu=$(lscpu | sed -n 's/^Model name:[[:space:]]*//p' | head -1)"
-            echo "cores=$(nproc)"
-            rustc -Vv
-            cargo -V
-            typst --version
-          } | tee "$BENCH_DIR/environment.txt"
-          du -sb "$RUNNER_TEMP/arkst-525-sccache-current" | tee "$BENCH_DIR/current-cache-size-bytes.txt"
-          du -sb "$RUNNER_TEMP/arkst-525-sccache-full" | tee "$BENCH_DIR/full-cache-size-bytes.txt"
-
-      - name: Run paired cache-coverage benchmark
-        shell: bash
-        run: |
-          set -euo pipefail
-          source_file="crates/arkst-core/src/lib.rs"
-          original_sha256="$(sha256sum "$source_file" | awk '{print $1}')"
-
-          run_phase() {
-            variant="$1"
-            phase="$2"
-            shift 2
-            sccache --zero-stats >/dev/null
-            start_ns="$(date +%s%N)"
-            "$@"
-            end_ns="$(date +%s%N)"
-            sccache --show-stats --stats-format=json > "$BENCH_DIR/${variant}-${phase}-stats.json"
-            python3 - "$variant" "$phase" "$start_ns" "$end_ns" "$BENCH_DIR/${variant}-${phase}-stats.json"               >> "$BENCH_DIR/phase-results.jsonl" <<'PY'
-          import json, sys
-          variant, phase, start_ns, end_ns, stats_path = sys.argv[1:]
-          stats = json.load(open(stats_path, encoding="utf-8")).get("stats", {})
-          print(json.dumps({
-              "variant": variant,
-              "phase": phase,
-              "wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
-              "rust_hits": stats.get("cache_hits", {}).get("counts", {}).get("Rust", 0),
-              "rust_misses": stats.get("cache_misses", {}).get("counts", {}).get("Rust", 0),
-              "read_errors": stats.get("cache_read_errors", 0),
-              "write_errors": stats.get("cache_write_errors", 0),
-              "successful_writes": stats.get("cache_writes", 0),
-          }, sort_keys=True))
-          PY
-          }
-
-          measure_variant() {
-            variant="$1"
-            case "$variant" in
-              current) cache_dir="$RUNNER_TEMP/arkst-525-sccache-current" ;;
-              full) cache_dir="$RUNNER_TEMP/arkst-525-sccache-full" ;;
-              *) exit 2 ;;
-            esac
-
-            rm -rf target
-            printf '\n#[allow(dead_code)]\nconst __ARKST_525_CACHE_BENCHMARK_PRIVATE_ITEM: usize = 525;\n' >> "$source_file"
-            test "$(sha256sum "$source_file" | awk '{print $1}')" != "$original_sha256"
-
-            sccache --stop-server >/dev/null 2>&1 || true
-            export SCCACHE_DIR="$cache_dir"
-            export SCCACHE_CACHE_SIZE=2G
-            export RUSTC_WRAPPER=sccache
-
-            total_start_ns="$(date +%s%N)"
-
-            run_phase "$variant" no-default               cargo test --locked -p arkst-cli --no-default-features
-
-            run_phase "$variant" workspace-all               env ARKST_REQUIRE_TYPST=1               cargo test --locked --workspace --all-targets --all-features
-
-            run_phase "$variant" backend-parity               env ARKST_REQUIRE_TYPST=1               cargo test --locked -p arkst-typst-inprocess                 --test backend_parity --all-features -- --nocapture
-
-            default_tree="$(mktemp)"
-            feature_tree="$(mktemp)"
-            cargo tree --locked -p arkst-cli --no-default-features > "$default_tree"
-            if grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v|arkst-typst-inprocess' "$default_tree"; then
-              exit 1
-            fi
-            cargo tree --locked -p arkst-cli --no-default-features --features typst-inprocess > "$feature_tree"
-            grep -Eq 'arkst-typst-inprocess' "$feature_tree"
-            grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v' "$feature_tree"
-            rm -f "$default_tree" "$feature_tree"
-
-            run_phase "$variant" dev-cli               cargo build --locked -p arkst-cli
-
-            mkdir -p target/example-smoke
-            for input in               examples/markdown/basic.md               examples/markdown/gfm.md               examples/markdown/bounded-html.md               examples/hello/main.qd
-            do
-              name="$(basename "${input%.*}")"
-              target/debug/arkst check "$input"
-              target/debug/arkst build "$input" --output "target/example-smoke/${name}.typ"
-              target/debug/arkst build "$input" --format pdf --output "target/example-smoke/${name}.pdf"
-            done
-
-            total_end_ns="$(date +%s%N)"
-            python3 - "$variant" "$total_start_ns" "$total_end_ns"               >> "$BENCH_DIR/variant-results.jsonl" <<'PY'
-          import json, os, sys
-          variant, start_ns, end_ns = sys.argv[1:]
-          print(json.dumps({
-              "variant": variant,
-              "replicate": int(os.environ["REPLICATE"]),
-              "order": [os.environ["ORDER_FIRST"], os.environ["ORDER_SECOND"]],
-              "wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
-          }, sort_keys=True))
-          PY
-
-            git checkout -- "$source_file"
-            test "$(sha256sum "$source_file" | awk '{print $1}')" = "$original_sha256"
-          }
-
-          measure_variant "$ORDER_FIRST"
-          measure_variant "$ORDER_SECOND"
           sccache --stop-server >/dev/null 2>&1 || true
-          git diff --exit-code
+          total_end_ns="$(date +%s%N)"
 
-          python3 - "$BENCH_DIR/phase-results.jsonl" > "$BENCH_DIR/aggregate.json" <<'PY'
+          local_bytes="$(du -sb "$SCCACHE_DIR" | awk '{print $1}')"
+          file_count="$(find "$SCCACHE_DIR" -type f | wc -l)"
+
+          transport_archive="$RUNNER_TEMP/arkst-527-zstd-$SCCACHE_CACHE_ZSTD_LEVEL.tzst"
+          archive_start_ns="$(date +%s%N)"
+          tar --posix -cf "$transport_archive" -C "$SCCACHE_DIR" . --use-compress-program=zstdmt
+          archive_end_ns="$(date +%s%N)"
+          transport_bytes="$(stat -c '%s' "$transport_archive")"
+
+          python3 \
+            "$SCCACHE_CACHE_ZSTD_LEVEL" \
+            "$total_start_ns" "$total_end_ns" \
+            "$archive_start_ns" "$archive_end_ns" \
+            "$local_bytes" "$transport_bytes" "$file_count" \
+            > "$BENCH_DIR/summary.json" <<'PY'
           import json, sys
-          rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-          out = {}
-          for row in rows:
-              v = row["variant"]
-              x = out.setdefault(v, {"rust_hits": 0, "rust_misses": 0, "read_errors": 0,
-                                     "write_errors": 0, "successful_writes": 0})
-              for k in x:
-                  x[k] += row[k]
-          for v, x in out.items():
-              total = x["rust_hits"] + x["rust_misses"]
-              x["rust_hit_rate"] = (x["rust_hits"] / total) if total else None
-          print(json.dumps(out, sort_keys=True, indent=2))
+          (
+              level, total_start, total_end, archive_start, archive_end,
+              local_bytes, transport_bytes, file_count
+          ) = sys.argv[1:]
+          print(json.dumps({
+              "zstd_level": int(level),
+              "prime_wall_ms": (int(total_end) - int(total_start)) / 1_000_000,
+              "transport_pack_wall_ms": (int(archive_end) - int(archive_start)) / 1_000_000,
+              "local_cache_bytes": int(local_bytes),
+              "transport_proxy_bytes": int(transport_bytes),
+              "cache_file_count": int(file_count),
+          }, sort_keys=True, indent=2))
           PY
 
-      - name: Retain paired evidence
+          cat "$BENCH_DIR/summary.json"
+          cat "$BENCH_DIR/phase-results.jsonl"
+
+      - name: Retain compression evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: arkst-525-round4-replicate-${{ matrix.replicate }}
-          path: benchmark-evidence/sccache-prime-coverage
+          name: arkst-527-round5a-zstd-${{ matrix.level }}
+          path: benchmark-evidence/sccache-compression-density
           if-no-files-found: error
           retention-days: 30
