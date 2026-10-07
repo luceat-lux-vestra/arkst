@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: exp-534-macos-windows-sccache
+  cancel-in-progress: true
+
 env:
   MAIN_SHA: 9b96a7c17b903b20f4d2cba314732c5b8b1a8c9c
   CARGO_TERM_COLOR: always
@@ -116,7 +120,9 @@ jobs:
             echo "SCCACHE_DIR=$RUNNER_TEMP/arkst-exp-534-sccache"
             echo "RUSTC_WRAPPER=sccache"
           } >> "$GITHUB_ENV"
-          sccache --zero-stats
+
+      - name: Zero producer cache stats
+        run: sccache --zero-stats
 
       - name: Test default CLI feature boundary
         run: cargo test --locked -p arkst-cli --no-default-features
@@ -266,7 +272,9 @@ jobs:
             echo "SCCACHE_LOCAL_RW_MODE=READ_ONLY"
             echo "RUSTC_WRAPPER=sccache"
           } >> "$GITHUB_ENV"
-          sccache --zero-stats
+
+      - name: Zero consumer cache stats
+        run: sccache --zero-stats
 
       - name: Test default CLI feature boundary
         run: cargo test --locked -p arkst-cli --no-default-features
