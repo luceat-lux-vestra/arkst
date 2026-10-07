@@ -79,6 +79,22 @@ fn lastheading_is_rejected_for_plain_documents() {
 }
 
 #[test]
+fn lastheading_is_available_for_paged_slides_and_docs_document_types() {
+    for document_type in ["paged", "slides", "docs"] {
+        let source = format!(".doctype {{{document_type}}}\n.lastheading {{2}}\n");
+        let (result, _) = compile_source(&source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "{document_type}: {result:?}"
+        );
+        assert!(matches!(
+            paragraph(&result),
+            [IrInline::LastHeading { depth: 2, .. }]
+        ));
+    }
+}
+
+#[test]
 fn source_defined_lastheading_keeps_precedence_over_native_binding_and_plain_gate() {
     let source = ".function {lastheading}\n    custom\n\n.lastheading\n";
     let (result, _) = compile_source(source);
