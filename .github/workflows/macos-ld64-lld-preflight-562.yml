@@ -1,0 +1,292 @@
+name: macOS ld64.lld preflight 562
+
+on:
+  push:
+    branches: [exp/562-macos-ld64-lld-preflight]
+    paths: [.github/workflows/macos-ld64-lld-preflight-562.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-562-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 07a9d478ae433b5e040f325b0fa231647b02150b
+
+jobs:
+  preflight:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact research scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-ld64-lld-preflight-562.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-ld64-lld-preflight-562.yml
+          git checkout --detach "$SOURCE_SHA"
+          git diff --exit-code
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Create evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/arkst-562"
+          echo "ARKST_562_EVIDENCE=$RUNNER_TEMP/arkst-562" >> "$GITHUB_ENV"
+
+      - name: Record environment and detect candidate
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "harness_sha=$GITHUB_SHA"
+            echo "source_sha=$SOURCE_SHA"
+            echo "ImageOS=$ImageOS"
+            echo "ImageVersion=$ImageVersion"
+            echo "RUNNER_ARCH=$RUNNER_ARCH"
+            sw_vers
+            uname -a
+            sysctl -n machdep.cpu.brand_string || true
+            rustc -Vv
+            cargo -V
+            /usr/bin/cc --version
+          } | tee "$ARKST_562_EVIDENCE/environment.txt"
+
+          available=false
+          candidate=""
+          if brew list --versions llvm@20 > "$ARKST_562_EVIDENCE/llvm-brew-version.txt" 2>&1; then
+            prefix="$(brew --prefix llvm@20)"
+            candidate="$prefix/bin/ld64.lld"
+          fi
+
+          if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            available=true
+            shasum -a 256 "$candidate" | tee "$ARKST_562_EVIDENCE/candidate-sha256.txt"
+            ( "$candidate" --version 2>&1 || "$candidate" -v 2>&1 || true ) \
+              | tee "$ARKST_562_EVIDENCE/candidate-version.txt"
+          fi
+
+          echo "$candidate" > "$ARKST_562_EVIDENCE/candidate-path.txt"
+          echo "available=$available" >> "$GITHUB_OUTPUT"
+          echo "path=$candidate" >> "$GITHUB_OUTPUT"
+          echo "ARKST_562_CANDIDATE available=$available path=$candidate"
+
+      - name: Create wrappers and run minimal probes
+        if: ${{ steps.candidate.outputs.available == 'true' }}
+        shell: bash
+        env:
+          LLD_PATH: ${{ steps.candidate.outputs.path }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/system-linker" <<'SH'
+          #!/bin/bash
+          printf '%s\n' "$*" >> "$ARKST_562_LINK_LOG"
+          exec /usr/bin/cc "$@"
+          SH
+          cat > "$RUNNER_TEMP/lld-linker" <<'SH'
+          #!/bin/bash
+          printf '%s\n' "$*" >> "$ARKST_562_LINK_LOG"
+          exec /usr/bin/cc --ld-path="$LLD_PATH" "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/system-linker" "$RUNNER_TEMP/lld-linker"
+
+          cat > "$RUNNER_TEMP/probe.rs" <<'RS'
+          fn main() {
+              println!("arkst-562-linker-probe");
+          }
+          RS
+
+          : > "$ARKST_562_EVIDENCE/system-minimal-link.log"
+          : > "$ARKST_562_EVIDENCE/lld-minimal-link.log"
+          set +e
+          ARKST_562_LINK_LOG="$ARKST_562_EVIDENCE/system-minimal-link.log" \
+            rustc "$RUNNER_TEMP/probe.rs" -C linker="$RUNNER_TEMP/system-linker" \
+            -C link-arg=-Wl,-v -o "$RUNNER_TEMP/system-probe" \
+            > "$ARKST_562_EVIDENCE/system-minimal.stdout" 2> "$ARKST_562_EVIDENCE/system-minimal.stderr"
+          system_compile=$?
+
+          ARKST_562_LINK_LOG="$ARKST_562_EVIDENCE/lld-minimal-link.log" LLD_PATH="$LLD_PATH" \
+            rustc "$RUNNER_TEMP/probe.rs" -C linker="$RUNNER_TEMP/lld-linker" \
+            -C link-arg=-Wl,-v -o "$RUNNER_TEMP/lld-probe" \
+            > "$ARKST_562_EVIDENCE/lld-minimal.stdout" 2> "$ARKST_562_EVIDENCE/lld-minimal.stderr"
+          lld_compile=$?
+          set -e
+
+          system_run=999
+          lld_run=999
+          if [ "$system_compile" -eq 0 ]; then
+            set +e
+            "$RUNNER_TEMP/system-probe" > "$ARKST_562_EVIDENCE/system-minimal.run" 2>&1
+            system_run=$?
+            set -e
+          fi
+          if [ "$lld_compile" -eq 0 ]; then
+            set +e
+            "$RUNNER_TEMP/lld-probe" > "$ARKST_562_EVIDENCE/lld-minimal.run" 2>&1
+            lld_run=$?
+            set -e
+          fi
+
+          printf 'system_compile=%s\nlld_compile=%s\nsystem_run=%s\nlld_run=%s\n' \
+            "$system_compile" "$lld_compile" "$system_run" "$lld_run" \
+            | tee "$ARKST_562_EVIDENCE/minimal-status.txt"
+
+      - name: Run Arkst baseline probe
+        if: ${{ steps.candidate.outputs.available == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$ARKST_562_EVIDENCE/system-arkst-link.log"
+          set +e
+          start="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          CARGO_TARGET_DIR="$RUNNER_TEMP/system-target" \
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$RUNNER_TEMP/system-linker" \
+          ARKST_562_LINK_LOG="$ARKST_562_EVIDENCE/system-arkst-link.log" \
+            cargo test --locked -p arkst-core --lib \
+            > "$ARKST_562_EVIDENCE/system-arkst.log" 2>&1
+          status=$?
+          end="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          set -e
+          printf 'status=%s\nelapsed_ms=%s\n' "$status" "$(( (end-start)/1000000 ))" \
+            | tee "$ARKST_562_EVIDENCE/system-arkst-status.txt"
+
+      - name: Run Arkst ld64.lld probe
+        if: ${{ steps.candidate.outputs.available == 'true' }}
+        shell: bash
+        env:
+          LLD_PATH: ${{ steps.candidate.outputs.path }}
+        run: |
+          set -euo pipefail
+          : > "$ARKST_562_EVIDENCE/lld-arkst-link.log"
+          set +e
+          start="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          CARGO_TARGET_DIR="$RUNNER_TEMP/lld-target" \
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$RUNNER_TEMP/lld-linker" \
+          ARKST_562_LINK_LOG="$ARKST_562_EVIDENCE/lld-arkst-link.log" \
+          LLD_PATH="$LLD_PATH" \
+            cargo test --locked -p arkst-core --lib \
+            > "$ARKST_562_EVIDENCE/lld-arkst.log" 2>&1
+          status=$?
+          end="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          set -e
+          printf 'status=%s\nelapsed_ms=%s\n' "$status" "$(( (end-start)/1000000 ))" \
+            | tee "$ARKST_562_EVIDENCE/lld-arkst-status.txt"
+
+      - name: Classify preflight
+        shell: bash
+        env:
+          CANDIDATE_AVAILABLE: ${{ steps.candidate.outputs.available }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+
+          e = Path(os.environ["ARKST_562_EVIDENCE"])
+          available = os.environ["CANDIDATE_AVAILABLE"] == "true"
+          result = {"candidate_available": available}
+
+          if not available:
+              decision = "NO ZERO-SETUP CANDIDATE"
+          else:
+              def kv(name):
+                  out = {}
+                  for line in (e / name).read_text(errors="replace").splitlines():
+                      if "=" in line:
+                          k, v = line.split("=", 1)
+                          out[k] = v
+                  return out
+
+              minimal = kv("minimal-status.txt")
+              sys_status = kv("system-arkst-status.txt")
+              lld_status = kv("lld-arkst-status.txt")
+              sys_run = (e / "system-minimal.run").read_text(errors="replace").strip() if (e / "system-minimal.run").exists() else ""
+              lld_run = (e / "lld-minimal.run").read_text(errors="replace").strip() if (e / "lld-minimal.run").exists() else ""
+
+              def results(name):
+                  text = (e / name).read_text(errors="replace")
+                  return re.findall(r"test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored", text)
+
+              sys_results = results("system-arkst.log")
+              lld_results = results("lld-arkst.log")
+              sys_log = (e / "system-arkst.log").read_text(errors="replace")
+              lld_log = (e / "lld-arkst.log").read_text(errors="replace")
+              sys_warn = [x for x in sys_log.splitlines() if "warning:" in x.lower()]
+              lld_warn = [x for x in lld_log.splitlines() if "warning:" in x.lower()]
+              linker_warn = [x for x in lld_log.splitlines() if "warning" in x.lower() and ("lld:" in x.lower() or "ld64.lld" in x.lower())]
+
+              baseline_ok = (
+                  minimal.get("system_compile") == "0"
+                  and minimal.get("system_run") == "0"
+                  and sys_status.get("status") == "0"
+                  and bool(sys_results)
+                  and all(x[0] == "ok" and x[2] == "0" for x in sys_results)
+              )
+              candidate_ok = (
+                  minimal.get("lld_compile") == "0"
+                  and minimal.get("lld_run") == "0"
+                  and lld_status.get("status") == "0"
+                  and sys_run == lld_run == "arkst-562-linker-probe"
+                  and sys_results == lld_results
+                  and not linker_warn
+                  and len(lld_warn) <= len(sys_warn)
+              )
+
+              if not baseline_ok:
+                  decision = "INSUFFICIENT EVIDENCE"
+              elif not candidate_ok:
+                  decision = "LLD PREFLIGHT COMPATIBILITY FAIL"
+              else:
+                  decision = "LLD PREFLIGHT PASS — PERFORMANCE A/B JUSTIFIED"
+
+              result.update({
+                  "minimal": minimal,
+                  "system_arkst": sys_status,
+                  "lld_arkst": lld_status,
+                  "system_results": sys_results,
+                  "lld_results": lld_results,
+                  "system_warning_count": len(sys_warn),
+                  "lld_warning_count": len(lld_warn),
+                  "candidate_linker_warnings": linker_warn,
+              })
+
+          result["decision"] = decision
+          (e / "summary.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+          print("ARKST_562_DECISION=" + decision)
+          print("ARKST_562_SUMMARY=" + json.dumps(result, sort_keys=True))
+          PY
+
+      - name: Prove clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: arkst-562-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-562
+          if-no-files-found: error
+          retention-days: 30
