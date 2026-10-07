@@ -88,6 +88,34 @@ fn source_defined_lastheading_keeps_precedence_over_native_binding_and_plain_gat
 }
 
 #[test]
+fn lastheading_binding_accepts_named_depth_and_rejects_invalid_shapes() {
+    let (named, _) = compile_source(".doctype {paged}\n.lastheading depth:{4}\n");
+    assert!(named.diagnostics.is_empty(), "{named:?}");
+    assert!(matches!(
+        paragraph(&named),
+        [IrInline::LastHeading { depth: 4, .. }]
+    ));
+
+    for source in [
+        ".doctype {paged}\n.lastheading\n",
+        ".doctype {paged}\n.lastheading {1} {2}\n",
+        ".doctype {paged}\n.lastheading {1.5}\n",
+        ".doctype {paged}\n.lastheading {1}\n    body\n",
+    ] {
+        let (result, _) = compile_source(source);
+        assert!(!result.diagnostics.is_empty(), "{source:?}: {result:?}");
+        assert!(
+            !result.ir.nodes.iter().any(|node| matches!(
+                node,
+                IrNode::Paragraph { content, .. }
+                    if content.iter().any(|inline| matches!(inline, IrInline::LastHeading { .. }))
+            )),
+            "{source:?}: {result:?}"
+        );
+    }
+}
+
+#[test]
 fn lastheading_ir_roundtrips_with_depth_and_span() {
     let value = IrInline::LastHeading {
         depth: -9,
