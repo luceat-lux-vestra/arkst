@@ -1,0 +1,412 @@
+name: macOS mold-macho paired benchmark
+
+on:
+  push:
+    branches:
+      - exp/524-macos-mold-macho-benchmark
+    paths:
+      - .github/workflows/macos-mold-macho-benchmark.yml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+      - rust-toolchain.toml
+      - .cargo/config.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-macos-mold-macho-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: paired / replicate ${{ matrix.replicate }} / ${{ matrix.first }}-first
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - replicate: 1
+            first: system
+            second: mold
+          - replicate: 2
+            first: mold
+            second: system
+          - replicate: 3
+            first: system
+            second: mold
+          - replicate: 4
+            first: mold
+            second: system
+
+    env:
+      CARGO_TERM_COLOR: never
+      RUSTUP_TOOLCHAIN: 1.98.0
+      SOURCE_SHA: 0dfc076e3f995af5cd38549927f2fdb1a4d690e2
+      MOLD_MACHO_COMMIT: 4ccb085ad3937f3c1c29aff6c084d8129d3532f7
+      BENCH_DIR: benchmark-evidence/macos-mold-macho-benchmark
+      REPLICATE: ${{ matrix.replicate }}
+      ORDER_FIRST: ${{ matrix.first }}
+      ORDER_SECOND: ${{ matrix.second }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Check exact experiment identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code
+
+          mapfile -t changed < <(git diff --name-only "$SOURCE_SHA..HEAD")
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = ".github/workflows/macos-mold-macho-benchmark.yml"
+          git diff --check "$SOURCE_SHA..HEAD" -- .github/workflows/macos-mold-macho-benchmark.yml
+
+      - name: Build pinned mold-macho from source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BENCH_DIR"
+
+          src="$RUNNER_TEMP/mold-macho-src"
+          target="$RUNNER_TEMP/mold-macho-target"
+          start_ns="$(python3 -c 'import time; print(time.time_ns())')"
+
+          git init "$src"
+          git -C "$src" remote add origin https://github.com/rui314/mold-macho.git
+          git -C "$src" fetch --depth=1 origin "$MOLD_MACHO_COMMIT"
+          git -C "$src" checkout --detach FETCH_HEAD
+          test "$(git -C "$src" rev-parse HEAD)" = "$MOLD_MACHO_COMMIT"
+
+          CARGO_TARGET_DIR="$target" cargo build --release --locked --manifest-path "$src/Cargo.toml"
+
+          binary="$target/release/mold"
+          test -x "$binary"
+          linker="$RUNNER_TEMP/ld64.mold"
+          ln -s "$binary" "$linker"
+
+          end_ns="$(python3 -c 'import time; print(time.time_ns())')"
+          binary_sha="$(shasum -a 256 "$binary" | awk '{print $1}')"
+
+          python3 - "$start_ns" "$end_ns" "$binary_sha" "$binary" "$linker" > "$BENCH_DIR/mold-macho-setup.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          start_ns, end_ns, sha, binary, linker = sys.argv[1:]
+          print(json.dumps({
+              "upstream_commit": os.environ["MOLD_MACHO_COMMIT"],
+              "workspace_version": "0.1.0",
+              "binary_sha256": sha,
+              "binary": binary,
+              "ld64_mold": linker,
+              "setup_wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
+          }, sort_keys=True))
+          PY
+
+          "$binary" --version | tee "$BENCH_DIR/mold-macho-version.txt"
+
+          echo "MOLD_MACHO_BINARY=$binary" >> "$GITHUB_ENV"
+          echo "MOLD_MACHO_LINKER=$linker" >> "$GITHUB_ENV"
+
+      - name: Capture environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "sha=$GITHUB_SHA"
+            echo "source_sha=$SOURCE_SHA"
+            echo "replicate=$REPLICATE"
+            echo "order=$ORDER_FIRST,$ORDER_SECOND"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            echo "image_os=${ImageOS:-unknown}"
+            echo "image_version=${ImageVersion:-unknown}"
+            echo "uname=$(uname -a)"
+            echo "cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)"
+            echo "logical_cpus=$(sysctl -n hw.logicalcpu)"
+            rustc -Vv
+            cargo -V
+            typst --version
+            /usr/bin/cc --version | head -1
+            /usr/bin/ld -v 2>&1 | head -1
+            "$MOLD_MACHO_BINARY" --version
+          } | tee "$BENCH_DIR/environment.txt"
+
+      - name: Build instrumented linker driver wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          timing_dir="$GITHUB_WORKSPACE/$BENCH_DIR/linker-invocations"
+          mkdir -p "$timing_dir"
+
+          source="$RUNNER_TEMP/arkst-macos-linker-wrapper.rs"
+          wrapper="$RUNNER_TEMP/arkst-macos-linker-wrapper"
+
+          cat > "$source" <<'RS'
+          use std::env;
+          use std::fs;
+          use std::path::PathBuf;
+          use std::process::{Command, exit};
+          use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+          fn main() {
+              let variant = env::var("ACTIVE_LINKER").expect("ACTIVE_LINKER is required");
+              let phase = env::var("LINK_PHASE").unwrap_or_else(|_| "unclassified".to_owned());
+              let timing_dir = env::var("LINKER_TIMINGS_DIR").expect("LINKER_TIMINGS_DIR is required");
+              let mold = env::var("MOLD_MACHO_LINKER").expect("MOLD_MACHO_LINKER is required");
+
+              let mut cmd = Command::new("/usr/bin/cc");
+              if variant == "mold" {
+                  cmd.arg(format!("--ld-path={mold}"));
+              } else if variant != "system" {
+                  eprintln!("unknown linker variant: {variant}");
+                  exit(97);
+              }
+              cmd.args(env::args_os().skip(1));
+
+              let start = Instant::now();
+              let status = cmd.status().unwrap_or_else(|e| {
+                  eprintln!("failed to execute /usr/bin/cc: {e}");
+                  exit(98);
+              });
+              let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+              let code = status.code().unwrap_or(99);
+
+              let stamp = SystemTime::now()
+                  .duration_since(UNIX_EPOCH)
+                  .expect("clock before epoch")
+                  .as_nanos();
+              let mut path = PathBuf::from(timing_dir);
+              path.push(format!("{}-{}-{}.tsv", std::process::id(), stamp, variant));
+              let record = format!("{variant}\t{phase}\t/usr/bin/cc\t{elapsed_ms:.3}\t{code}\n");
+              fs::write(&path, record).expect("cannot write linker timing record");
+
+              exit(code);
+          }
+          RS
+
+          rustc "$source" -o "$wrapper"
+          test -x "$wrapper"
+
+          echo "LINKER_WRAPPER=$wrapper" >> "$GITHUB_ENV"
+          echo "LINKER_TIMINGS_DIR=$timing_dir" >> "$GITHUB_ENV"
+
+      - name: Prove system and mold linker selections
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/linker-probe.rs"
+          cat > "$probe" <<'RS'
+          fn main() {
+              println!("arkst-linker-probe");
+          }
+          RS
+
+          for variant in system mold; do
+            export ACTIVE_LINKER="$variant"
+            export LINK_PHASE="probe-$variant"
+            output="$RUNNER_TEMP/linker-probe-$variant"
+            rustc -C "linker=$LINKER_WRAPPER" "$probe" -o "$output"
+            test -x "$output"
+            test "$("$output")" = "arkst-linker-probe"
+          done
+          unset LINK_PHASE
+
+          grep -R $'system\tprobe-system\t/usr/bin/cc\t' "$LINKER_TIMINGS_DIR" >/dev/null
+          grep -R $'mold\tprobe-mold\t/usr/bin/cc\t' "$LINKER_TIMINGS_DIR" >/dev/null
+
+      - name: Fetch dependencies outside measurement
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --locked
+
+      - name: Run paired Final-like and warm-local-change benchmark
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$BENCH_DIR"
+
+          measure() {
+            label="$1"
+            shift
+
+            export LINK_PHASE="$label"
+            start_ns="$(python3 -c 'import time; print(time.time_ns())')"
+            set +e
+            "$@" 2>&1 | tee "$BENCH_DIR/$label.log"
+            status="${PIPESTATUS[0]}"
+            set -e
+            end_ns="$(python3 -c 'import time; print(time.time_ns())')"
+            unset LINK_PHASE
+
+            python3 - "$label" "$start_ns" "$end_ns" "$status" >> "$BENCH_DIR/results.jsonl" <<'PY'
+          import json
+          import os
+          import sys
+
+          label, start_ns, end_ns, status = sys.argv[1:]
+          print(json.dumps({
+              "sha": os.environ["GITHUB_SHA"],
+              "source_sha": os.environ["SOURCE_SHA"],
+              "linker": os.environ["ACTIVE_LINKER"],
+              "replicate": int(os.environ["REPLICATE"]),
+              "order": [os.environ["ORDER_FIRST"], os.environ["ORDER_SECOND"]],
+              "phase": label,
+              "wall_ms": (int(end_ns) - int(start_ns)) / 1_000_000,
+              "exit_code": int(status),
+              "rustflags": os.environ.get("RUSTFLAGS", ""),
+              "target_dir": os.environ["CARGO_TARGET_DIR"],
+          }, sort_keys=True))
+          PY
+
+            test "$status" -eq 0
+          }
+
+          run_variant() {
+            variant="$1"
+            export ACTIVE_LINKER="$variant"
+            export RUSTFLAGS="-D warnings -C linker=$LINKER_WRAPPER"
+            export CARGO_TARGET_DIR="$RUNNER_TEMP/arkst-524-macos-linker-target-$variant"
+
+            rm -rf "$CARGO_TARGET_DIR"
+            source_file="crates/arkst-core/src/lib.rs"
+            original_sha256="$(shasum -a 256 "$source_file" | awk '{print $1}')"
+
+            measure "$variant-final-default-cli"               cargo test --locked -p arkst-cli --no-default-features
+
+            measure "$variant-final-workspace"               cargo test --locked --workspace --all-targets --all-features
+
+            printf '\n// paired macOS mold-macho benchmark no-op; never committed.\n' >> "$source_file"
+            changed_sha256="$(shasum -a 256 "$source_file" | awk '{print $1}')"
+            test "$changed_sha256" != "$original_sha256"
+
+            measure "$variant-warm-local-change-build-link"               cargo test --locked --workspace --all-targets --all-features --no-run
+
+            measure "$variant-warm-test-execution"               cargo test --locked --workspace --all-targets --all-features
+
+            git checkout -- "$source_file"
+            restored_sha256="$(shasum -a 256 "$source_file" | awk '{print $1}')"
+            test "$restored_sha256" = "$original_sha256"
+            git diff --exit-code -- "$source_file"
+
+            bytes="$(find "$CARGO_TARGET_DIR" -type f -print0 | xargs -0 stat -f %z | awk '{sum += $1} END {print sum+0}')"
+            echo "target_bytes=$bytes" > "$BENCH_DIR/$variant-target-size.txt"
+          }
+
+          run_variant "$ORDER_FIRST"
+          run_variant "$ORDER_SECOND"
+
+          git diff --exit-code
+
+      - name: Summarize benchmark evidence
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          results="$BENCH_DIR/results.jsonl"
+
+          if [ -f "$results" ]; then
+            {
+              echo "### Arkst macOS mold-macho paired benchmark: replicate $REPLICATE"
+              echo
+              echo "Order: $ORDER_FIRST -> $ORDER_SECOND"
+              echo
+              echo '~~~json'
+              cat "$results"
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -d "$LINKER_TIMINGS_DIR" ]; then
+            python3 - "$LINKER_TIMINGS_DIR" > "$BENCH_DIR/linker-summary.json" <<'PY'
+          import collections
+          import json
+          import os
+          import statistics
+          import sys
+
+          root = sys.argv[1]
+          grouped = collections.defaultdict(list)
+          failures = []
+
+          for name in os.listdir(root):
+              path = os.path.join(root, name)
+              if not os.path.isfile(path):
+                  continue
+              with open(path, encoding="utf-8") as handle:
+                  raw = handle.read().strip()
+              parts = raw.split("\t")
+              if len(parts) != 5:
+                  raise SystemExit(f"malformed linker timing record: {name}: {raw!r}")
+              variant, phase, program, elapsed_ms, status = parts
+              elapsed_ms = float(elapsed_ms)
+              status = int(status)
+              if not variant or not phase:
+                  raise SystemExit(f"blank linker timing identity: {name}")
+              grouped[(variant, phase)].append(elapsed_ms)
+              if status != 0:
+                  failures.append({
+                      "variant": variant,
+                      "phase": phase,
+                      "program": program,
+                      "elapsed_ms": elapsed_ms,
+                      "exit_code": status,
+                  })
+
+          summary = {}
+          for (variant, phase), values in sorted(grouped.items()):
+              summary.setdefault(variant, {})[phase] = {
+                  "count": len(values),
+                  "total_driver_wall_ms": sum(values),
+                  "median_driver_wall_ms": statistics.median(values),
+                  "max_driver_wall_ms": max(values),
+                  "min_driver_wall_ms": min(values),
+              }
+
+          print(json.dumps({
+              "failures": failures,
+              "variants": summary,
+          }, indent=2, sort_keys=True))
+          if failures:
+              raise SystemExit("linker driver failure recorded")
+          PY
+
+            {
+              echo
+              echo '~~~json'
+              cat "$BENCH_DIR/linker-summary.json"
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Retain benchmark evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-macos-mold-macho-paired-replicate-${{ matrix.replicate }}
+          path: benchmark-evidence/macos-mold-macho-benchmark
+          if-no-files-found: error
+          retention-days: 30
