@@ -83,10 +83,7 @@ fn lastheading_is_available_for_paged_slides_and_docs_document_types() {
     for document_type in ["paged", "slides", "docs"] {
         let source = format!(".doctype {{{document_type}}}\n.lastheading {{2}}\n");
         let (result, _) = compile_source(&source);
-        assert!(
-            result.diagnostics.is_empty(),
-            "{document_type}: {result:?}"
-        );
+        assert!(result.diagnostics.is_empty(), "{document_type}: {result:?}");
         assert!(matches!(
             paragraph(&result),
             [IrInline::LastHeading { depth: 2, .. }]
