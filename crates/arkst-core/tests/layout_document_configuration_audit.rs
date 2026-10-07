@@ -602,8 +602,8 @@ fn audit_records_bounded_page_margin_content_slice() {
     assert!(AUDIT.contains("current physical `here().page()`"));
     assert!(AUDIT.contains("other 22"));
     assert!(AUDIT.contains("final `plain`/`slides`/`docs`"));
-    assert!(AUDIT.contains("15 conservative `PARTIAL` rows"));
-    assert!(AUDIT.contains("plus 5"));
+    assert!(AUDIT.contains("16 conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("plus 4"));
 }
 
 #[test]
