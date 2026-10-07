@@ -1,0 +1,333 @@
+name: macOS warm workspace telemetry 554
+
+on:
+  push:
+    branches:
+      - exp/554-macos-warm-workspace-telemetry
+    paths:
+      - .github/workflows/macos-warm-workspace-telemetry-554.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-554-macos-warm-workspace-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 07a9d478ae433b5e040f325b0fa231647b02150b
+
+jobs:
+  prime:
+    name: common producer
+    runs-on: macos-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-warm-workspace-telemetry-554.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-warm-workspace-telemetry-554.yml
+
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Record producer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ImageOS=$ImageOS"
+          echo "ImageVersion=$ImageVersion"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          rustc -Vv
+          cargo -V
+          typst --version
+
+      - name: Prime common target cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 554-common-macos-${{ github.sha }}
+
+      - name: Prime default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime Typst-required workspace
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+  telemetry:
+    name: telemetry / fresh ${{ matrix.rep }}
+    needs: [prime]
+    runs-on: macos-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        rep: [1, 2]
+
+    env:
+      REP: ${{ matrix.rep }}
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-warm-workspace-telemetry-554.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-warm-workspace-telemetry-554.yml
+
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Create evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/arkst-554-$REP"
+          mkdir -p "$evidence"
+          echo "ARKST_554_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+
+      - name: Record consumer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "harness_sha=$GITHUB_SHA"
+            echo "source_sha=$SOURCE_SHA"
+            echo "rep=$REP"
+            echo "ImageOS=$ImageOS"
+            echo "ImageVersion=$ImageVersion"
+            echo "RUNNER_ARCH=$RUNNER_ARCH"
+            rustc -Vv
+            cargo -V
+            typst --version
+          } | tee "$ARKST_554_EVIDENCE/environment.txt"
+
+      - name: Restore common target cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 554-common-macos-${{ github.sha }}
+          save-if: false
+
+      - name: Run current default CLI warmup
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Snapshot target tree before workspace no-run
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          root = Path("target")
+          data = {}
+          for p in root.rglob("*"):
+              if not p.is_file():
+                  continue
+              st = p.stat()
+              data[str(p)] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+          out = Path(os.environ["ARKST_554_EVIDENCE"]) / "target-before.json"
+          out.write_text(json.dumps(data, sort_keys=True))
+          print(f"target-before files={len(data)} bytes={sum(v['size'] for v in data.values())}")
+          PY
+
+      - name: Compile Typst-required workspace without execution
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          cargo test --locked --workspace --all-targets --all-features --no-run --message-format=json-render-diagnostics > "$ARKST_554_EVIDENCE/cargo-no-run.jsonl"
+
+      - name: Analyze no-run artifacts and target delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import collections, json, os
+          from pathlib import Path
+
+          evidence = Path(os.environ["ARKST_554_EVIDENCE"])
+          records = []
+          for line in (evidence / "cargo-no-run.jsonl").read_text(errors="replace").splitlines():
+              try:
+                  obj = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if obj.get("reason") == "compiler-artifact":
+                  records.append(obj)
+
+          def kind_key(obj):
+              kinds = obj.get("target", {}).get("kind") or []
+              return "+".join(kinds) if kinds else "<none>"
+
+          fresh = [r for r in records if r.get("fresh") is True]
+          nonfresh = [r for r in records if r.get("fresh") is False]
+          by_kind = collections.Counter(kind_key(r) for r in nonfresh)
+          profile_test = collections.Counter(str(bool((r.get("profile") or {}).get("test"))).lower() for r in nonfresh)
+
+          executable_rows = []
+          for r in nonfresh:
+              exe = r.get("executable")
+              size = None
+              if exe and Path(exe).is_file():
+                  size = Path(exe).stat().st_size
+              executable_rows.append({
+                  "name": (r.get("target") or {}).get("name"),
+                  "kind": (r.get("target") or {}).get("kind"),
+                  "crate_types": (r.get("target") or {}).get("crate_types"),
+                  "profile_test": bool((r.get("profile") or {}).get("test")),
+                  "fresh": r.get("fresh"),
+                  "executable": exe,
+                  "executable_bytes": size,
+                  "filenames": r.get("filenames") or [],
+              })
+
+          executable_rows = [r for r in executable_rows if r["executable"]]
+          executable_rows.sort(key=lambda r: (r["executable_bytes"] or 0), reverse=True)
+
+          before = json.loads((evidence / "target-before.json").read_text())
+          after = {}
+          root = Path("target")
+          for p in root.rglob("*"):
+              if not p.is_file():
+                  continue
+              st = p.stat()
+              after[str(p)] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+          added = []
+          modified = []
+          for path, meta in after.items():
+              old = before.get(path)
+              row = {"path": path, "size": meta["size"], "mtime_ns": meta["mtime_ns"]}
+              if old is None:
+                  added.append(row)
+              elif old["size"] != meta["size"] or old["mtime_ns"] != meta["mtime_ns"]:
+                  modified.append(row)
+
+          changed = added + modified
+          changed.sort(key=lambda r: r["size"], reverse=True)
+
+          summary = {
+              "rep": int(os.environ["REP"]),
+              "compiler_artifact_count": len(records),
+              "fresh_count": len(fresh),
+              "nonfresh_count": len(nonfresh),
+              "nonfresh_by_kind": dict(sorted(by_kind.items())),
+              "nonfresh_profile_test": dict(sorted(profile_test.items())),
+              "nonfresh_executable_count": len(executable_rows),
+              "nonfresh_executable_bytes": sum((r["executable_bytes"] or 0) for r in executable_rows),
+              "nonfresh_executables": executable_rows,
+              "target_before_file_count": len(before),
+              "target_before_bytes": sum(v["size"] for v in before.values()),
+              "target_after_file_count": len(after),
+              "target_after_bytes": sum(v["size"] for v in after.values()),
+              "target_added_count": len(added),
+              "target_modified_count": len(modified),
+              "target_changed_bytes": sum(r["size"] for r in changed),
+              "largest_changed_files": changed[:80],
+          }
+          (evidence / "artifact-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+          print(json.dumps({
+              k: v for k, v in summary.items()
+              if k not in {"nonfresh_executables", "largest_changed_files"}
+          }, indent=2))
+          print("top nonfresh executables:")
+          for row in executable_rows[:30]:
+              print(f"{row['executable_bytes']}\t{row['kind']}\t{row['name']}\t{row['executable']}")
+          PY
+
+      - name: Execute fully warmed Typst-required workspace
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          cargo test --locked --workspace --all-targets --all-features 2>&1 | tee "$ARKST_554_EVIDENCE/warmed-test.log"
+
+      - name: Summarize warmed test results
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+
+          evidence = Path(os.environ["ARKST_554_EVIDENCE"])
+          text = (evidence / "warmed-test.log").read_text(errors="replace")
+          pat = re.compile(r"test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored;")
+          groups = passed = failed = ignored = 0
+          for m in pat.finditer(text):
+              groups += 1
+              passed += int(m.group(1))
+              failed += int(m.group(2))
+              ignored += int(m.group(3))
+
+          summary = {
+              "rep": int(os.environ["REP"]),
+              "groups": groups,
+              "passed": passed,
+              "failed": failed,
+              "ignored": ignored,
+          }
+          (evidence / "test-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+          print(json.dumps(summary, indent=2))
+          if groups == 0 or failed != 0:
+              raise SystemExit("unexpected warmed test result summary")
+          PY
+
+      - name: Upload telemetry evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-554-fresh-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-554-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
