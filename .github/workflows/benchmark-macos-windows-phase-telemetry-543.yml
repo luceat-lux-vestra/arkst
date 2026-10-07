@@ -1,0 +1,231 @@
+name: Benchmark macOS Windows phase telemetry 543
+
+on:
+  push:
+    branches:
+      - exp/543-macos-windows-phase-telemetry
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 0dfc076e3f995af5cd38549927f2fdb1a4d690e2
+
+jobs:
+  prime-current:
+    name: prime-current-rust-cache (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact protected-main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1 (pinned)
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Prime research-local current Rust target cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 543-current-${{ matrix.os }}
+
+      - name: Prime default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime Typst-required workspace
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+  telemetry:
+    name: phase-telemetry (${{ matrix.os }})
+    needs: [prime-current]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact protected-main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1 (pinned)
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Record runner and toolchain identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_os=$RUNNER_OS"
+          echo "runner_arch=$RUNNER_ARCH"
+          echo "ImageOS=${ImageOS:-unknown}"
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          rustc -Vv
+          cargo -V
+          typst --version
+
+      - name: Restore research-local current Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 543-current-${{ matrix.os }}
+          save-if: false
+
+      - name: Record restored target state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("target")
+          files = [p for p in root.rglob("*") if p.is_file()] if root.exists() else []
+          print(f"restored_target_files={len(files)}")
+          print(f"restored_target_bytes={sum(p.stat().st_size for p in files)}")
+          PY
+
+      - name: Measure default CLI feature boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          cargo test --locked -p arkst-cli --no-default-features --timings 2>&1 | tee "$RUNNER_TEMP/default-cli.log"
+          status=${PIPESTATUS[0]}
+          elapsed=$SECONDS
+          echo "$elapsed" > "$RUNNER_TEMP/default-cli.wall-seconds"
+          test "$status" -eq 0
+          test -f target/cargo-timings/cargo-timing.html
+          cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/default-cli-cargo-timing.html"
+
+      - name: Measure Typst-required workspace
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          cargo test --locked --workspace --all-targets --all-features --timings 2>&1 | tee "$RUNNER_TEMP/workspace.log"
+          status=${PIPESTATUS[0]}
+          elapsed=$SECONDS
+          echo "$elapsed" > "$RUNNER_TEMP/workspace.wall-seconds"
+          test "$status" -eq 0
+          test -f target/cargo-timings/cargo-timing.html
+          cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/workspace-cargo-timing.html"
+
+      - name: Summarize compile wait and test execution
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP" "${{ runner.os }}" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          runner_os = sys.argv[2]
+          ansi = re.compile(r"\x1b\[[0-9;]*m")
+          finished = re.compile(r"Finished .*? in ([^\r\n]+)")
+          running = re.compile(r"Running .*?\((target[/\\].+?)\)")
+
+          def duration_seconds(text):
+              total = 0.0
+              found = False
+              for value, unit in re.findall(r"([0-9]+(?:\.[0-9]+)?)(ms|s|m|h)", text):
+                  found = True
+                  n = float(value)
+                  total += n / 1000 if unit == "ms" else n if unit == "s" else n * 60 if unit == "m" else n * 3600
+              return total if found else None
+
+          def summarize(prefix):
+              log_path = root / f"{prefix}.log"
+              wall_path = root / f"{prefix}.wall-seconds"
+              result = {"prefix": prefix}
+              if wall_path.exists():
+                  result["wall_seconds"] = float(wall_path.read_text().strip())
+              if not log_path.exists():
+                  result["log_missing"] = True
+                  return result
+              raw = ansi.sub("", log_path.read_text(errors="replace"))
+              matches = finished.findall(raw)
+              if matches:
+                  result["cargo_finished_text"] = matches[-1].strip()
+                  result["cargo_compile_seconds"] = duration_seconds(matches[-1])
+              if result.get("cargo_compile_seconds") is not None and result.get("wall_seconds") is not None:
+                  result["post_compile_wall_seconds"] = max(0.0, result["wall_seconds"] - result["cargo_compile_seconds"])
+              paths = []
+              for match in running.findall(raw):
+                  candidate = Path(match.replace("\\", os.sep).replace("/", os.sep))
+                  if candidate.exists() and candidate.is_file():
+                      paths.append(candidate)
+              unique = list(dict.fromkeys(paths))
+              result["observed_test_binaries"] = len(unique)
+              result["observed_test_binary_bytes"] = sum(p.stat().st_size for p in unique)
+              result["observed_test_binary_paths"] = [str(p) for p in unique]
+              return result
+
+          summary = {
+              "runner_os": runner_os,
+              "source_sha": os.environ.get("SOURCE_SHA"),
+              "default_cli": summarize("default-cli"),
+              "workspace": summarize("workspace"),
+          }
+          out = root / "phase-summary.json"
+          out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          print(out.read_text())
+          PY
+
+      - name: Upload phase telemetry
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: phase-telemetry-543-${{ runner.os }}-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/default-cli.log
+            ${{ runner.temp }}/workspace.log
+            ${{ runner.temp }}/default-cli.wall-seconds
+            ${{ runner.temp }}/workspace.wall-seconds
+            ${{ runner.temp }}/default-cli-cargo-timing.html
+            ${{ runner.temp }}/workspace-cargo-timing.html
+            ${{ runner.temp }}/phase-summary.json
