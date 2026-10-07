@@ -128,8 +128,8 @@ fn manifest_is_complete_and_machine_checkable() {
     assert_eq!(rows.len(), 47);
     assert_eq!(rows.iter().filter(|row| row[4] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[4] == "#154").count(), 27);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 15);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 5);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 16);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(), 4);
     assert!(MANIFEST.contains(BASE_SHA));
     assert!(MANIFEST.contains("captionposition\tcaptionPosition\tcode"));
 }
@@ -142,7 +142,7 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(
         AUDIT.contains("No #153-owned row currently carries a `SUPPORTED_END_TO_END` v2.5.1 claim")
     );
-    assert!(AUDIT.contains("15 conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("16 conservative `PARTIAL` rows"));
 }
 
 #[test]
@@ -602,8 +602,8 @@ fn audit_records_bounded_page_margin_content_slice() {
     assert!(AUDIT.contains("current physical `here().page()`"));
     assert!(AUDIT.contains("other 22"));
     assert!(AUDIT.contains("final `plain`/`slides`/`docs`"));
-    assert!(AUDIT.contains("15 conservative `PARTIAL` rows"));
-    assert!(AUDIT.contains("plus 5"));
+    assert!(AUDIT.contains("16 conservative `PARTIAL` rows"));
+    assert!(AUDIT.contains("plus 4"));
 }
 
 #[test]
@@ -641,8 +641,13 @@ fn audit_records_pinned_pagination_renderer_divergences() {
         .iter()
         .find(|row| row[1] == "lastheading")
         .expect("lastheading row");
+    assert_eq!(last_heading[5], "PARTIAL");
     assert!(last_heading[8].contains("persistent-headings.ts@"));
+    assert!(last_heading[9].contains("IrInline::LastHeading"));
+    assert!(last_heading[9].contains("quarkdown_last_heading.rs"));
     assert!(last_heading[10].contains("no call-time depth range validation"));
+    assert!(last_heading[10].contains("page-aware persistent heading history"));
+    assert!(last_heading[11].contains("bounded-lastheading-semantic-node"));
     assert!(last_heading[11].contains("documented-vs-runtime-depth"));
 }
 
