@@ -121,18 +121,20 @@ jobs:
           $ErrorActionPreference = "Stop"
           $source = Join-Path $env:RUNNER_TEMP "arkst-linker-wrapper.rs"
           $wrapper = Join-Path $env:RUNNER_TEMP "arkst-linker-wrapper.exe"
+          $timingDir = Join-Path $env:GITHUB_WORKSPACE "$env:BENCH_DIR\linker-invocations"
+          New-Item -ItemType Directory -Force -Path $timingDir | Out-Null
 
           @'
           use std::env;
-          use std::fs::OpenOptions;
-          use std::io::Write;
-          use std::process::{Command, exit};
-          use std::time::Instant;
+          use std::fs;
+          use std::path::PathBuf;
+          use std::process::{self, Command, exit};
+          use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
           fn main() {
               let variant = env::var("ACTIVE_LINKER").expect("ACTIVE_LINKER is required");
               let phase = env::var("LINK_PHASE").unwrap_or_else(|_| "unclassified".to_owned());
-              let timing_file = env::var("LINKER_TIMINGS_FILE").expect("LINKER_TIMINGS_FILE is required");
+              let timing_dir = env::var("LINKER_TIMINGS_DIR").expect("LINKER_TIMINGS_DIR is required");
 
               let program = match variant.as_str() {
                   "system" => "link.exe",
@@ -154,14 +156,15 @@ jobs:
                   });
               let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
               let code = status.code().unwrap_or(99);
+              let stamp = SystemTime::now()
+                  .duration_since(UNIX_EPOCH)
+                  .expect("system clock before Unix epoch")
+                  .as_nanos();
 
-              let mut file = OpenOptions::new()
-                  .create(true)
-                  .append(true)
-                  .open(&timing_file)
-                  .expect("cannot open linker timing file");
-              writeln!(file, "{variant}\t{phase}\t{program}\t{elapsed_ms:.3}\t{code}")
-                  .expect("cannot write linker timing record");
+              let mut path = PathBuf::from(timing_dir);
+              path.push(format!("{variant}-{phase}-{}-{stamp}.tsv", process::id()));
+              let record = format!("{variant}\t{phase}\t{program}\t{elapsed_ms:.3}\t{code}\n");
+              fs::write(&path, record).expect("cannot write linker timing record");
 
               exit(code);
           }
@@ -173,7 +176,7 @@ jobs:
           }
 
           "LINKER_WRAPPER=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "LINKER_TIMINGS_FILE=$env:GITHUB_WORKSPACE\$env:BENCH_DIR\linker-invocations.tsv" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LINKER_TIMINGS_DIR=$timingDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Prove system and lld linker selections
         shell: pwsh
@@ -197,7 +200,7 @@ jobs:
           }
           Remove-Item Env:LINK_PHASE -ErrorAction SilentlyContinue
 
-          $records = Get-Content $env:LINKER_TIMINGS_FILE
+          $records = @(Get-ChildItem -Path $env:LINKER_TIMINGS_DIR -File | ForEach-Object { Get-Content $_.FullName })
           $tab = [char]9
           if (-not ($records | Select-String -SimpleMatch ($tab + "probe-system" + $tab + "link.exe" + $tab) -Quiet)) {
             throw "system link.exe invocation was not recorded"
@@ -314,7 +317,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $results = Join-Path $env:BENCH_DIR "results.jsonl"
-          $timings = Join-Path $env:BENCH_DIR "linker-invocations.tsv"
+          $timingDir = Join-Path $env:BENCH_DIR "linker-invocations"
 
           if (Test-Path $results) {
             "### Arkst Windows lld-link paired benchmark: replicate $env:REPLICATE" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
@@ -326,12 +329,15 @@ jobs:
             "~~~" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
-          if (Test-Path $timings) {
+          if (Test-Path $timingDir) {
             $records = @()
             $tab = [char]9
-            foreach ($line in Get-Content $timings) {
-              $parts = $line.Split($tab)
-              if ($parts.Count -eq 5) {
+            foreach ($file in Get-ChildItem -Path $timingDir -File) {
+              foreach ($line in Get-Content $file.FullName) {
+                $parts = $line.Split($tab)
+                if ($parts.Count -ne 5) {
+                  throw "malformed linker timing record in $($file.Name): $line"
+                }
                 $records += [pscustomobject]@{
                   linker = $parts[0]
                   phase = $parts[1]
@@ -345,6 +351,9 @@ jobs:
             $failed = @($records | Where-Object { $_.exit_code -ne 0 })
             if ($failed.Count -gt 0) {
               throw "linker invocation failures were recorded"
+            }
+            if (@($records | Where-Object { [string]::IsNullOrWhiteSpace($_.linker) -or [string]::IsNullOrWhiteSpace($_.phase) }).Count -gt 0) {
+              throw "blank linker timing identity recorded"
             }
 
             $summary = @()
