@@ -1,0 +1,281 @@
+name: Windows debug0 diagnostics 549
+
+on:
+  push:
+    branches:
+      - exp/549-windows-debug0-diagnostics
+    paths:
+      - .github/workflows/windows-debug0-diagnostics-549.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-549-windows-debug0-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 0dfc076e3f995af5cd38549927f2fdb1a4d690e2
+
+jobs:
+  diagnostics:
+    name: ${{ matrix.mode }} / fresh ${{ matrix.rep }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: default
+            rep: 1
+          - mode: default
+            rep: 2
+          - mode: debug0
+            rep: 1
+          - mode: debug0
+            rep: 2
+          - mode: debug1
+            rep: 1
+          - mode: debug1
+            rep: 2
+
+    env:
+      MODE: ${{ matrix.mode }}
+      REP: ${{ matrix.rep }}
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) {
+            throw "research checkout does not match GITHUB_SHA"
+          }
+
+          $changed = @(git diff --name-only "$env:SOURCE_SHA..$env:GITHUB_SHA")
+          if ($changed.Count -ne 1 -or $changed[0] -ne ".github/workflows/windows-debug0-diagnostics-549.yml") {
+            throw "research branch must differ by exactly one workflow; got: $($changed -join ', ')"
+          }
+
+          git diff --check "$env:SOURCE_SHA..$env:GITHUB_SHA" -- .github/workflows/windows-debug0-diagnostics-549.yml
+          if ($LASTEXITCODE -ne 0) { throw "workflow diff hygiene failed" }
+
+          git checkout --detach $env:SOURCE_SHA
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw "source authority mismatch" }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "source worktree dirty" }
+
+      - name: Configure test debug mode
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:MODE -eq "debug0") {
+            "CARGO_PROFILE_TEST_DEBUG=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif ($env:MODE -eq "debug1") {
+            "CARGO_PROFILE_TEST_DEBUG=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif ($env:MODE -ne "default") {
+            throw "unknown mode: $env:MODE"
+          }
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Create synthetic diagnostic test probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $probe = Join-Path $env:RUNNER_TEMP "arkst-549-probe"
+          $evidence = Join-Path $env:RUNNER_TEMP "arkst-549-$env:MODE-$env:REP"
+          New-Item -ItemType Directory -Force -Path (Join-Path $probe "src"), $evidence | Out-Null
+
+          @'
+          [package]
+          name = "arkst_549_diag_probe"
+          version = "0.0.0"
+          edition = "2024"
+
+          [lib]
+          path = "src/lib.rs"
+          '@ | Set-Content -Path (Join-Path $probe "Cargo.toml") -Encoding utf8
+
+          @'
+          #[inline(never)]
+          pub fn diagnostic_leaf() {
+              panic!("ARKST_549_DIAGNOSTIC_PANIC");
+          }
+
+          #[inline(never)]
+          pub fn diagnostic_middle() {
+              diagnostic_leaf();
+          }
+
+          #[inline(never)]
+          pub fn diagnostic_outer() {
+              diagnostic_middle();
+          }
+
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn panic_chain() {
+                  diagnostic_outer();
+              }
+          }
+          '@ | Set-Content -Path (Join-Path $probe "src\lib.rs") -Encoding utf8
+
+          @(
+            "ARKST_549_PROBE=$probe",
+            "ARKST_549_EVIDENCE=$evidence"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Record environment and symbol tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $llvmPdb = Get-Command llvm-pdbutil.exe -ErrorAction SilentlyContinue
+          if (-not $llvmPdb -and (Test-Path "C:\Program Files\LLVM\bin\llvm-pdbutil.exe")) {
+            $llvmPdb = Get-Item "C:\Program Files\LLVM\bin\llvm-pdbutil.exe"
+          }
+
+          @(
+            "harness_sha=$env:GITHUB_SHA",
+            "source_sha=$env:SOURCE_SHA",
+            "mode=$env:MODE",
+            "rep=$env:REP",
+            "cargo_profile_test_debug=$env:CARGO_PROFILE_TEST_DEBUG",
+            "image_os=$env:ImageOS",
+            "image_version=$env:ImageVersion",
+            "runner_arch=$env:RUNNER_ARCH",
+            "rustc=$((rustc -Vv | Out-String).Trim() -replace "\r?\n", " | ")",
+            "cargo=$((cargo -V | Out-String).Trim())",
+            "llvm_pdbutil=$($llvmPdb.Source)"
+          ) | Set-Content -Path (Join-Path $env:ARKST_549_EVIDENCE "environment.txt") -Encoding utf8
+
+          if ($llvmPdb) {
+            "ARKST_549_LLVM_PDBUTIL=$($llvmPdb.Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Build test probe
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/arkst-549-probe
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked --no-run
+          if ($LASTEXITCODE -ne 0) { throw "probe build failed" }
+
+          $executables = @(Get-ChildItem -Path "target\debug\deps" -Filter "arkst_549_diag_probe-*.exe" -File)
+          if ($executables.Count -ne 1) {
+            throw "expected one probe test executable, got $($executables.Count)"
+          }
+
+          $exe = $executables[0].FullName
+          $pdb = [System.IO.Path]::ChangeExtension($exe, ".pdb")
+
+          @(
+            "ARKST_549_EXE=$exe",
+            "ARKST_549_PDB=$pdb"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run intentional panic with full backtrace
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stdout = Join-Path $env:ARKST_549_EVIDENCE "panic.stdout.txt"
+          $stderr = Join-Path $env:ARKST_549_EVIDENCE "panic.stderr.txt"
+
+          $oldBacktrace = $env:RUST_BACKTRACE
+          $env:RUST_BACKTRACE = "full"
+          $proc = Start-Process -FilePath $env:ARKST_549_EXE -ArgumentList @("tests::panic_chain", "--exact", "--nocapture") -RedirectStandardOutput $stdout -RedirectStandardError $stderr -NoNewWindow -Wait -PassThru
+          $env:RUST_BACKTRACE = $oldBacktrace
+
+          $combined = @()
+          if (Test-Path $stdout) { $combined += Get-Content $stdout }
+          if (Test-Path $stderr) { $combined += Get-Content $stderr }
+          $combined | Set-Content -Path (Join-Path $env:ARKST_549_EVIDENCE "panic.combined.txt") -Encoding utf8
+          $combined | ForEach-Object { Write-Host $_ }
+
+          if ($proc.ExitCode -eq 0) { throw "intentional panic unexpectedly succeeded" }
+          if (-not ($combined -match "ARKST_549_DIAGNOSTIC_PANIC")) {
+            throw "intentional panic marker missing"
+          }
+
+          "ARKST_549_PANIC_EXIT=$($proc.ExitCode)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Inspect backtrace and PDB diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $combinedPath = Join-Path $env:ARKST_549_EVIDENCE "panic.combined.txt"
+          $combined = Get-Content -Raw $combinedPath
+
+          $leaf = $combined -match "diagnostic_leaf"
+          $middle = $combined -match "diagnostic_middle"
+          $outer = $combined -match "diagnostic_outer"
+          $sourceFile = $combined -match "lib\.rs"
+          $sourceLine = $combined -match "lib\.rs:\d+"
+
+          $exeBytes = (Get-Item $env:ARKST_549_EXE).Length
+          $pdbExists = Test-Path $env:ARKST_549_PDB
+          $pdbBytes = if ($pdbExists) { (Get-Item $env:ARKST_549_PDB).Length } else { 0 }
+
+          $symbolToolAvailable = -not [string]::IsNullOrWhiteSpace($env:ARKST_549_LLVM_PDBUTIL)
+          $pdbLeaf = $false
+          $pdbMiddle = $false
+          $pdbOuter = $false
+          $symbolDumpExit = $null
+
+          if ($pdbExists -and $symbolToolAvailable) {
+            $dumpPath = Join-Path $env:ARKST_549_EVIDENCE "pdb-symbols.txt"
+            & $env:ARKST_549_LLVM_PDBUTIL dump -symbols $env:ARKST_549_PDB 2>&1 | Set-Content -Path $dumpPath -Encoding utf8
+            $symbolDumpExit = $LASTEXITCODE
+            if ($symbolDumpExit -ne 0) { throw "llvm-pdbutil dump failed: $symbolDumpExit" }
+
+            $dump = Get-Content -Raw $dumpPath
+            $pdbLeaf = $dump -match "diagnostic_leaf"
+            $pdbMiddle = $dump -match "diagnostic_middle"
+            $pdbOuter = $dump -match "diagnostic_outer"
+          }
+
+          [ordered]@{
+            mode = $env:MODE
+            rep = [int]$env:REP
+            source_sha = $env:SOURCE_SHA
+            harness_sha = $env:GITHUB_SHA
+            panic_exit_code = [int]$env:ARKST_549_PANIC_EXIT
+            backtrace_leaf = [bool]$leaf
+            backtrace_middle = [bool]$middle
+            backtrace_outer = [bool]$outer
+            backtrace_source_file = [bool]$sourceFile
+            backtrace_source_line = [bool]$sourceLine
+            exe_bytes = [int64]$exeBytes
+            pdb_exists = [bool]$pdbExists
+            pdb_bytes = [int64]$pdbBytes
+            symbol_tool_available = [bool]$symbolToolAvailable
+            symbol_dump_exit = $symbolDumpExit
+            pdb_leaf = [bool]$pdbLeaf
+            pdb_middle = [bool]$pdbMiddle
+            pdb_outer = [bool]$pdbOuter
+          } | ConvertTo-Json | Set-Content -Path (Join-Path $env:ARKST_549_EVIDENCE "summary.json") -Encoding utf8
+
+          Get-Content -Raw (Join-Path $env:ARKST_549_EVIDENCE "summary.json")
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-549-${{ matrix.mode }}-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-549-${{ matrix.mode }}-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
