@@ -8,7 +8,10 @@ on:
 
 permissions:
   contents: read
-  issues: write
+
+concurrency:
+  group: benchmark-543-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -111,178 +114,30 @@ jobs:
           shared-key: 543-current-${{ matrix.os }}
           save-if: false
 
-      - name: Record restored target state
+      - name: Test default CLI feature boundary with Cargo timings
         shell: bash
         run: |
           set -euo pipefail
-          node - <<'JS'
-          const fs = require("fs");
-          const path = require("path");
-          let count = 0;
-          let bytes = 0;
-          function walk(dir) {
-            if (!fs.existsSync(dir)) return;
-            for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
-              const p = path.join(dir, entry.name);
-              if (entry.isDirectory()) walk(p);
-              else if (entry.isFile()) {
-                count += 1;
-                bytes += fs.statSync(p).size;
-              }
-            }
-          }
-          walk("target");
-          console.log(`restored_target_files=${count}`);
-          console.log(`restored_target_bytes=${bytes}`);
-          JS
-
-      - name: Measure default CLI feature boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          SECONDS=0
-          cargo test --locked -p arkst-cli --no-default-features --timings 2>&1 | tee "$RUNNER_TEMP/default-cli.log"
-          status=${PIPESTATUS[0]}
-          elapsed=$SECONDS
-          echo "$elapsed" > "$RUNNER_TEMP/default-cli.wall-seconds"
-          test "$status" -eq 0
+          cargo test --locked -p arkst-cli --no-default-features --timings
           test -f target/cargo-timings/cargo-timing.html
           cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/default-cli-cargo-timing.html"
 
-      - name: Measure Typst-required workspace
+      - name: Test Typst-required workspace with Cargo timings
         shell: bash
         env:
           ARKST_REQUIRE_TYPST: "1"
         run: |
           set -euo pipefail
-          SECONDS=0
-          cargo test --locked --workspace --all-targets --all-features --timings 2>&1 | tee "$RUNNER_TEMP/workspace.log"
-          status=${PIPESTATUS[0]}
-          elapsed=$SECONDS
-          echo "$elapsed" > "$RUNNER_TEMP/workspace.wall-seconds"
-          test "$status" -eq 0
+          cargo test --locked --workspace --all-targets --all-features --timings
           test -f target/cargo-timings/cargo-timing.html
           cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/workspace-cargo-timing.html"
 
-      - name: Summarize compile wait and test execution
-        if: ${{ always() }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          node - "$RUNNER_TEMP" "${{ runner.os }}" <<'JS'
-          const fs = require("fs");
-          const path = require("path");
-
-          const root = process.argv[2];
-          const runnerOs = process.argv[3];
-          const ansi = /\x1b\[[0-9;]*m/g;
-          const finished = /Finished .*? in ([^\r\n]+)/g;
-          const running = /Running .*?\((target[/\\].+?)\)/g;
-
-          function durationSeconds(text) {
-            let total = 0;
-            let found = false;
-            for (const m of text.matchAll(/([0-9]+(?:\.[0-9]+)?)(ms|s|m|h)/g)) {
-              found = true;
-              const n = Number(m[1]);
-              total += m[2] === "ms" ? n / 1000 : m[2] === "s" ? n : m[2] === "m" ? n * 60 : n * 3600;
-            }
-            return found ? total : null;
-          }
-
-          function summarize(prefix) {
-            const logPath = path.join(root, `${prefix}.log`);
-            const wallPath = path.join(root, `${prefix}.wall-seconds`);
-            const result = {prefix};
-            if (fs.existsSync(wallPath)) result.wall_seconds = Number(fs.readFileSync(wallPath, "utf8").trim());
-            if (!fs.existsSync(logPath)) {
-              result.log_missing = true;
-              return result;
-            }
-            const raw = fs.readFileSync(logPath, "utf8").replace(ansi, "");
-            const matches = [...raw.matchAll(finished)];
-            if (matches.length) {
-              const value = matches[matches.length - 1][1].trim();
-              result.cargo_finished_text = value;
-              result.cargo_compile_seconds = durationSeconds(value);
-            }
-            if (result.cargo_compile_seconds != null && result.wall_seconds != null) {
-              result.post_compile_wall_seconds = Math.max(0, result.wall_seconds - result.cargo_compile_seconds);
-            }
-            const seen = new Set();
-            const binaries = [];
-            for (const m of raw.matchAll(running)) {
-              const candidate = path.normalize(m[1].replace(/[\\/]+/g, path.sep));
-              if (!seen.has(candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-                seen.add(candidate);
-                binaries.push(candidate);
-              }
-            }
-            result.observed_test_binaries = binaries.length;
-            result.observed_test_binary_bytes = binaries.reduce((sum, file) => sum + fs.statSync(file).size, 0);
-            result.observed_test_binary_paths = binaries;
-            return result;
-          }
-
-          const summary = {
-            runner_os: runnerOs,
-            source_sha: process.env.SOURCE_SHA,
-            default_cli: summarize("default-cli"),
-            workspace: summarize("workspace"),
-          };
-          const out = path.join(root, "phase-summary.json");
-          fs.writeFileSync(out, JSON.stringify(summary, null, 2));
-          console.log(fs.readFileSync(out, "utf8"));
-          JS
-
-      - name: Upload phase telemetry
+      - name: Upload Cargo timing reports
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: phase-telemetry-543-${{ runner.os }}-${{ github.run_id }}
           if-no-files-found: error
           path: |
-            ${{ runner.temp }}/default-cli.log
-            ${{ runner.temp }}/workspace.log
-            ${{ runner.temp }}/default-cli.wall-seconds
-            ${{ runner.temp }}/workspace.wall-seconds
             ${{ runner.temp }}/default-cli-cargo-timing.html
             ${{ runner.temp }}/workspace-cargo-timing.html
-            ${{ runner.temp }}/phase-summary.json
-
-      - name: Publish telemetry summary to issue 543
-        if: ${{ always() }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          summary="$RUNNER_TEMP/phase-summary.json"
-          if [ -f "$summary" ]; then
-            body="$(node - "$summary" "${{ runner.os }}" "$SOURCE_SHA" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_REPOSITORY" <<'JS'
-            const fs = require("fs");
-            const [summaryPath, runnerOs, sourceSha, harnessSha, runId, repo] = process.argv.slice(2);
-            const summary = fs.readFileSync(summaryPath, "utf8").trim();
-            const body = [
-              `## #543 telemetry — ${runnerOs}`,
-              "",
-              `- harness HEAD: \`${harnessSha}\``,
-              `- source under test: \`${sourceSha}\``,
-              `- run: https://github.com/${repo}/actions/runs/${runId}`,
-              "",
-              "\`\`\`json",
-              summary,
-              "\`\`\`",
-            ].join("\n");
-            process.stdout.write(body);
-            JS
-            )"
-          else
-            body="## #543 telemetry — ${{ runner.os }}
-
-- harness HEAD: \`$GITHUB_SHA\`
-- source under test: \`$SOURCE_SHA\`
-- run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-- result: **summary unavailable; inspect failed job before classification**"
-          fi
-          gh api "repos/$GITHUB_REPOSITORY/issues/543/comments" -f body="$body" >/dev/null
