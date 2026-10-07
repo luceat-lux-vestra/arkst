@@ -1,0 +1,400 @@
+name: macOS Typst in-process test consolidation 557
+
+on:
+  push:
+    branches:
+      - exp/557-typst-inprocess-test-consolidation
+    paths:
+      - .github/workflows/macos-typst-inprocess-consolidation-557.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-557-typst-inprocess-consolidation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 07a9d478ae433b5e040f325b0fa231647b02150b
+
+jobs:
+  prime:
+    name: common producer
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-typst-inprocess-consolidation-557.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-typst-inprocess-consolidation-557.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Prime common target cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: 557-common-macos-${{ github.sha }}
+
+      - name: Prime default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime current Typst-required workspace
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+  benchmark:
+    name: benchmark ${{ matrix.variant }} / rep ${{ matrix.rep }}
+    needs: [prime]
+    runs-on: macos-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B]
+        rep: [1, 2, 3]
+    env:
+      VARIANT: ${{ matrix.variant }}
+      REP: ${{ matrix.rep }}
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-typst-inprocess-consolidation-557.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-typst-inprocess-consolidation-557.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Create evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/arkst-557-$VARIANT-$REP"
+          mkdir -p "$evidence"
+          echo "ARKST_557_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+
+      - name: Record identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "harness_sha=$GITHUB_SHA"
+            echo "source_sha=$SOURCE_SHA"
+            echo "variant=$VARIANT"
+            echo "rep=$REP"
+            echo "ImageOS=$ImageOS"
+            echo "ImageVersion=$ImageVersion"
+            echo "RUNNER_ARCH=$RUNNER_ARCH"
+            rustc -Vv
+            cargo -V
+            typst --version
+          } | tee "$ARKST_557_EVIDENCE/environment.txt"
+
+      - name: Restore common target cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: 557-common-macos-${{ github.sha }}
+          save-if: false
+
+      - name: Run current default CLI warmup
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Create ephemeral consolidated test target for B
+        if: matrix.variant == 'B'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > crates/arkst-typst-inprocess/tests/consolidated.rs <<'RS'
+          #[path = "auto_page_break.rs"]
+          mod auto_page_break;
+          #[path = "backend_integration.rs"]
+          mod backend_integration;
+          #[path = "backend_parity.rs"]
+          mod backend_parity;
+          #[path = "slides_backend_parity.rs"]
+          mod slides_backend_parity;
+          #[path = "slides_pdf_contract.rs"]
+          mod slides_pdf_contract;
+          RS
+          test "$(git status --porcelain)" = "?? crates/arkst-typst-inprocess/tests/consolidated.rs"
+
+      - name: Snapshot target tree before benchmark compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          data = {}
+          for path in Path("target").rglob("*"):
+              if path.is_file():
+                  stat = path.stat()
+                  data[str(path)] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+          evidence = Path(os.environ["ARKST_557_EVIDENCE"])
+          (evidence / "target-before.json").write_text(json.dumps(data, sort_keys=True))
+          print(f"target-before files={len(data)} bytes={sum(v['size'] for v in data.values())}")
+          PY
+
+      - name: Compile selected topology without execution
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          start_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          if [ "$VARIANT" = "A" ]; then
+            cargo test --locked -p arkst-typst-inprocess --all-features \
+              --test auto_page_break \
+              --test backend_integration \
+              --test backend_parity \
+              --test slides_backend_parity \
+              --test slides_pdf_contract \
+              --no-run --message-format=json-render-diagnostics \
+              > "$ARKST_557_EVIDENCE/cargo-no-run.jsonl"
+          else
+            cargo test --locked -p arkst-typst-inprocess --all-features \
+              --test consolidated \
+              --no-run --message-format=json-render-diagnostics \
+              > "$ARKST_557_EVIDENCE/cargo-no-run.jsonl"
+          fi
+          end_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+          printf '%s\n' "$elapsed_ms" > "$ARKST_557_EVIDENCE/compile-elapsed-ms.txt"
+          echo "ARKST_557_COMPILE variant=$VARIANT rep=$REP elapsed_ms=$elapsed_ms"
+
+      - name: Analyze compile artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          evidence = Path(os.environ["ARKST_557_EVIDENCE"])
+          expected = (
+              {"auto_page_break", "backend_integration", "backend_parity", "slides_backend_parity", "slides_pdf_contract"}
+              if os.environ["VARIANT"] == "A"
+              else {"consolidated"}
+          )
+          by_name = {}
+          for line in (evidence / "cargo-no-run.jsonl").read_text(errors="replace").splitlines():
+              try:
+                  obj = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if obj.get("reason") != "compiler-artifact":
+                  continue
+              target = obj.get("target") or {}
+              name = target.get("name")
+              if "test" not in (target.get("kind") or []) or name not in expected:
+                  continue
+              executable = obj.get("executable")
+              size = Path(executable).stat().st_size if executable and Path(executable).is_file() else None
+              by_name[name] = {
+                  "name": name,
+                  "fresh": obj.get("fresh"),
+                  "executable": executable,
+                  "executable_bytes": size,
+              }
+          if set(by_name) != expected:
+              raise SystemExit(f"unexpected test artifacts: expected={sorted(expected)} actual={sorted(by_name)}")
+
+          before = json.loads((evidence / "target-before.json").read_text())
+          after = {}
+          for path in Path("target").rglob("*"):
+              if path.is_file():
+                  stat = path.stat()
+                  after[str(path)] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+          changed = []
+          added = modified = 0
+          for path, current in after.items():
+              old = before.get(path)
+              if old is None:
+                  added += 1
+                  changed.append({"path": path, "size": current["size"]})
+              elif old["size"] != current["size"] or old["mtime_ns"] != current["mtime_ns"]:
+                  modified += 1
+                  changed.append({"path": path, "size": current["size"]})
+
+          artifacts = sorted(by_name.values(), key=lambda row: (row["executable_bytes"] or 0), reverse=True)
+          summary = {
+              "variant": os.environ["VARIANT"],
+              "rep": int(os.environ["REP"]),
+              "compile_elapsed_ms": int((evidence / "compile-elapsed-ms.txt").read_text().strip()),
+              "test_executable_count": len(artifacts),
+              "test_executable_bytes": sum((row["executable_bytes"] or 0) for row in artifacts),
+              "target_added_count": added,
+              "target_modified_count": modified,
+              "target_changed_bytes": sum(row["size"] for row in changed),
+              "test_executables": artifacts,
+          }
+          (evidence / "compile-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+          printable = {k: v for k, v in summary.items() if k != "test_executables"}
+          print("ARKST_557_COMPILE_SUMMARY=" + json.dumps(printable, sort_keys=True))
+          for row in artifacts:
+              print(f"ARKST_557_EXECUTABLE\t{row['name']}\t{row['executable_bytes']}\t{row['fresh']}")
+          PY
+
+      - name: Enumerate exact canonical test set
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARKST_557_EVIDENCE/test-lists"
+          if [ "$VARIANT" = "A" ]; then
+            for target in auto_page_break backend_integration backend_parity slides_backend_parity slides_pdf_contract; do
+              cargo test --locked -p arkst-typst-inprocess --all-features \
+                --test "$target" -- --list --format terse \
+                > "$ARKST_557_EVIDENCE/test-lists/$target.txt"
+            done
+          else
+            cargo test --locked -p arkst-typst-inprocess --all-features \
+              --test consolidated -- --list --format terse \
+              > "$ARKST_557_EVIDENCE/test-lists/consolidated.txt"
+          fi
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          root = Path(os.environ["ARKST_557_EVIDENCE"]) / "test-lists"
+          tests = []
+          if os.environ["VARIANT"] == "A":
+              for path in sorted(root.glob("*.txt")):
+                  target = path.stem
+                  for line in path.read_text(errors="replace").splitlines():
+                      if line.endswith(": test"):
+                          tests.append(f"{target}::{line[:-len(': test')].strip()}")
+          else:
+              for line in (root / "consolidated.txt").read_text(errors="replace").splitlines():
+                  if line.endswith(": test"):
+                      tests.append(line[:-len(": test")].strip())
+          tests = sorted(tests)
+          if len(tests) != 34 or len(set(tests)) != 34:
+              raise SystemExit(f"unexpected canonical test set: count={len(tests)} unique={len(set(tests))}")
+          out = {"variant": os.environ["VARIANT"], "rep": int(os.environ["REP"]), "count": 34, "tests": tests}
+          (Path(os.environ["ARKST_557_EVIDENCE"]) / "canonical-tests.json").write_text(json.dumps(out, indent=2) + "\n")
+          print("ARKST_557_TEST_SET=" + json.dumps(out, sort_keys=True))
+          PY
+
+      - name: Execute selected topology
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          start_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          if [ "$VARIANT" = "A" ]; then
+            cargo test --locked -p arkst-typst-inprocess --all-features \
+              --test auto_page_break \
+              --test backend_integration \
+              --test backend_parity \
+              --test slides_backend_parity \
+              --test slides_pdf_contract \
+              2>&1 | tee "$ARKST_557_EVIDENCE/test.log"
+          else
+            cargo test --locked -p arkst-typst-inprocess --all-features \
+              --test consolidated \
+              2>&1 | tee "$ARKST_557_EVIDENCE/test.log"
+          fi
+          end_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+          printf '%s\n' "$elapsed_ms" > "$ARKST_557_EVIDENCE/execute-elapsed-ms.txt"
+
+      - name: Summarize execution parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+
+          evidence = Path(os.environ["ARKST_557_EVIDENCE"])
+          text = (evidence / "test.log").read_text(errors="replace")
+          pat = re.compile(r"test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored;")
+          groups = passed = failed = ignored = 0
+          for match in pat.finditer(text):
+              groups += 1
+              passed += int(match.group(1))
+              failed += int(match.group(2))
+              ignored += int(match.group(3))
+          expected_groups = 5 if os.environ["VARIANT"] == "A" else 1
+          if groups != expected_groups or passed != 34 or failed != 0 or ignored != 0:
+              raise SystemExit(f"unexpected results groups={groups} passed={passed} failed={failed} ignored={ignored}")
+
+          compile_summary = json.loads((evidence / "compile-summary.json").read_text())
+          execute_ms = int((evidence / "execute-elapsed-ms.txt").read_text().strip())
+          summary = {
+              "variant": os.environ["VARIANT"],
+              "rep": int(os.environ["REP"]),
+              "groups": groups,
+              "passed": passed,
+              "failed": failed,
+              "ignored": ignored,
+              "compile_elapsed_ms": compile_summary["compile_elapsed_ms"],
+              "execute_elapsed_ms": execute_ms,
+              "measured_path_ms": compile_summary["compile_elapsed_ms"] + execute_ms,
+              "test_executable_count": compile_summary["test_executable_count"],
+              "test_executable_bytes": compile_summary["test_executable_bytes"],
+              "target_changed_bytes": compile_summary["target_changed_bytes"],
+          }
+          (evidence / "result-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+          print("ARKST_557_RESULT=" + json.dumps(summary, sort_keys=True))
+          PY
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: arkst-557-${{ matrix.variant }}-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-557-${{ matrix.variant }}-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
