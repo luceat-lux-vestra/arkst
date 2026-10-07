@@ -476,7 +476,7 @@ jobs:
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
         run: sccache --zero-stats
       - name: Test default CLI feature boundary
-        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-latest' }}
         run: cargo test --locked -p arkst-cli --no-default-features
       - name: Test (Typst required)
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
@@ -544,6 +544,47 @@ jobs:
           if successful_writes != 0:
               raise SystemExit("restore-only compiler-cache consumer wrote cache entries")
           PY
+
+
+  default_cli_boundary:
+    name: default-cli-boundary (${{ matrix.os }})
+    needs: [scope]
+    if: ${{ always() }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Draft final-gate placeholder
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: echo "full required-context validation is deferred until the pull request is ready for review"
+      - name: Documentation-only fast path
+        if: ${{ github.event.pull_request.draft == false && needs.scope.outputs.docs_only == 'true' }}
+        run: echo "Trusted-base classification proved documentation-only scope; heavy product validation is not applicable."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
+        with:
+          toolchain: 1.98.0
+      - name: Restore Final Rust cache read-only
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
+        with:
+          shared-key: test
+          save-if: false
+      - name: Install Typst 0.15.1 (pinned)
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+      - name: Test default CLI feature boundary
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
+        run: cargo test --locked -p arkst-cli --no-default-features
 
   wasm:
     name: wasm
@@ -811,7 +852,7 @@ jobs:
 
   merge_gate:
     name: Merge Gate
-    needs: [fmt, clippy, test, wasm, doc, deny, compatibility, msrv, dependency_review]
+    needs: [fmt, clippy, test, default_cli_boundary, wasm, doc, deny, compatibility, msrv, dependency_review]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
