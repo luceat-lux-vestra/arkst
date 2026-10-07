@@ -1,0 +1,265 @@
+name: Windows proc-macro Brepro 545
+
+on:
+  push:
+    branches:
+      - exp/545-windows-proc-macro-brepro
+    paths:
+      - .github/workflows/windows-proc-macro-brepro-545.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-545-proc-macro-brepro-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 0dfc076e3f995af5cd38549927f2fdb1a4d690e2
+
+jobs:
+  reproducibility:
+    name: ${{ matrix.mode }} / fresh ${{ matrix.rep }}
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: baseline
+            rep: 1
+          - mode: baseline
+            rep: 2
+          - mode: brepro
+            rep: 1
+          - mode: brepro
+            rep: 2
+
+    env:
+      MODE: ${{ matrix.mode }}
+      REP: ${{ matrix.rep }}
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and switch to exact source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw "research checkout does not match GITHUB_SHA" }
+          $changed = @(git diff --name-only "$env:SOURCE_SHA..$env:GITHUB_SHA")
+          if ($changed.Count -ne 1 -or $changed[0] -ne ".github/workflows/windows-proc-macro-brepro-545.yml") {
+            throw "research branch must differ by exactly one workflow; got: $($changed -join ', ')"
+          }
+          git diff --check "$env:SOURCE_SHA..$env:GITHUB_SHA" -- .github/workflows/windows-proc-macro-brepro-545.yml
+          if ($LASTEXITCODE -ne 0) { throw "workflow diff hygiene failed" }
+          git checkout --detach $env:SOURCE_SHA
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw "source checkout does not match SOURCE_SHA" }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "source worktree is dirty" }
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Restore dependency-only Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 545-deps-windows
+          cache-targets: false
+          save-if: false
+
+      - name: Build deterministic-link probe wrapper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $evidence = Join-Path $env:RUNNER_TEMP "arkst-545-$env:MODE-$env:REP"
+          $source = Join-Path $env:RUNNER_TEMP "arkst-545-linker-wrapper.rs"
+          $wrapper = Join-Path $env:RUNNER_TEMP "arkst-545-linker-wrapper.exe"
+          $records = Join-Path $evidence "linker-records"
+          New-Item -ItemType Directory -Force -Path $evidence, $records | Out-Null
+
+          @'
+          use std::env;
+          use std::fs;
+          use std::path::PathBuf;
+          use std::process::{Command, exit};
+          use std::time::{SystemTime, UNIX_EPOCH};
+
+          fn main() {
+              let mode = env::var("ARKST_545_MODE").expect("ARKST_545_MODE required");
+              let record_dir = env::var("ARKST_545_LINK_RECORD_DIR").expect("record dir required");
+              let args: Vec<_> = env::args_os().skip(1).collect();
+
+              let mut dll = false;
+              let mut output = String::new();
+              for arg in &args {
+                  let s = arg.to_string_lossy();
+                  let upper = s.to_ascii_uppercase();
+                  if upper == "/DLL" { dll = true; }
+                  if upper.starts_with("/OUT:") {
+                      output = s[5..].trim_matches('"').to_owned();
+                      if output.to_ascii_lowercase().ends_with(".dll") { dll = true; }
+                  }
+              }
+
+              let mut cmd = Command::new("link.exe");
+              cmd.args(&args);
+              if mode == "brepro" && dll {
+                  cmd.arg("/Brepro");
+              }
+
+              let status = cmd.status().unwrap_or_else(|e| {
+                  eprintln!("failed to execute link.exe: {e}");
+                  exit(98);
+              });
+              let code = status.code().unwrap_or(99);
+
+              let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+              let mut record = PathBuf::from(record_dir);
+              record.push(format!("{}-{stamp}.txt", std::process::id()));
+              let payload = format!(
+                  "mode={mode}\ndll={}\nbrepro_added={}\nexit_code={code}\noutput={}\nargs={}\n",
+                  dll,
+                  mode == "brepro" && dll,
+                  output,
+                  args.iter().map(|x| x.to_string_lossy()).collect::<Vec<_>>().join("\u{1f}")
+              );
+              fs::write(record, payload).expect("write linker record");
+
+              exit(code);
+          }
+          '@ | Set-Content -Path $source -Encoding utf8
+
+          rustc $source -o $wrapper
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $wrapper)) { throw "failed to build linker wrapper" }
+
+          @(
+            "ARKST_545_EVIDENCE=$evidence",
+            "ARKST_545_LINK_RECORD_DIR=$records",
+            "ARKST_545_MODE=$env:MODE",
+            "ARKST_545_LINKER=$wrapper",
+            "RUSTFLAGS=-D warnings -C linker=$wrapper",
+            "CARGO_INCREMENTAL=0"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify linker mode and environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          rustc -Vv
+          cargo -V
+          typst --version
+          Write-Host "ImageOS=$env:ImageOS"
+          Write-Host "ImageVersion=$env:ImageVersion"
+          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
+          Write-Host "MODE=$env:MODE REP=$env:REP"
+          $link = Get-Command link.exe -ErrorAction Stop
+          Write-Host "link.exe=$($link.Source)"
+
+          $probe = Join-Path $env:RUNNER_TEMP "arkst-545-probe.rs"
+          'fn main() {}' | Set-Content -Path $probe -Encoding utf8
+          rustc -C "linker=$env:ARKST_545_LINKER" $probe -o (Join-Path $env:RUNNER_TEMP "arkst-545-probe.exe")
+          if ($LASTEXITCODE -ne 0) { throw "ordinary EXE wrapper probe failed" }
+
+      - name: Compile Final surface without test execution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked -p arkst-cli --no-default-features --no-run
+          if ($LASTEXITCODE -ne 0) { throw "default CLI compile failed" }
+
+          $env:ARKST_REQUIRE_TYPST = "1"
+          cargo test --locked --workspace --all-targets --all-features --no-run
+          if ($LASTEXITCODE -ne 0) { throw "Typst workspace compile failed" }
+
+      - name: Capture reproducibility manifests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $evidence = $env:ARKST_545_EVIDENCE
+
+          $dlls = @(Get-ChildItem -Path "target\debug\deps" -Filter "*.dll" -File | Sort-Object Name)
+          if ($dlls.Count -eq 0) { throw "no proc-macro DLLs found" }
+
+          $dllManifest = @()
+          foreach ($file in $dlls) {
+            $dllManifest += [pscustomobject]@{
+              name = $file.Name
+              bytes = [int64]$file.Length
+              sha256 = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            }
+          }
+          $dllManifest | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $evidence "proc-macro-dll-manifest.json") -Encoding utf8
+
+          $nativeManifest = @()
+          foreach ($crate in @("psm", "stacker")) {
+            foreach ($dir in Get-ChildItem -Path "target\debug\build" -Directory -Filter "$crate-*") {
+              $out = Join-Path $dir.FullName "out"
+              if (-not (Test-Path $out)) { continue }
+              foreach ($file in Get-ChildItem -Path $out -Recurse -File) {
+                $relative = [System.IO.Path]::GetRelativePath($env:GITHUB_WORKSPACE, $file.FullName).Replace("\", "/")
+                $nativeManifest += [pscustomobject]@{
+                  crate = $crate
+                  path = $relative
+                  bytes = [int64]$file.Length
+                  sha256 = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+                }
+              }
+            }
+          }
+          $nativeManifest | Sort-Object path | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $evidence "native-output-manifest.json") -Encoding utf8
+
+          $records = @(Get-ChildItem -Path $env:ARKST_545_LINK_RECORD_DIR -File)
+          $dllRecords = 0
+          $breproRecords = 0
+          $failedRecords = 0
+          foreach ($record in $records) {
+            $raw = Get-Content -Raw $record.FullName
+            if ($raw -match "(?m)^dll=true$") { $dllRecords++ }
+            if ($raw -match "(?m)^brepro_added=true$") { $breproRecords++ }
+            if ($raw -notmatch "(?m)^exit_code=0$") { $failedRecords++ }
+          }
+
+          [ordered]@{
+            mode = $env:MODE
+            rep = [int]$env:REP
+            source_sha = $env:SOURCE_SHA
+            harness_sha = $env:GITHUB_SHA
+            image_os = $env:ImageOS
+            image_version = $env:ImageVersion
+            proc_macro_dll_count = $dlls.Count
+            linker_record_count = $records.Count
+            dll_link_invocation_count = $dllRecords
+            brepro_added_count = $breproRecords
+            failed_link_invocation_count = $failedRecords
+            native_output_count = $nativeManifest.Count
+          } | ConvertTo-Json | Set-Content -Path (Join-Path $evidence "summary.json") -Encoding utf8
+
+          Get-Content -Raw (Join-Path $evidence "summary.json")
+
+          if ($failedRecords -ne 0) { throw "linker wrapper recorded failures" }
+          if ($env:MODE -eq "baseline" -and $breproRecords -ne 0) { throw "baseline unexpectedly added /Brepro" }
+          if ($env:MODE -eq "brepro" -and $dllRecords -ne $breproRecords) { throw "/Brepro not applied to every DLL invocation" }
+          if ($dllRecords -lt $dlls.Count) { throw "fewer DLL link records than produced DLL files" }
+
+      - name: Upload reproducibility evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-545-${{ matrix.mode }}-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-545-${{ matrix.mode }}-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
