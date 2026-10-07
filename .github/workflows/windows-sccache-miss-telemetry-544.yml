@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: arkst-544-windows-sccache-\${{ github.ref }}
+  group: arkst-544-windows-sccache-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -137,9 +137,9 @@ jobs:
           $raw | Set-Content -Path $statsPath -Encoding utf8
           sccache --stop-server
           $stats = $raw | ConvertFrom-Json
-          $misses = if ($stats.cache_misses.counts.Rust) { [int]$stats.cache_misses.counts.Rust } else { 0 }
-          $writes = [int]$stats.cache_writes
-          $readErrors = [int]$stats.cache_read_errors
+          $misses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
+          $writes = [int]$stats.stats.cache_writes
+          $readErrors = [int]$stats.stats.cache_read_errors
           Write-Host "producer rust_misses=$misses writes=$writes read_errors=$readErrors"
           if ($readErrors -ne 0) { throw "producer cache read errors are nonzero" }
           if ($writes -le 0) { throw "producer wrote no cache entries" }
@@ -380,20 +380,20 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.3.0
         with:
           path: |
-            \${{ runner.temp }}/arkst-544-sccache
-            \${{ runner.temp }}/arkst-544-producer-evidence
-          key: arkst-544-windows-sccache-v1-\${{ github.sha }}
+            ${{ runner.temp }}/arkst-544-sccache
+            ${{ runner.temp }}/arkst-544-producer-evidence
+          key: arkst-544-windows-sccache-v1-${{ github.sha }}
 
       - name: Upload producer telemetry
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: arkst-544-windows-producer-\${{ github.run_id }}
-          path: \${{ runner.temp }}/arkst-544-producer-evidence
+          name: arkst-544-windows-producer-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-544-producer-evidence
           if-no-files-found: error
           retention-days: 30
 
   consumer:
-    name: consumer / fresh \${{ matrix.rep }}
+    name: consumer / fresh ${{ matrix.rep }}
     needs: [producer]
     runs-on: windows-latest
     timeout-minutes: 35
@@ -441,9 +441,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.3.0
         with:
           path: |
-            \${{ runner.temp }}/arkst-544-sccache
-            \${{ runner.temp }}/arkst-544-producer-evidence
-          key: arkst-544-windows-sccache-v1-\${{ github.sha }}
+            ${{ runner.temp }}/arkst-544-sccache
+            ${{ runner.temp }}/arkst-544-producer-evidence
+          key: arkst-544-windows-sccache-v1-${{ github.sha }}
           fail-on-cache-miss: true
 
       - name: Install verified sccache 0.18.0
@@ -465,7 +465,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $cacheDir = Join-Path $env:RUNNER_TEMP "arkst-544-sccache"
           $producerDir = Join-Path $env:RUNNER_TEMP "arkst-544-producer-evidence"
-          $consumerDir = Join-Path $env:RUNNER_TEMP "arkst-544-consumer-evidence-\${{ matrix.rep }}"
+          $consumerDir = Join-Path $env:RUNNER_TEMP "arkst-544-consumer-evidence-${{ matrix.rep }}"
           New-Item -ItemType Directory -Force -Path $consumerDir | Out-Null
           @(
             "SCCACHE_DIR=$cacheDir",
@@ -506,11 +506,11 @@ jobs:
           $raw | Set-Content -Path $statsPath -Encoding utf8
           sccache --stop-server
           $stats = $raw | ConvertFrom-Json
-          $hits = if ($stats.cache_hits.counts.Rust) { [int]$stats.cache_hits.counts.Rust } else { 0 }
-          $misses = if ($stats.cache_misses.counts.Rust) { [int]$stats.cache_misses.counts.Rust } else { 0 }
-          $readErrors = [int]$stats.cache_read_errors
-          $writes = [int]$stats.cache_writes
-          $writeErrors = [int]$stats.cache_write_errors
+          $hits = if ($stats.stats.cache_hits.counts.Rust) { [int]$stats.stats.cache_hits.counts.Rust } else { 0 }
+          $misses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
+          $readErrors = [int]$stats.stats.cache_read_errors
+          $writes = [int]$stats.stats.cache_writes
+          $writeErrors = [int]$stats.stats.cache_write_errors
           Write-Host "consumer rust_hits=$hits rust_misses=$misses read_errors=$readErrors writes=$writes write_errors=$writeErrors"
           if ($readErrors -ne 0) { throw "restore-only cache read errors are nonzero" }
           if ($writes -ne 0) { throw "restore-only consumer performed cache writes" }
@@ -525,7 +525,7 @@ jobs:
           $analysisPath = Join-Path $env:ARKST_544_CONSUMER_EVIDENCE "consumer-analysis.json"
           $analysis = Get-Content -Raw -Path $analysisPath | ConvertFrom-Json
           $stats = $analysis.stats
-          $rustMisses = if ($stats.cache_misses.counts.Rust) { [int]$stats.cache_misses.counts.Rust } else { 0 }
+          $rustMisses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
           Write-Host ($analysis.miss_classification_counts | ConvertTo-Json -Compress)
           Write-Host "debug_misses=$($analysis.miss_count_from_log) stats_rust_misses=$rustMisses changed_build_outputs=$($analysis.changed_build_outputs.Count)"
           if ([int]$analysis.miss_count_from_log -ne $rustMisses) { throw "debug-log miss count does not match sccache Rust miss stats" }
@@ -533,7 +533,7 @@ jobs:
       - name: Upload consumer telemetry
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: arkst-544-windows-consumer-\${{ matrix.rep }}-\${{ github.run_id }}
-          path: \${{ runner.temp }}/arkst-544-consumer-evidence-\${{ matrix.rep }}
+          name: arkst-544-windows-consumer-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-544-consumer-evidence-${{ matrix.rep }}
           if-no-files-found: error
           retention-days: 30
