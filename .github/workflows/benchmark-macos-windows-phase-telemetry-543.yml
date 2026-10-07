@@ -155,7 +155,15 @@ jobs:
         run: |
           set -euo pipefail
           SECONDS=0
-          cargo test --locked --workspace --all-      - name: Summarize compile wait and test execution
+          cargo test --locked --workspace --all-targets --all-features --timings 2>&1 | tee "$RUNNER_TEMP/workspace.log"
+          status=${PIPESTATUS[0]}
+          elapsed=$SECONDS
+          echo "$elapsed" > "$RUNNER_TEMP/workspace.wall-seconds"
+          test "$status" -eq 0
+          test -f target/cargo-timings/cargo-timing.html
+          cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/workspace-cargo-timing.html"
+
+      - name: Summarize compile wait and test execution
         if: ${{ always() }}
         shell: bash
         run: |
@@ -210,7 +218,7 @@ jobs:
               }
             }
             result.observed_test_binaries = binaries.length;
-            result.observed_test_binary_bytes = binaries.reduce((sum, p) => sum + fs.statSync(p).size, 0);
+            result.observed_test_binary_bytes = binaries.reduce((sum, file) => sum + fs.statSync(file).size, 0);
             result.observed_test_binary_paths = binaries;
             return result;
           }
@@ -225,17 +233,6 @@ jobs:
           fs.writeFileSync(out, JSON.stringify(summary, null, 2));
           console.log(fs.readFileSync(out, "utf8"));
           JS
-
- = {
-              "runner_os": runner_os,
-              "source_sha": os.environ.get("SOURCE_SHA"),
-              "default_cli": summarize("default-cli"),
-              "workspace": summarize("workspace"),
-          }
-          out = root / "phase-summary.json"
-          out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-          print(out.read_text())
-          PY
 
       - name: Upload phase telemetry
         if: ${{ always() }}
