@@ -1,0 +1,429 @@
+name: macOS typst-library unit identity 560
+
+on:
+  push:
+    branches:
+      - exp/560-typst-library-unit-identity
+    paths:
+      - .github/workflows/macos-typst-library-unit-identity-560.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-560-typst-library-unit-identity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 07a9d478ae433b5e040f325b0fa231647b02150b
+
+jobs:
+  prime:
+    name: common producer
+    runs-on: macos-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-typst-library-unit-identity-560.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-typst-library-unit-identity-560.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Prime current Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: 560-common-macos-${{ github.sha }}
+
+      - name: Prime default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime Typst-required workspace
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: cargo test --locked --workspace --all-targets --all-features
+
+  compare:
+    name: compare / rep ${{ matrix.rep }}
+    needs: [prime]
+    runs-on: macos-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        rep: [1, 2]
+
+    env:
+      REP: ${{ matrix.rep }}
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-typst-library-unit-identity-560.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-typst-library-unit-identity-560.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Create evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/arkst-560-$REP"
+          mkdir -p "$evidence"
+          echo "ARKST_560_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+
+      - name: Record identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "harness_sha=$GITHUB_SHA"
+            echo "source_sha=$SOURCE_SHA"
+            echo "rep=$REP"
+            echo "ImageOS=$ImageOS"
+            echo "ImageVersion=$ImageVersion"
+            echo "RUNNER_ARCH=$RUNNER_ARCH"
+            rustc -Vv
+            cargo -V
+            typst --version
+          } | tee "$ARKST_560_EVIDENCE/environment.txt"
+
+      - name: Restore common Rust cache
+        id: cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: 560-common-macos-${{ github.sha }}
+          save-if: false
+
+      - name: Install fingerprint snapshot helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$ARKST_560_EVIDENCE/snapshot.py" <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import sys
+          from pathlib import Path
+
+          label = sys.argv[1]
+          evidence = Path(os.environ["ARKST_560_EVIDENCE"])
+          root = Path("target/debug/.fingerprint")
+          deps_root = Path("target/debug/deps")
+          out_dir = evidence / f"snapshot-{label}"
+          out_dir.mkdir(parents=True, exist_ok=True)
+
+          def sha256(path):
+              h = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          variants = []
+          for json_path in sorted(root.glob("typst-library-*/lib-typst_library.json")):
+              dirname = json_path.parent.name
+              prefix = "typst-library-"
+              if not dirname.startswith(prefix):
+                  continue
+              variant = dirname[len(prefix):]
+              fp_path = json_path.with_name("lib-typst_library")
+              dep_fp_path = json_path.with_name("dep-lib-typst_library")
+              dep_info = deps_root / f"typst_library-{variant}.d"
+
+              files = {}
+              for key, path in {
+                  "json": json_path,
+                  "fingerprint": fp_path,
+                  "dep_fingerprint": dep_fp_path,
+                  "dep_info": dep_info,
+              }.items():
+                  if path.exists() and path.is_file():
+                      dst = out_dir / f"{variant}-{key}{path.suffix if key == 'dep_info' else ''}"
+                      shutil.copy2(path, dst)
+                      files[key] = {
+                          "path": str(path),
+                          "size": path.stat().st_size,
+                          "sha256": sha256(path),
+                          "captured": str(dst),
+                      }
+                  else:
+                      files[key] = None
+
+              parsed = json.loads(json_path.read_text())
+              variants.append({
+                  "variant": variant,
+                  "json_path": str(json_path),
+                  "json": parsed,
+                  "files": files,
+              })
+
+          payload = {"label": label, "variants": variants}
+          (evidence / f"snapshot-{label}.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+          print("ARKST_560_SNAPSHOT=" + json.dumps({
+              "label": label,
+              "variant_count": len(variants),
+              "variants": [row["variant"] for row in variants],
+          }, sort_keys=True))
+          PY
+
+      - name: Snapshot restored typst-library fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$ARKST_560_EVIDENCE/snapshot.py" restore
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ["ARKST_560_EVIDENCE"]) / "snapshot-restore.json"
+          x = json.loads(p.read_text())
+          if len(x["variants"]) != 1:
+              raise SystemExit(f"expected exactly one restored typst-library variant, got {[v['variant'] for v in x['variants']]}")
+          Path(os.environ["ARKST_560_EVIDENCE"], "restore-variant.txt").write_text(x["variants"][0]["variant"] + "\n")
+          PY
+
+      - name: Run current default CLI warmup
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prove warmup preserves restored fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$ARKST_560_EVIDENCE/snapshot.py" post-warmup
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          e = Path(os.environ["ARKST_560_EVIDENCE"])
+          a = json.loads((e / "snapshot-restore.json").read_text())
+          b = json.loads((e / "snapshot-post-warmup.json").read_text())
+          if [v["variant"] for v in a["variants"]] != [v["variant"] for v in b["variants"]]:
+              raise SystemExit("default CLI warmup changed restored variant set")
+          for av, bv in zip(a["variants"], b["variants"]):
+              if av["files"]["json"]["sha256"] != bv["files"]["json"]["sha256"]:
+                  raise SystemExit("default CLI warmup changed restored fingerprint JSON")
+              if av["files"]["fingerprint"]["sha256"] != bv["files"]["fingerprint"]["sha256"]:
+                  raise SystemExit("default CLI warmup changed restored raw fingerprint")
+          PY
+
+      - name: Build representative Typst target
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          cargo test --locked -p arkst-typst-inprocess --all-features \
+            --test backend_parity --no-run \
+            --message-format=json-render-diagnostics \
+            > "$ARKST_560_EVIDENCE/build.jsonl" \
+            2> "$ARKST_560_EVIDENCE/build.stderr"
+
+      - name: Snapshot restored and generated variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$ARKST_560_EVIDENCE/snapshot.py" post-build
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          e = Path(os.environ["ARKST_560_EVIDENCE"])
+          before = json.loads((e / "snapshot-restore.json").read_text())
+          after = json.loads((e / "snapshot-post-build.json").read_text())
+          before_ids = {x["variant"] for x in before["variants"]}
+          after_ids = {x["variant"] for x in after["variants"]}
+          new_ids = sorted(after_ids - before_ids)
+          if len(before_ids) != 1:
+              raise SystemExit(f"expected one restored variant, got {sorted(before_ids)}")
+          if len(after_ids) != 2:
+              raise SystemExit(f"expected exactly two variants after targeted build, got {sorted(after_ids)}")
+          if len(new_ids) != 1:
+              raise SystemExit(f"expected one newly generated variant, got {new_ids}")
+          (e / "generated-variant.txt").write_text(new_ids[0] + "\n")
+          PY
+
+      - name: Compare fingerprint metadata structurally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          e = Path(os.environ["ARKST_560_EVIDENCE"])
+          restored_id = (e / "restore-variant.txt").read_text().strip()
+          generated_id = (e / "generated-variant.txt").read_text().strip()
+          post = json.loads((e / "snapshot-post-build.json").read_text())
+          by_id = {row["variant"]: row for row in post["variants"]}
+          restored = by_id[restored_id]["json"]
+          generated = by_id[generated_id]["json"]
+
+          def walk(a, b, path="$"):
+              diffs = []
+              if type(a) is not type(b):
+                  return [{"path": path, "kind": "type", "a": a, "b": b}]
+              if isinstance(a, dict):
+                  keys = sorted(set(a) | set(b))
+                  for key in keys:
+                      p = f"{path}.{key}"
+                      if key not in a:
+                          diffs.append({"path": p, "kind": "missing_a", "a": None, "b": b[key]})
+                      elif key not in b:
+                          diffs.append({"path": p, "kind": "missing_b", "a": a[key], "b": None})
+                      else:
+                          diffs.extend(walk(a[key], b[key], p))
+                  return diffs
+              if isinstance(a, list):
+                  if a != b:
+                      diffs.append({"path": path, "kind": "list", "a": a, "b": b})
+                  return diffs
+              if a != b:
+                  diffs.append({"path": path, "kind": "value", "a": a, "b": b})
+              return diffs
+
+          diffs = walk(restored, generated)
+
+          artifact = None
+          for line in (e / "build.jsonl").read_text(errors="replace").splitlines():
+              try:
+                  obj = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if obj.get("reason") != "compiler-artifact":
+                  continue
+              package_id = str(obj.get("package_id", ""))
+              target = obj.get("target") or {}
+              if "typst-library" in package_id or target.get("name") == "typst_library":
+                  artifact = {
+                      "package_id": package_id,
+                      "target": target,
+                      "profile": obj.get("profile"),
+                      "features": obj.get("features"),
+                      "fresh": obj.get("fresh"),
+                      "filenames": obj.get("filenames"),
+                  }
+
+          if artifact is None:
+              raise SystemExit("missing typst-library compiler-artifact row")
+
+          def dep_inputs(row):
+              item = row["files"]["dep_info"]
+              if not item:
+                  return None
+              p = Path(item["captured"])
+              text = p.read_text(errors="replace").replace("\\\n", " ")
+              if ":" not in text:
+                  return []
+              rhs = text.split(":", 1)[1]
+              parts = re.split(r"\s+", rhs.strip())
+              normalized = []
+              for x in parts:
+                  if not x:
+                      continue
+                  x = x.replace("\\ ", " ")
+                  normalized.append(x)
+              return sorted(set(normalized))
+
+          restored_inputs = dep_inputs(by_id[restored_id])
+          generated_inputs = dep_inputs(by_id[generated_id])
+
+          selected = {}
+          for key in [
+              "rustc", "features", "declared_features", "target", "profile",
+              "path", "deps", "local", "rustflags", "config", "compile_kind"
+          ]:
+              selected[key] = {
+                  "restored": restored.get(key),
+                  "generated": generated.get(key),
+                  "equal": restored.get(key) == generated.get(key),
+              }
+
+          result = {
+              "rep": int(os.environ["REP"]),
+              "restored_variant": restored_id,
+              "generated_variant": generated_id,
+              "restored_key_set": sorted(restored.keys()),
+              "generated_key_set": sorted(generated.keys()),
+              "structural_diffs": diffs,
+              "selected_fields": selected,
+              "dep_info_inputs_equal": restored_inputs == generated_inputs,
+              "restored_dep_info_inputs": restored_inputs,
+              "generated_dep_info_inputs": generated_inputs,
+              "compiler_artifact": artifact,
+          }
+          (e / "comparison.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+
+          compact = {
+              "rep": result["rep"],
+              "restored_variant": restored_id,
+              "generated_variant": generated_id,
+              "diff_paths": [d["path"] for d in diffs],
+              "different_selected_fields": [k for k, v in selected.items() if not v["equal"]],
+              "dep_info_inputs_equal": result["dep_info_inputs_equal"],
+              "artifact_fresh": artifact["fresh"],
+              "artifact_profile": artifact["profile"],
+              "artifact_features": artifact["features"],
+          }
+          print("ARKST_560_COMPARISON=" + json.dumps(compact, sort_keys=True))
+          for diff in diffs[:80]:
+              print("ARKST_560_DIFF=" + json.dumps(diff, sort_keys=True))
+          PY
+
+      - name: Upload unit-identity evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: arkst-560-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-560-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
