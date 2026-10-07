@@ -173,6 +173,9 @@ jobs:
         working-directory: ${{ runner.temp }}/arkst-549-probe
         run: |
           $ErrorActionPreference = "Stop"
+          cargo generate-lockfile --offline
+          if ($LASTEXITCODE -ne 0) { throw "probe lockfile generation failed" }
+
           cargo test --locked --no-run
           if ($LASTEXITCODE -ne 0) { throw "probe build failed" }
 
