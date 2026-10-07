@@ -1,0 +1,463 @@
+name: Windows corrected sccache performance 547
+
+on:
+  push:
+    branches:
+      - exp/547-windows-sccache-performance
+    paths:
+      - .github/workflows/windows-sccache-performance-547.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-547-windows-sccache-performance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 0dfc076e3f995af5cd38549927f2fdb1a4d690e2
+  SCCACHE_VERSION: 0.18.0
+  SCCACHE_ARCHIVE_SHA256: 1a63c1be2beab3f04d27e4cc145443e092e02d3dd83a51030989829d7023091b
+  BREPRO_EVIDENCE_HEAD: 6f962c2d6507e9561c11344167757d79ce8b717d
+  REUSE_EVIDENCE_HEAD: ea50243c0f568e409473f1eb78e96508a4ba6854
+
+jobs:
+  prime-current:
+    name: producer A / current target cache
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact protected-main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify source authority
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw "source authority mismatch" }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "source worktree dirty" }
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Record A producer identity
+        shell: pwsh
+        run: |
+          Write-Host "ImageOS=$env:ImageOS"
+          Write-Host "ImageVersion=$env:ImageVersion"
+          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
+          rustc -Vv
+          cargo -V
+          typst --version
+
+      - name: Prime current Rust target cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 547-current-windows-${{ github.sha }}
+
+      - name: Prime current default CLI surface
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime current Typst-required workspace surface
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+  prime-sccache:
+    name: producer B / corrected sccache
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact protected-main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify source authority
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw "source authority mismatch" }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "source worktree dirty" }
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Record B producer identity
+        shell: pwsh
+        run: |
+          Write-Host "ImageOS=$env:ImageOS"
+          Write-Host "ImageVersion=$env:ImageVersion"
+          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
+          rustc -Vv
+          cargo -V
+          typst --version
+
+      - name: Prime dependency-only Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 547-deps-windows-${{ github.sha }}
+          cache-targets: false
+
+      - name: Install verified sccache 0.18.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz"
+          $installDir = Join-Path $env:RUNNER_TEMP "sccache-v0.18.0"
+          Invoke-WebRequest -Uri "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz" -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:SCCACHE_ARCHIVE_SHA256) { throw "sccache SHA mismatch: $actual" }
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          tar.exe -xzf $archive -C $installDir --strip-components=1
+          if (-not (Test-Path (Join-Path $installDir "sccache.exe"))) { throw "missing sccache.exe" }
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure writable sccache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cacheDir = Join-Path $env:RUNNER_TEMP "arkst-547-sccache"
+          $evidenceDir = Join-Path $env:RUNNER_TEMP "arkst-547-producer-evidence"
+          New-Item -ItemType Directory -Force -Path $cacheDir, $evidenceDir | Out-Null
+          @(
+            "SCCACHE_DIR=$cacheDir",
+            "SCCACHE_CACHE_SIZE=1G",
+            "RUSTC_WRAPPER=sccache",
+            "CARGO_INCREMENTAL=0",
+            "ARKST_547_PRODUCER_EVIDENCE=$evidenceDir"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build exact DLL-only Brepro linker wrapper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $toolDir = Join-Path $env:GITHUB_WORKSPACE ".arkst-547-tools"
+          $recordDir = Join-Path $env:ARKST_547_PRODUCER_EVIDENCE "linker-records"
+          New-Item -ItemType Directory -Force -Path $toolDir, $recordDir | Out-Null
+          $source = Join-Path $toolDir "linker-wrapper.rs"
+          $wrapper = Join-Path $toolDir "linker-wrapper.exe"
+
+          @'
+          use std::env;
+          use std::fs;
+          use std::path::PathBuf;
+          use std::process::{Command, exit};
+          use std::time::{SystemTime, UNIX_EPOCH};
+
+          fn main() {
+              let record_dir = env::var("ARKST_547_LINK_RECORD_DIR").expect("record dir required");
+              let args: Vec<_> = env::args_os().skip(1).collect();
+              let mut dll = false;
+              for arg in &args {
+                  let s = arg.to_string_lossy();
+                  let upper = s.to_ascii_uppercase();
+                  if upper == "/DLL" { dll = true; }
+                  if upper.starts_with("/OUT:") && s.to_ascii_lowercase().ends_with(".dll") { dll = true; }
+              }
+
+              let mut cmd = Command::new("link.exe");
+              cmd.args(&args);
+              if dll { cmd.arg("/Brepro"); }
+
+              let status = cmd.status().unwrap_or_else(|e| {
+                  eprintln!("failed to execute link.exe: {e}");
+                  exit(98);
+              });
+              let code = status.code().unwrap_or(99);
+
+              let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+              let mut record = PathBuf::from(record_dir);
+              record.push(format!("{}-{stamp}.txt", std::process::id()));
+              fs::write(
+                  record,
+                  format!("dll={}\nbrepro_added={}\nexit_code={code}\n", dll, dll)
+              ).expect("write linker record");
+              exit(code);
+          }
+          '@ | Set-Content -Path $source -Encoding utf8
+
+          rustc $source -o $wrapper
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $wrapper)) { throw "failed to build linker wrapper" }
+
+          $sha = (Get-FileHash -Algorithm SHA256 $wrapper).Hash.ToLowerInvariant()
+          $sha | Set-Content -Path (Join-Path $env:ARKST_547_PRODUCER_EVIDENCE "linker-wrapper.sha256") -Encoding ascii
+          $wrapper | Set-Content -Path (Join-Path $env:ARKST_547_PRODUCER_EVIDENCE "linker-wrapper-path.txt") -Encoding utf8
+
+          @(
+            "ARKST_547_LINK_RECORD_DIR=$recordDir",
+            "ARKST_547_LINKER_WRAPPER=$wrapper",
+            "RUSTFLAGS=-D warnings -C linker=$wrapper"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Start clean sccache server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          sccache --version
+          sccache --stop-server 2>$null
+          sccache --start-server
+          sccache --zero-stats
+
+      - name: Prime corrected default CLI surface
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime corrected Typst-required workspace surface
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Verify producer DLL-only Brepro records
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $records = @(Get-ChildItem -Path $env:ARKST_547_LINK_RECORD_DIR -File)
+          $dll = 0
+          $brepro = 0
+          $failed = 0
+          foreach ($record in $records) {
+            $raw = Get-Content -Raw $record.FullName
+            if ($raw -match "(?m)^dll=true$") { $dll++ }
+            if ($raw -match "(?m)^brepro_added=true$") { $brepro++ }
+            if ($raw -notmatch "(?m)^exit_code=0$") { $failed++ }
+          }
+          Write-Host "producer links=$($records.Count) dll=$dll brepro=$brepro failed=$failed"
+          if ($failed -ne 0) { throw "linker failure recorded" }
+          if ($dll -ne 24 -or $brepro -ne 24) { throw "expected 24/24 DLL Brepro links" }
+
+      - name: Capture producer sccache stats
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $raw = sccache --show-stats --stats-format=json | Out-String
+          $raw | Set-Content -Path (Join-Path $env:ARKST_547_PRODUCER_EVIDENCE "producer-stats.json") -Encoding utf8
+          $raw
+          sccache --stop-server
+
+      - name: Save exact corrected producer sccache and wrapper
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.3.0
+        with:
+          path: |
+            ${{ runner.temp }}/arkst-547-sccache
+            ${{ runner.temp }}/arkst-547-producer-evidence
+            ${{ github.workspace }}/.arkst-547-tools
+          key: arkst-547-corrected-sccache-${{ github.sha }}
+
+      - name: Upload B producer evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-547-producer-b-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-547-producer-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  benchmark:
+    name: benchmark ${{ matrix.variant }} / rep ${{ matrix.rep }}
+    needs: [prime-current, prime-sccache]
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B]
+        rep: [1, 2, 3, 4]
+
+    steps:
+      - name: Check out exact protected-main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: Verify source authority
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw "source authority mismatch" }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "source worktree dirty" }
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Record benchmark identity
+        shell: pwsh
+        run: |
+          Write-Host "variant=${{ matrix.variant }}"
+          Write-Host "rep=${{ matrix.rep }}"
+          Write-Host "ImageOS=$env:ImageOS"
+          Write-Host "ImageVersion=$env:ImageVersion"
+          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
+          rustc -Vv
+          cargo -V
+          typst --version
+
+      - name: Restore current target cache (A)
+        if: ${{ matrix.variant == 'A' }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 547-current-windows-${{ github.sha }}
+          save-if: false
+
+      - name: Restore dependency-only Rust cache (B)
+        if: ${{ matrix.variant == 'B' }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 547-deps-windows-${{ github.sha }}
+          cache-targets: false
+          save-if: false
+
+      - name: Restore corrected protected-main sccache and wrapper (B)
+        if: ${{ matrix.variant == 'B' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.3.0
+        with:
+          path: |
+            ${{ runner.temp }}/arkst-547-sccache
+            ${{ runner.temp }}/arkst-547-producer-evidence
+            ${{ github.workspace }}/.arkst-547-tools
+          key: arkst-547-corrected-sccache-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Install verified sccache 0.18.0 (B)
+        if: ${{ matrix.variant == 'B' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz"
+          $installDir = Join-Path $env:RUNNER_TEMP "sccache-v0.18.0"
+          Invoke-WebRequest -Uri "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz" -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:SCCACHE_ARCHIVE_SHA256) { throw "sccache SHA mismatch: $actual" }
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          tar.exe -xzf $archive -C $installDir --strip-components=1
+          if (-not (Test-Path (Join-Path $installDir "sccache.exe"))) { throw "missing sccache.exe" }
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure corrected restore-only sccache (B)
+        if: ${{ matrix.variant == 'B' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cacheDir = Join-Path $env:RUNNER_TEMP "arkst-547-sccache"
+          $producerDir = Join-Path $env:RUNNER_TEMP "arkst-547-producer-evidence"
+          $consumerDir = Join-Path $env:RUNNER_TEMP "arkst-547-consumer-${{ matrix.rep }}"
+          $wrapper = Join-Path $env:GITHUB_WORKSPACE ".arkst-547-tools\linker-wrapper.exe"
+          New-Item -ItemType Directory -Force -Path $consumerDir | Out-Null
+
+          $expectedSha = (Get-Content -Raw (Join-Path $producerDir "linker-wrapper.sha256")).Trim().ToLowerInvariant()
+          $actualSha = (Get-FileHash -Algorithm SHA256 $wrapper).Hash.ToLowerInvariant()
+          if ($actualSha -ne $expectedSha) { throw "linker-wrapper SHA mismatch" }
+          $expectedPath = (Get-Content -Raw (Join-Path $producerDir "linker-wrapper-path.txt")).Trim()
+          if ($wrapper -ne $expectedPath) { throw "linker-wrapper path mismatch" }
+
+          $recordDir = Join-Path $consumerDir "linker-records"
+          New-Item -ItemType Directory -Force -Path $recordDir | Out-Null
+
+          @(
+            "SCCACHE_DIR=$cacheDir",
+            "SCCACHE_CACHE_SIZE=1G",
+            "SCCACHE_LOCAL_RW_MODE=READ_ONLY",
+            "RUSTC_WRAPPER=sccache",
+            "CARGO_INCREMENTAL=0",
+            "ARKST_547_LINK_RECORD_DIR=$recordDir",
+            "ARKST_547_CONSUMER_EVIDENCE=$consumerDir",
+            "RUSTFLAGS=-D warnings -C linker=$wrapper"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Start restore-only sccache server (B)
+        if: ${{ matrix.variant == 'B' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          sccache --version
+          sccache --stop-server 2>$null
+          sccache --start-server
+          sccache --zero-stats
+
+      - name: Test default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Test Typst-required workspace
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Verify corrected sccache health (B)
+        if: ${{ always() && matrix.variant == 'B' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $raw = sccache --show-stats --stats-format=json | Out-String
+          $raw
+          $raw | Set-Content -Path (Join-Path $env:ARKST_547_CONSUMER_EVIDENCE "sccache-stats.json") -Encoding utf8
+          $obj = $raw | ConvertFrom-Json
+          $stats = $obj.stats
+          $hits = if ($stats.cache_hits.counts.Rust) { [int]$stats.cache_hits.counts.Rust } else { 0 }
+          $misses = if ($stats.cache_misses.counts.Rust) { [int]$stats.cache_misses.counts.Rust } else { 0 }
+          $readErrors = [int]$stats.cache_read_errors
+          $writes = [int]$stats.cache_writes
+          $writeErrors = [int]$stats.cache_write_errors
+          Write-Host "rust_hits=$hits rust_misses=$misses read_errors=$readErrors writes=$writes write_errors=$writeErrors"
+          if ($readErrors -ne 0) { throw "read errors are nonzero" }
+          if ($writes -ne 0) { throw "restore-only consumer wrote cache entries" }
+          if ($hits -lt 390 -or $misses -gt 2) { throw "corrected sccache reuse regressed: hits=$hits misses=$misses" }
+          sccache --stop-server
+
+      - name: Verify DLL-only Brepro records (B)
+        if: ${{ always() && matrix.variant == 'B' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $records = @(Get-ChildItem -Path $env:ARKST_547_LINK_RECORD_DIR -File)
+          $dll = 0
+          $brepro = 0
+          $failed = 0
+          foreach ($record in $records) {
+            $raw = Get-Content -Raw $record.FullName
+            if ($raw -match "(?m)^dll=true$") { $dll++ }
+            if ($raw -match "(?m)^brepro_added=true$") { $brepro++ }
+            if ($raw -notmatch "(?m)^exit_code=0$") { $failed++ }
+          }
+          Write-Host "consumer links=$($records.Count) dll=$dll brepro=$brepro failed=$failed"
+          if ($failed -ne 0) { throw "linker failure recorded" }
+          if ($dll -ne 24 -or $brepro -ne 24) { throw "expected 24/24 DLL Brepro links" }
+
+      - name: Upload B consumer evidence
+        if: ${{ always() && matrix.variant == 'B' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-547-b-rep-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-547-consumer-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
