@@ -1,0 +1,301 @@
+name: Benchmark macOS Windows sccache 534
+
+on:
+  push:
+    branches:
+      - exp/534-macos-windows-sccache
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MAIN_SHA: 9b96a7c17b903b20f4d2cba314732c5b8b1a8c9c
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+  SCCACHE_VERSION: "0.18.0"
+  SCCACHE_CACHE_SIZE: 1G
+
+jobs:
+  producer:
+    name: producer (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact protected main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.MAIN_SHA }}
+          persist-credentials: false
+
+      - name: Verify authority and runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          rustc --version || true
+          echo "runner_os=$RUNNER_OS"
+          echo "runner_arch=$RUNNER_ARCH"
+          echo "image_os=${ImageOS:-unknown}"
+          echo "image_version=${ImageVersion:-unknown}"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Verify Rust host
+        shell: bash
+        run: rustc -Vv
+
+      - name: Restore dependency-only Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          cache-targets: false
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Install verified sccache 0.18.0 (macOS arm64)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sccache-v0.18.0-aarch64-apple-darwin.tar.gz"
+          install_dir="$RUNNER_TEMP/sccache-v0.18.0"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-aarch64-apple-darwin.tar.gz" \
+            --output "$archive"
+          echo "308184519b646f5125289e8515b36f6ca65a13a041923994aebe702348674e8e  $archive" | shasum -a 256 -c -
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1
+          test -x "$install_dir/sccache"
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Install verified sccache 0.18.0 (Windows x64)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz'
+          $installDir = Join-Path $env:RUNNER_TEMP 'sccache-v0.18.0'
+          Invoke-WebRequest -Uri 'https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz' -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = '1a63c1be2beab3f04d27e4cc145443e092e02d3dd83a51030989829d7023091b'
+          if ($actual -ne $expected) { throw "sccache digest mismatch: $actual" }
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          tar -xzf $archive -C $installDir --strip-components=1
+          $exe = Get-ChildItem -Path $installDir -Filter sccache.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'sccache.exe missing after extraction' }
+          Add-Content -Path $env:GITHUB_PATH -Value $exe.Directory.FullName
+
+      - name: Verify sccache version
+        shell: bash
+        run: |
+          set -euo pipefail
+          sccache --version | grep -F "sccache 0.18.0"
+
+      - name: Restore exact experiment compiler cache
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/arkst-exp-534-sccache
+          key: arkst-exp534-v1-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-rustflags-Dwarnings-${{ hashFiles('Cargo.lock', '.cargo/config.toml') }}-${{ env.MAIN_SHA }}
+
+      - name: Enable writable producer sccache
+        shell: bash
+        run: |
+          {
+            echo "SCCACHE_DIR=$RUNNER_TEMP/arkst-exp-534-sccache"
+            echo "RUSTC_WRAPPER=sccache"
+          } >> "$GITHUB_ENV"
+          sccache --zero-stats
+
+      - name: Test default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Test workspace Typst required
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Test Typst backend parity
+        run: cargo test --locked -p arkst-typst-inprocess --test backend_parity --all-features -- --nocapture
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Verify producer cache health
+        shell: bash
+        run: |
+          set -euo pipefail
+          stats="$RUNNER_TEMP/exp534-producer-stats.json"
+          sccache --show-stats --stats-format=json | tee "$stats"
+          node - "$stats" <<'NODE'
+          const fs = require('fs');
+          const p = process.argv[2];
+          const stats = JSON.parse(fs.readFileSync(p, 'utf8')).stats || {};
+          const hits = (((stats.cache_hits || {}).counts || {}).Rust) || 0;
+          const misses = (((stats.cache_misses || {}).counts || {}).Rust) || 0;
+          const readErrors = stats.cache_read_errors || 0;
+          const writeErrors = stats.cache_write_errors || 0;
+          const writes = stats.cache_writes || 0;
+          console.log(`producer rust_hits=${hits} rust_misses=${misses} read_errors=${readErrors} write_errors=${writeErrors} successful_writes=${writes}`);
+          if (readErrors !== 0 || writeErrors !== 0) process.exit(1);
+          NODE
+
+      - name: Save exact protected-main experiment cache
+        if: steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/arkst-exp-534-sccache
+          key: arkst-exp534-v1-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-rustflags-Dwarnings-${{ hashFiles('Cargo.lock', '.cargo/config.toml') }}-${{ env.MAIN_SHA }}
+
+  consumer:
+    name: consumer (${{ matrix.os }}, r${{ matrix.replica }})
+    needs: producer
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        replica: [1, 2, 3]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact protected main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.MAIN_SHA }}
+          persist-credentials: false
+
+      - name: Verify authority and runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          echo "replica=${{ matrix.replica }}"
+          echo "runner_os=$RUNNER_OS"
+          echo "runner_arch=$RUNNER_ARCH"
+          echo "image_os=${ImageOS:-unknown}"
+          echo "image_version=${ImageVersion:-unknown}"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Verify Rust host
+        shell: bash
+        run: rustc -Vv
+
+      - name: Restore dependency-only Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          cache-targets: false
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Install verified sccache 0.18.0 (macOS arm64)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sccache-v0.18.0-aarch64-apple-darwin.tar.gz"
+          install_dir="$RUNNER_TEMP/sccache-v0.18.0"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-aarch64-apple-darwin.tar.gz" \
+            --output "$archive"
+          echo "308184519b646f5125289e8515b36f6ca65a13a041923994aebe702348674e8e  $archive" | shasum -a 256 -c -
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1
+          test -x "$install_dir/sccache"
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Install verified sccache 0.18.0 (Windows x64)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz'
+          $installDir = Join-Path $env:RUNNER_TEMP 'sccache-v0.18.0'
+          Invoke-WebRequest -Uri 'https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz' -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = '1a63c1be2beab3f04d27e4cc145443e092e02d3dd83a51030989829d7023091b'
+          if ($actual -ne $expected) { throw "sccache digest mismatch: $actual" }
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          tar -xzf $archive -C $installDir --strip-components=1
+          $exe = Get-ChildItem -Path $installDir -Filter sccache.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'sccache.exe missing after extraction' }
+          Add-Content -Path $env:GITHUB_PATH -Value $exe.Directory.FullName
+
+      - name: Verify sccache version
+        shell: bash
+        run: |
+          set -euo pipefail
+          sccache --version | grep -F "sccache 0.18.0"
+
+      - name: Restore exact protected-main experiment cache
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/arkst-exp-534-sccache
+          key: arkst-exp534-v1-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-rustflags-Dwarnings-${{ hashFiles('Cargo.lock', '.cargo/config.toml') }}-${{ env.MAIN_SHA }}
+
+      - name: Require exact compiler-cache hit
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          test "$CACHE_HIT" = "true"
+
+      - name: Enable read-only consumer sccache
+        shell: bash
+        run: |
+          {
+            echo "SCCACHE_DIR=$RUNNER_TEMP/arkst-exp-534-sccache"
+            echo "SCCACHE_LOCAL_RW_MODE=READ_ONLY"
+            echo "RUSTC_WRAPPER=sccache"
+          } >> "$GITHUB_ENV"
+          sccache --zero-stats
+
+      - name: Test default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Test workspace Typst required
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Test Typst backend parity
+        run: cargo test --locked -p arkst-typst-inprocess --test backend_parity --all-features -- --nocapture
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Verify read-only consumer cache health
+        shell: bash
+        run: |
+          set -euo pipefail
+          stats="$RUNNER_TEMP/exp534-consumer-stats.json"
+          sccache --show-stats --stats-format=json | tee "$stats"
+          node - "$stats" <<'NODE'
+          const fs = require('fs');
+          const p = process.argv[2];
+          const stats = JSON.parse(fs.readFileSync(p, 'utf8')).stats || {};
+          const hits = (((stats.cache_hits || {}).counts || {}).Rust) || 0;
+          const misses = (((stats.cache_misses || {}).counts || {}).Rust) || 0;
+          const readErrors = stats.cache_read_errors || 0;
+          const writeErrors = stats.cache_write_errors || 0;
+          const writes = stats.cache_writes || 0;
+          console.log(`consumer rust_hits=${hits} rust_misses=${misses} read_errors=${readErrors} write_errors=${writeErrors} successful_writes=${writes}`);
+          if (readErrors !== 0 || writeErrors !== 0 || writes !== 0 || hits === 0) process.exit(1);
+          NODE
