@@ -192,7 +192,7 @@ jobs:
             }
             $probeOutput = (& $output | Out-String).Trim()
             if ($probeOutput -ne "arkst-linker-probe") {
-              throw "runtime probe divergence for $variant: $probeOutput"
+              throw "runtime probe divergence for ${variant}: $probeOutput"
             }
           }
           Remove-Item Env:LINK_PHASE -ErrorAction SilentlyContinue
