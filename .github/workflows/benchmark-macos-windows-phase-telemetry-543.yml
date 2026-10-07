@@ -114,13 +114,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          root = Path("target")
-          files = [p for p in root.rglob("*") if p.is_file()] if root.exists() else []
-          print(f"restored_target_files={len(files)}")
-          print(f"restored_target_bytes={sum(p.stat().st_size for p in files)}")
-          PY
+          node - <<'JS'
+          const fs = require("fs");
+          const path = require("path");
+          let count = 0;
+          let bytes = 0;
+          function walk(dir) {
+            if (!fs.existsSync(dir)) return;
+            for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(p);
+              else if (entry.isFile()) {
+                count += 1;
+                bytes += fs.statSync(p).size;
+              }
+            }
+          }
+          walk("target");
+          console.log(`restored_target_files=${count}`);
+          console.log(`restored_target_bytes=${bytes}`);
+          JS
 
       - name: Measure default CLI feature boundary
         shell: bash
@@ -142,69 +155,78 @@ jobs:
         run: |
           set -euo pipefail
           SECONDS=0
-          cargo test --locked --workspace --all-targets --all-features --timings 2>&1 | tee "$RUNNER_TEMP/workspace.log"
-          status=${PIPESTATUS[0]}
-          elapsed=$SECONDS
-          echo "$elapsed" > "$RUNNER_TEMP/workspace.wall-seconds"
-          test "$status" -eq 0
-          test -f target/cargo-timings/cargo-timing.html
-          cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/workspace-cargo-timing.html"
-
-      - name: Summarize compile wait and test execution
+          cargo test --locked --workspace --all-      - name: Summarize compile wait and test execution
         if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 - "$RUNNER_TEMP" "${{ runner.os }}" <<'PY'
-          import json
-          import os
-          import re
-          import sys
-          from pathlib import Path
+          node - "$RUNNER_TEMP" "${{ runner.os }}" <<'JS'
+          const fs = require("fs");
+          const path = require("path");
 
-          root = Path(sys.argv[1])
-          runner_os = sys.argv[2]
-          ansi = re.compile(r"\x1b\[[0-9;]*m")
-          finished = re.compile(r"Finished .*? in ([^\r\n]+)")
-          running = re.compile(r"Running .*?\((target[/\\].+?)\)")
+          const root = process.argv[2];
+          const runnerOs = process.argv[3];
+          const ansi = /\x1b\[[0-9;]*m/g;
+          const finished = /Finished .*? in ([^\r\n]+)/g;
+          const running = /Running .*?\((target[/\\].+?)\)/g;
 
-          def duration_seconds(text):
-              total = 0.0
-              found = False
-              for value, unit in re.findall(r"([0-9]+(?:\.[0-9]+)?)(ms|s|m|h)", text):
-                  found = True
-                  n = float(value)
-                  total += n / 1000 if unit == "ms" else n if unit == "s" else n * 60 if unit == "m" else n * 3600
-              return total if found else None
+          function durationSeconds(text) {
+            let total = 0;
+            let found = false;
+            for (const m of text.matchAll(/([0-9]+(?:\.[0-9]+)?)(ms|s|m|h)/g)) {
+              found = true;
+              const n = Number(m[1]);
+              total += m[2] === "ms" ? n / 1000 : m[2] === "s" ? n : m[2] === "m" ? n * 60 : n * 3600;
+            }
+            return found ? total : null;
+          }
 
-          def summarize(prefix):
-              log_path = root / f"{prefix}.log"
-              wall_path = root / f"{prefix}.wall-seconds"
-              result = {"prefix": prefix}
-              if wall_path.exists():
-                  result["wall_seconds"] = float(wall_path.read_text().strip())
-              if not log_path.exists():
-                  result["log_missing"] = True
-                  return result
-              raw = ansi.sub("", log_path.read_text(errors="replace"))
-              matches = finished.findall(raw)
-              if matches:
-                  result["cargo_finished_text"] = matches[-1].strip()
-                  result["cargo_compile_seconds"] = duration_seconds(matches[-1])
-              if result.get("cargo_compile_seconds") is not None and result.get("wall_seconds") is not None:
-                  result["post_compile_wall_seconds"] = max(0.0, result["wall_seconds"] - result["cargo_compile_seconds"])
-              paths = []
-              for match in running.findall(raw):
-                  candidate = Path(match.replace("\\", os.sep).replace("/", os.sep))
-                  if candidate.exists() and candidate.is_file():
-                      paths.append(candidate)
-              unique = list(dict.fromkeys(paths))
-              result["observed_test_binaries"] = len(unique)
-              result["observed_test_binary_bytes"] = sum(p.stat().st_size for p in unique)
-              result["observed_test_binary_paths"] = [str(p) for p in unique]
-              return result
+          function summarize(prefix) {
+            const logPath = path.join(root, `${prefix}.log`);
+            const wallPath = path.join(root, `${prefix}.wall-seconds`);
+            const result = {prefix};
+            if (fs.existsSync(wallPath)) result.wall_seconds = Number(fs.readFileSync(wallPath, "utf8").trim());
+            if (!fs.existsSync(logPath)) {
+              result.log_missing = true;
+              return result;
+            }
+            const raw = fs.readFileSync(logPath, "utf8").replace(ansi, "");
+            const matches = [...raw.matchAll(finished)];
+            if (matches.length) {
+              const value = matches[matches.length - 1][1].trim();
+              result.cargo_finished_text = value;
+              result.cargo_compile_seconds = durationSeconds(value);
+            }
+            if (result.cargo_compile_seconds != null && result.wall_seconds != null) {
+              result.post_compile_wall_seconds = Math.max(0, result.wall_seconds - result.cargo_compile_seconds);
+            }
+            const seen = new Set();
+            const binaries = [];
+            for (const m of raw.matchAll(running)) {
+              const candidate = path.normalize(m[1].replace(/[\\/]+/g, path.sep));
+              if (!seen.has(candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+                seen.add(candidate);
+                binaries.push(candidate);
+              }
+            }
+            result.observed_test_binaries = binaries.length;
+            result.observed_test_binary_bytes = binaries.reduce((sum, p) => sum + fs.statSync(p).size, 0);
+            result.observed_test_binary_paths = binaries;
+            return result;
+          }
 
-          summary = {
+          const summary = {
+            runner_os: runnerOs,
+            source_sha: process.env.SOURCE_SHA,
+            default_cli: summarize("default-cli"),
+            workspace: summarize("workspace"),
+          };
+          const out = path.join(root, "phase-summary.json");
+          fs.writeFileSync(out, JSON.stringify(summary, null, 2));
+          console.log(fs.readFileSync(out, "utf8"));
+          JS
+
+ = {
               "runner_os": runner_os,
               "source_sha": os.environ.get("SOURCE_SHA"),
               "default_cli": summarize("default-cli"),
