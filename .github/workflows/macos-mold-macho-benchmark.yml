@@ -131,8 +131,6 @@ jobs:
           }, sort_keys=True))
           PY
 
-          "$binary" --version | tee "$BENCH_DIR/mold-macho-version.txt"
-
           echo "MOLD_MACHO_BINARY=$binary" >> "$GITHUB_ENV"
           echo "MOLD_MACHO_LINKER=$linker" >> "$GITHUB_ENV"
 
@@ -157,7 +155,6 @@ jobs:
             typst --version
             /usr/bin/cc --version | head -1
             /usr/bin/ld -v 2>&1 | head -1
-            "$MOLD_MACHO_BINARY" --version
           } | tee "$BENCH_DIR/environment.txt"
 
       - name: Build instrumented linker driver wrapper
