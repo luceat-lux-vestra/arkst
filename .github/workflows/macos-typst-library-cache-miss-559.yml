@@ -1,0 +1,385 @@
+name: macOS typst-library cache miss 559
+
+on:
+  push:
+    branches:
+      - exp/559-typst-library-cache-miss
+    paths:
+      - .github/workflows/macos-typst-library-cache-miss-559.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-559-typst-library-cache-miss-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 07a9d478ae433b5e040f325b0fa231647b02150b
+
+jobs:
+  prime:
+    name: common producer
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-typst-library-cache-miss-559.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-typst-library-cache-miss-559.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Prime current Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: 559-common-macos-${{ github.sha }}
+
+      - name: Prime default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime Typst-required workspace
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: cargo test --locked --workspace --all-targets --all-features
+
+  probe:
+    name: probe / rep ${{ matrix.rep }}
+    needs: [prime]
+    runs-on: macos-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        rep: [1, 2]
+
+    env:
+      REP: ${{ matrix.rep }}
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-typst-library-cache-miss-559.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-typst-library-cache-miss-559.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Create evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/arkst-559-$REP"
+          mkdir -p "$evidence"
+          echo "ARKST_559_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+
+      - name: Record identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "harness_sha=$GITHUB_SHA"
+            echo "source_sha=$SOURCE_SHA"
+            echo "rep=$REP"
+            echo "ImageOS=$ImageOS"
+            echo "ImageVersion=$ImageVersion"
+            echo "RUNNER_ARCH=$RUNNER_ARCH"
+            rustc -Vv
+            cargo -V
+            typst --version
+          } | tee "$ARKST_559_EVIDENCE/environment.txt"
+
+      - name: Restore common Rust cache
+        id: cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: 559-common-macos-${{ github.sha }}
+          save-if: false
+
+      - name: Record cache-hit output
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          printf 'cache_hit=%s\n' "$CACHE_HIT" | tee "$ARKST_559_EVIDENCE/cache-hit.txt"
+
+      - name: Install inventory helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$ARKST_559_EVIDENCE/inventory.py" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          label = sys.argv[1]
+          evidence = Path(os.environ["ARKST_559_EVIDENCE"])
+
+          def file_row(path: Path):
+              stat = path.stat()
+              row = {
+                  "path": str(path),
+                  "type": "file" if path.is_file() else "dir",
+                  "size": stat.st_size if path.is_file() else None,
+                  "mtime_ns": stat.st_mtime_ns,
+              }
+              if path.is_file() and stat.st_size <= 8 * 1024 * 1024:
+                  row["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+              return row
+
+          matches = []
+          target = Path("target")
+          if target.exists():
+              for path in target.rglob("*"):
+                  name = path.name.lower()
+                  full = str(path).lower()
+                  if "typst_library" in name or "typst-library" in name or "typst_library" in full or "typst-library" in full:
+                      try:
+                          matches.append(file_row(path))
+                      except FileNotFoundError:
+                          pass
+
+          cargo_home = Path(os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")))
+          registry_sources = []
+          src_root = cargo_home / "registry" / "src"
+          if src_root.exists():
+              for path in src_root.glob("*/typst-library-0.15.1"):
+                  try:
+                      source_row = file_row(path)
+                      representatives = []
+                      for candidate in [
+                          path / "Cargo.toml",
+                          path / "src" / "lib.rs",
+                          path / "src" / "foundations" / "mod.rs",
+                      ]:
+                          if candidate.exists():
+                              representatives.append(file_row(candidate))
+                      source_row["representative_files"] = representatives
+                      registry_sources.append(source_row)
+                  except FileNotFoundError:
+                      pass
+
+          payload = {
+              "label": label,
+              "target_match_count": len(matches),
+              "target_matches": sorted(matches, key=lambda row: row["path"]),
+              "registry_source_count": len(registry_sources),
+              "registry_sources": registry_sources,
+          }
+          (evidence / f"inventory-{label}.json").write_text(json.dumps(payload, indent=2) + "\n")
+          print(
+              f"ARKST_559_INVENTORY label={label} "
+              f"target_matches={len(matches)} registry_sources={len(registry_sources)}"
+          )
+          PY
+
+      - name: Inventory immediately after restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$ARKST_559_EVIDENCE/inventory.py" restore
+
+      - name: Run current default CLI warmup
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Inventory after default CLI warmup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$ARKST_559_EVIDENCE/inventory.py" post-warmup
+
+      - name: First representative build with fingerprint trace
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+          CARGO_LOG: cargo::core::compiler::fingerprint=trace
+        run: |
+          set -euo pipefail
+          start_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          cargo test --locked -p arkst-typst-inprocess --all-features \
+            --test backend_parity --no-run \
+            --message-format=json-render-diagnostics \
+            > "$ARKST_559_EVIDENCE/first.jsonl" \
+            2> "$ARKST_559_EVIDENCE/first-fingerprint.log"
+          end_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+          printf '%s\n' "$elapsed_ms" > "$ARKST_559_EVIDENCE/first-elapsed-ms.txt"
+          echo "ARKST_559_FIRST elapsed_ms=$elapsed_ms"
+
+      - name: Inventory after first build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$ARKST_559_EVIDENCE/inventory.py" post-first
+
+      - name: Immediate identical second build control
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+          CARGO_LOG: cargo::core::compiler::fingerprint=trace
+        run: |
+          set -euo pipefail
+          start_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          cargo test --locked -p arkst-typst-inprocess --all-features \
+            --test backend_parity --no-run \
+            --message-format=json-render-diagnostics \
+            > "$ARKST_559_EVIDENCE/second.jsonl" \
+            2> "$ARKST_559_EVIDENCE/second-fingerprint.log"
+          end_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+          printf '%s\n' "$elapsed_ms" > "$ARKST_559_EVIDENCE/second-elapsed-ms.txt"
+          echo "ARKST_559_SECOND elapsed_ms=$elapsed_ms"
+
+      - name: Analyze typst-library miss
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          evidence = Path(os.environ["ARKST_559_EVIDENCE"])
+
+          def artifact(path):
+              rows = []
+              for line in path.read_text(errors="replace").splitlines():
+                  try:
+                      obj = json.loads(line)
+                  except json.JSONDecodeError:
+                      continue
+                  if obj.get("reason") != "compiler-artifact":
+                      continue
+                  package_id = str(obj.get("package_id", ""))
+                  target = obj.get("target") or {}
+                  target_name = str(target.get("name", ""))
+                  if "typst-library" in package_id or target_name == "typst_library":
+                      rows.append({
+                          "package_id": package_id,
+                          "target_name": target_name,
+                          "fresh": obj.get("fresh"),
+                          "filenames": obj.get("filenames") or [],
+                          "executable": obj.get("executable"),
+                      })
+              return rows
+
+          first_artifacts = artifact(evidence / "first.jsonl")
+          second_artifacts = artifact(evidence / "second.jsonl")
+
+          if not first_artifacts:
+              raise SystemExit("first build emitted no typst-library compiler-artifact")
+          if not second_artifacts:
+              raise SystemExit("second build emitted no typst-library compiler-artifact")
+
+          def relevant_log(path):
+              lines = path.read_text(errors="replace").splitlines()
+              direct = [
+                  line for line in lines
+                  if "typst-library" in line.lower() or "typst_library" in line.lower()
+              ]
+              return direct
+
+          first_log = relevant_log(evidence / "first-fingerprint.log")
+          second_log = relevant_log(evidence / "second-fingerprint.log")
+
+          restore = json.loads((evidence / "inventory-restore.json").read_text())
+          warmup = json.loads((evidence / "inventory-post-warmup.json").read_text())
+          post = json.loads((evidence / "inventory-post-first.json").read_text())
+
+          result = {
+              "rep": int(os.environ["REP"]),
+              "cache_hit": (evidence / "cache-hit.txt").read_text().strip(),
+              "restore_target_match_count": restore["target_match_count"],
+              "restore_registry_source_count": restore["registry_source_count"],
+              "post_warmup_target_match_count": warmup["target_match_count"],
+              "post_first_target_match_count": post["target_match_count"],
+              "first_elapsed_ms": int((evidence / "first-elapsed-ms.txt").read_text().strip()),
+              "second_elapsed_ms": int((evidence / "second-elapsed-ms.txt").read_text().strip()),
+              "first_typst_library_artifacts": first_artifacts,
+              "second_typst_library_artifacts": second_artifacts,
+              "first_typst_library_fingerprint_lines": first_log,
+              "second_typst_library_fingerprint_lines": second_log,
+          }
+
+          (evidence / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
+
+          small = {
+              "rep": result["rep"],
+              "cache_hit": result["cache_hit"],
+              "restore_target_match_count": result["restore_target_match_count"],
+              "restore_registry_source_count": result["restore_registry_source_count"],
+              "post_warmup_target_match_count": result["post_warmup_target_match_count"],
+              "post_first_target_match_count": result["post_first_target_match_count"],
+              "first_elapsed_ms": result["first_elapsed_ms"],
+              "second_elapsed_ms": result["second_elapsed_ms"],
+              "first_fresh": [row["fresh"] for row in first_artifacts],
+              "second_fresh": [row["fresh"] for row in second_artifacts],
+              "first_fingerprint_line_count": len(first_log),
+              "second_fingerprint_line_count": len(second_log),
+          }
+          print("ARKST_559_SUMMARY=" + json.dumps(small, sort_keys=True))
+          for line in first_log[:120]:
+              print("ARKST_559_FIRST_FP=" + line)
+          for line in second_log[:40]:
+              print("ARKST_559_SECOND_FP=" + line)
+          PY
+
+      - name: Upload cache-miss evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: arkst-559-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-559-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
