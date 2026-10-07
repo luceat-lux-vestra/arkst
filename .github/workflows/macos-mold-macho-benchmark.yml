@@ -73,12 +73,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "$BENCH_DIR"
+          {
+            echo "harness_sha=$GITHUB_SHA"
+            echo "source_sha=$SOURCE_SHA"
+            echo "upstream_mold_macho_commit=$MOLD_MACHO_COMMIT"
+          } > "$BENCH_DIR/harness-authority.txt"
+
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git diff --exit-code
 
-          mapfile -t changed < <(git diff --name-only "$SOURCE_SHA..HEAD")
-          test "${#changed[@]}" -eq 1
-          test "${changed[0]}" = ".github/workflows/macos-mold-macho-benchmark.yml"
+          changed="$(git diff --name-only "$SOURCE_SHA..HEAD")"
+          count="$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')"
+          test "$count" -eq 1
+          test "$changed" = ".github/workflows/macos-mold-macho-benchmark.yml"
           git diff --check "$SOURCE_SHA..HEAD" -- .github/workflows/macos-mold-macho-benchmark.yml
 
       - name: Build pinned mold-macho from source
@@ -340,7 +348,7 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          if [ -d "$LINKER_TIMINGS_DIR" ]; then
+          if [ -n "${LINKER_TIMINGS_DIR:-}" ] && [ -d "$LINKER_TIMINGS_DIR" ]; then
             python3 - "$LINKER_TIMINGS_DIR" > "$BENCH_DIR/linker-summary.json" <<'PY'
           import collections
           import json
