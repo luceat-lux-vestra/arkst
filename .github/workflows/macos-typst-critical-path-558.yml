@@ -1,0 +1,419 @@
+name: macOS Typst consolidation critical path 558
+
+on:
+  push:
+    branches:
+      - exp/558-typst-consolidation-critical-path
+    paths:
+      - .github/workflows/macos-typst-critical-path-558.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-558-typst-critical-path-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 07a9d478ae433b5e040f325b0fa231647b02150b
+
+jobs:
+  prime:
+    name: common producer
+    runs-on: macos-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-typst-critical-path-558.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-typst-critical-path-558.yml
+
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Record producer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ImageOS=$ImageOS"
+          echo "ImageVersion=$ImageVersion"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          echo "logical_cpu=$(sysctl -n hw.logicalcpu)"
+          rustc -Vv
+          cargo -V
+          typst --version
+
+      - name: Prime common target cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: 558-common-macos-${{ github.sha }}
+
+      - name: Prime default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime current Typst-required workspace
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+  telemetry:
+    name: telemetry ${{ matrix.variant }} / rep ${{ matrix.rep }}
+    needs: [prime]
+    runs-on: macos-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B]
+        rep: [1, 2]
+
+    env:
+      VARIANT: ${{ matrix.variant }}
+      REP: ${{ matrix.rep }}
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-typst-critical-path-558.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-typst-critical-path-558.yml
+
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e
+        with:
+          typst-version: 0.15.1
+
+      - name: Create evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/arkst-558-$VARIANT-$REP"
+          mkdir -p "$evidence"
+          echo "ARKST_558_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+
+      - name: Record consumer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "harness_sha=$GITHUB_SHA"
+            echo "source_sha=$SOURCE_SHA"
+            echo "variant=$VARIANT"
+            echo "rep=$REP"
+            echo "ImageOS=$ImageOS"
+            echo "ImageVersion=$ImageVersion"
+            echo "RUNNER_ARCH=$RUNNER_ARCH"
+            echo "logical_cpu=$(sysctl -n hw.logicalcpu)"
+            rustc -Vv
+            cargo -V
+            typst --version
+          } | tee "$ARKST_558_EVIDENCE/environment.txt"
+
+      - name: Restore common target cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          shared-key: 558-common-macos-${{ github.sha }}
+          save-if: false
+
+      - name: Run current default CLI warmup
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Create ephemeral consolidated test target for B
+        if: matrix.variant == 'B'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > crates/arkst-typst-inprocess/tests/consolidated.rs <<'RS'
+          #[path = "auto_page_break.rs"]
+          mod auto_page_break;
+          #[path = "backend_integration.rs"]
+          mod backend_integration;
+          #[path = "backend_parity.rs"]
+          mod backend_parity;
+          #[path = "slides_backend_parity.rs"]
+          mod slides_backend_parity;
+          #[path = "slides_pdf_contract.rs"]
+          mod slides_pdf_contract;
+          RS
+          test "$(git status --porcelain)" = "?? crates/arkst-typst-inprocess/tests/consolidated.rs"
+
+      - name: Install observational process sampler
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$ARKST_558_EVIDENCE/sample_processes.py" <<'PY'
+          import json
+          import re
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          out = Path(sys.argv[1])
+          rustc_re = re.compile(r"(?:^|[/ ])rustc(?: |$)")
+          linker_re = re.compile(r"(?:^|[/ ])(?:clang|clang\+\+|cc|ld)(?: |$)")
+
+          with out.open("w") as handle:
+              while True:
+                  now = time.monotonic_ns()
+                  ps = subprocess.run(
+                      ["ps", "-A", "-o", "pid=,ppid=,%cpu=,command="],
+                      check=True,
+                      capture_output=True,
+                      text=True,
+                  ).stdout
+
+                  rustc = []
+                  linker = []
+                  for raw in ps.splitlines():
+                      parts = raw.strip().split(None, 3)
+                      if len(parts) < 4:
+                          continue
+                      try:
+                          pid = int(parts[0])
+                          ppid = int(parts[1])
+                          cpu = float(parts[2])
+                      except ValueError:
+                          continue
+                      command = parts[3]
+                      row = {"pid": pid, "ppid": ppid, "cpu": cpu, "command": command}
+                      if rustc_re.search(command):
+                          rustc.append(row)
+                      if linker_re.search(command):
+                          linker.append(row)
+
+                  handle.write(json.dumps({
+                      "t_ns": now,
+                      "rustc_count": len(rustc),
+                      "rustc_cpu_sum": sum(row["cpu"] for row in rustc),
+                      "linker_count": len(linker),
+                      "linker_cpu_sum": sum(row["cpu"] for row in linker),
+                      "rustc": rustc,
+                      "linker": linker,
+                  }) + "\n")
+                  handle.flush()
+                  time.sleep(0.2)
+          PY
+
+      - name: Compile selected topology with Cargo timings
+        shell: bash
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+        run: |
+          set -euo pipefail
+          rm -rf target/cargo-timings
+
+          python3 "$ARKST_558_EVIDENCE/sample_processes.py" \
+            "$ARKST_558_EVIDENCE/process-samples.jsonl" &
+          sampler_pid=$!
+
+          cleanup_sampler() {
+            kill "$sampler_pid" 2>/dev/null || true
+            wait "$sampler_pid" 2>/dev/null || true
+          }
+          trap cleanup_sampler EXIT
+
+          start_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+
+          if [ "$VARIANT" = "A" ]; then
+            cargo test --locked -p arkst-typst-inprocess --all-features \
+              --test auto_page_break \
+              --test backend_integration \
+              --test backend_parity \
+              --test slides_backend_parity \
+              --test slides_pdf_contract \
+              --no-run --timings \
+              2>&1 | tee "$ARKST_558_EVIDENCE/cargo.log"
+          else
+            cargo test --locked -p arkst-typst-inprocess --all-features \
+              --test consolidated \
+              --no-run --timings \
+              2>&1 | tee "$ARKST_558_EVIDENCE/cargo.log"
+          fi
+
+          end_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          cleanup_sampler
+          trap - EXIT
+
+          elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+          printf '%s\n' "$elapsed_ms" > "$ARKST_558_EVIDENCE/compile-elapsed-ms.txt"
+
+          test -e target/cargo-timings/cargo-timing.html
+          cp -L target/cargo-timings/cargo-timing.html "$ARKST_558_EVIDENCE/cargo-timing.html"
+
+          echo "ARKST_558_COMPILE variant=$VARIANT rep=$REP elapsed_ms=$elapsed_ms"
+
+      - name: Analyze Cargo timing and process samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import statistics
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          evidence = Path(os.environ["ARKST_558_EVIDENCE"])
+
+          class Tables(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.tables = []
+                  self.table = None
+                  self.row = None
+                  self.cell = None
+
+              def handle_starttag(self, tag, attrs):
+                  if tag == "table":
+                      self.table = []
+                  elif tag == "tr" and self.table is not None:
+                      self.row = []
+                  elif tag in {"td", "th"} and self.row is not None:
+                      self.cell = []
+
+              def handle_data(self, data):
+                  if self.cell is not None:
+                      self.cell.append(data)
+
+              def handle_endtag(self, tag):
+                  if tag in {"td", "th"} and self.cell is not None:
+                      self.row.append(" ".join("".join(self.cell).split()))
+                      self.cell = None
+                  elif tag == "tr" and self.row is not None:
+                      self.table.append(self.row)
+                      self.row = None
+                  elif tag == "table" and self.table is not None:
+                      self.tables.append(self.table)
+                      self.table = None
+
+          parser = Tables()
+          parser.feed((evidence / "cargo-timing.html").read_text(errors="replace"))
+
+          summary_rows = {}
+          unit_rows = []
+          for table in parser.tables:
+              for row in table:
+                  if len(row) >= 2:
+                      key = row[0].rstrip(":")
+                      if key in {
+                          "Targets", "Profile", "Fresh units", "Dirty units", "Total units",
+                          "Max concurrency", "Build start", "Total time", "rustc",
+                          "Max (global) rustc threads concurrency",
+                      }:
+                          summary_rows[key] = row[1]
+                  if len(row) >= 3 and row[0].rstrip(".").isdigit():
+                      duration_match = re.search(r"([0-9.]+)s", row[2])
+                      if duration_match:
+                          unit_rows.append({
+                              "rank": int(row[0].rstrip(".")),
+                              "unit": row[1],
+                              "duration_s": float(duration_match.group(1)),
+                              "codegen": row[3] if len(row) > 3 else "",
+                          })
+
+          samples = []
+          for line in (evidence / "process-samples.jsonl").read_text(errors="replace").splitlines():
+              if line.strip():
+                  samples.append(json.loads(line))
+
+          if not samples:
+              raise SystemExit("no process samples")
+
+          active = [sample for sample in samples if sample["rustc_count"] > 0]
+          multi = [sample for sample in active if sample["rustc_count"] >= 2]
+
+          def mean(values):
+              return statistics.fmean(values) if values else 0.0
+
+          rustc_commands = {}
+          for sample in samples:
+              for row in sample["rustc"]:
+                  command = row["command"]
+                  rustc_commands[command] = rustc_commands.get(command, 0) + 1
+
+          result = {
+              "variant": os.environ["VARIANT"],
+              "rep": int(os.environ["REP"]),
+              "compile_elapsed_ms": int((evidence / "compile-elapsed-ms.txt").read_text().strip()),
+              "cargo_summary": summary_rows,
+              "top_units": sorted(unit_rows, key=lambda row: row["duration_s"], reverse=True)[:20],
+              "sample_count": len(samples),
+              "active_rustc_sample_count": len(active),
+              "max_rustc_count": max(sample["rustc_count"] for sample in samples),
+              "mean_rustc_count_all": mean([sample["rustc_count"] for sample in samples]),
+              "mean_rustc_count_when_active": mean([sample["rustc_count"] for sample in active]),
+              "multi_rustc_fraction_when_active": (len(multi) / len(active)) if active else 0.0,
+              "peak_rustc_cpu_sum": max(sample["rustc_cpu_sum"] for sample in samples),
+              "mean_rustc_cpu_sum_when_active": mean([sample["rustc_cpu_sum"] for sample in active]),
+              "max_linker_count": max(sample["linker_count"] for sample in samples),
+              "peak_linker_cpu_sum": max(sample["linker_cpu_sum"] for sample in samples),
+              "distinct_rustc_commands": len(rustc_commands),
+          }
+
+          if "Total time" not in summary_rows or "Max concurrency" not in summary_rows:
+              raise SystemExit(f"Cargo timing summary parse incomplete: {summary_rows}")
+          if not unit_rows:
+              raise SystemExit("Cargo timing unit table parse produced no units")
+
+          (evidence / "critical-path-summary.json").write_text(json.dumps(result, indent=2) + "\n")
+          printable = {k: v for k, v in result.items() if k != "top_units"}
+          print("ARKST_558_SUMMARY=" + json.dumps(printable, sort_keys=True))
+          print("ARKST_558_TOP_UNITS=" + json.dumps(result["top_units"], sort_keys=True))
+          PY
+
+      - name: Upload critical-path evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: arkst-558-${{ matrix.variant }}-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-558-${{ matrix.variant }}-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
