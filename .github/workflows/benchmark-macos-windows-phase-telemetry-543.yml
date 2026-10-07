@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -248,3 +249,40 @@ jobs:
             ${{ runner.temp }}/default-cli-cargo-timing.html
             ${{ runner.temp }}/workspace-cargo-timing.html
             ${{ runner.temp }}/phase-summary.json
+
+      - name: Publish telemetry summary to issue 543
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          summary="$RUNNER_TEMP/phase-summary.json"
+          if [ -f "$summary" ]; then
+            body="$(node - "$summary" "${{ runner.os }}" "$SOURCE_SHA" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_REPOSITORY" <<'JS'
+            const fs = require("fs");
+            const [summaryPath, runnerOs, sourceSha, harnessSha, runId, repo] = process.argv.slice(2);
+            const summary = fs.readFileSync(summaryPath, "utf8").trim();
+            const body = [
+              `## #543 telemetry — ${runnerOs}`,
+              "",
+              `- harness HEAD: \`${harnessSha}\``,
+              `- source under test: \`${sourceSha}\``,
+              `- run: https://github.com/${repo}/actions/runs/${runId}`,
+              "",
+              "\`\`\`json",
+              summary,
+              "\`\`\`",
+            ].join("\n");
+            process.stdout.write(body);
+            JS
+            )"
+          else
+            body="## #543 telemetry — ${{ runner.os }}
+
+- harness HEAD: \`$GITHUB_SHA\`
+- source under test: \`$SOURCE_SHA\`
+- run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+- result: **summary unavailable; inspect failed job before classification**"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/issues/543/comments" -f body="$body" >/dev/null
