@@ -43,9 +43,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          mapfile -t changed < <(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")
-          test "${#changed[@]}" -eq 1
-          test "${changed[0]}" = ".github/workflows/macos-test-debug1-552.yml"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-test-debug1-552.yml"
           git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-test-debug1-552.yml
           git checkout --detach "$SOURCE_SHA"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
@@ -166,9 +166,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          mapfile -t changed < <(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")
-          test "${#changed[@]}" -eq 1
-          test "${changed[0]}" = ".github/workflows/macos-test-debug1-552.yml"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-test-debug1-552.yml"
           git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-test-debug1-552.yml
           git checkout --detach "$SOURCE_SHA"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
