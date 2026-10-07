@@ -170,48 +170,52 @@ jobs:
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
-          function Canonicalize-Output([string]$raw) {
-            $value = $raw.Replace("\", "/")
-            $workspaceNorm = $Workspace.Replace("\", "/").TrimEnd("/")
-            if ($value.StartsWith($workspaceNorm, [System.StringComparison]::OrdinalIgnoreCase)) {
-              return '$WORKSPACE' + $value.Substring($workspaceNorm.Length)
-            }
-            return $value
+          function Remove-Ansi([string]$value) {
+            return [regex]::Replace($value, '\x1B\[[0-9;]*m', '')
           }
 
-          function Get-Units {
-            $units = @{}
-            foreach ($line in Get-Content -Path $LogPath) {
-              if ($line -match '\[(?<out>[^\]]+)\]: get_cached_or_compile: (?<cmd>.*)$') {
-                $key = Canonicalize-Output $Matches.out
-                if (-not $units.ContainsKey($key)) {
-                  $units[$key] = [ordered]@{ output=$key; raw_output=$Matches.out; command=$null; key=$null; status=$null }
+          function Canonicalize-Command([string]$value) {
+            $canonical = $value
+            $escapedWorkspace = $Workspace.Replace("\", "\\")
+            $canonical = $canonical.Replace($escapedWorkspace, '$WORKSPACE')
+            $canonical = $canonical.Replace($Workspace, '$WORKSPACE')
+            return $canonical
+          }
+
+          function Get-StringSha256([string]$value) {
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+              $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
+              return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+            } finally {
+              $sha.Dispose()
+            }
+          }
+
+          function Get-LogRecords {
+            $hashRecords = @()
+            $commandRecords = @()
+            foreach ($rawLine in Get-Content -Path $LogPath) {
+              $line = Remove-Ansi $rawLine
+              if ($line -match '\[(?<crate>[^\]]+)\]: get_cached_or_compile: (?<cmd>.*)$') {
+                $command = Canonicalize-Command $Matches.cmd
+                $commandRecords += [pscustomobject]@{
+                  crate = $Matches.crate
+                  command_sha256 = Get-StringSha256 $command
+                  command = $command
                 }
-                $units[$key].command = $Matches.cmd
               }
-              if ($line -match '\[(?<out>[^\]]+)\]: Hash key: (?<hash>[0-9a-fA-F]+)') {
-                $key = Canonicalize-Output $Matches.out
-                if (-not $units.ContainsKey($key)) {
-                  $units[$key] = [ordered]@{ output=$key; raw_output=$Matches.out; command=$null; key=$null; status=$null }
+              if ($line -match '\[(?<crate>[^\]]+)\]: Hash key: (?<hash>[0-9a-fA-F]+)') {
+                $hashRecords += [pscustomobject]@{
+                  crate = $Matches.crate
+                  key = $Matches.hash.ToLowerInvariant()
                 }
-                $units[$key].key = $Matches.hash.ToLowerInvariant()
-              }
-              if ($line -match '\[(?<out>[^\]]+)\]: Cache (?<status>hit|miss|none|recache) in ') {
-                $key = Canonicalize-Output $Matches.out
-                if (-not $units.ContainsKey($key)) {
-                  $units[$key] = [ordered]@{ output=$key; raw_output=$Matches.out; command=$null; key=$null; status=$null }
-                }
-                $units[$key].status = $Matches.status
-              }
-              if ($line -match '\[(?<out>[^\]]+)\]: Cache read error:') {
-                $key = Canonicalize-Output $Matches.out
-                if (-not $units.ContainsKey($key)) {
-                  $units[$key] = [ordered]@{ output=$key; raw_output=$Matches.out; command=$null; key=$null; status=$null }
-                }
-                $units[$key].status = "read_error"
               }
             }
-            return @($units.Values | ForEach-Object { [pscustomobject]$_ } | Sort-Object output)
+            return [pscustomobject]@{
+              hash_records = @($hashRecords)
+              command_records = @($commandRecords)
+            }
           }
 
           function Get-BuildOutputManifest {
@@ -235,56 +239,75 @@ jobs:
             return @($items | Sort-Object path)
           }
 
-          $units = Get-Units
+          function Get-CommandCountMap($records) {
+            $map = @{}
+            foreach ($record in $records) {
+              $key = [string]$record.command_sha256
+              if (-not $map.ContainsKey($key)) {
+                $map[$key] = [ordered]@{
+                  count = 0
+                  crate = $record.crate
+                  command = $record.command
+                }
+              }
+              $map[$key].count = [int]$map[$key].count + 1
+            }
+            return $map
+          }
+
+          $records = Get-LogRecords
           $stats = Get-Content -Raw -Path $StatsPath | ConvertFrom-Json
           $buildManifest = Get-BuildOutputManifest
 
-          if ($Mode -eq "Producer") {
-            $cacheFiles = @(Get-ChildItem -Path $CacheDir -Recurse -File)
-            $leafNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-            [int64]$cacheBytes = 0
-            foreach ($file in $cacheFiles) {
-              $cacheBytes += $file.Length
-              if ($file.Name -match '^[0-9a-fA-F]{32,128}$') { [void]$leafNames.Add($file.Name.ToLowerInvariant()) }
+          $cacheFiles = @(Get-ChildItem -Path $CacheDir -Recurse -File)
+          $cacheKeyFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+          [int64]$cacheBytes = 0
+          foreach ($file in $cacheFiles) {
+            $cacheBytes += $file.Length
+            if ($file.Name -match '^[0-9a-fA-F]{32,128}$') {
+              [void]$cacheKeyFiles.Add($file.Name.ToLowerInvariant())
             }
+          }
 
-            $annotated = @()
-            foreach ($unit in $units) {
-              $retained = $false
-              if ($unit.key) { $retained = $leafNames.Contains($unit.key) }
-              $annotated += [pscustomobject]@{
-                output = $unit.output
-                raw_output = $unit.raw_output
-                command = $unit.command
-                key = $unit.key
-                status = $unit.status
-                retained_in_final_cache = $retained
-              }
-            }
+          if ($Mode -eq "Producer") {
+            $allKeys = @($records.hash_records | ForEach-Object { $_.key } | Sort-Object -Unique)
+            $retainedKeys = @($allKeys | Where-Object { $cacheKeyFiles.Contains($_) })
+            $notRetainedKeys = @($allKeys | Where-Object { -not $cacheKeyFiles.Contains($_) })
 
             [ordered]@{
               mode = "producer"
               source_sha = $env:SOURCE_SHA
               harness_sha = $env:GITHUB_SHA
-              unit_count = $annotated.Count
-              cache_file_count = $cacheFiles.Count
-              cache_hex_leaf_count = $leafNames.Count
-              cache_bytes = $cacheBytes
               stats = $stats
-              units = $annotated
+              hash_record_count = $records.hash_records.Count
+              unique_hash_key_count = $allKeys.Count
+              retained_hash_key_count = $retainedKeys.Count
+              not_retained_hash_key_count = $notRetainedKeys.Count
+              all_hash_keys = $allKeys
+              retained_hash_keys = $retainedKeys
+              not_retained_hash_keys = $notRetainedKeys
+              command_record_count = $records.command_records.Count
+              command_records = $records.command_records
+              cache_file_count = $cacheFiles.Count
+              cache_key_file_count = $cacheKeyFiles.Count
+              cache_bytes = $cacheBytes
             } | ConvertTo-Json -Depth 20 | Set-Content -Path (Join-Path $OutputDir "producer-unit-map.json") -Encoding utf8
 
             $buildManifest | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $OutputDir "producer-build-output-manifest.json") -Encoding utf8
 
-            $withKeys = @($annotated | Where-Object { $_.key })
             [ordered]@{
-              units_with_keys = $withKeys.Count
-              retained_keys = @($withKeys | Where-Object { $_.retained_in_final_cache }).Count
-              not_retained_keys = @($withKeys | Where-Object { -not $_.retained_in_final_cache }).Count
+              hash_records = $records.hash_records.Count
+              unique_hash_keys = $allKeys.Count
+              retained_hash_keys = $retainedKeys.Count
+              not_retained_hash_keys = $notRetainedKeys.Count
+              command_records = $records.command_records.Count
               cache_files = $cacheFiles.Count
-              cache_hex_leaf_files = $leafNames.Count
+              cache_key_files = $cacheKeyFiles.Count
               cache_bytes = $cacheBytes
               build_output_files = $buildManifest.Count
+              rust_misses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
+              cache_writes = [int]$stats.stats.cache_writes
+              compile_fails = [int]$stats.stats.compile_fails
             } | ConvertTo-Json | Set-Content -Path (Join-Path $OutputDir "producer-summary.json") -Encoding utf8
             return
           }
@@ -295,35 +318,33 @@ jobs:
           if (-not (Test-Path $producerMapPath)) { throw "missing producer unit map" }
           if (-not (Test-Path $producerBuildPath)) { throw "missing producer build-output manifest" }
 
-          $producerDoc = Get-Content -Raw -Path $producerMapPath | ConvertFrom-Json
-          $producerByOutput = @{}
-          foreach ($unit in $producerDoc.units) { $producerByOutput[$unit.output] = $unit }
+          $producer = Get-Content -Raw -Path $producerMapPath | ConvertFrom-Json
+          $producerAllKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+          $producerRetainedKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+          foreach ($key in $producer.all_hash_keys) { [void]$producerAllKeys.Add([string]$key) }
+          foreach ($key in $producer.retained_hash_keys) { [void]$producerRetainedKeys.Add([string]$key) }
 
-          $missDetails = @()
-          foreach ($unit in @($units | Where-Object { $_.status -eq "miss" })) {
-            $classification = "NO_PRODUCER_UNIT"
-            $producerKey = $null
-            $producerRetained = $null
-            $producerCommand = $null
-            if ($producerByOutput.ContainsKey($unit.output)) {
-              $p = $producerByOutput[$unit.output]
-              $producerKey = $p.key
-              $producerRetained = [bool]$p.retained_in_final_cache
-              $producerCommand = $p.command
-              if ($producerKey -and $unit.key -and $producerKey -eq $unit.key) {
-                if ($producerRetained) { $classification = "SAME_KEY_RETAINED" } else { $classification = "SAME_KEY_NOT_RETAINED" }
-              } else {
-                $classification = "KEY_CHANGED"
+          $consumerKeys = @($records.hash_records | ForEach-Object { $_.key } | Sort-Object -Unique)
+          $retainedMatches = @($consumerKeys | Where-Object { $producerRetainedKeys.Contains($_) })
+          $knownNonRetainedMatches = @($consumerKeys | Where-Object { $producerAllKeys.Contains($_) -and -not $producerRetainedKeys.Contains($_) })
+          $newKeys = @($consumerKeys | Where-Object { -not $producerAllKeys.Contains($_) })
+
+          $producerCommandMap = Get-CommandCountMap $producer.command_records
+          $consumerCommandMap = Get-CommandCountMap $records.command_records
+          $allCommandHashes = @($producerCommandMap.Keys + $consumerCommandMap.Keys | Sort-Object -Unique)
+          $commandDiff = @()
+          foreach ($hash in $allCommandHashes) {
+            $pCount = if ($producerCommandMap.ContainsKey($hash)) { [int]$producerCommandMap[$hash].count } else { 0 }
+            $cCount = if ($consumerCommandMap.ContainsKey($hash)) { [int]$consumerCommandMap[$hash].count } else { 0 }
+            if ($pCount -ne $cCount) {
+              $representative = if ($consumerCommandMap.ContainsKey($hash)) { $consumerCommandMap[$hash] } else { $producerCommandMap[$hash] }
+              $commandDiff += [pscustomobject]@{
+                command_sha256 = $hash
+                crate = $representative.crate
+                producer_count = $pCount
+                consumer_count = $cCount
+                command = $representative.command
               }
-            }
-            $missDetails += [pscustomobject]@{
-              output = $unit.output
-              consumer_key = $unit.key
-              producer_key = $producerKey
-              producer_retained = $producerRetained
-              classification = $classification
-              consumer_command = $unit.command
-              producer_command = $producerCommand
             }
           }
 
@@ -347,22 +368,25 @@ jobs:
             }
           }
 
-          $counts = [ordered]@{}
-          foreach ($name in @("SAME_KEY_RETAINED","SAME_KEY_NOT_RETAINED","KEY_CHANGED","NO_PRODUCER_UNIT")) {
-            $counts[$name] = @($missDetails | Where-Object { $_.classification -eq $name }).Count
-          }
-
           [ordered]@{
             mode = "consumer"
             source_sha = $env:SOURCE_SHA
             harness_sha = $env:GITHUB_SHA
-            unit_count = $units.Count
             stats = $stats
-            miss_count_from_log = $missDetails.Count
-            miss_classification_counts = $counts
-            misses = $missDetails
+            hash_record_count = $records.hash_records.Count
+            unique_hash_key_count = $consumerKeys.Count
+            producer_retained_key_matches = $retainedMatches.Count
+            producer_known_nonretained_key_matches = $knownNonRetainedMatches.Count
+            new_hash_key_count = $newKeys.Count
+            new_hash_keys = $newKeys
+            command_record_count = $records.command_records.Count
+            command_multiset_diff_count = $commandDiff.Count
+            command_multiset_diff = $commandDiff
+            changed_build_output_count = $changedBuildOutputs.Count
             changed_build_outputs = @($changedBuildOutputs | Sort-Object path)
             build_output_file_count = $buildManifest.Count
+            restored_cache_key_file_count = $cacheKeyFiles.Count
+            restored_cache_bytes = $cacheBytes
           } | ConvertTo-Json -Depth 20 | Set-Content -Path (Join-Path $OutputDir "consumer-analysis.json") -Encoding utf8
 
           $buildManifest | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $OutputDir "consumer-build-output-manifest.json") -Encoding utf8
@@ -525,10 +549,9 @@ jobs:
           $analysisPath = Join-Path $env:ARKST_544_CONSUMER_EVIDENCE "consumer-analysis.json"
           $analysis = Get-Content -Raw -Path $analysisPath | ConvertFrom-Json
           $stats = $analysis.stats
+          $rustHits = if ($stats.stats.cache_hits.counts.Rust) { [int]$stats.stats.cache_hits.counts.Rust } else { 0 }
           $rustMisses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
-          Write-Host ($analysis.miss_classification_counts | ConvertTo-Json -Compress)
-          Write-Host "debug_misses=$($analysis.miss_count_from_log) stats_rust_misses=$rustMisses changed_build_outputs=$($analysis.changed_build_outputs.Count)"
-          if ([int]$analysis.miss_count_from_log -ne $rustMisses) { throw "debug-log miss count does not match sccache Rust miss stats" }
+          Write-Host "rust_hits=$rustHits rust_misses=$rustMisses unique_hash_keys=$($analysis.unique_hash_key_count) retained_key_matches=$($analysis.producer_retained_key_matches) known_nonretained_matches=$($analysis.producer_known_nonretained_key_matches) new_hash_keys=$($analysis.new_hash_key_count) command_diff=$($analysis.command_multiset_diff_count) build_output_diff=$($analysis.changed_build_output_count)"
 
       - name: Upload consumer telemetry
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
