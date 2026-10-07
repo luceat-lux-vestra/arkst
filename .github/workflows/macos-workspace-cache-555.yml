@@ -1,0 +1,230 @@
+name: macOS workspace-cache benchmark 555
+
+on:
+  push:
+    branches:
+      - exp/555-macos-workspace-cache
+    paths:
+      - .github/workflows/macos-workspace-cache-555.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-555-macos-workspace-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 07a9d478ae433b5e040f325b0fa231647b02150b
+
+jobs:
+  prime:
+    name: producer ${{ matrix.variant }}
+    runs-on: macos-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B]
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-workspace-cache-555.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-workspace-cache-555.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Record producer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "variant=${{ matrix.variant }}"
+          echo "ImageOS=$ImageOS"
+          echo "ImageVersion=$ImageVersion"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          rustc -Vv
+          cargo -V
+          typst --version
+
+      - name: Prime variant target cache A
+        if: ${{ matrix.variant == 'A' }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 555-A-macos-${{ github.sha }}
+
+      - name: Prime variant target cache B
+        if: ${{ matrix.variant == 'B' }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 555-B-macos-${{ github.sha }}
+          cache-workspace-crates: true
+
+      - name: Prime default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Prime Typst-required workspace
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Capture producer target footprint
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          root = Path("target")
+          files = [p for p in root.rglob("*") if p.is_file()]
+          executables = [
+              p for p in files
+              if os.access(p, os.X_OK)
+              and p.suffix not in {".dylib", ".rlib", ".rmeta", ".a", ".o", ".d"}
+              and not any(part.endswith(".dSYM") for part in p.parts)
+          ]
+          data = {
+              "variant": os.environ["VARIANT"],
+              "file_count": len(files),
+              "total_bytes": sum(p.stat().st_size for p in files),
+              "executable_count": len(executables),
+              "executable_bytes": sum(p.stat().st_size for p in executables),
+          }
+          print("ARKST_555_PRODUCER_FOOTPRINT=" + json.dumps(data, sort_keys=True))
+          PY
+
+  benchmark:
+    name: benchmark ${{ matrix.variant }} / rep ${{ matrix.rep }}
+    needs: [prime]
+    runs-on: macos-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B]
+        rep: [1, 2, 3, 4]
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/macos-workspace-cache-555.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/macos-workspace-cache-555.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Record benchmark identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "variant=${{ matrix.variant }}"
+          echo "rep=${{ matrix.rep }}"
+          echo "ImageOS=$ImageOS"
+          echo "ImageVersion=$ImageVersion"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          rustc -Vv
+          cargo -V
+          typst --version
+
+      - name: Restore variant target cache A
+        if: ${{ matrix.variant == 'A' }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 555-A-macos-${{ github.sha }}
+          save-if: false
+
+      - name: Restore variant target cache B
+        if: ${{ matrix.variant == 'B' }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 555-B-macos-${{ github.sha }}
+          cache-workspace-crates: true
+          save-if: false
+
+      - name: Capture restored target footprint
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+          REP: ${{ matrix.rep }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          root = Path("target")
+          files = [p for p in root.rglob("*") if p.is_file()] if root.exists() else []
+          executables = [
+              p for p in files
+              if os.access(p, os.X_OK)
+              and p.suffix not in {".dylib", ".rlib", ".rmeta", ".a", ".o", ".d"}
+              and not any(part.endswith(".dSYM") for part in p.parts)
+          ]
+          data = {
+              "variant": os.environ["VARIANT"],
+              "rep": int(os.environ["REP"]),
+              "file_count": len(files),
+              "total_bytes": sum(p.stat().st_size for p in files),
+              "executable_count": len(executables),
+              "executable_bytes": sum(p.stat().st_size for p in executables),
+          }
+          print("ARKST_555_RESTORED_FOOTPRINT=" + json.dumps(data, sort_keys=True))
+          PY
+
+      - name: Test default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Test Typst-required workspace
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
