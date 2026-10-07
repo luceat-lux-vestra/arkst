@@ -1,0 +1,722 @@
+name: Windows sccache Brepro re-test 546
+
+on:
+  push:
+    branches:
+      - exp/546-windows-sccache-brepro-retest
+    paths:
+      - .github/workflows/windows-sccache-brepro-retest-546.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-546-windows-sccache-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUSTUP_TOOLCHAIN: 1.98.0
+  SOURCE_SHA: 0dfc076e3f995af5cd38549927f2fdb1a4d690e2
+  SCCACHE_VERSION: 0.18.0
+  SCCACHE_ARCHIVE_SHA256: 1a63c1be2beab3f04d27e4cc145463e092e02d3dd83a51030989829d7023091b
+
+jobs:
+  producer:
+    name: producer / Windows 1GiB
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and switch to exact protected-main source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw "research checkout does not match GITHUB_SHA" }
+          $changed = @(git diff --name-only "$env:SOURCE_SHA..$env:GITHUB_SHA")
+          if ($LASTEXITCODE -ne 0) { throw "cannot diff harness against source authority" }
+          if ($changed.Count -ne 1 -or $changed[0] -ne ".github/workflows/windows-sccache-brepro-retest-546.yml") {
+            throw "research branch must differ by exactly one telemetry workflow; got: $($changed -join ', ')"
+          }
+          git diff --check "$env:SOURCE_SHA..$env:GITHUB_SHA" -- .github/workflows/windows-sccache-brepro-retest-546.yml
+          if ($LASTEXITCODE -ne 0) { throw "workflow diff hygiene failed" }
+          git checkout --detach $env:SOURCE_SHA
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw "source checkout does not match SOURCE_SHA" }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "source worktree is dirty" }
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Prime dependency-only Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 546-deps-windows
+          cache-targets: false
+
+      - name: Install verified sccache 0.18.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz"
+          $installDir = Join-Path $env:RUNNER_TEMP "sccache-v0.18.0"
+          Invoke-WebRequest -Uri "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz" -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:SCCACHE_ARCHIVE_SHA256) { throw "sccache SHA-256 mismatch: $actual" }
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          tar.exe -xzf $archive -C $installDir --strip-components=1
+          $exe = Join-Path $installDir "sccache.exe"
+          if (-not (Test-Path $exe)) { throw "missing sccache.exe" }
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure writable diagnostic sccache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cacheDir = Join-Path $env:RUNNER_TEMP "arkst-546-sccache"
+          $evidenceDir = Join-Path $env:RUNNER_TEMP "arkst-546-producer-evidence"
+          New-Item -ItemType Directory -Force -Path $cacheDir, $evidenceDir | Out-Null
+          @(
+            "SCCACHE_DIR=$cacheDir",
+            "SCCACHE_CACHE_SIZE=1G",
+            "RUSTC_WRAPPER=sccache",
+            "CARGO_INCREMENTAL=0",
+            "SCCACHE_LOG=sccache=debug",
+            "SCCACHE_LOG_MILLIS=1",
+            "SCCACHE_ERROR_LOG=$(Join-Path $evidenceDir 'producer-sccache.log')",
+            "ARKST_546_PRODUCER_EVIDENCE=$evidenceDir"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build exact DLL-only Brepro linker wrapper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $toolDir = Join-Path $env:GITHUB_WORKSPACE ".arkst-546-tools"
+          $recordDir = Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "linker-records"
+          New-Item -ItemType Directory -Force -Path $toolDir, $recordDir | Out-Null
+
+          $source = Join-Path $toolDir "linker-wrapper.rs"
+          $wrapper = Join-Path $toolDir "linker-wrapper.exe"
+
+          @'
+          use std::env;
+          use std::fs;
+          use std::path::PathBuf;
+          use std::process::{Command, exit};
+          use std::time::{SystemTime, UNIX_EPOCH};
+
+          fn main() {
+              let record_dir = env::var("ARKST_546_LINK_RECORD_DIR").expect("record dir required");
+              let args: Vec<_> = env::args_os().skip(1).collect();
+
+              let mut dll = false;
+              let mut output = String::new();
+              for arg in &args {
+                  let s = arg.to_string_lossy();
+                  let upper = s.to_ascii_uppercase();
+                  if upper == "/DLL" { dll = true; }
+                  if upper.starts_with("/OUT:") {
+                      output = s[5..].trim_matches('"').to_owned();
+                      if output.to_ascii_lowercase().ends_with(".dll") { dll = true; }
+                  }
+              }
+
+              let mut cmd = Command::new("link.exe");
+              cmd.args(&args);
+              if dll {
+                  cmd.arg("/Brepro");
+              }
+
+              let status = cmd.status().unwrap_or_else(|e| {
+                  eprintln!("failed to execute link.exe: {e}");
+                  exit(98);
+              });
+              let code = status.code().unwrap_or(99);
+
+              let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+              let mut record = PathBuf::from(record_dir);
+              record.push(format!("{}-{stamp}.txt", std::process::id()));
+              let payload = format!(
+                  "dll={}\nbrepro_added={}\nexit_code={code}\noutput={}\nargs={}\n",
+                  dll,
+                  dll,
+                  output,
+                  args.iter().map(|x| x.to_string_lossy()).collect::<Vec<_>>().join("\u{1f}")
+              );
+              fs::write(record, payload).expect("write linker record");
+              exit(code);
+          }
+          '@ | Set-Content -Path $source -Encoding utf8
+
+          rustc $source -o $wrapper
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $wrapper)) { throw "failed to build linker wrapper" }
+
+          $wrapperSha = (Get-FileHash -Algorithm SHA256 $wrapper).Hash.ToLowerInvariant()
+          $wrapperSha | Set-Content -Path (Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "linker-wrapper.sha256") -Encoding ascii
+          $wrapper | Set-Content -Path (Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "linker-wrapper-path.txt") -Encoding utf8
+
+          @(
+            "ARKST_546_LINK_RECORD_DIR=$recordDir",
+            "ARKST_546_LINKER_WRAPPER=$wrapper",
+            "RUSTFLAGS=-C linker=$wrapper"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify producer identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          sccache --version
+          rustc -Vv
+          cargo -V
+          typst --version
+          Write-Host "ImageOS=$env:ImageOS"
+          Write-Host "ImageVersion=$env:ImageVersion"
+          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
+
+      - name: Start clean sccache server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          sccache --stop-server 2>$null
+          sccache --start-server
+          sccache --zero-stats
+
+      - name: Run current Final default CLI surface
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Run current Final Typst-required workspace surface
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Verify DLL-only Brepro linker records
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $records = @(Get-ChildItem -Path $env:ARKST_546_LINK_RECORD_DIR -File)
+          $dllCount = 0
+          $breproCount = 0
+          $failedCount = 0
+          foreach ($record in $records) {
+            $raw = Get-Content -Raw $record.FullName
+            if ($raw -match "(?m)^dll=true$") { $dllCount++ }
+            if ($raw -match "(?m)^brepro_added=true$") { $breproCount++ }
+            if ($raw -notmatch "(?m)^exit_code=0$") { $failedCount++ }
+          }
+
+          [ordered]@{
+            total_link_invocations = $records.Count
+            dll_link_invocations = $dllCount
+            brepro_added = $breproCount
+            failed_link_invocations = $failedCount
+          } | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path $env:ARKST_546_LINK_RECORD_DIR -Parent) "linker-summary.json") -Encoding utf8
+
+          Write-Host "link_invocations=$($records.Count) dll=$dllCount brepro=$breproCount failed=$failedCount"
+          if ($failedCount -ne 0) { throw "linker failures recorded" }
+          if ($dllCount -ne 24) { throw "expected 24 proc-macro DLL links, got $dllCount" }
+          if ($breproCount -ne $dllCount) { throw "/Brepro was not applied to every DLL link" }
+
+
+      - name: Capture producer stats and stop server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $statsPath = Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "producer-stats.json"
+          $raw = sccache --show-stats --stats-format=json | Out-String
+          $raw | Set-Content -Path $statsPath -Encoding utf8
+          sccache --stop-server
+          $stats = $raw | ConvertFrom-Json
+          $misses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
+          $writes = [int]$stats.stats.cache_writes
+          $readErrors = [int]$stats.stats.cache_read_errors
+          Write-Host "producer rust_misses=$misses writes=$writes read_errors=$readErrors"
+          if ($readErrors -ne 0) { throw "producer cache read errors are nonzero" }
+          if ($writes -le 0) { throw "producer wrote no cache entries" }
+
+      - name: Write telemetry analyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $script = Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "analyze-sccache.ps1"
+          @'
+          param(
+            [Parameter(Mandatory=$true)]
+            [ValidateSet("Producer", "Consumer")]
+            [string]$Mode,
+            [Parameter(Mandatory=$true)]
+            [string]$LogPath,
+            [Parameter(Mandatory=$true)]
+            [string]$StatsPath,
+            [Parameter(Mandatory=$true)]
+            [string]$CacheDir,
+            [Parameter(Mandatory=$true)]
+            [string]$Workspace,
+            [Parameter(Mandatory=$true)]
+            [string]$OutputDir,
+            [string]$ProducerDir = ""
+          )
+
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+
+          function Remove-Ansi([string]$value) {
+            return [regex]::Replace($value, '\x1B\[[0-9;]*m', '')
+          }
+
+          function Canonicalize-Command([string]$value) {
+            $canonical = $value
+            $escapedWorkspace = $Workspace.Replace("\", "\\")
+            $canonical = $canonical.Replace($escapedWorkspace, '$WORKSPACE')
+            $canonical = $canonical.Replace($Workspace, '$WORKSPACE')
+            return $canonical
+          }
+
+          function Get-StringSha256([string]$value) {
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+              $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
+              return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+            } finally {
+              $sha.Dispose()
+            }
+          }
+
+          function Get-LogRecords {
+            $hashRecords = @()
+            $commandRecords = @()
+            foreach ($rawLine in Get-Content -Path $LogPath) {
+              $line = Remove-Ansi $rawLine
+              if ($line -match '\[(?<crate>[^\]]+)\]: get_cached_or_compile: (?<cmd>.*)$') {
+                $command = Canonicalize-Command $Matches.cmd
+                $commandRecords += [pscustomobject]@{
+                  crate = $Matches.crate
+                  command_sha256 = Get-StringSha256 $command
+                  command = $command
+                }
+              }
+              if ($line -match '\[(?<crate>[^\]]+)\]: Hash key: (?<hash>[0-9a-fA-F]+)') {
+                $hashRecords += [pscustomobject]@{
+                  crate = $Matches.crate
+                  key = $Matches.hash.ToLowerInvariant()
+                }
+              }
+            }
+            return [pscustomobject]@{
+              hash_records = @($hashRecords)
+              command_records = @($commandRecords)
+            }
+          }
+
+          function Get-BuildOutputManifest {
+            $buildRoot = Join-Path $Workspace "target\debug\build"
+            $items = @()
+            if (Test-Path $buildRoot) {
+              foreach ($file in Get-ChildItem -Path $buildRoot -Recurse -File) {
+                $relative = [System.IO.Path]::GetRelativePath($Workspace, $file.FullName).Replace("\", "/")
+                $segments = $relative.Split("/")
+                $isOut = $segments -contains "out"
+                $isBuildOutput = $file.Name -eq "output"
+                if ($isOut -or $isBuildOutput) {
+                  $items += [pscustomobject]@{
+                    path = $relative
+                    bytes = [int64]$file.Length
+                    sha256 = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+                  }
+                }
+              }
+            }
+            return @($items | Sort-Object path)
+          }
+
+          function Get-CommandCountMap($records) {
+            $map = @{}
+            foreach ($record in $records) {
+              $key = [string]$record.command_sha256
+              if (-not $map.ContainsKey($key)) {
+                $map[$key] = [ordered]@{
+                  count = 0
+                  crate = $record.crate
+                  command = $record.command
+                }
+              }
+              $map[$key].count = [int]$map[$key].count + 1
+            }
+            return $map
+          }
+
+          $records = Get-LogRecords
+          $stats = Get-Content -Raw -Path $StatsPath | ConvertFrom-Json
+          $buildManifest = Get-BuildOutputManifest
+
+          $cacheFiles = @(Get-ChildItem -Path $CacheDir -Recurse -File)
+          $cacheKeyFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+          [int64]$cacheBytes = 0
+          foreach ($file in $cacheFiles) {
+            $cacheBytes += $file.Length
+            if ($file.Name -match '^[0-9a-fA-F]{32,128}$') {
+              [void]$cacheKeyFiles.Add($file.Name.ToLowerInvariant())
+            }
+          }
+
+          if ($Mode -eq "Producer") {
+            $allKeys = @($records.hash_records | ForEach-Object { $_.key } | Sort-Object -Unique)
+            $retainedKeys = @($allKeys | Where-Object { $cacheKeyFiles.Contains($_) })
+            $notRetainedKeys = @($allKeys | Where-Object { -not $cacheKeyFiles.Contains($_) })
+
+            [ordered]@{
+              mode = "producer"
+              source_sha = $env:SOURCE_SHA
+              harness_sha = $env:GITHUB_SHA
+              stats = $stats
+              hash_record_count = $records.hash_records.Count
+              unique_hash_key_count = $allKeys.Count
+              retained_hash_key_count = $retainedKeys.Count
+              not_retained_hash_key_count = $notRetainedKeys.Count
+              all_hash_keys = $allKeys
+              retained_hash_keys = $retainedKeys
+              not_retained_hash_keys = $notRetainedKeys
+              command_record_count = $records.command_records.Count
+              command_records = $records.command_records
+              cache_file_count = $cacheFiles.Count
+              cache_key_file_count = $cacheKeyFiles.Count
+              cache_bytes = $cacheBytes
+            } | ConvertTo-Json -Depth 20 | Set-Content -Path (Join-Path $OutputDir "producer-unit-map.json") -Encoding utf8
+
+            $buildManifest | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $OutputDir "producer-build-output-manifest.json") -Encoding utf8
+
+            [ordered]@{
+              hash_records = $records.hash_records.Count
+              unique_hash_keys = $allKeys.Count
+              retained_hash_keys = $retainedKeys.Count
+              not_retained_hash_keys = $notRetainedKeys.Count
+              command_records = $records.command_records.Count
+              cache_files = $cacheFiles.Count
+              cache_key_files = $cacheKeyFiles.Count
+              cache_bytes = $cacheBytes
+              build_output_files = $buildManifest.Count
+              rust_misses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
+              cache_writes = [int]$stats.stats.cache_writes
+              compile_fails = [int]$stats.stats.compile_fails
+            } | ConvertTo-Json | Set-Content -Path (Join-Path $OutputDir "producer-summary.json") -Encoding utf8
+            return
+          }
+
+          if (-not $ProducerDir) { throw "ProducerDir is required in Consumer mode" }
+          $producerMapPath = Join-Path $ProducerDir "producer-unit-map.json"
+          $producerBuildPath = Join-Path $ProducerDir "producer-build-output-manifest.json"
+          if (-not (Test-Path $producerMapPath)) { throw "missing producer unit map" }
+          if (-not (Test-Path $producerBuildPath)) { throw "missing producer build-output manifest" }
+
+          $producer = Get-Content -Raw -Path $producerMapPath | ConvertFrom-Json
+          $producerAllKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+          $producerRetainedKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+          foreach ($key in $producer.all_hash_keys) { [void]$producerAllKeys.Add([string]$key) }
+          foreach ($key in $producer.retained_hash_keys) { [void]$producerRetainedKeys.Add([string]$key) }
+
+          $consumerKeys = @($records.hash_records | ForEach-Object { $_.key } | Sort-Object -Unique)
+          $retainedMatches = @($consumerKeys | Where-Object { $producerRetainedKeys.Contains($_) })
+          $knownNonRetainedMatches = @($consumerKeys | Where-Object { $producerAllKeys.Contains($_) -and -not $producerRetainedKeys.Contains($_) })
+          $newKeys = @($consumerKeys | Where-Object { -not $producerAllKeys.Contains($_) })
+
+          $producerCommandMap = Get-CommandCountMap $producer.command_records
+          $consumerCommandMap = Get-CommandCountMap $records.command_records
+          $allCommandHashes = @($producerCommandMap.Keys + $consumerCommandMap.Keys | Sort-Object -Unique)
+          $commandDiff = @()
+          foreach ($hash in $allCommandHashes) {
+            $pCount = if ($producerCommandMap.ContainsKey($hash)) { [int]$producerCommandMap[$hash].count } else { 0 }
+            $cCount = if ($consumerCommandMap.ContainsKey($hash)) { [int]$consumerCommandMap[$hash].count } else { 0 }
+            if ($pCount -ne $cCount) {
+              $representative = if ($consumerCommandMap.ContainsKey($hash)) { $consumerCommandMap[$hash] } else { $producerCommandMap[$hash] }
+              $commandDiff += [pscustomobject]@{
+                command_sha256 = $hash
+                crate = $representative.crate
+                producer_count = $pCount
+                consumer_count = $cCount
+                command = $representative.command
+              }
+            }
+          }
+
+          $producerBuild = @(Get-Content -Raw -Path $producerBuildPath | ConvertFrom-Json)
+          $producerBuildByPath = @{}
+          foreach ($item in $producerBuild) { $producerBuildByPath[$item.path] = $item }
+          $consumerBuildByPath = @{}
+          foreach ($item in $buildManifest) { $consumerBuildByPath[$item.path] = $item }
+
+          $changedBuildOutputs = @()
+          foreach ($itemPath in $consumerBuildByPath.Keys) {
+            if (-not $producerBuildByPath.ContainsKey($itemPath)) {
+              $changedBuildOutputs += [pscustomobject]@{ path=$itemPath; change="NEW_IN_CONSUMER"; producer_sha256=$null; consumer_sha256=$consumerBuildByPath[$itemPath].sha256 }
+            } elseif ($producerBuildByPath[$itemPath].sha256 -ne $consumerBuildByPath[$itemPath].sha256) {
+              $changedBuildOutputs += [pscustomobject]@{ path=$itemPath; change="CONTENT_CHANGED"; producer_sha256=$producerBuildByPath[$itemPath].sha256; consumer_sha256=$consumerBuildByPath[$itemPath].sha256 }
+            }
+          }
+          foreach ($itemPath in $producerBuildByPath.Keys) {
+            if (-not $consumerBuildByPath.ContainsKey($itemPath)) {
+              $changedBuildOutputs += [pscustomobject]@{ path=$itemPath; change="MISSING_IN_CONSUMER"; producer_sha256=$producerBuildByPath[$itemPath].sha256; consumer_sha256=$null }
+            }
+          }
+
+          [ordered]@{
+            mode = "consumer"
+            source_sha = $env:SOURCE_SHA
+            harness_sha = $env:GITHUB_SHA
+            stats = $stats
+            hash_record_count = $records.hash_records.Count
+            unique_hash_key_count = $consumerKeys.Count
+            producer_retained_key_matches = $retainedMatches.Count
+            producer_known_nonretained_key_matches = $knownNonRetainedMatches.Count
+            new_hash_key_count = $newKeys.Count
+            new_hash_keys = $newKeys
+            command_record_count = $records.command_records.Count
+            command_multiset_diff_count = $commandDiff.Count
+            command_multiset_diff = $commandDiff
+            changed_build_output_count = $changedBuildOutputs.Count
+            changed_build_outputs = @($changedBuildOutputs | Sort-Object path)
+            build_output_file_count = $buildManifest.Count
+            restored_cache_key_file_count = $cacheKeyFiles.Count
+            restored_cache_bytes = $cacheBytes
+          } | ConvertTo-Json -Depth 20 | Set-Content -Path (Join-Path $OutputDir "consumer-analysis.json") -Encoding utf8
+
+          $buildManifest | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $OutputDir "consumer-build-output-manifest.json") -Encoding utf8
+          '@ | Set-Content -Path $script -Encoding utf8
+
+      - name: Analyze producer cache retention
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $script = Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "analyze-sccache.ps1"
+          & $script -Mode Producer -LogPath $env:SCCACHE_ERROR_LOG -StatsPath (Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "producer-stats.json") -CacheDir $env:SCCACHE_DIR -Workspace $env:GITHUB_WORKSPACE -OutputDir $env:ARKST_546_PRODUCER_EVIDENCE
+          Get-Content -Raw (Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "producer-summary.json")
+
+      - name: Save exact producer sccache and telemetry
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.3.0
+        with:
+          path: |
+            ${{ runner.temp }}/arkst-546-sccache
+            ${{ runner.temp }}/arkst-546-producer-evidence
+            ${{ github.workspace }}/.arkst-546-tools
+          key: arkst-546-windows-sccache-v1-${{ github.sha }}
+
+      - name: Upload producer telemetry
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-546-windows-producer-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-546-producer-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  consumer:
+    name: consumer / fresh ${{ matrix.rep }}
+    needs: [producer]
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        rep: [1, 2]
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and switch to exact protected-main source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw "research checkout does not match GITHUB_SHA" }
+          $changed = @(git diff --name-only "$env:SOURCE_SHA..$env:GITHUB_SHA")
+          if ($changed.Count -ne 1 -or $changed[0] -ne ".github/workflows/windows-sccache-brepro-retest-546.yml") { throw "research branch must differ by exactly one telemetry workflow" }
+          git checkout --detach $env:SOURCE_SHA
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw "source checkout does not match SOURCE_SHA" }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "source worktree is dirty" }
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Typst 0.15.1
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Restore dependency-only Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: 546-deps-windows
+          cache-targets: false
+          save-if: false
+
+      - name: Restore exact producer sccache and telemetry
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.3.0
+        with:
+          path: |
+            ${{ runner.temp }}/arkst-546-sccache
+            ${{ runner.temp }}/arkst-546-producer-evidence
+            ${{ github.workspace }}/.arkst-546-tools
+          key: arkst-546-windows-sccache-v1-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Install verified sccache 0.18.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz"
+          $installDir = Join-Path $env:RUNNER_TEMP "sccache-v0.18.0"
+          Invoke-WebRequest -Uri "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-pc-windows-msvc.tar.gz" -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:SCCACHE_ARCHIVE_SHA256) { throw "sccache SHA-256 mismatch: $actual" }
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          tar.exe -xzf $archive -C $installDir --strip-components=1
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure restore-only diagnostic sccache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cacheDir = Join-Path $env:RUNNER_TEMP "arkst-546-sccache"
+          $producerDir = Join-Path $env:RUNNER_TEMP "arkst-546-producer-evidence"
+          $consumerDir = Join-Path $env:RUNNER_TEMP "arkst-546-consumer-evidence-${{ matrix.rep }}"
+          New-Item -ItemType Directory -Force -Path $consumerDir | Out-Null
+          @(
+            "SCCACHE_DIR=$cacheDir",
+            "SCCACHE_CACHE_SIZE=1G",
+            "SCCACHE_LOCAL_RW_MODE=READ_ONLY",
+            "RUSTC_WRAPPER=sccache",
+            "CARGO_INCREMENTAL=0",
+            "SCCACHE_LOG=sccache=debug",
+            "SCCACHE_LOG_MILLIS=1",
+            "SCCACHE_ERROR_LOG=$(Join-Path $consumerDir 'consumer-sccache.log')",
+            "ARKST_546_PRODUCER_EVIDENCE=$producerDir",
+            "ARKST_546_CONSUMER_EVIDENCE=$consumerDir"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify exact producer linker wrapper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $wrapper = Join-Path $env:GITHUB_WORKSPACE ".arkst-546-tools\linker-wrapper.exe"
+          if (-not (Test-Path $wrapper)) { throw "missing restored producer linker wrapper" }
+
+          $expectedShaPath = Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "linker-wrapper.sha256"
+          $expectedPathFile = Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "linker-wrapper-path.txt"
+          if (-not (Test-Path $expectedShaPath)) { throw "missing producer wrapper SHA" }
+          if (-not (Test-Path $expectedPathFile)) { throw "missing producer wrapper path identity" }
+
+          $expectedSha = (Get-Content -Raw $expectedShaPath).Trim().ToLowerInvariant()
+          $actualSha = (Get-FileHash -Algorithm SHA256 $wrapper).Hash.ToLowerInvariant()
+          if ($actualSha -ne $expectedSha) { throw "restored linker-wrapper SHA mismatch" }
+
+          $expectedPath = (Get-Content -Raw $expectedPathFile).Trim()
+          if ($wrapper -ne $expectedPath) { throw "linker-wrapper path changed across producer/consumer: producer=$expectedPath consumer=$wrapper" }
+
+          $recordDir = Join-Path $env:ARKST_546_CONSUMER_EVIDENCE "linker-records"
+          New-Item -ItemType Directory -Force -Path $recordDir | Out-Null
+
+          @(
+            "ARKST_546_LINK_RECORD_DIR=$recordDir",
+            "ARKST_546_LINKER_WRAPPER=$wrapper",
+            "RUSTFLAGS=-C linker=$wrapper"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Start restore-only sccache server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          sccache --version
+          sccache --stop-server 2>$null
+          sccache --start-server
+          sccache --zero-stats
+
+      - name: Run current Final default CLI surface
+        run: cargo test --locked -p arkst-cli --no-default-features
+
+      - name: Run current Final Typst-required workspace surface
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+
+      - name: Verify DLL-only Brepro linker records
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $records = @(Get-ChildItem -Path $env:ARKST_546_LINK_RECORD_DIR -File)
+          $dllCount = 0
+          $breproCount = 0
+          $failedCount = 0
+          foreach ($record in $records) {
+            $raw = Get-Content -Raw $record.FullName
+            if ($raw -match "(?m)^dll=true$") { $dllCount++ }
+            if ($raw -match "(?m)^brepro_added=true$") { $breproCount++ }
+            if ($raw -notmatch "(?m)^exit_code=0$") { $failedCount++ }
+          }
+
+          [ordered]@{
+            total_link_invocations = $records.Count
+            dll_link_invocations = $dllCount
+            brepro_added = $breproCount
+            failed_link_invocations = $failedCount
+          } | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path $env:ARKST_546_LINK_RECORD_DIR -Parent) "linker-summary.json") -Encoding utf8
+
+          Write-Host "link_invocations=$($records.Count) dll=$dllCount brepro=$breproCount failed=$failedCount"
+          if ($failedCount -ne 0) { throw "linker failures recorded" }
+          if ($dllCount -ne 24) { throw "expected 24 proc-macro DLL links, got $dllCount" }
+          if ($breproCount -ne $dllCount) { throw "/Brepro was not applied to every DLL link" }
+
+
+      - name: Capture consumer stats and stop server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $statsPath = Join-Path $env:ARKST_546_CONSUMER_EVIDENCE "consumer-stats.json"
+          $raw = sccache --show-stats --stats-format=json | Out-String
+          $raw | Set-Content -Path $statsPath -Encoding utf8
+          sccache --stop-server
+          $stats = $raw | ConvertFrom-Json
+          $hits = if ($stats.stats.cache_hits.counts.Rust) { [int]$stats.stats.cache_hits.counts.Rust } else { 0 }
+          $misses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
+          $readErrors = [int]$stats.stats.cache_read_errors
+          $writes = [int]$stats.stats.cache_writes
+          $writeErrors = [int]$stats.stats.cache_write_errors
+          Write-Host "consumer rust_hits=$hits rust_misses=$misses read_errors=$readErrors writes=$writes write_errors=$writeErrors"
+          if ($readErrors -ne 0) { throw "restore-only cache read errors are nonzero" }
+          if ($writes -ne 0) { throw "restore-only consumer performed cache writes" }
+
+      - name: Classify consumer misses
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $script = Join-Path $env:ARKST_546_PRODUCER_EVIDENCE "analyze-sccache.ps1"
+          if (-not (Test-Path $script)) { throw "missing restored telemetry analyzer" }
+          & $script -Mode Consumer -LogPath $env:SCCACHE_ERROR_LOG -StatsPath (Join-Path $env:ARKST_546_CONSUMER_EVIDENCE "consumer-stats.json") -CacheDir $env:SCCACHE_DIR -Workspace $env:GITHUB_WORKSPACE -OutputDir $env:ARKST_546_CONSUMER_EVIDENCE -ProducerDir $env:ARKST_546_PRODUCER_EVIDENCE
+          $analysisPath = Join-Path $env:ARKST_546_CONSUMER_EVIDENCE "consumer-analysis.json"
+          $analysis = Get-Content -Raw -Path $analysisPath | ConvertFrom-Json
+          $stats = $analysis.stats
+          $rustHits = if ($stats.stats.cache_hits.counts.Rust) { [int]$stats.stats.cache_hits.counts.Rust } else { 0 }
+          $rustMisses = if ($stats.stats.cache_misses.counts.Rust) { [int]$stats.stats.cache_misses.counts.Rust } else { 0 }
+          Write-Host "rust_hits=$rustHits rust_misses=$rustMisses unique_hash_keys=$($analysis.unique_hash_key_count) retained_key_matches=$($analysis.producer_retained_key_matches) known_nonretained_matches=$($analysis.producer_known_nonretained_key_matches) new_hash_keys=$($analysis.new_hash_key_count) command_diff=$($analysis.command_multiset_diff_count) build_output_diff=$($analysis.changed_build_output_count)"
+
+      - name: Upload consumer telemetry
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arkst-546-windows-consumer-${{ matrix.rep }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-546-consumer-evidence-${{ matrix.rep }}
+          if-no-files-found: error
+          retention-days: 30
