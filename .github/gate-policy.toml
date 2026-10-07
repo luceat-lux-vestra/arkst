@@ -85,6 +85,16 @@ rationale = "Required three-OS workspace, CLI-boundary, and backend-parity tests
 
 [[producer]]
 workflow = ".github/workflows/ci.yml"
+job = "default_cli_boundary"
+classification = "merge_component"
+contexts = ["default-cli-boundary (macos-latest)", "default-cli-boundary (windows-latest)"]
+always_present = true
+matrix_axis = "os"
+matrix_values = ["macos-latest", "windows-latest"]
+rationale = "Required macOS/Windows default-CLI no-default-features boundary moved off the serial full-workspace critical path; restore-only cache reuse preserves coverage without concurrent cache writes."
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
 job = "wasm"
 classification = "merge_component"
 contexts = ["wasm"]
