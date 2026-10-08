@@ -220,26 +220,57 @@ def check_codeql_authority(root: Path = ROOT) -> list[Finding]:
 
 
 def check_supply_chain_authority(root: Path = ROOT) -> list[Finding]:
-    path = root / ".github" / "workflows" / "security.yml"
+    workflow_path = root / ".github" / "workflows" / "security.yml"
+    action_path = root / ".github" / "actions" / "cargo-deny-prebuilt" / "action.yml"
+    findings: list[Finding] = []
+
     try:
-        text = path.read_text(encoding="utf-8")
+        workflow = workflow_path.read_text(encoding="utf-8")
     except OSError as exc:
         return [Finding("supply-chain-authority", f"cannot read security workflow: {exc}")]
-    required = [
+
+    workflow_required = [
         "schedule:",
         "workflow_dispatch:",
-        "EmbarkStudios/cargo-deny-action@",
+        "runs-on: ubuntu-24.04-arm",
+        "uses: ./.github/actions/cargo-deny-prebuilt",
         "arguments: --all-features",
         "report-failure:",
         "issues: write",
         "<!-- arkst-owned:scheduled-supply-chain-failure -->",
         "force_failure",
     ]
-    return [
+    findings.extend(
         Finding("supply-chain-authority", f"security workflow missing {fragment!r}")
-        for fragment in required
-        if fragment not in text
+        for fragment in workflow_required
+        if fragment not in workflow
+    )
+
+    try:
+        action = action_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        findings.append(
+            Finding("supply-chain-authority", f"cannot read cargo-deny local action: {exc}")
+        )
+        return findings
+
+    action_required = [
+        'version="0.20.2"',
+        'target="aarch64-unknown-linux-musl"',
+        'expected_sha256="995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"',
+        'test "$RUNNER_ARCH" = "ARM64"',
+        "sha256sum --check --strict",
     ]
+    findings.extend(
+        Finding("supply-chain-authority", f"cargo-deny local action missing {fragment!r}")
+        for fragment in action_required
+        if fragment not in action
+    )
+    if "x86_64" in action:
+        findings.append(
+            Finding("supply-chain-authority", "cargo-deny local action reintroduced x86_64")
+        )
+    return findings
 
 
 def check_governance_docs_and_ownership(root: Path = ROOT) -> list[Finding]:

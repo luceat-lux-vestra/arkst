@@ -1,0 +1,84 @@
+name: cargo-deny official ARM64 prebuilt
+description: Run the reviewed cargo-deny 0.20.2 ARM64 official prebuilt with fail-closed provenance verification.
+
+inputs:
+  command:
+    description: cargo-deny command
+    required: false
+    default: check
+  arguments:
+    description: Global cargo-deny arguments
+    required: false
+    default: --all-features
+  command-arguments:
+    description: Arguments passed after the command
+    required: false
+    default: ""
+  manifest-path:
+    description: Repository-relative Cargo manifest
+    required: false
+    default: ./Cargo.toml
+  log-level:
+    description: cargo-deny log level
+    required: false
+    default: warn
+
+runs:
+  using: composite
+  steps:
+    - name: Install reviewed cargo-deny ARM64 prebuilt
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        version="0.20.2"
+        target="aarch64-unknown-linux-musl"
+        expected_sha256="995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"
+        install_dir="$RUNNER_TEMP/cargo-deny-$version-$target"
+        binary="$install_dir/cargo-deny"
+
+        test "$RUNNER_OS" = "Linux"
+        test "$RUNNER_ARCH" = "ARM64"
+        test "$(uname -m)" = "aarch64"
+
+        if [ ! -x "$binary" ]; then
+          archive="$RUNNER_TEMP/cargo-deny-$version-$target.tar.gz"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/$version/cargo-deny-$version-$target.tar.gz" \
+            --output "$archive"
+          echo "$expected_sha256  $archive" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1
+          test -x "$binary"
+        fi
+
+        "$binary" --version
+        echo "$install_dir" >> "$GITHUB_PATH"
+
+    - name: Run reviewed cargo-deny authority
+      shell: bash
+      env:
+        CARGO_DENY_COMMAND: ${{ inputs.command }}
+        CARGO_DENY_ARGUMENTS: ${{ inputs.arguments }}
+        CARGO_DENY_COMMAND_ARGUMENTS: ${{ inputs.command-arguments }}
+        CARGO_DENY_MANIFEST_PATH: ${{ inputs.manifest-path }}
+        CARGO_DENY_LOG_LEVEL: ${{ inputs.log-level }}
+      run: |
+        set -euo pipefail
+
+        arguments=()
+        command_arguments=()
+
+        if [ -n "$CARGO_DENY_ARGUMENTS" ]; then
+          read -r -a arguments <<< "$CARGO_DENY_ARGUMENTS"
+        fi
+        if [ -n "$CARGO_DENY_COMMAND_ARGUMENTS" ]; then
+          read -r -a command_arguments <<< "$CARGO_DENY_COMMAND_ARGUMENTS"
+        fi
+
+        cargo-deny \
+          --log-level "$CARGO_DENY_LOG_LEVEL" \
+          --manifest-path "$CARGO_DENY_MANIFEST_PATH" \
+          "${arguments[@]}" \
+          "$CARGO_DENY_COMMAND" \
+          "${command_arguments[@]}"
