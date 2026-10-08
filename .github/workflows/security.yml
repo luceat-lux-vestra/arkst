@@ -43,16 +43,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
         with:
           toolchain: 1.98.0
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          command: check
-          arguments: --all-features
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          manifest-path: tools/spikes/typst-in-process/Cargo.toml
-          command: check
-          arguments: --all-features
-          command-arguments: advisories sources
+      - name: Install verified cargo-deny 0.20.2 ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/cargo-deny-0.20.2-aarch64-unknown-linux-musl.tar.gz"
+          install_dir="$RUNNER_TEMP/cargo-deny-0.20.2"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-unknown-linux-musl.tar.gz" \
+            --output "$archive"
+          echo "995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1
+          test -x "$install_dir/cargo-deny"
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Audit workspace supply chain
+        run: cargo-deny --log-level warn --manifest-path ./Cargo.toml --all-features check
+      - name: Audit Typst spike advisories and sources
+        run: cargo-deny --log-level warn --manifest-path tools/spikes/typst-in-process/Cargo.toml --all-features check advisories sources
       - name: Force reporter validation failure
         if: github.event_name == 'workflow_dispatch' && inputs.force_failure
         run: |
