@@ -1,0 +1,291 @@
+name: CodeQL Rust scope classifier 563
+
+on:
+  push:
+    branches:
+      - exp/563-codeql-rust-scope
+    paths:
+      - .github/workflows/codeql-rust-scope-563.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: arkst-563-codeql-rust-scope-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_SHA: 07a9d478ae433b5e040f325b0fa231647b02150b
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify harness and source authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/codeql-rust-scope-563.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/codeql-rust-scope-563.yml
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+
+      - name: Create evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/arkst-563"
+          mkdir -p "$evidence/prs"
+          echo "ARKST_563_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+
+      - name: Fetch authoritative historical PR file metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for pr in 551 542 541 539 537 532 529 528 526 523 522 521; do
+            gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/pulls/$pr" \
+              > "$ARKST_563_EVIDENCE/prs/$pr-meta.json"
+
+            gh api --paginate --slurp \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/pulls/$pr/files?per_page=100" \
+              > "$ARKST_563_EVIDENCE/prs/$pr-pages.json"
+          done
+
+      - name: Classify historical and adversarial cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+
+          root = Path(os.environ["ARKST_563_EVIDENCE"])
+
+          EXPECTED = {
+              551: False,
+              542: False,
+              541: False,
+              539: False,
+              537: False,
+              532: True,
+              529: False,
+              528: False,
+              526: True,
+              523: True,
+              522: True,
+              521: True,
+          }
+
+          ALLOWED_STATUS = {"added", "modified", "removed", "renamed", "copied", "changed", "unchanged"}
+
+          def path_is_well_formed(path):
+              if not isinstance(path, str) or not path:
+                  return False
+              p = PurePosixPath(path)
+              if p.is_absolute() or ".." in p.parts:
+                  return False
+              return True
+
+          def rust_input_path(path):
+              if not path_is_well_formed(path):
+                  return True
+
+              p = PurePosixPath(path)
+              name = p.name
+
+              if path.endswith(".rs"):
+                  return True
+              if name in {"Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml"}:
+                  return True
+              if path == ".cargo" or path.startswith(".cargo/"):
+                  return True
+              if path == ".github/workflows/codeql.yml":
+                  return True
+              if path == ".github/codeql" or path.startswith(".github/codeql/"):
+                  return True
+
+              return False
+
+          def classify(records, expected_count):
+              if not isinstance(expected_count, int) or expected_count < 0:
+                  return True, "invalid-expected-count"
+              if not isinstance(records, list):
+                  return True, "invalid-records"
+              if len(records) != expected_count:
+                  return True, "count-mismatch"
+
+              for rec in records:
+                  if not isinstance(rec, dict):
+                      return True, "malformed-record"
+
+                  status = rec.get("status")
+                  filename = rec.get("filename")
+                  previous = rec.get("previous_filename")
+
+                  if status not in ALLOWED_STATUS:
+                      return True, "unknown-status"
+                  if not path_is_well_formed(filename):
+                      return True, "malformed-filename"
+
+                  if rust_input_path(filename):
+                      return True, f"rust-input:{filename}"
+
+                  if status == "renamed":
+                      if not path_is_well_formed(previous):
+                          return True, "malformed-previous-filename"
+                      if rust_input_path(previous):
+                          return True, f"rust-input-previous:{previous}"
+                  elif previous not in (None, ""):
+                      # Unexpected previous_filename metadata outside rename is fail-closed.
+                      return True, "unexpected-previous-filename"
+
+              return False, "no-rust-input-change"
+
+          def flatten_pages(value):
+              if not isinstance(value, list) or not all(isinstance(page, list) for page in value):
+                  raise ValueError("paginated PR-files response must be array-of-arrays")
+              return [row for page in value for row in page]
+
+          historical = []
+          failures = []
+
+          for pr, expected in EXPECTED.items():
+              meta = json.loads((root / "prs" / f"{pr}-meta.json").read_text())
+              pages = json.loads((root / "prs" / f"{pr}-pages.json").read_text())
+              records = flatten_pages(pages)
+              expected_count = meta.get("changed_files")
+              actual, reason = classify(records, expected_count)
+
+              row = {
+                  "pr": pr,
+                  "expected": expected,
+                  "actual": actual,
+                  "reason": reason,
+                  "changed_files": expected_count,
+                  "filenames": [r.get("filename") for r in records],
+              }
+              historical.append(row)
+              if actual != expected:
+                  failures.append({"kind": "historical", **row})
+
+          synthetic = [
+              ("docs-only", [{"status": "modified", "filename": "docs/README.md"}], 1, False),
+              ("ordinary-ci-workflow", [{"status": "modified", "filename": ".github/workflows/ci.yml"}], 1, False),
+              ("actions-only-local-action", [{"status": "modified", "filename": ".github/actions/example/action.yml"}], 1, False),
+              ("codeql-workflow", [{"status": "modified", "filename": ".github/workflows/codeql.yml"}], 1, True),
+              ("rust-source", [{"status": "modified", "filename": "crates/arkst-core/src/lib.rs"}], 1, True),
+              ("cargo-manifest", [{"status": "modified", "filename": "crates/arkst-core/Cargo.toml"}], 1, True),
+              ("cargo-lock", [{"status": "modified", "filename": "Cargo.lock"}], 1, True),
+              ("cargo-config", [{"status": "modified", "filename": ".cargo/config.toml"}], 1, True),
+              ("toolchain", [{"status": "modified", "filename": "rust-toolchain.toml"}], 1, True),
+              ("rename-rust-to-doc", [{
+                  "status": "renamed",
+                  "filename": "docs/old-lib.md",
+                  "previous_filename": "crates/arkst-core/src/lib.rs",
+              }], 1, True),
+              ("rename-doc-to-rust", [{
+                  "status": "renamed",
+                  "filename": "crates/arkst-core/src/new.rs",
+                  "previous_filename": "docs/old.md",
+              }], 1, True),
+              ("rename-doc-to-doc", [{
+                  "status": "renamed",
+                  "filename": "docs/new.md",
+                  "previous_filename": "docs/old.md",
+              }], 1, False),
+              ("remove-cargo-lock", [{"status": "removed", "filename": "Cargo.lock"}], 1, True),
+              ("unknown-status", [{"status": "mystery", "filename": "docs/x.md"}], 1, True),
+              ("malformed-record", [{}], 1, True),
+              ("count-mismatch", [{"status": "modified", "filename": "docs/x.md"}], 2, True),
+              ("unexpected-previous", [{
+                  "status": "modified",
+                  "filename": "docs/x.md",
+                  "previous_filename": "docs/y.md",
+              }], 1, True),
+              ("path-traversal", [{"status": "modified", "filename": "../src/lib.rs"}], 1, True),
+          ]
+
+          synthetic_rows = []
+          for name, records, expected_count, expected in synthetic:
+              actual, reason = classify(records, expected_count)
+              row = {
+                  "name": name,
+                  "expected": expected,
+                  "actual": actual,
+                  "reason": reason,
+              }
+              synthetic_rows.append(row)
+              if actual != expected:
+                  failures.append({"kind": "synthetic", **row})
+
+          rust_impacted = sum(1 for row in historical if row["actual"])
+          non_rust = len(historical) - rust_impacted
+
+          summary = {
+              "source_sha": os.environ["SOURCE_SHA"],
+              "harness_sha": os.environ["GITHUB_SHA"],
+              "historical_total": len(historical),
+              "historical_rust_impact": rust_impacted,
+              "historical_non_rust_impact": non_rust,
+              "historical_match": not any(f["kind"] == "historical" for f in failures),
+              "synthetic_total": len(synthetic_rows),
+              "synthetic_match": not any(f["kind"] == "synthetic" for f in failures),
+              "failures": failures,
+              "historical": historical,
+              "synthetic": synthetic_rows,
+          }
+
+          decision = "CLASSIFIER PROVEN" if not failures else "CLASSIFIER UNSAFE"
+          summary["decision"] = decision
+
+          (root / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+          print("ARKST_563_DECISION=" + decision)
+          print("ARKST_563_SUMMARY=" + json.dumps({
+              "decision": decision,
+              "historical_total": len(historical),
+              "historical_rust_impact": rust_impacted,
+              "historical_non_rust_impact": non_rust,
+              "historical_match": summary["historical_match"],
+              "synthetic_total": len(synthetic_rows),
+              "synthetic_match": summary["synthetic_match"],
+              "failure_count": len(failures),
+          }, sort_keys=True))
+
+          if failures:
+              raise SystemExit(json.dumps(failures, indent=2))
+          PY
+
+      - name: Prove clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: arkst-563-${{ github.run_id }}
+          path: ${{ runner.temp }}/arkst-563
+          if-no-files-found: error
+          retention-days: 30
