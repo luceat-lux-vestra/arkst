@@ -19,7 +19,25 @@ git = "https://github.com/typst/citationberg.git"
 rev = "06a591e2f237d25e1dfdedac3f3d1494c496c52d"
 '''
 
-ACTION = "EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25"
+ACTION = "./.github/actions/cargo-deny-prebuilt"
+ACTION_YAML = '''name: cargo-deny official ARM64 prebuilt
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        version="0.20.2"
+        target="aarch64-unknown-linux-musl"
+        expected_sha256="995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"
+        test "$RUNNER_OS" = "Linux"
+        test "$RUNNER_ARCH" = "ARM64"
+        test "$(uname -m)" = "aarch64"
+        archive="$RUNNER_TEMP/cargo-deny-$version-$target.tar.gz"
+        echo "$expected_sha256  $archive" | sha256sum --check --strict
+        cargo-deny \
+          --log-level "$CARGO_DENY_LOG_LEVEL" \
+          --manifest-path "$CARGO_DENY_MANIFEST_PATH"
+'''
 DOCS_ONLY_STEP_GUARD = "${{ needs.scope.outputs.docs_only != 'true' }}"
 CI_WORKFLOW = f'''jobs:
   deny:
@@ -58,6 +76,10 @@ class CargoGraphOwnershipTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
         (root / ".github/workflows").mkdir(parents=True)
+        (root / ".github/actions/cargo-deny-prebuilt").mkdir(parents=True)
+        (root / ".github/actions/cargo-deny-prebuilt/action.yml").write_text(
+            ACTION_YAML, encoding="utf-8"
+        )
         (root / "crates/app").mkdir(parents=True)
         (root / "Cargo.toml").write_text(
             '[workspace]\nmembers = ["crates/app"]\nexclude = [\n'
@@ -220,15 +242,45 @@ class CargoGraphOwnershipTests(unittest.TestCase):
         path = root / ".github/workflows/ci.yml"
         path.write_text(
             path.read_text(encoding="utf-8").replace(
-                "3c6349835b2b7b196a839186cb8b78e02f7b5f25",
-                "4c6349835b2b7b196a839186cb8b78e02f7b5f25",
+                "./.github/actions/cargo-deny-prebuilt",
+                "EmbarkStudios/cargo-deny-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 1,
             ),
             encoding="utf-8",
         )
         with self.assertRaisesRegex(
-            mod.CargoGraphOwnershipError, "must use exact action ref"
+            mod.CargoGraphOwnershipError, "must use exact local action"
         ):
+            mod.verify_repository(root)
+
+    def test_cargo_deny_version_drift_fails_closed(self):
+        root = self.make_repo()
+        path = root / ".github/actions/cargo-deny-prebuilt/action.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace('version="0.20.2"', 'version="0.20.3"'),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(mod.CargoGraphOwnershipError, "version"):
+            mod.verify_repository(root)
+
+    def test_cargo_deny_asset_sha_drift_fails_closed(self):
+        root = self.make_repo()
+        path = root / ".github/actions/cargo-deny-prebuilt/action.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d",
+                "095c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d",
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(mod.CargoGraphOwnershipError, "expected_sha256"):
+            mod.verify_repository(root)
+
+    def test_cargo_deny_x64_reintroduction_fails_closed(self):
+        root = self.make_repo()
+        path = root / ".github/actions/cargo-deny-prebuilt/action.yml"
+        path.write_text(path.read_text(encoding="utf-8") + "\nx86_64\n", encoding="utf-8")
+        with self.assertRaisesRegex(mod.CargoGraphOwnershipError, "must not use x86_64"):
             mod.verify_repository(root)
 
     def test_missing_typst_audit_fails_closed(self):
