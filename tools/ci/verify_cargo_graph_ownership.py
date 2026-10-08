@@ -329,7 +329,6 @@ def verify_local_cargo_deny_action(root: Path) -> None:
         'test "$(uname -m)" = "aarch64"',
         "cargo-deny-$version-$target.tar.gz",
         "sha256sum --check --strict",
-        'cargo-deny \\',
         '--log-level "$CARGO_DENY_LOG_LEVEL"',
         '--manifest-path "$CARGO_DENY_MANIFEST_PATH"',
     ]
@@ -338,6 +337,11 @@ def verify_local_cargo_deny_action(root: Path) -> None:
             raise CargoGraphOwnershipError(
                 f"{CARGO_DENY_LOCAL_ACTION.as_posix()}: missing reviewed contract fragment {fragment!r}"
             )
+
+    if re.search(r"(?m)^\s*cargo-deny \\\s*$", text) is None:
+        raise CargoGraphOwnershipError(
+            f"{CARGO_DENY_LOCAL_ACTION.as_posix()}: missing reviewed cargo-deny command shape"
+        )
 
     if "x86_64" in text:
         raise CargoGraphOwnershipError(
