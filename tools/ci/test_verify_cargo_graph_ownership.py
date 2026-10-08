@@ -276,6 +276,22 @@ class CargoGraphOwnershipTests(unittest.TestCase):
         with self.assertRaisesRegex(mod.CargoGraphOwnershipError, "expected_sha256"):
             mod.verify_repository(root)
 
+    def test_cargo_deny_command_shape_drift_fails_closed(self):
+        root = self.make_repo()
+        path = root / ".github/actions/cargo-deny-prebuilt/action.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "        cargo-deny ",
+                "        cargo-audit ",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            mod.CargoGraphOwnershipError, "cargo-deny command shape"
+        ):
+            mod.verify_repository(root)
+
     def test_cargo_deny_x64_reintroduction_fails_closed(self):
         root = self.make_repo()
         path = root / ".github/actions/cargo-deny-prebuilt/action.yml"
