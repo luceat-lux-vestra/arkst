@@ -1,0 +1,174 @@
+name: cargo-deny prebuilt x64 vs arm64 575
+
+on:
+  push:
+    branches:
+      - exp/575-cargo-deny-prebuilt
+    paths:
+      - .github/workflows/cargo-deny-prebuilt-575.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arkst-575-cargo-deny-prebuilt-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: 60be072f1343c5d7348ef50c93152f48d71838a6
+  CARGO_DENY_VERSION: 0.20.2
+  RUSTUP_TOOLCHAIN: 1.98.0
+
+jobs:
+  benchmark:
+    name: cargo-deny-${{ matrix.arch }}-rep${{ matrix.rep }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            asset: cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+            sha256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+            rep: 1
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            asset: cargo-deny-0.20.2-aarch64-unknown-linux-musl.tar.gz
+            sha256: 995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d
+            rep: 1
+          - arch: x64
+            runner: ubuntu-24.04
+            asset: cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+            sha256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+            rep: 2
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            asset: cargo-deny-0.20.2-aarch64-unknown-linux-musl.tar.gz
+            sha256: 995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d
+            rep: 2
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out research harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact harness scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only "$SOURCE_SHA..$GITHUB_SHA")"
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+          test "$changed" = ".github/workflows/cargo-deny-prebuilt-575.yml"
+          git diff --check "$SOURCE_SHA..$GITHUB_SHA" -- .github/workflows/cargo-deny-prebuilt-575.yml
+
+      - name: Switch to protected exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+
+      - name: Record environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "BENCH_ARCH=${{ matrix.arch }}"
+          echo "BENCH_RUNNER=${{ matrix.runner }}"
+          echo "BENCH_REP=${{ matrix.rep }}"
+          echo "UNAME=$(uname -a)"
+          echo "ARCH=$(uname -m)"
+          echo "NPROC=$(nproc)"
+          rustc -Vv
+          cargo -V
+
+      - name: Start timer
+        id: timer
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
+          echo "BENCH_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Verify license/provenance engineering invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          python3 tools/ci/test_verify_license_provenance.py
+          python3 tools/ci/verify_license_provenance.py
+          python3 tools/ci/verify_license_provenance.py --release
+          end="$(date +%s)"
+          echo "BENCH_INVARIANTS_SECONDS=$((end - start))"
+
+      - name: Install verified cargo-deny prebuilt
+        shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
+          EXPECTED_SHA256: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          archive="$RUNNER_TEMP/$ASSET"
+          install_dir="$RUNNER_TEMP/cargo-deny-$CARGO_DENY_VERSION"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$ASSET" \
+            --output "$archive"
+          echo "$EXPECTED_SHA256  $archive" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" --strip-components=1
+          test -x "$install_dir/cargo-deny"
+          echo "$install_dir" >> "$GITHUB_PATH"
+          "$install_dir/cargo-deny" --version
+          end="$(date +%s)"
+          echo "BENCH_INSTALL_SECONDS=$((end - start))"
+
+      - name: Run root cargo-deny
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo-deny \
+            --log-level warn \
+            --manifest-path ./Cargo.toml \
+            --all-features \
+            check
+          end="$(date +%s)"
+          echo "BENCH_ROOT_DENY_SECONDS=$((end - start))"
+
+      - name: Run spike cargo-deny
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo-deny \
+            --log-level warn \
+            --manifest-path tools/spikes/typst-in-process/Cargo.toml \
+            --all-features \
+            check advisories sources
+          end="$(date +%s)"
+          echo "BENCH_SPIKE_DENY_SECONDS=$((end - start))"
+
+      - name: End timer
+        if: always()
+        shell: bash
+        env:
+          START_EPOCH: ${{ steps.timer.outputs.epoch }}
+        run: |
+          set -euo pipefail
+          end="$(date +%s)"
+          echo "BENCH_END=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -n "$START_EPOCH" ]; then
+            echo "BENCH_ELAPSED_SECONDS=$((end - START_EPOCH))"
+          fi
