@@ -200,7 +200,16 @@ def check_codeql_authority(root: Path = ROOT) -> list[Finding]:
         "language: [actions, rust]",
         "build-mode: none",
         "security-events: write",
+        "pull-requests: read",
         "persist-credentials: false",
+        "id: trusted_base",
+        "ref: ${{ github.event.pull_request.base.sha }}",
+        "path: .codeql-trusted-base",
+        "continue-on-error: true",
+        "id: rust_scope",
+        "tools/ci/codeql_scope.py",
+        "steps.trusted_base.outcome",
+        "steps.rust_scope.outputs.rust_impact == 'true'",
     ]
     for fragment in required_fragments:
         if fragment not in text:
