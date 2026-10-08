@@ -210,7 +210,16 @@ class StaticAuthorityTests(unittest.TestCase):
                     "language: [actions, rust]",
                     "build-mode: none",
                     "security-events: write",
+                    "pull-requests: read",
                     "persist-credentials: false",
+                    "id: trusted_base",
+                    "ref: ${{ github.event.pull_request.base.sha }}",
+                    "path: .codeql-trusted-base",
+                    "continue-on-error: true",
+                    "id: rust_scope",
+                    "tools/ci/codeql_scope.py",
+                    "steps.trusted_base.outcome",
+                    "steps.rust_scope.outputs.rust_impact == 'true'",
                     "uses: github/codeql-action/init@0123456789012345678901234567890123456789",
                 ]
             ),
@@ -241,6 +250,18 @@ class StaticAuthorityTests(unittest.TestCase):
         self.write_codeql_fixture(root, classification="required")
         findings = AUDIT.check_codeql_authority(root)
         self.assertTrue(any("classification" in item.details for item in findings))
+
+    def test_codeql_trusted_scope_contract_removal_fails(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        self.write_codeql_fixture(root)
+        path = root / ".github" / "workflows" / "codeql.yml"
+        text = path.read_text(encoding="utf-8").replace(
+            "ref: ${{ github.event.pull_request.base.sha }}", "ref: HEAD"
+        )
+        path.write_text(text, encoding="utf-8")
+        findings = AUDIT.check_codeql_authority(root)
+        self.assertTrue(any("pull_request.base.sha" in item.details for item in findings))
 
     def test_supply_chain_reporter_removal_fails(self):
         temp, root = self.make_root()
