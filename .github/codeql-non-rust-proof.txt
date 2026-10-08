@@ -1,0 +1,2 @@
+Temporary non-Rust CodeQL scope proof for Arkst #568.
+This branch/PR is evidence-only and must not be merged.
