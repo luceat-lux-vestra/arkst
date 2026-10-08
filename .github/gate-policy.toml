@@ -147,7 +147,7 @@ contexts = ["codeql (actions)", "codeql (rust)"]
 always_present = true
 matrix_axis = "language"
 matrix_values = ["actions", "rust"]
-rationale = "Always-present CodeQL advanced setup for GitHub Actions workflow and Rust static analysis. It is distinct security evidence and remains advisory until reliability and enforcement are separately proven."
+rationale = "Always-present advisory CodeQL contexts. Actions analysis runs on every non-draft pull request; Rust analysis runs for trusted-base Rust-impacting pull requests and for scheduled/manual full scans, while non-Rust pull requests retain a successful rust context without expensive analysis."
 
 [[producer]]
 workflow = ".github/workflows/docs.yml"
