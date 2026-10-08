@@ -338,7 +338,11 @@ def verify_local_cargo_deny_action(root: Path) -> None:
                 f"{CARGO_DENY_LOCAL_ACTION.as_posix()}: missing reviewed contract fragment {fragment!r}"
             )
 
-    if re.search(r"(?m)^\s*cargo-deny \\\s*$", text) is None:
+    expected_command_line = "cargo-deny " + chr(92)
+    if not any(
+        line.strip() == expected_command_line
+        for line in text.splitlines()
+    ):
         raise CargoGraphOwnershipError(
             f"{CARGO_DENY_LOCAL_ACTION.as_posix()}: missing reviewed cargo-deny command shape"
         )
