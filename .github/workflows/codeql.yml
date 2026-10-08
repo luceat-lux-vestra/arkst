@@ -46,6 +46,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           TRUSTED_BASE_OUTCOME: ${{ steps.trusted_base.outcome }}
         run: |
           set -euo pipefail
@@ -72,13 +73,13 @@ jobs:
           set +e
           gh api \
             -H 'Accept: application/vnd.github+json' \
-            "repos/$GITHUB_REPOSITORY/pulls/${{ github.event.pull_request.number }}" \
+            "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
             > "$evidence/meta.json"
           meta_status=$?
 
           gh api --paginate --slurp \
             -H 'Accept: application/vnd.github+json' \
-            "repos/$GITHUB_REPOSITORY/pulls/${{ github.event.pull_request.number }}/files?per_page=100" \
+            "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" \
             > "$evidence/pages.json"
           pages_status=$?
           set -e
