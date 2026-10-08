@@ -20,7 +20,7 @@ rev = "06a591e2f237d25e1dfdedac3f3d1494c496c52d"
 '''
 
 ACTION = "./.github/actions/cargo-deny-prebuilt"
-ACTION_YAML = '''name: cargo-deny official ARM64 prebuilt
+ACTION_YAML = r'''name: cargo-deny official ARM64 prebuilt
 runs:
   using: composite
   steps:
