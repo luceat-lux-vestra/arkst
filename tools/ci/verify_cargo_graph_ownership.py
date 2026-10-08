@@ -25,10 +25,11 @@ SUPPLY_CHAIN_WORKFLOWS = {
     Path(".github/workflows/ci.yml"): ("deny", "license"),
     Path(".github/workflows/security.yml"): ("audit", None),
 }
-CARGO_DENY_ACTION_REF = (
-    "EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25"
-)
-CARGO_DENY_ACTION_FAMILY = "EmbarkStudios/cargo-deny-action@"
+CARGO_DENY_ACTION_REF = "./.github/actions/cargo-deny-prebuilt"
+CARGO_DENY_LOCAL_ACTION = Path(".github/actions/cargo-deny-prebuilt/action.yml")
+CARGO_DENY_VERSION = "0.20.2"
+CARGO_DENY_TARGET = "aarch64-unknown-linux-musl"
+CARGO_DENY_SHA256 = "995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"
 DOCS_ONLY_JOB_NEEDS = "[scope]"
 DOCS_ONLY_JOB_GUARD = "${{ always() }}"
 DOCS_ONLY_STEP_GUARD = "${{ needs.scope.outputs.docs_only != 'true' }}"
@@ -277,9 +278,10 @@ def action_blocks(text: str) -> list[str]:
     index = 0
     while index < len(lines):
         line = lines[index]
-        if CARGO_DENY_ACTION_FAMILY in line and CARGO_DENY_ACTION.match(line) is None:
+        stripped = line.strip()
+        if stripped.startswith("- uses:") and "cargo-deny" in stripped and CARGO_DENY_ACTION.match(line) is None:
             raise CargoGraphOwnershipError(
-                f"cargo-deny authority must use exact action ref {CARGO_DENY_ACTION_REF}"
+                f"cargo-deny authority must use exact local action {CARGO_DENY_ACTION_REF}"
             )
         if CARGO_DENY_ACTION.match(line) is None:
             index += 1
@@ -307,6 +309,44 @@ def step_field(block: str, name: str) -> str | None:
     if not lines:
         return None
     return direct_field(block, name, leading_spaces(lines[0]) + 2)
+
+
+def verify_local_cargo_deny_action(root: Path) -> None:
+    path = root / CARGO_DENY_LOCAL_ACTION
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise CargoGraphOwnershipError(
+            f"cannot read reviewed cargo-deny local action {path.as_posix()}: {exc}"
+        ) from exc
+
+    required = [
+        'version="0.20.2"',
+        'target="aarch64-unknown-linux-musl"',
+        'expected_sha256="995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"',
+        'test "$RUNNER_OS" = "Linux"',
+        'test "$RUNNER_ARCH" = "ARM64"',
+        'test "$(uname -m)" = "aarch64"',
+        "cargo-deny-$version-$target.tar.gz",
+        "sha256sum --check --strict",
+        'cargo-deny \\',
+        '--log-level "$CARGO_DENY_LOG_LEVEL"',
+        '--manifest-path "$CARGO_DENY_MANIFEST_PATH"',
+    ]
+    for fragment in required:
+        if fragment not in text:
+            raise CargoGraphOwnershipError(
+                f"{CARGO_DENY_LOCAL_ACTION.as_posix()}: missing reviewed contract fragment {fragment!r}"
+            )
+
+    if "x86_64" in text:
+        raise CargoGraphOwnershipError(
+            f"{CARGO_DENY_LOCAL_ACTION.as_posix()}: reviewed authority must not use x86_64"
+        )
+    if "continue-on-error" in text:
+        raise CargoGraphOwnershipError(
+            f"{CARGO_DENY_LOCAL_ACTION.as_posix()}: reviewed authority must fail hard"
+        )
 
 
 def verify_authority_step_guard(
@@ -454,6 +494,7 @@ def verify_repository(root: Path) -> None:
             f"{AUDITED_RESEARCH_MANIFEST.as_posix()}: citationberg patch must exactly match production"
         )
 
+    verify_local_cargo_deny_action(root)
     for workflow, (job_id, required_name) in SUPPLY_CHAIN_WORKFLOWS.items():
         verify_supply_chain_workflow(root / workflow, job_id, required_name)
     verify_workflow_containment(root)
