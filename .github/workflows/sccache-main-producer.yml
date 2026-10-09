@@ -248,6 +248,7 @@ jobs:
           "CARGO_PROFILE_TEST_DEBUG=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore and populate protected-main Rust test cache
+        id: platform-rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           # Default key uses job ID "test" just as the authoritative PR job.
@@ -255,14 +256,17 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Typst 0.15.1 (pinned)
+        if: ${{ steps.platform-rust-cache.outputs.cache-hit != 'true' }}
         uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
         with:
           typst-version: 0.15.1
 
       - name: Test default CLI feature boundary
+        if: ${{ steps.platform-rust-cache.outputs.cache-hit != 'true' }}
         run: cargo test --locked -p arkst-cli --no-default-features
 
       - name: Test workspace (Typst required)
+        if: ${{ steps.platform-rust-cache.outputs.cache-hit != 'true' }}
         run: cargo test --locked --workspace --all-targets --all-features
         env:
           ARKST_REQUIRE_TYPST: "1"

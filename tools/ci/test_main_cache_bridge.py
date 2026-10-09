@@ -38,6 +38,18 @@ def validate(producer: str, consumer: str) -> None:
     require(seed, "test \"$GITHUB_REF\" = \"refs/heads/$DEFAULT_BRANCH\"", "main authority")
     require(seed, 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"', "SHA authority")
     require(seed, RUST_CACHE, "same pinned Rust cache action")
+    require(seed, "id: platform-rust-cache", "cache hit identity")
+    cache_miss_guard = "if: " + "$" + "{{ steps.platform-rust-cache.outputs.cache-hit != 'true' }}"
+    for named_step in (
+        "Install Typst 0.15.1 (pinned)",
+        "Test default CLI feature boundary",
+        "Test workspace (Typst required)",
+    ):
+        step_prefix = "      - name: " + named_step + "\n"
+        require(seed, step_prefix, "main producer step identity")
+        body = seed.split(step_prefix, 1)[1].split("      - name:", 1)[0]
+        require(body, cache_miss_guard, "cache-hit skip protection")
+
     require(seed, "save-if: " + "$" + "{{ github.ref == 'refs/heads/main' }}", "main-only cache writer")
     require(seed, "CARGO_PROFILE_TEST_DEBUG=1", "Windows debug parity")
     require(seed, "toolchain: 1.98.0", "toolchain parity")
@@ -92,6 +104,15 @@ class MainCacheBridgeContractTests(unittest.TestCase):
     def test_single_platform_rejected(self) -> None:
         bad = self.producer.replace(
             "os: [macos-latest, windows-latest]", "os: [macos-latest]", 1
+        )
+        with self.assertRaises(ValueError):
+            validate(bad, self.consumer)
+
+    def test_main_warm_cache_cannot_repeat_full_tests(self) -> None:
+        bad = self.producer.replace(
+            "if: " + "$" + "{{ steps.platform-rust-cache.outputs.cache-hit != 'true' }}",
+            "if: " + "$" + "{{ steps.platform-rust-cache.outputs.cache-hit == 'true' }}",
+            1,
         )
         with self.assertRaises(ValueError):
             validate(bad, self.consumer)
