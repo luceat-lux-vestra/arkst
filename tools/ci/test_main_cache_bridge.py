@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Fail-closed contract for trusted main -> PR macOS/Windows Rust caches."""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+PRODUCER = ROOT / ".github/workflows/sccache-main-producer.yml"
+CONSUMER = ROOT / ".github/workflows/ci.yml"
+RUST_CACHE = "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+
+
+def validate(producer: str, consumer: str) -> None:
+    """Refuse a cache producer that cannot populate the PR test cache family."""
+    def require(haystack: str, needle: str, reason: str) -> None:
+        if needle not in haystack:
+            raise ValueError(f"{reason}: missing {needle!r}")
+
+    require(producer, "on:\n  push:\n    branches: [main]", "trusted main-only event")
+    if "\n  pull_request:" in producer or "\n  pull_request_target:" in producer:
+        raise ValueError("untrusted events must not populate protected-main cache")
+
+    require(producer, "\n  test:\n", "matching PR job ID")
+    seed = producer.split("\n  test:\n", 1)[1]
+    require(seed, "os: [macos-latest, windows-latest]", "both platforms")
+    require(seed, "runs-on: " + "$" + "{{ matrix.os }}", "OS-matched runner")
+    require(seed, "test \"$GITHUB_REF\" = \"refs/heads/$DEFAULT_BRANCH\"", "main authority")
+    require(seed, 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"', "SHA authority")
+    require(seed, RUST_CACHE, "same pinned Rust cache action")
+    require(seed, "save-if: " + "$" + "{{ github.ref == 'refs/heads/main' }}", "main-only cache writer")
+    require(seed, "CARGO_PROFILE_TEST_DEBUG=1", "Windows debug parity")
+    require(seed, "toolchain: 1.98.0", "toolchain parity")
+    require(seed, "typst-version: 0.15.1", "Typst parity")
+    for command in (
+        "cargo test --locked -p arkst-cli --no-default-features",
+        "cargo test --locked --workspace --all-targets --all-features",
+        'ARKST_REQUIRE_TYPST: "1"',
+    ):
+        require(seed, command, "test workload parity")
+        require(consumer, command, "PR test workload parity")
+
+    name = "      - name: Restore Rust cache (macOS/Windows)"
+    require(consumer, name, "PR restore-only cache")
+    section = consumer.split(name, 1)[1].split("      - name:", 1)[0]
+    require(section, RUST_CACHE, "same pinned PR Rust cache action")
+    require(section, "matrix.os != 'ubuntu-24.04-arm'", "non-Linux matrix guard")
+    require(section, "save-if: false", "PR cannot create per-merge-ref cache")
+    if "save-if: true" in section:
+        raise ValueError("PR Rust cache must not be writable")
+
+
+class MainCacheBridgeContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.producer = PRODUCER.read_text(encoding="utf-8")
+        cls.consumer = CONSUMER.read_text(encoding="utf-8")
+
+    def test_current_repository_contract(self) -> None:
+        validate(self.producer, self.consumer)
+
+    def test_producer_without_main_identity_rejected(self) -> None:
+        bad = self.producer.replace("    branches: [main]", "    branches: [feature]", 1)
+        with self.assertRaises(ValueError):
+            validate(bad, self.consumer)
+
+    def test_single_platform_rejected(self) -> None:
+        bad = self.producer.replace(
+            "os: [macos-latest, windows-latest]", "os: [macos-latest]", 1
+        )
+        with self.assertRaises(ValueError):
+            validate(bad, self.consumer)
+
+    def test_pr_cache_writes_rejected(self) -> None:
+        bad = self.consumer.replace("save-if: false", "save-if: true", 1)
+        with self.assertRaises(ValueError):
+            validate(self.producer, bad)
+
+    def test_wrong_producer_cache_action_rejected(self) -> None:
+        bad = self.producer.replace(
+            RUST_CACHE, "Swatinem/rust-cache@unreviewed", 1
+        )
+        with self.assertRaises(ValueError):
+            validate(bad, self.consumer)
+
+
+if __name__ == "__main__":
+    unittest.main()
