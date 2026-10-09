@@ -58,6 +58,21 @@ def validate(producer: str, consumer: str) -> None:
     require(section, "save-if: false", "PR cannot create per-merge-ref cache")
     if "save-if: true" in section:
         raise ValueError("PR Rust cache must not be writable")
+    # This CI-only LGPL-3.0 action was already pinned in CI before the
+    # producer was introduced. Any license-policy exception must be scoped
+    # to that exact reviewed SHA, never LGPL globally or a wildcard action.
+    exception = "pkg:githubactions/Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+    lines = [line for line in consumer.splitlines() if "allow-dependencies-licenses:" in line]
+    if len(lines) != 1:
+        raise ValueError("expected one authoritative dependency license exception list")
+    allowed = lines[0].split("allow-dependencies-licenses:", 1)[1]
+    action_exemptions = [item.strip() for item in allowed.split(",") if item.strip().startswith("pkg:githubactions/")]
+    if action_exemptions != [exception]:
+        raise ValueError("GitHub Actions license exception must match reviewed SHA exactly")
+    license_allow = [line for line in consumer.splitlines() if "allow-licenses:" in line]
+    if any("LGPL" in line for line in license_allow):
+        raise ValueError("must not globally allow LGPL")
+
 
 
 class MainCacheBridgeContractTests(unittest.TestCase):
@@ -83,6 +98,15 @@ class MainCacheBridgeContractTests(unittest.TestCase):
 
     def test_pr_cache_writes_rejected(self) -> None:
         bad = self.consumer.replace("save-if: false", "save-if: true", 1)
+        with self.assertRaises(ValueError):
+            validate(self.producer, bad)
+
+    def test_broad_action_license_exception_rejected(self) -> None:
+        bad = self.consumer.replace(
+            "pkg:githubactions/Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6",
+            "pkg:githubactions/Swatinem/rust-cache",
+            1,
+        )
         with self.assertRaises(ValueError):
             validate(self.producer, bad)
 
