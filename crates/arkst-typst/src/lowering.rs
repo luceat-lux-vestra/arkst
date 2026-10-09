@@ -430,6 +430,32 @@ impl LoweringContext {
         self.push_str(">\n");
     }
 
+    fn lower_paged_last_heading(&mut self, depth: i32) {
+        if !(1..=6).contains(&depth) {
+            self.push_str("[]");
+            return;
+        }
+
+        self.push_str("#context {\n");
+        self.push_str("  let __arkst_page = here().page()\n");
+        self.push_str("  let __arkst_headings = query(heading).filter(it => it.location().page() <= __arkst_page)\n");
+        self.push_str("  let __arkst_candidates = __arkst_headings.filter(it => it.level == ");
+        self.push_str(&depth.to_string());
+        self.push_str(")\n");
+        self.push_str("  if __arkst_candidates.len() == 0 {\n");
+        self.push_str("    []\n");
+        self.push_str("  } else {\n");
+        self.push_str("    let __arkst_candidate = __arkst_candidates.last()\n");
+        self.push_str("    let __arkst_candidate_page = __arkst_candidate.location().page()\n");
+        self.push_str("    let __arkst_shallower = __arkst_headings.filter(it => it.level < ");
+        self.push_str(&depth.to_string());
+        self.push_str(" and it.location().page() > __arkst_candidate_page)\n");
+        self.push_str("    if __arkst_shallower.len() > 0 { [] } else { __arkst_candidate.body }\n");
+        self.push_str("  }\n");
+        self.push_str("}");
+    }
+
+
     fn lower_component(&mut self, component: &IrComponent) {
         match component {
             IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
@@ -930,11 +956,15 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
-            IrInline::LastHeading { span, .. } => {
+            IrInline::LastHeading { depth, span } => {
                 let before = self.output.len();
-                self.push_str(
-                    "#panic(\"Arkst .lastheading requires page-aware heading history that is not implemented by the Typst backend\")",
-                );
+                if self.document_type == IrDocumentType::Paged {
+                    self.lower_paged_last_heading(*depth);
+                } else {
+                    self.push_str(
+                        "#panic(\"Arkst .lastheading output currently supports only final paged documents\")",
+                    );
+                }
                 if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
