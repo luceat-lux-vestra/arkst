@@ -15,7 +15,7 @@ concurrency:
 jobs:
   detect:
     name: detect-hardening-drift
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     outputs:
       result_b64: ${{ steps.result.outputs.result_b64 }}
@@ -54,7 +54,7 @@ jobs:
     name: report-hardening-drift
     needs: detect
     if: ${{ always() && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read

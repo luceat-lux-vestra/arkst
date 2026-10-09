@@ -14,7 +14,7 @@ Authoritative internal merge components:
 
 - `fmt`
 - `clippy`
-- `test (ubuntu-latest)`
+- `test (ubuntu-24.04-arm)`
 - `test (macos-latest)`
 - `test (windows-latest)`
 - `docs`

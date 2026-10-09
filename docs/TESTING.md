@@ -193,7 +193,7 @@ internal components of that aggregate.
 | fmt | `cargo fmt --all --check` plus deterministic policy/hardening verifiers | Merge Gate component |
 | clippy | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Merge Gate component |
 | test (macos-latest) | `cargo test --locked --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge Gate component |
-| test (ubuntu-latest) | The same workspace, CLI, and parity checks, plus the CLI dependency-tree and public-example smoke checks | Merge Gate component |
+| test (ubuntu-24.04-arm) | The same workspace, CLI, and parity checks, plus the CLI dependency-tree and public-example smoke checks | Merge Gate component |
 | test (windows-latest) | `cargo test --locked --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge Gate component |
 | docs | `cargo doc --locked --workspace --all-features --no-deps` | Merge Gate component |
 | license | `cargo deny check --all-features` through the repository's cargo-deny action | Merge Gate component |

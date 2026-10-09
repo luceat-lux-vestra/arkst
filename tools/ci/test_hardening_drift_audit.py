@@ -51,7 +51,7 @@ def good_main_ruleset():
     contexts = [
         "fmt",
         "clippy",
-        "test (ubuntu-latest)",
+        "test (ubuntu-24.04-arm)",
         "test (macos-latest)",
         "test (windows-latest)",
         "docs",
