@@ -22,6 +22,15 @@ def validate(producer: str, consumer: str) -> None:
     if "\n  pull_request:" in producer or "\n  pull_request_target:" in producer:
         raise ValueError("untrusted events must not populate protected-main cache")
 
+    # rust-cache hashes variables beginning with CARGO, including CARGO_INCREMENTAL.
+    # Unlike the ARM sccache producer, the PR test cache is keyed before
+    # rust-cache injects CARGO_INCREMENTAL=0; prevent producer-only key drift.
+    producer_global = producer.split("\njobs:\n", 1)[0]
+    if "CARGO_INCREMENTAL:" in producer_global:
+        raise ValueError("producer-only CARGO_INCREMENTAL must not alter test cache keys")
+    require(producer, '  produce:\n    env:\n', "bounded ARM producer environment")
+    require(producer.split("\n  test:\n", 1)[0], 'CARGO_INCREMENTAL: "0"', "ARM producer incremental policy")
+
     require(producer, "\n  test:\n", "matching PR job ID")
     seed = producer.split("\n  test:\n", 1)[1]
     require(seed, "os: [macos-latest, windows-latest]", "both platforms")
