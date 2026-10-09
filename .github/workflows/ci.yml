@@ -389,9 +389,10 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os != 'ubuntu-24.04-arm' }}
         with:
-          # PR caches are refs/pull/*/merge scoped; sibling PRs cannot reuse
-          # them. Restore trusted protected-main caches without PR cache writes.
-          save-if: false
+          # TEMPORARY DIAGNOSTIC ONLY (#580): seed only this same-repository
+          # PR-scoped cache to measure cold vs warm. Revert to false before
+          # merge; never publish into protected-main cache namespace.
+          save-if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 580 && github.event.pull_request.head.repo.full_name == github.repository && github.ref == 'refs/pull/580/merge' }}
       - name: Restore dependency-only Rust cache (Ubuntu)
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' && matrix.os == 'ubuntu-24.04-arm' }}
