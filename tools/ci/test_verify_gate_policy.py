@@ -250,7 +250,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 """
         policy_text = """
@@ -265,10 +265,10 @@ skip = ["docs/**"]
 workflow = ".github/workflows/ci.yml"
 job = "test"
 classification = "required"
-contexts = ["test (ubuntu-latest)", "test (macos-latest)", "test (windows-latest)"]
+contexts = ["test (ubuntu-24.04-arm)", "test (macos-latest)", "test (windows-latest)"]
 always_present = true
 matrix_axis = "os"
-matrix_values = ["ubuntu-latest", "macos-latest", "windows-latest"]
+matrix_values = ["ubuntu-24.04-arm", "macos-latest", "windows-latest"]
 rationale = "fixture"
 """
         tmp, root, policy = self.make_repo(workflow, policy_text)
@@ -278,7 +278,7 @@ rationale = "fixture"
             policy,
             ruleset(
                 [
-                    "test (ubuntu-latest)",
+                    "test (ubuntu-24.04-arm)",
                     "test (macos-latest)",
                     "test (windows-latest)",
                 ]
@@ -495,6 +495,22 @@ rationale = "fixture"
         self.addCleanup(tmp.cleanup)
         with self.assertRaisesRegex(mod.PolicyError, "fail closed"):
             mod.verify_repository(root, policy)
+
+
+
+class NativeLinuxSupplyChainScopeTests(unittest.TestCase):
+    """The native ARM runner must not silently narrow the cargo-deny graph."""
+
+    def test_x64_and_arm64_linux_are_both_audited(self):
+        import tomllib
+
+        policy_path = Path(__file__).resolve().parents[2] / "deny.toml"
+        with policy_path.open("rb") as stream:
+            targets = tomllib.load(stream)["graph"]["targets"]
+        triples = {entry["triple"] for entry in targets}
+        self.assertIn("x86_64-unknown-linux-gnu", triples)
+        self.assertIn("aarch64-unknown-linux-gnu", triples)
+
 
 
 if __name__ == "__main__":
