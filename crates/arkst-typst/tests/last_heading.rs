@@ -24,7 +24,10 @@ fn paged_lastheading_lowers_to_page_aware_heading_query() {
     assert!(typst.contains("query(heading)"), "{typst}");
     assert!(typst.contains("it.level == 2"), "{typst}");
     assert!(typst.contains("it.level < 2"), "{typst}");
-    assert!(typst.contains("it.location().page() > __arkst_candidate_page"), "{typst}");
+    assert!(
+        typst.contains("it.location().page() > __arkst_candidate_page"),
+        "{typst}"
+    );
     assert!(typst.contains("__arkst_candidate.body"), "{typst}");
     assert!(!typst.contains("#panic("), "{typst}");
 }
@@ -54,7 +57,11 @@ fn paged_lastheading_out_of_runtime_heading_range_uses_empty_fallback() {
 #[test]
 fn lastheading_remains_fail_closed_for_non_paged_typst_output() {
     let span = SourceSpan::new(SourceId(0), 0, 0);
-    for document_type in [IrDocumentType::Plain, IrDocumentType::Slides, IrDocumentType::Docs] {
+    for document_type in [
+        IrDocumentType::Plain,
+        IrDocumentType::Slides,
+        IrDocumentType::Docs,
+    ] {
         let document = IrDocument {
             nodes: vec![IrNode::Paragraph {
                 content: vec![IrInline::LastHeading { depth: 2, span }],

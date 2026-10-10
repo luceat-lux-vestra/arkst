@@ -54,7 +54,10 @@ fn paged_lastheading_history_query_compiles_with_pinned_typst() {
     assert!(typst.contains("query(heading)"), "{typst}");
     assert!(typst.contains("it.level == 2"), "{typst}");
     assert!(typst.contains("it.level < 2"), "{typst}");
-    assert!(typst.contains("it.location().page() > __arkst_candidate_page"), "{typst}");
+    assert!(
+        typst.contains("it.location().page() > __arkst_candidate_page"),
+        "{typst}"
+    );
     assert!(typst.contains("__arkst_candidate.body"), "{typst}");
 
     with_typst("paged-lastheading-history", |backend| {

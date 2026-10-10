@@ -450,11 +450,12 @@ impl LoweringContext {
         self.push_str("    let __arkst_shallower = __arkst_headings.filter(it => it.level < ");
         self.push_str(&depth.to_string());
         self.push_str(" and it.location().page() > __arkst_candidate_page)\n");
-        self.push_str("    if __arkst_shallower.len() > 0 { [] } else { __arkst_candidate.body }\n");
+        self.push_str(
+            "    if __arkst_shallower.len() > 0 { [] } else { __arkst_candidate.body }\n",
+        );
         self.push_str("  }\n");
         self.push_str("}");
     }
-
 
     fn lower_component(&mut self, component: &IrComponent) {
         match component {
