@@ -615,15 +615,14 @@ Arkst now has a bounded typed slice. The evaluator converts all 24 public
 positions to `IrPageMarginPosition`, preserves the initializer as
 `IrNode::PageMarginContent` in source order, evaluates an indented Markdown
 block body structurally, preserves source-defined shadowing and serde, and
-maps `.footer` exactly to `BottomCenter`. For final `paged` output,
-`topcenter` and `bottomcenter` lower to locatable Typst metadata markers.
+maps `.footer` exactly to `BottomCenter`. For final `paged` output, the fixed top-left/center/right and bottom-left/center/right positions lower to locatable Typst metadata markers.
 The page header/footer queries markers whose `location().page()` is less than
 or equal to the current physical `here().page()`, then takes the last match.
 That preserves the pinned start-page, persistence, and same-page last-wins
 contract without reducing repeated content to one document-global static
-header/footer value. Real Typst/PDF integration covers both central positions.
+header/footer value. Real Typst/PDF integration covers both fixed three-slot rows, composing one header and one footer without overwriting sibling slots; `.footer` continues to share the bottom-center position.
 
-This is deliberately not complete page-margin equivalence. The other 22
+This is deliberately not complete page-margin equivalence. The other 18
 positions, left/right mirror resolution, and final `plain`/`slides`/`docs`
 renderer behavior remain unsupported and fail closed at the current Typst
 boundary. The bounded evaluator also accepts the evidenced indented block-body

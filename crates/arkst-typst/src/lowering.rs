@@ -304,8 +304,14 @@ impl LoweringContext {
                     (IrDocumentType::Paged, IrPageMarginPosition::TopRight) => {
                         self.lower_page_margin_marker(children, "arkst-page-margin-top-right");
                     }
+                    (IrDocumentType::Paged, IrPageMarginPosition::BottomLeft) => {
+                        self.lower_page_margin_marker(children, "arkst-page-margin-bottom-left");
+                    }
                     (IrDocumentType::Paged, IrPageMarginPosition::BottomCenter) => {
                         self.lower_page_margin_marker(children, "arkst-page-margin-bottom-center");
+                    }
+                    (IrDocumentType::Paged, IrPageMarginPosition::BottomRight) => {
+                        self.lower_page_margin_marker(children, "arkst-page-margin-bottom-right");
                     }
                     _ => {
                         self.push_str("#panic(\"Arkst page-margin position/document-type combination is not supported by the current bounded Typst backend\")\n");
