@@ -130,5 +130,67 @@ class CodeqlScopeTests(unittest.TestCase):
             self.assertIn('languages=["actions","rust"]', ghout.read_text(encoding="utf-8"))
 
 
+# Fail-closed textual contract for the pinned workflow; no YAML code executed.
+CODEQL_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "codeql.yml"
+PINNED_ACTION = "github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2"
+
+
+def validate_codeql_upload_contract(workflow: str) -> None:
+    """Retain full Rust+Actions SARIF security analysis without DB upload."""
+    required = (
+        "language: [actions, rust]",
+        "runs-on: ubuntu-24.04-arm",
+        "security-events: write",
+        "gh api --paginate --slurp",
+        'emit_full_scan "github-api-failure"',
+        "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
+        "types: [opened, synchronize, reopened, ready_for_review]",
+        "  schedule:",
+        "  workflow_dispatch:",
+        "uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
+        "build-mode: none",
+    )
+    for token in required:
+        if token not in workflow:
+            raise ValueError(f"CodeQL security scan contract missing: {token}")
+    step = "      - name: Analyze\n"
+    if workflow.count(step) != 1:
+        raise ValueError("one authoritative CodeQL analyze step is required")
+    analyze = workflow.split(step, 1)[1]
+    for token in (
+        "uses: " + PINNED_ACTION,
+        'category: "/language:${{ matrix.language }}"',
+        "upload-database: false",
+        "matrix.language != 'rust' || github.event_name != 'pull_request' || steps.rust_scope.outputs.rust_impact == 'true'",
+    ):
+        if token not in analyze:
+            raise ValueError(f"CodeQL analyze contract missing: {token}")
+    if analyze.count("upload-database:") != 1:
+        raise ValueError("CodeQL database artifact setting is ambiguous")
+
+
+class CodeqlUploadContractTests(unittest.TestCase):
+    def test_codeql_scan_retains_sarif_without_database_archive(self):
+        validate_codeql_upload_contract(CODEQL_WORKFLOW.read_text(encoding="utf-8"))
+
+    def test_adversarial_security_regressions_fail_closed(self):
+        original = CODEQL_WORKFLOW.read_text(encoding="utf-8")
+        mutations = [
+            ("upload-database: false", "upload-database: true"),
+            ("security-events: write", "security-events: read"),
+            ("language: [actions, rust]", "language: [actions]"),
+            (PINNED_ACTION, "github/codeql-action/analyze@main"),
+            ("gh api --paginate --slurp", "gh api"),
+            ('emit_full_scan "github-api-failure"', 'echo "rust_impact=false"'),
+            ("build-mode: none", "build-mode: manual"),
+            ("  schedule:", "  # no schedule:"),
+        ]
+        for before, after in mutations:
+            with self.subTest(before=before):
+                self.assertIn(before, original)
+                with self.assertRaises(ValueError):
+                    validate_codeql_upload_contract(original.replace(before, after, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
