@@ -16,7 +16,7 @@ use crate::lowering_base;
 
 const PRELUDE_MARKER: &str = "// Arkst Quarkdown v2.6 focus layout\n";
 const UNSUPPORTED_PAGE_MARGIN_PRELUDE: &str =
-    "#panic(\"Arkst page-margin output currently supports only paged topcenter/bottomcenter\")\n";
+    "#panic(\"Arkst page-margin output currently supports only paged top-left/top-center/top-right and bottom-center\")\n";
 
 /// Lower an Arkst IR document to Typst source, applying the bounded Quarkdown
 /// v2.6 `focus` layout adaptation when the evaluated document state requests it.
@@ -696,14 +696,17 @@ fn has_unsupported_page_margin(doc: &IrDocument) -> bool {
             || positions.iter().any(|position| {
                 !matches!(
                     position,
-                    IrPageMarginPosition::TopCenter | IrPageMarginPosition::BottomCenter
+                    IrPageMarginPosition::TopLeft
+                        | IrPageMarginPosition::TopCenter
+                        | IrPageMarginPosition::TopRight
+                        | IrPageMarginPosition::BottomCenter
                 )
             }))
 }
 
-fn page_margin_slot(label: &str) -> String {
+fn page_margin_slot(label: &str, alignment: &str) -> String {
     format!(
-        "context {{\n  let __arkst_page = here().page()\n  let __arkst_margin = query(<{label}>).filter(it => it.location().page() <= __arkst_page)\n  if __arkst_margin.len() > 0 {{ align(center, __arkst_margin.last().value) }} else {{ none }}\n}}"
+        "context {{\n  let __arkst_page = here().page()\n  let __arkst_margin = query(<{label}>).filter(it => it.location().page() <= __arkst_page)\n  if __arkst_margin.len() > 0 {{ align({alignment}, __arkst_margin.last().value) }} else {{ none }}\n}}"
     )
 }
 
@@ -717,12 +720,31 @@ fn page_margin_prelude(doc: &IrDocument) -> String {
     }
 
     let mut prelude = String::new();
-    if positions.contains(&IrPageMarginPosition::TopCenter) {
-        let header = page_margin_slot("arkst-page-margin-top-center");
-        prelude.push_str(&format!("#set page(header: {header})\n"));
+    let has_top_left = positions.contains(&IrPageMarginPosition::TopLeft);
+    let has_top_center = positions.contains(&IrPageMarginPosition::TopCenter);
+    let has_top_right = positions.contains(&IrPageMarginPosition::TopRight);
+    if has_top_left || has_top_center || has_top_right {
+        let left = if has_top_left {
+            page_margin_slot("arkst-page-margin-top-left", "left")
+        } else {
+            "none".to_string()
+        };
+        let center = if has_top_center {
+            page_margin_slot("arkst-page-margin-top-center", "center")
+        } else {
+            "none".to_string()
+        };
+        let right = if has_top_right {
+            page_margin_slot("arkst-page-margin-top-right", "right")
+        } else {
+            "none".to_string()
+        };
+        prelude.push_str(&format!(
+            "#set page(header: grid(columns: (1fr, 1fr, 1fr), {left}, {center}, {right}))\n"
+        ));
     }
     if positions.contains(&IrPageMarginPosition::BottomCenter) {
-        let footer = page_margin_slot("arkst-page-margin-bottom-center");
+        let footer = page_margin_slot("arkst-page-margin-bottom-center", "center");
         prelude.push_str(&format!("#set page(footer: {footer})\n"));
     }
     prelude
