@@ -588,7 +588,8 @@ fn audit_records_bounded_page_margin_content_slice() {
     assert!(pagemargin[9].contains("IrNode::PageMarginContent"));
     assert!(pagemargin[10].contains("All 24 public positions"));
     assert!(pagemargin[10].contains("same-page last-wins"));
-    assert!(pagemargin[10].contains("other 22 positions"));
+    assert!(pagemargin[10].contains("other 18 positions"));
+    assert!(pagemargin[10].contains("fixed top and bottom three-slot rows"));
 
     let footer = rows
         .iter()
@@ -600,7 +601,7 @@ fn audit_records_bounded_page_margin_content_slice() {
     assert!(AUDIT.contains("last same-page initializer wins"));
     assert!(AUDIT.contains("location().page()"));
     assert!(AUDIT.contains("current physical `here().page()`"));
-    assert!(AUDIT.contains("other 22"));
+    assert!(AUDIT.contains("other 18"));
     assert!(AUDIT.contains("final `plain`/`slides`/`docs`"));
     assert!(AUDIT.contains("16 conservative `PARTIAL` rows"));
     assert!(AUDIT.contains("plus 4"));
