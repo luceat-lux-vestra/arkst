@@ -406,7 +406,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["text"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "none",

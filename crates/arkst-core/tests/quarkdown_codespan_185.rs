@@ -69,7 +69,7 @@ fn codespan_invalid_calls_remain_fail_closed_and_source_backed() {
         ".codespan {one} {two}\n",
         ".codespan wrong:{one}\n",
         ".codespan {one} text:{two}\n",
-        ".codespan\n    nested body\n",
+        ".codespan {one}\n    nested body\n",
     ] {
         let (result, _) = compile_source(source);
         assert!(!result.diagnostics.is_empty(), "{source:?}: {result:?}");
@@ -85,6 +85,12 @@ fn codespan_invalid_calls_remain_fail_closed_and_source_backed() {
             "{source:?}: {result:?}"
         );
     }
+}
+
+#[test]
+fn source_backed_raw_body_uses_shared_text_conversion() {
+    let (code, _) = single_code(".codespan\n    raw code\n");
+    assert!(matches!(code, IrInline::Code { content, .. } if content == "raw code"));
 }
 
 #[test]
