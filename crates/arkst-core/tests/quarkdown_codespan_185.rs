@@ -9,7 +9,10 @@ fn compile_source(source: &str) -> (arkst_core::CompileResult, SourceId) {
         .expect("source")
         .build()
         .expect("project");
-    let source_id = project.sources().get_id(project.entry()).expect("source id");
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("source id");
     (compile(&project, &CompileOptions::default()), source_id)
 }
 
@@ -30,7 +33,9 @@ fn single_code(source: &str) -> (IrInline, SourceId) {
 fn codespan_uses_existing_inline_code_with_call_provenance() {
     let source = ".codespan {a\\b}\n";
     let (code, id) = single_code(source);
-    let IrInline::Code { content, span } = code else { unreachable!() };
+    let IrInline::Code { content, span } = code else {
+        unreachable!()
+    };
     assert_eq!(content, "a\\b");
     assert_eq!(span.source_id, id);
     assert_eq!(span.start, 0);
@@ -51,7 +56,9 @@ fn codespan_preserves_surrounding_inline_text() {
         panic!("expected paragraph: {:?}", result.ir.nodes);
     };
     assert!(matches!(&content[0], IrInline::Text { content, .. } if content == "before "));
-    assert!(content.iter().any(|node| matches!(node, IrInline::Code { content, .. } if content == "alpha")));
+    assert!(content
+        .iter()
+        .any(|node| matches!(node, IrInline::Code { content, .. } if content == "alpha")));
     assert!(matches!(content.last(), Some(IrInline::Text { content, .. }) if content == " after"));
 }
 
@@ -66,11 +73,17 @@ fn codespan_invalid_calls_remain_fail_closed_and_source_backed() {
     ] {
         let (result, _) = compile_source(source);
         assert!(!result.diagnostics.is_empty(), "{source:?}: {result:?}");
-        assert!(result.diagnostics[0].primary.is_some(), "{source:?}: {result:?}");
-        assert!(result.ir.nodes.iter().all(|node| {
-            !matches!(node, IrNode::Paragraph { content, .. }
-                if content.iter().any(|inline| matches!(inline, IrInline::Code { .. })))
-        }), "{source:?}: {result:?}");
+        assert!(
+            result.diagnostics[0].primary.is_some(),
+            "{source:?}: {result:?}"
+        );
+        assert!(
+            result.ir.nodes.iter().all(|node| {
+                !matches!(node, IrNode::Paragraph { content, .. }
+                    if content.iter().any(|inline| matches!(inline, IrInline::Code { .. })))
+            }),
+            "{source:?}: {result:?}"
+        );
     }
 }
 
@@ -78,10 +91,13 @@ fn codespan_invalid_calls_remain_fail_closed_and_source_backed() {
 fn user_defined_codespan_keeps_source_precedence() {
     let (result, _) = compile_source(".function {codespan}\n    custom\n\n.codespan {not-code}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
-    assert!(result.ir.nodes.iter().all(|node| {
-        !matches!(node, IrNode::Paragraph { content, .. }
-            if content.iter().any(|inline| matches!(inline, IrInline::Code { .. })))
-    }), "{result:?}");
+    assert!(
+        result.ir.nodes.iter().all(|node| {
+            !matches!(node, IrNode::Paragraph { content, .. }
+                if content.iter().any(|inline| matches!(inline, IrInline::Code { .. })))
+        }),
+        "{result:?}"
+    );
 }
 
 #[test]
