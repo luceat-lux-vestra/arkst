@@ -51,7 +51,10 @@ fn paged_top_and_bottom_center_use_persistent_page_query_state() {
         ".doctype {paged}\n.pagemargin {topcenter}\n    Header A\n.footer\n    Footer A\n\n.pagebreak\n\n.pagemargin {topcenter}\n    Header B\n.footer\n    Footer B\nBody\n",
     );
 
-    assert!(typst.contains("#set page(header: context {"), "{typst}");
+    assert!(
+        typst.contains("#set page(header: grid(columns: (1fr, 1fr, 1fr), none, context {"),
+        "{typst}"
+    );
     assert!(typst.contains("#set page(footer: context {"), "{typst}");
     assert!(typst.contains(
         "query(<arkst-page-margin-top-center>).filter(it => it.location().page() <= __arkst_page)"
@@ -98,11 +101,74 @@ fn paged_top_and_bottom_center_use_persistent_page_query_state() {
 }
 
 #[test]
+fn paged_top_row_composes_left_center_right_slots_without_overwrite() {
+    let typst = lower(
+        ".doctype {paged}\n.pagemargin {topleft}\n    Left A\n.pagemargin {topcenter}\n    Center A\n.pagemargin {topright}\n    Right A\n\n.pagebreak\n\n.pagemargin {topleft}\n    Left B\nBody\n",
+    );
+
+    assert!(
+        typst.contains("#set page(header: grid(columns: (1fr, 1fr, 1fr), context {"),
+        "{typst}"
+    );
+    assert_eq!(
+        typst.matches("#set page(header:").count(),
+        1,
+        "top slots must compose into one header channel: {typst}"
+    );
+    for (label, alignment) in [
+        ("arkst-page-margin-top-left", "left"),
+        ("arkst-page-margin-top-center", "center"),
+        ("arkst-page-margin-top-right", "right"),
+    ] {
+        assert!(
+            typst.contains(&format!(
+                "query(<{label}>).filter(it => it.location().page() <= __arkst_page)"
+            )),
+            "{typst}"
+        );
+        assert!(
+            typst.contains(&format!(
+                "align({alignment}, __arkst_margin.last().value)"
+            )),
+            "{typst}"
+        );
+    }
+    assert_eq!(
+        typst.matches("<arkst-page-margin-top-left>").count(),
+        3,
+        "one query label plus two left initializers: {typst}"
+    );
+    assert_eq!(
+        typst.matches("<arkst-page-margin-top-center>").count(),
+        2,
+        "one query label plus one center initializer: {typst}"
+    );
+    assert_eq!(
+        typst.matches("<arkst-page-margin-top-right>").count(),
+        2,
+        "one query label plus one right initializer: {typst}"
+    );
+
+    with_typst("paged-top-row-page-margin", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst,
+                entry_path: "page-margin-content.qd".to_string(),
+            })
+            .expect("paged fixed top-row margins must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn unsupported_page_margin_positions_and_document_types_fail_closed() {
     for (name, source) in [
         (
-            "paged-left",
-            ".doctype {paged}\n.pagemargin {topleft}\n    Unsupported\nBody\n",
+            "paged-corner",
+            ".doctype {paged}\n.pagemargin {topleftcorner}\n    Unsupported\nBody\n",
         ),
         (
             "slides-footer",
@@ -117,7 +183,7 @@ fn unsupported_page_margin_positions_and_document_types_fail_closed() {
         let typst = lower(source);
         assert!(
             typst.starts_with(
-                "#panic(\"Arkst page-margin output currently supports only paged topcenter/bottomcenter\")"
+                "#panic(\"Arkst page-margin output currently supports only paged top-left/top-center/top-right and bottom-center\")"
             ),
             "{name}: {typst}"
         );
