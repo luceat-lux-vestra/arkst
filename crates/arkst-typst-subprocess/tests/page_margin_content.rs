@@ -55,7 +55,10 @@ fn paged_top_and_bottom_center_use_persistent_page_query_state() {
         typst.contains("#set page(header: grid(columns: (1fr, 1fr, 1fr), none, context {"),
         "{typst}"
     );
-    assert!(typst.contains("#set page(footer: grid(columns: (1fr, 1fr, 1fr), none, context {"), "{typst}");
+    assert!(
+        typst.contains("#set page(footer: grid(columns: (1fr, 1fr, 1fr), none, context {"),
+        "{typst}"
+    );
     assert!(typst.contains(
         "query(<arkst-page-margin-top-center>).filter(it => it.location().page() <= __arkst_page)"
     ));
@@ -193,13 +196,23 @@ fn paged_bottom_row_composes_left_center_right_slots_and_footer_sugar() {
         );
     }
     assert_eq!(typst.matches("<arkst-page-margin-bottom-left>").count(), 2);
-    assert_eq!(typst.matches("<arkst-page-margin-bottom-center>").count(), 2);
+    assert_eq!(
+        typst.matches("<arkst-page-margin-bottom-center>").count(),
+        2
+    );
     assert_eq!(typst.matches("<arkst-page-margin-bottom-right>").count(), 3);
     assert!(!typst.contains("#set page(header:"));
-    let first_right = typst.find("#metadata([\nRight A").expect("first right marker");
+    let first_right = typst
+        .find("#metadata([\nRight A")
+        .expect("first right marker");
     let break_pos = typst.find("#pagebreak").expect("page break");
-    let second_right = typst.find("#metadata([\nRight B").expect("second right marker");
-    assert!(first_right < break_pos && break_pos < second_right, "{typst}");
+    let second_right = typst
+        .find("#metadata([\nRight B")
+        .expect("second right marker");
+    assert!(
+        first_right < break_pos && break_pos < second_right,
+        "{typst}"
+    );
 
     with_typst("paged-bottom-row-page-margin", |backend| {
         let output = backend
