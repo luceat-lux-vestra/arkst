@@ -127,9 +127,7 @@ fn paged_top_row_composes_left_center_right_slots_without_overwrite() {
             "{typst}"
         );
         assert!(
-            typst.contains(&format!(
-                "align({alignment}, __arkst_margin.last().value)"
-            )),
+            typst.contains(&format!("align({alignment}, __arkst_margin.last().value)")),
             "{typst}"
         );
     }
