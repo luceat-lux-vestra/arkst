@@ -217,7 +217,9 @@ jobs:
           python3 tools/ci/test_hardening_drift_live.py
       - name: Test CodeQL Rust scope classifier
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
-        run: python3 tools/ci/test_codeql_scope.py
+        run: |
+          python3 tools/ci/test_codeql_scope.py
+          python3 tools/ci/test_codeql_rust_log_timing.py
       - name: Install pinned actionlint
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
         env:
