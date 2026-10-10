@@ -10,19 +10,12 @@ on:
         required: false
         type: boolean
         default: false
-  push:
-    branches: [main]
-    paths:
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - ".github/workflows/security.yml"
-      - ".github/actions/cargo-deny-prebuilt/action.yml"
-      - ".github/actions/cargo-deny-prebuilt/action.yml"
   pull_request:
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".github/workflows/security.yml"
+      - ".github/actions/cargo-deny-prebuilt/action.yml"
 
 permissions:
   contents: read
