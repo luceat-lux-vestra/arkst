@@ -306,3 +306,7 @@ checks, without network access:
 Repository-wide checks are reported separately from this document. A passing
 offline guard is evidence that the inventory is internally reconciled; it is
 not remote CI, a merge, or a claim of complete Quarkdown compatibility.
+
+### #185 bounded callable code-span slice (2026-10-11)
+
+The callable `.codespan(text)` now uses the shared builtin binder, raw-body fallback, and String conversion path to produce the existing backend-neutral `IrInline::Code` with the call-site span. Existing Typst lowering quotes/escapes it as `#raw(...)`; the call introduces no independent parser, renderer object, or code-caption producer. The independently authored `quarkdown_codespan_185` tests cover block and nested-inline materialization, text preservation, named/positional binding, invalid shape and conflicting body/argument failures, source-defined override, and serde. This is a bounded production subset: the canonical `primitive:codespan` row remains `PARTIAL` pending independent pinned-runtime/HTML and expanded output parity evidence. No change is made to #181 shared caption/index ownership or #180 TeX state.

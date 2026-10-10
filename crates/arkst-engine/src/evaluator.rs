@@ -5046,7 +5046,7 @@ impl Evaluator {
             Ok(bound) => bound,
             Err(outcome) => return outcome,
         };
-        match builtins::evaluate_bound(builtin, bound) {
+        match builtins::evaluate_bound(builtin, bound, span) {
             Ok(value) => CallOutcome::Value(value),
             Err(error) => {
                 if let Some(conversion) = error.conversion {
