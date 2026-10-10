@@ -98,6 +98,7 @@ pub(crate) enum BuiltinKind {
     IsNotEmpty,
     StartsWith,
     Plaintext,
+    Codespan,
     None,
     Otherwise,
     IsNone,
@@ -400,6 +401,14 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
     builtin_spec(
+        "codespan",
+        BuiltinKind::Codespan,
+        &["text"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
         "none",
         BuiltinKind::None,
         &[],
@@ -558,7 +567,7 @@ pub(crate) fn evaluate_with_origins(
     let bound = plan
         .bind(&candidates, body.as_ref(), fallback_span)
         .map_err(|failure| error(format!("`.{}` {}", builtin.name, failure.message)))?;
-    evaluate_bound(builtin, bound)
+    evaluate_bound(builtin, bound, fallback_span)
 }
 
 /// Evaluates a builtin after the engine-owned binder has selected every slot.
@@ -567,6 +576,7 @@ pub(crate) fn evaluate_with_origins(
 pub(crate) fn evaluate_bound(
     builtin: &BuiltinSpec,
     bound: BoundInvocation<InvocationValue>,
+    call_span: SourceSpan,
 ) -> Result<IrValue, BuiltinError> {
     let candidate_spans = bound
         .slots
@@ -613,6 +623,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::IsEmpty | BuiltinKind::IsNotEmpty => evaluate_empty_check(builtin, arguments),
         BuiltinKind::StartsWith => evaluate_startswith(builtin, arguments),
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
+        BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
         BuiltinKind::None => evaluate_none(builtin, arguments),
         BuiltinKind::Otherwise => evaluate_otherwise(builtin, arguments),
         BuiltinKind::IsNone => evaluate_isnone(builtin, arguments),
@@ -926,6 +937,25 @@ fn is_final_sigma(characters: &[char], index: usize, boundaries: &[bool]) -> boo
         cursor += 1;
     }
     true
+}
+
+/// A callable inline code producer; the shared binder/converter owns the
+/// String contract while this node reuses existing Markdown code lowering.
+fn evaluate_codespan(
+    mut arguments: BoundArguments,
+    call_span: SourceSpan,
+) -> Result<IrValue, BuiltinError> {
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.codespan` requires a text argument".to_string()))?;
+    let content = scalar_string_argument_result(&value, "text")?;
+    Ok(IrValue::Content(vec![IrNode::Paragraph {
+        content: vec![IrInline::Code {
+            content,
+            span: call_span,
+        }],
+        span: call_span,
+    }]))
 }
 
 fn evaluate_plaintext(
