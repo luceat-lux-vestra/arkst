@@ -295,8 +295,14 @@ impl LoweringContext {
             } => {
                 let before = self.output.len();
                 match (self.document_type, position) {
+                    (IrDocumentType::Paged, IrPageMarginPosition::TopLeft) => {
+                        self.lower_page_margin_marker(children, "arkst-page-margin-top-left");
+                    }
                     (IrDocumentType::Paged, IrPageMarginPosition::TopCenter) => {
                         self.lower_page_margin_marker(children, "arkst-page-margin-top-center");
+                    }
+                    (IrDocumentType::Paged, IrPageMarginPosition::TopRight) => {
+                        self.lower_page_margin_marker(children, "arkst-page-margin-top-right");
                     }
                     (IrDocumentType::Paged, IrPageMarginPosition::BottomCenter) => {
                         self.lower_page_margin_marker(children, "arkst-page-margin-bottom-center");
