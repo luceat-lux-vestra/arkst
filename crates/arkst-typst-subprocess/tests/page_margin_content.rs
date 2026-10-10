@@ -55,7 +55,10 @@ fn paged_top_and_bottom_center_use_persistent_page_query_state() {
         typst.contains("#set page(header: grid(columns: (1fr, 1fr, 1fr), none, context {"),
         "{typst}"
     );
-    assert!(typst.contains("#set page(footer: context {"), "{typst}");
+    assert!(
+        typst.contains("#set page(footer: grid(columns: (1fr, 1fr, 1fr), none, context {"),
+        "{typst}"
+    );
     assert!(typst.contains(
         "query(<arkst-page-margin-top-center>).filter(it => it.location().page() <= __arkst_page)"
     ));
@@ -162,6 +165,83 @@ fn paged_top_row_composes_left_center_right_slots_without_overwrite() {
 }
 
 #[test]
+fn paged_bottom_row_composes_left_center_right_slots_and_footer_sugar() {
+    let typst = lower(
+        ".doctype {paged}\n.pagemargin {bottomleft}\n    Left A\n.footer\n    Center A\n.pagemargin {bottomright}\n    Right A\n\n.pagebreak\n\n.pagemargin {bottomright}\n    Right B\nBody\n",
+    );
+
+    assert!(
+        typst.contains("#set page(footer: grid(columns: (1fr, 1fr, 1fr), context {"),
+        "{typst}"
+    );
+    assert_eq!(
+        typst.matches("#set page(footer:").count(),
+        1,
+        "bottom slots must compose into one footer channel: {typst}"
+    );
+    for (label, alignment) in [
+        ("arkst-page-margin-bottom-left", "left"),
+        ("arkst-page-margin-bottom-center", "center"),
+        ("arkst-page-margin-bottom-right", "right"),
+    ] {
+        assert!(
+            typst.contains(&format!(
+                "query(<{label}>).filter(it => it.location().page() <= __arkst_page)"
+            )),
+            "{typst}"
+        );
+        assert!(
+            typst.contains(&format!("align({alignment}, __arkst_margin.last().value)")),
+            "{typst}"
+        );
+    }
+    assert_eq!(typst.matches("<arkst-page-margin-bottom-left>").count(), 2);
+    assert_eq!(
+        typst.matches("<arkst-page-margin-bottom-center>").count(),
+        2
+    );
+    assert_eq!(typst.matches("<arkst-page-margin-bottom-right>").count(), 3);
+    assert!(!typst.contains("#set page(header:"));
+    let first_right = typst
+        .find("#metadata([\nRight A")
+        .expect("first right marker");
+    let break_pos = typst.find("#pagebreak").expect("page break");
+    let second_right = typst
+        .find("#metadata([\nRight B")
+        .expect("second right marker");
+    assert!(
+        first_right < break_pos && break_pos < second_right,
+        "{typst}"
+    );
+
+    with_typst("paged-bottom-row-page-margin", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst,
+                entry_path: "page-margin-content.qd".to_string(),
+            })
+            .expect("paged fixed bottom-row margins must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn paged_bottom_left_only_does_not_invent_other_slots() {
+    let typst = lower(".doctype {paged}\n.pagemargin {bottomleft}\n    Left only\nBody\n");
+    assert!(
+        typst.contains("#set page(footer: grid(columns: (1fr, 1fr, 1fr), context {"),
+        "{typst}"
+    );
+    assert!(typst.contains("else { none }\n}, none, none))"), "{typst}");
+    assert!(!typst.contains("#set page(header:"));
+    assert!(!typst.contains("query(<arkst-page-margin-bottom-center>)"));
+    assert!(!typst.contains("query(<arkst-page-margin-bottom-right>)"));
+}
+
+#[test]
 fn unsupported_page_margin_positions_and_document_types_fail_closed() {
     for (name, source) in [
         (
@@ -181,7 +261,7 @@ fn unsupported_page_margin_positions_and_document_types_fail_closed() {
         let typst = lower(source);
         assert!(
             typst.starts_with(
-                "#panic(\"Arkst page-margin output currently supports only paged top-left/top-center/top-right and bottom-center\")"
+                "#panic(\"Arkst page-margin output currently supports only paged fixed top and bottom left/center/right positions\")"
             ),
             "{name}: {typst}"
         );

@@ -16,7 +16,7 @@ use crate::lowering_base;
 
 const PRELUDE_MARKER: &str = "// Arkst Quarkdown v2.6 focus layout\n";
 const UNSUPPORTED_PAGE_MARGIN_PRELUDE: &str =
-    "#panic(\"Arkst page-margin output currently supports only paged top-left/top-center/top-right and bottom-center\")\n";
+    "#panic(\"Arkst page-margin output currently supports only paged fixed top and bottom left/center/right positions\")\n";
 
 /// Lower an Arkst IR document to Typst source, applying the bounded Quarkdown
 /// v2.6 `focus` layout adaptation when the evaluated document state requests it.
@@ -699,7 +699,9 @@ fn has_unsupported_page_margin(doc: &IrDocument) -> bool {
                     IrPageMarginPosition::TopLeft
                         | IrPageMarginPosition::TopCenter
                         | IrPageMarginPosition::TopRight
+                        | IrPageMarginPosition::BottomLeft
                         | IrPageMarginPosition::BottomCenter
+                        | IrPageMarginPosition::BottomRight
                 )
             }))
 }
@@ -743,9 +745,28 @@ fn page_margin_prelude(doc: &IrDocument) -> String {
             "#set page(header: grid(columns: (1fr, 1fr, 1fr), {left}, {center}, {right}))\n"
         ));
     }
-    if positions.contains(&IrPageMarginPosition::BottomCenter) {
-        let footer = page_margin_slot("arkst-page-margin-bottom-center", "center");
-        prelude.push_str(&format!("#set page(footer: {footer})\n"));
+    let has_bottom_left = positions.contains(&IrPageMarginPosition::BottomLeft);
+    let has_bottom_center = positions.contains(&IrPageMarginPosition::BottomCenter);
+    let has_bottom_right = positions.contains(&IrPageMarginPosition::BottomRight);
+    if has_bottom_left || has_bottom_center || has_bottom_right {
+        let left = if has_bottom_left {
+            page_margin_slot("arkst-page-margin-bottom-left", "left")
+        } else {
+            "none".to_string()
+        };
+        let center = if has_bottom_center {
+            page_margin_slot("arkst-page-margin-bottom-center", "center")
+        } else {
+            "none".to_string()
+        };
+        let right = if has_bottom_right {
+            page_margin_slot("arkst-page-margin-bottom-right", "right")
+        } else {
+            "none".to_string()
+        };
+        prelude.push_str(&format!(
+            "#set page(footer: grid(columns: (1fr, 1fr, 1fr), {left}, {center}, {right}))\n"
+        ));
     }
     prelude
 }
