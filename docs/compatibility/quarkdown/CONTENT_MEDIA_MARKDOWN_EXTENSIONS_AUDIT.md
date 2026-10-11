@@ -24,11 +24,11 @@ owned status counts are:
 | 'SUPPORTED_END_TO_END' | 13 |
 | 'SUPPORTED_SEMANTICS' | 3 |
 | 'PARSED_ONLY' | 1 |
-| 'PARTIAL' | 15 |
+| 'PARTIAL' | 16 |
 | 'UNSUPPORTED' | 35 |
 | 'DEFERRED' | 2 |
 | 'BLOCKED' | 1 |
-| 'UNKNOWN' | 1 |
+| 'UNKNOWN' | 0 |
 | **Owned total** | **71** |
 | 'NOT_APPLICABLE' handoffs | 12 |
 | **Manifest total** | **83** |
@@ -314,3 +314,7 @@ The callable `.codespan(text)` now uses the shared builtin binder, raw-body fall
 ### #185 bounded explicit-pagebreak grammar reconciliation (2026-10-11)
 
 The pinned Quarkdown v2.5.1 lexer accepts an isolated line of **three or more** angle brackets, with at most three leading spaces and optional trailing whitespace. Existing Arkst code already implemented the Quarkdown-only `Block::PageBreak`, backend-neutral `IrNode::PageBreak`, source-defined-aware zero-argument `.pagebreak` builtin, serde, and Typst `#pagebreak(weak: true)` lowering, but the block parser recognized only the literal three-character spelling. The bounded #185 grammar correction admits longer markers without broadening Markdown mode, code fences, or mixed-paragraph recognition. Parser and core tests cover delimiter lengths, malformed markers, whitespace, spans, call-vs-syntax IR identity and serialization; the selected Typst subprocess test proves actual PDF output. Both canonical #154 pagebreak rows are conservatively `PARTIAL`, not complete upstream parity: pinned `.extend {pagebreak}` interception and complete document-type/renderer equivalence remain unverified. No separate pagebreak evaluator or new IR/backend type has been introduced.
+
+### #184 bounded typed keybinding producer (2026-10-11)
+
+The callable `.keybinding(input)` uses the shared builtin binder and String conversion path, including the raw-body fallback, and retains ordered modifier/key variants in `IrInline::Keybinding`. Independent tests exercise separator/alias parsing, literal key names, input diagnostics, precedence, provenance and IR serialization; Typst renders generic keycaps and a required subprocess test checks PDF creation. Canonical `primitive:keybinding` becomes `PARTIAL` rather than `UNKNOWN`; dynamic browser/platform-aware macOS glyph replacement and full pinned HTML/CSS parity are not claimed. No shared #181 caption/index or #178 slides state is reimplemented.
