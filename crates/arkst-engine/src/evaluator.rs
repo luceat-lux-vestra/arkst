@@ -5016,7 +5016,8 @@ impl Evaluator {
                     None
                 }
             }
-            builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
+            builtins::BuiltinBodyPolicy::BindEvaluatedContent
+            | builtins::BuiltinBodyPolicy::BindEvaluatedFirst => {
                 if let Some(call_body) = body {
                     let body = match self.evaluate_call_body_value_context(
                         call_body,
@@ -5089,6 +5090,11 @@ impl Evaluator {
         }
 
         for (index, slot) in bound.slots.iter_mut().enumerate() {
+            // Only the first .text argument is InlineMarkdownContent. The
+            // second (url) is String?, not Markdown and must not be reparsed.
+            if builtin.kind == builtins::BuiltinKind::Text && index != 0 {
+                continue;
+            }
             let BoundSlot::Explicit { value, span } = slot else {
                 continue;
             };
@@ -19491,7 +19497,8 @@ fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> Extensi
     match policy {
         builtins::BuiltinBodyPolicy::Reject => ExtensionBodyPolicy::Reject,
         builtins::BuiltinBodyPolicy::BindRaw => ExtensionBodyPolicy::BindRaw,
-        builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
+        builtins::BuiltinBodyPolicy::BindEvaluatedContent
+        | builtins::BuiltinBodyPolicy::BindEvaluatedFirst => {
             ExtensionBodyPolicy::BindEvaluatedContent
         }
     }
@@ -19500,7 +19507,7 @@ fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> Extensi
 fn native_extension_body_policy(policy: BodyPolicy) -> ExtensionBodyPolicy {
     match policy {
         BodyPolicy::Reject => ExtensionBodyPolicy::Reject,
-        BodyPolicy::BindFinal => ExtensionBodyPolicy::BindEvaluatedContent,
+        BodyPolicy::BindFinal | BodyPolicy::BindFirst => ExtensionBodyPolicy::BindEvaluatedContent,
         BodyPolicy::AllowSeparate => ExtensionBodyPolicy::AllowSeparate,
     }
 }

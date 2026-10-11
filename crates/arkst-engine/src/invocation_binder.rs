@@ -78,6 +78,9 @@ impl<'a> ParameterMetadata<'a> {
 pub(crate) enum BodyPolicy {
     Reject,
     BindFinal,
+    /// Bind a source-backed body to the first declared parameter. A later
+    /// optional named argument may follow an @Body-first signature.
+    BindFirst,
     /// The target owns a separate body contract (for example a Markdown
     /// layout body or an iteration callback). The binder validates explicit
     /// slots while leaving body interpretation to that target adapter.
@@ -309,13 +312,17 @@ pub(crate) fn plan<T>(
                 hint: "Remove the body or use the target's supported body form.".to_string(),
             });
         }
-        (Some(body), BodyPolicy::BindFinal) => {
-            let Some(index) = parameters.len().checked_sub(1) else {
+        (Some(body), BodyPolicy::BindFinal | BodyPolicy::BindFirst) => {
+            let Some(index) = (if body_policy == BodyPolicy::BindFirst {
+                (!parameters.is_empty()).then_some(0)
+            } else {
+                parameters.len().checked_sub(1)
+            }) else {
                 return Err(BindingError {
-                    message: "a body requires a final parameter".to_string(),
+                    message: "a body requires a declared parameter".to_string(),
                     primary: body.span(),
                     secondary: Vec::new(),
-                    hint: "Add a final body parameter or remove the body.".to_string(),
+                    hint: "Add a body parameter or remove the body.".to_string(),
                 });
             };
             if let Some(previous_span) = bound_spans[index] {
@@ -326,14 +333,19 @@ pub(crate) fn plan<T>(
                     ),
                     primary: body.span(),
                     secondary: vec![previous_span],
-                    hint: "Remove the final explicit value when using a body fallback.".to_string(),
+                    hint: if body_policy == BodyPolicy::BindFinal {
+                        "Remove the final explicit value when using a body fallback."
+                    } else {
+                        "Remove the explicit value already occupying the body parameter."
+                    }
+                    .to_string(),
                 });
             }
             slots[index] = Some(PlannedSlot::Body);
             bound_spans[index] = Some(body.span());
         }
         (Some(_), BodyPolicy::AllowSeparate) | (None, BodyPolicy::AllowSeparate) => {}
-        (None, BodyPolicy::Reject | BodyPolicy::BindFinal) => {}
+        (None, BodyPolicy::Reject | BodyPolicy::BindFinal | BodyPolicy::BindFirst) => {}
     }
 
     let mut planned = Vec::with_capacity(parameters.len());
@@ -364,7 +376,8 @@ pub(crate) fn plan<T>(
             })
             .collect(),
         candidate_count: candidates.len(),
-        binds_body: matches!(body_policy, BodyPolicy::BindFinal) && body.is_some(),
+        binds_body: matches!(body_policy, BodyPolicy::BindFinal | BodyPolicy::BindFirst)
+            && body.is_some(),
     })
 }
 
