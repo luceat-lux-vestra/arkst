@@ -60,6 +60,13 @@ fn text_explicit_named_text_and_url_share_normal_binding() {
 }
 
 #[test]
+fn text_positional_content_and_url_are_valid_and_typed() {
+    let (url, content) = single_link(".text {hello} {https://example.org/positional}\n");
+    assert_eq!(url, "https://example.org/positional");
+    assert!(matches!(&content[..], [IrInline::Text { content, .. }] if content == "hello"));
+}
+
+#[test]
 fn text_none_url_still_preserves_unstyled_inline_content() {
     let result = compile_source(".text url:{.none} {**Bold**}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
