@@ -7,18 +7,25 @@ use arkst_typst::{TypstBackend, TypstInput};
 use arkst_typst_subprocess::SubprocessBackend;
 
 #[test]
-fn explicitly_block_math_compiles_to_real_typst_pdf() {
-    let project = VirtualProjectBuilder::new()
-        .entry("math.qd")
-        .expect("entry")
-        .add_source("math.qd", ".math {x^2 + y} block:{true}\n")
-        .expect("source")
-        .build()
-        .expect("project");
-    let result = compile(&project, &CompileOptions::default());
-    assert!(result.diagnostics.is_empty(), "{result:?}");
-    let source = lower_to_typst_code(&result.ir);
-    assert!(source.contains("$ x^2 + y $"), "{source}");
+fn explicit_and_inferred_block_math_compile_to_real_typst_pdf() {
+    let mut typst_sources = Vec::new();
+    for (input, expected) in [
+        (".math {x^2 + y} block:{true}\n", "$ x^2 + y $"),
+        (".math\n    a + b\n", "$ a + b $"),
+    ] {
+        let project = VirtualProjectBuilder::new()
+            .entry("math.qd")
+            .expect("entry")
+            .add_source("math.qd", input)
+            .expect("source")
+            .build()
+            .expect("project");
+        let result = compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let source = lower_to_typst_code(&result.ir);
+        assert!(source.contains(expected), "{source}");
+        typst_sources.push(source);
+    }
 
     let path = if let Some(path) = std::env::var_os("ARKST_TYPST_PATH") {
         let path = PathBuf::from(path);
@@ -40,11 +47,13 @@ fn explicitly_block_math_compiles_to_real_typst_pdf() {
         eprintln!("[integration] Typst unavailable; skipping PDF check");
         return;
     };
-    let output = SubprocessBackend::new(path)
-        .compile(&TypstInput {
-            source,
-            entry_path: "math.qd".into(),
-        })
-        .expect("block math must compile");
-    assert!(output.pdf.expect("PDF output").starts_with(b"%PDF-"));
+    for source in typst_sources {
+        let output = SubprocessBackend::new(path.clone())
+            .compile(&TypstInput {
+                source,
+                entry_path: "math.qd".into(),
+            })
+            .expect("block math must compile");
+        assert!(output.pdf.expect("PDF output").starts_with(b"%PDF-"));
+    }
 }

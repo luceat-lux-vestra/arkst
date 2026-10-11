@@ -436,8 +436,8 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         BuiltinBodyPolicy::BindRaw,
     ),
     // Pinned Primitives.kt: @Body content precedes optional block/ref.
-    // Style/extension and automatically inferred inline mode remain outside
-    // this bounded, explicit block:true implementation.
+    // Style/extension and inline math remain outside this bounded slice;
+    // an indented raw block body may infer block:true.
     builtin_spec_with_defaults(
         "math",
         BuiltinKind::Math,
@@ -622,7 +622,7 @@ pub(crate) fn evaluate_with_origins(
     let bound = plan
         .bind(&candidates, body.as_ref(), fallback_span)
         .map_err(|failure| error(format!("`.{}` {}", builtin.name, failure.message)))?;
-    evaluate_bound(builtin, bound, fallback_span)
+    evaluate_bound(builtin, bound, fallback_span, has_body)
 }
 
 /// Evaluates a builtin after the engine-owned binder has selected every slot.
@@ -632,6 +632,7 @@ pub(crate) fn evaluate_bound(
     builtin: &BuiltinSpec,
     bound: BoundInvocation<InvocationValue>,
     call_span: SourceSpan,
+    is_block_call: bool,
 ) -> Result<IrValue, BuiltinError> {
     let candidate_spans = bound
         .slots
@@ -680,7 +681,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
         BuiltinKind::Text => evaluate_text(arguments, call_span),
         BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
-        BuiltinKind::Math => evaluate_math(arguments, call_span),
+        BuiltinKind::Math => evaluate_math(arguments, call_span, is_block_call),
         BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
         BuiltinKind::LoremIpsum => Ok(IrValue::String(LOREM_IPSUM_TEXT.to_string())),
         BuiltinKind::None => evaluate_none(builtin, arguments),
@@ -1018,12 +1019,13 @@ fn evaluate_codespan(
 }
 
 /// Bounded pinned-v2.5.1 `.math` block producer. The first String slot
-/// uses the shared source-backed dynamic conversion; unproven implicit
-/// inline/block inference, TeX macros, reference indexing and style are
-/// deliberately rejected instead of approximated by Typst's math dialect.
+/// uses shared source-backed conversion. An indented block body may infer
+/// block:true; inline math, TeX macros, references and styling remain
+/// unsupported rather than approximated by Typst.
 fn evaluate_math(
     mut arguments: BoundArguments,
     call_span: SourceSpan,
+    is_block_call: bool,
 ) -> Result<IrValue, BuiltinError> {
     let content = arguments
         .remove(0)
@@ -1032,9 +1034,10 @@ fn evaluate_math(
     let block = arguments.remove(0);
     match block.as_ref().map(|value| &value.value) {
         Some(IrValue::Boolean(true)) => {}
+        None if is_block_call => {}
         _ => {
             return Err(error(
-                "`.math` currently requires explicit block:true; inferred/inline math is unsupported"
+                "`.math` requires block:true or an indented block body; inline math is unsupported"
                     .to_string(),
             ));
         }
