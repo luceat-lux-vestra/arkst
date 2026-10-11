@@ -401,7 +401,7 @@ jobs:
           cache-targets: false
       - name: Install Typst 0.15.1 (pinned)
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
-        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        uses: typst-community/setup-typst@fee4b65b091cc546f02ce3be15fad8760f38a108 # v5
         with:
           typst-version: 0.15.1
 
@@ -699,7 +699,7 @@ jobs:
           toolchain: 1.98.0
 
       - if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (steps.scope.outputs.relevant == 'true') }}
-        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        uses: typst-community/setup-typst@fee4b65b091cc546f02ce3be15fad8760f38a108 # v5
         with:
           typst-version: 0.15.1
 
@@ -781,7 +781,7 @@ jobs:
 
       - name: Upload Markdown compatibility artifacts
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (always() && steps.scope.outputs.relevant == 'true') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: markdown-compat-${{ github.run_id }}
           path: ${{ runner.temp }}/markdown-compat-report
