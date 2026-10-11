@@ -72,6 +72,7 @@ use arkst_ir::{
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
 use arkst_source::{SourceId, SourceSpan};
+use regex::RegexBuilder;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -5015,7 +5016,8 @@ impl Evaluator {
                     None
                 }
             }
-            builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
+            builtins::BuiltinBodyPolicy::BindEvaluatedContent
+            | builtins::BuiltinBodyPolicy::BindEvaluatedFirst => {
                 if let Some(call_body) = body {
                     let body = match self.evaluate_call_body_value_context(
                         call_body,
@@ -5080,11 +5082,19 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<invocation_binder::BoundInvocation<InvocationValue>, CallOutcome> {
-        if builtin.kind != builtins::BuiltinKind::Plaintext {
+        if !matches!(
+            builtin.kind,
+            builtins::BuiltinKind::Plaintext | builtins::BuiltinKind::Text
+        ) {
             return Ok(bound);
         }
 
         for (index, slot) in bound.slots.iter_mut().enumerate() {
+            // Only the first .text argument is InlineMarkdownContent. The
+            // second (url) is String?, not Markdown and must not be reparsed.
+            if builtin.kind == builtins::BuiltinKind::Text && index != 0 {
+                continue;
+            }
             let BoundSlot::Explicit { value, span } = slot else {
                 continue;
             };
@@ -5104,7 +5114,11 @@ impl Evaluator {
                             parameter.and_then(|parameter| parameter.name_span),
                             call_span,
                         ),
-                        Some("`.plaintext` content"),
+                        Some(if builtin.kind == builtins::BuiltinKind::Text {
+                            "`.text` inline content"
+                        } else {
+                            "`.plaintext` content"
+                        }),
                     ));
                     return Err(CallOutcome::Failed);
                 }
@@ -10213,15 +10227,6 @@ impl Evaluator {
                 Err(()) => return CallOutcome::Failed,
             };
 
-        if arguments.pattern.is_some() {
-            diagnostics.push(resource_diagnostic(
-                "E3001",
-                "`.listfiles` `pattern` filtering is not implemented by the bounded logical-directory slice".to_string(),
-                *span,
-                "Omit `pattern`; #189 retains regex filtering as explicit compatibility debt.",
-            ));
-            return CallOutcome::Failed;
-        }
         if arguments.full_path {
             diagnostics.push(resource_diagnostic(
                 "E8001",
@@ -10261,10 +10266,67 @@ impl Evaluator {
             return outcome;
         }
 
+        // Pinned v2.5.1 uses Kotlin Regex.matches(file.name): a FULL
+        // basename match after directory selection and before sorting.
+        // Limit this slice to ASCII inputs and the shared Rust/Java regexp
+        // syntax. JVM-only extensions, inline flags, and Unicode-varying
+        // behavior are deliberately NOT interpreted with approximate results.
+        let name_pattern = if let Some(pattern) = arguments.pattern.as_deref() {
+            if pattern.len() > 4096
+                || !pattern.is_ascii()
+                || pattern.contains("(?")
+                || pattern.contains(r"\p")
+                || pattern.contains(r"\P")
+            {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    "`.listfiles` `pattern` uses unsupported regex syntax or exceeds the ASCII/4096-byte bound".to_string(),
+                    *span,
+                    "Use the bounded ASCII regex subset without inline flags or JVM-only constructs; #189 tracks full JVM parity.",
+                ));
+                return CallOutcome::Failed;
+            }
+            let anchored = format!(r"\A(?:{pattern})\z");
+            match RegexBuilder::new(&anchored)
+                .size_limit(1 << 20)
+                .dfa_size_limit(1 << 20)
+                .build()
+            {
+                Ok(regex) => Some(regex),
+                Err(error) => {
+                    diagnostics.push(resource_diagnostic(
+                        "E3001",
+                        format!("`.listfiles` invalid or unsupported `pattern` regex: {error}"),
+                        *span,
+                        "Use supported bounded ASCII regular-expression syntax; do not substitute a literal/glob approximation.",
+                    ));
+                    return CallOutcome::Failed;
+                }
+            }
+        } else {
+            None
+        };
+
         let mut entries = entries
             .into_iter()
             .filter(|entry| arguments.list_directories || entry.kind == ResourceEntryKind::File)
             .collect::<Vec<_>>();
+
+        if let Some(regex) = name_pattern.as_ref() {
+            if let Some(entry) = entries.iter().find(|entry| !entry.name.is_ascii()) {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    format!(
+                        "`.listfiles` `pattern` cannot claim exact JVM regex parity for non-ASCII filename `{}`",
+                        entry.name
+                    ),
+                    *span,
+                    "Filter only ASCII filenames; #189 retains Unicode/JVM regex parity as explicit debt.",
+                ));
+                return CallOutcome::Failed;
+            }
+            entries.retain(|entry| regex.is_match(&entry.name));
+        }
 
         match arguments.sort_by {
             ListFilesSort::None => {
@@ -19435,7 +19497,8 @@ fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> Extensi
     match policy {
         builtins::BuiltinBodyPolicy::Reject => ExtensionBodyPolicy::Reject,
         builtins::BuiltinBodyPolicy::BindRaw => ExtensionBodyPolicy::BindRaw,
-        builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
+        builtins::BuiltinBodyPolicy::BindEvaluatedContent
+        | builtins::BuiltinBodyPolicy::BindEvaluatedFirst => {
             ExtensionBodyPolicy::BindEvaluatedContent
         }
     }
@@ -19444,7 +19507,7 @@ fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> Extensi
 fn native_extension_body_policy(policy: BodyPolicy) -> ExtensionBodyPolicy {
     match policy {
         BodyPolicy::Reject => ExtensionBodyPolicy::Reject,
-        BodyPolicy::BindFinal => ExtensionBodyPolicy::BindEvaluatedContent,
+        BodyPolicy::BindFinal | BodyPolicy::BindFirst => ExtensionBodyPolicy::BindEvaluatedContent,
         BodyPolicy::AllowSeparate => ExtensionBodyPolicy::AllowSeparate,
     }
 }

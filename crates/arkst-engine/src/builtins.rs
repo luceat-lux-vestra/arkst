@@ -98,6 +98,7 @@ pub(crate) enum BuiltinKind {
     IsNotEmpty,
     StartsWith,
     Plaintext,
+    Text,
     Codespan,
     Keybinding,
     LoremIpsum,
@@ -118,6 +119,9 @@ pub(crate) enum BuiltinBodyPolicy {
     /// representation before target conversion.
     BindRaw,
     BindEvaluatedContent,
+    /// A parsed inline body occupies the FIRST declared slot, before the
+    /// optional URL parameter of pinned Quarkdown `.text`.
+    BindEvaluatedFirst,
 }
 
 impl BuiltinBodyPolicy {
@@ -125,6 +129,7 @@ impl BuiltinBodyPolicy {
         match self {
             Self::Reject => BodyPolicy::Reject,
             Self::BindRaw | Self::BindEvaluatedContent => BodyPolicy::BindFinal,
+            Self::BindEvaluatedFirst => BodyPolicy::BindFirst,
         }
     }
 }
@@ -407,6 +412,17 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
+    // Pinned Text.kt places @Body text FIRST, ahead of optional
+    // link options. Preserve inline structure and bind the body to that slot.
+    builtin_spec_with_defaults(
+        "text",
+        BuiltinKind::Text,
+        &["text", "url"],
+        &[1],
+        2,
+        true,
+        BuiltinBodyPolicy::BindEvaluatedFirst,
+    ),
     builtin_spec(
         "codespan",
         BuiltinKind::Codespan,
@@ -646,6 +662,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::IsEmpty | BuiltinKind::IsNotEmpty => evaluate_empty_check(builtin, arguments),
         BuiltinKind::StartsWith => evaluate_startswith(builtin, arguments),
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
+        BuiltinKind::Text => evaluate_text(arguments, call_span),
         BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
         BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
         BuiltinKind::LoremIpsum => Ok(IrValue::String(LOREM_IPSUM_TEXT.to_string())),
@@ -1019,6 +1036,101 @@ fn evaluate_keybinding(
         content: vec![IrInline::Keybinding { parts, span }],
         span,
     }]))
+}
+
+/// The default, option-free .text transform is visually transparent.
+/// Preserve every evaluated inline leaf rather than projecting to plain text;
+/// any styling arguments remain unbound/unsupported by the narrow signature.
+/// The pinned `.text url` String input may be parsed as one Markdown
+/// autolink. Preserve that exact URL without broadening scalar String
+/// conversion to arbitrary formatted or linked content.
+fn text_url_string_conversion(
+    value: &InvocationValue,
+) -> Result<String, value_conversion::ConversionError> {
+    scalar_string_conversion(value).or_else(|error| {
+        let IrValue::Content(nodes) = &value.value else {
+            return Err(error);
+        };
+        let [IrNode::Paragraph { content, .. }] = nodes.as_slice() else {
+            return Err(error);
+        };
+        let [IrInline::Link {
+            content,
+            destination,
+            title: None,
+            ..
+        }] = content.as_slice()
+        else {
+            return Err(error);
+        };
+        let [IrInline::Text { content: label, .. }] = content.as_slice() else {
+            return Err(error);
+        };
+        if label == destination {
+            Ok(destination.clone())
+        } else {
+            Err(error)
+        }
+    })
+}
+
+fn evaluate_text(
+    mut arguments: BoundArguments,
+    call_span: SourceSpan,
+) -> Result<IrValue, BuiltinError> {
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.text` requires inline content".to_string()))?;
+    let url = arguments
+        .remove(0)
+        .map(|value| match &value.value {
+            IrValue::None => Ok(None),
+            _ => {
+                let url = text_url_string_conversion(&value).map_err(|cause| {
+                    conversion_error(
+                        "`.text` `url` must be a String or None".to_string(),
+                        "url",
+                        cause,
+                    )
+                })?;
+                if url.trim().is_empty() {
+                    return Err(error(
+                        "`.text` empty `url` text-derived destination is not yet supported"
+                            .to_string(),
+                    ));
+                }
+                Ok(Some(url))
+            }
+        })
+        .transpose()?
+        .flatten();
+    match value.value {
+        IrValue::Content(nodes) if url.is_none() && nodes.is_empty() => Ok(IrValue::Content(nodes)),
+        IrValue::Content(nodes) if nodes.is_empty() => {
+            // Upstream accepts an empty inline body, but the Typst/Link
+            // projection of an empty display label is not proven here.
+            Err(error(
+                "`.text` URL requires nonempty inline content".to_string(),
+            ))
+        }
+        IrValue::Content(mut nodes) if matches!(nodes.as_slice(), [IrNode::Paragraph { .. }]) => {
+            if let Some(destination) = url {
+                if let IrNode::Paragraph { content, .. } = &mut nodes[0] {
+                    let children = std::mem::take(content);
+                    *content = vec![IrInline::Link {
+                        content: children,
+                        destination,
+                        title: None,
+                        span: call_span,
+                    }];
+                }
+            }
+            Ok(IrValue::Content(nodes))
+        }
+        _ => Err(error(
+            "`.text` requires a single inline paragraph, not block content".to_string(),
+        )),
+    }
 }
 
 fn evaluate_plaintext(
@@ -1873,7 +1985,9 @@ mod tests {
     #[test]
     fn regular_body_fallback_policy_is_declared_per_signature() {
         for builtin in regular_builtins() {
-            let expected = if builtin.name == "plaintext" {
+            let expected = if builtin.name == "text" {
+                BuiltinBodyPolicy::BindEvaluatedFirst
+            } else if builtin.name == "plaintext" {
                 BuiltinBodyPolicy::BindEvaluatedContent
             } else if builtin.signature.parameter_names.is_empty() {
                 BuiltinBodyPolicy::Reject
