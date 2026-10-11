@@ -100,6 +100,7 @@ pub(crate) enum BuiltinKind {
     Plaintext,
     Codespan,
     Keybinding,
+    LoremIpsum,
     None,
     Otherwise,
     IsNone,
@@ -184,6 +185,11 @@ const fn builtin_spec_with_defaults(
         body_policy,
     }
 }
+
+/// Independently authored deterministic placeholder paragraph. This is not
+/// the GPL-licensed pinned Quarkdown resource: exact text parity is outside
+/// this bounded implementation slice.
+const LOREM_IPSUM_TEXT: &str = "Lorem ipsum dolor sit amet. Integer cursus neque vel arcu luctus, vitae posuere velit facilisis. Curabitur vitae purus sed sapien laoreet tincidunt. Morbi tempor erat ac nibh dignissim, in tincidunt nisl placerat. Donec porta lorem at eros vestibulum, ut viverra justo cursus.";
 
 /// The complete regular scalar builtin inventory.
 ///
@@ -418,6 +424,14 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
+        "loremipsum",
+        BuiltinKind::LoremIpsum,
+        &[],
+        0,
+        false,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
         "none",
         BuiltinKind::None,
         &[],
@@ -634,6 +648,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
         BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
         BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
+        BuiltinKind::LoremIpsum => Ok(IrValue::String(LOREM_IPSUM_TEXT.to_string())),
         BuiltinKind::None => evaluate_none(builtin, arguments),
         BuiltinKind::Otherwise => evaluate_otherwise(builtin, arguments),
         BuiltinKind::IsNone => evaluate_isnone(builtin, arguments),

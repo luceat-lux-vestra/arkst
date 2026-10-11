@@ -245,7 +245,7 @@ fn reconciliation_assigns_actionable_content_gaps_without_closed_owner_links() {
     assert!(keybinding[28].contains("#184"));
 
     let loremipsum = content_row("primitive:loremipsum");
-    assert_eq!(loremipsum[26], "UNSUPPORTED");
+    assert_eq!(loremipsum[26], "PARTIAL");
     assert_eq!(loremipsum[27], "#184");
     assert!(loremipsum[28].contains("#184"));
 
