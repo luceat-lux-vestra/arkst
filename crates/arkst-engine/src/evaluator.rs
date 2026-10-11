@@ -10268,15 +10268,16 @@ impl Evaluator {
 
         // Pinned v2.5.1 uses Kotlin Regex.matches(file.name): a FULL
         // basename match after directory selection and before sorting.
-        // Limit this slice to ASCII inputs and the shared Rust/Java regexp
-        // syntax. JVM-only extensions, inline flags, and Unicode-varying
-        // behavior are deliberately NOT interpreted with approximate results.
+        // Keep the ASCII regex subset. Non-ASCII operator-free literals have
+        // the same case-sensitive exact-basename meaning in Kotlin/JVM regex.
+        // Full Unicode regex dialect parity is not claimed.
+        let mut unicode_literal = None;
         let name_pattern = if let Some(pattern) = arguments.pattern.as_deref() {
             if pattern.len() > 4096
-                || !pattern.is_ascii()
-                || pattern.contains("(?")
-                || pattern.contains(r"\p")
-                || pattern.contains(r"\P")
+                || (pattern.is_ascii()
+                    && (pattern.contains("(?")
+                        || pattern.contains(r"\p")
+                        || pattern.contains(r"\P")))
             {
                 diagnostics.push(resource_diagnostic(
                     "E3001",
@@ -10286,21 +10287,40 @@ impl Evaluator {
                 ));
                 return CallOutcome::Failed;
             }
-            let anchored = format!(r"\A(?:{pattern})\z");
-            match RegexBuilder::new(&anchored)
-                .size_limit(1 << 20)
-                .dfa_size_limit(1 << 20)
-                .build()
-            {
-                Ok(regex) => Some(regex),
-                Err(error) => {
+            if !pattern.is_ascii() {
+                // Exclude every regex operator and escape in this bounded
+                // Unicode-literal slice. Never approximate JVM classes.
+                if pattern
+                    .chars()
+                    .any(|c| c.is_ascii() && r"\.^$|?*+()[]{}".contains(c))
+                {
                     diagnostics.push(resource_diagnostic(
                         "E3001",
-                        format!("`.listfiles` invalid or unsupported `pattern` regex: {error}"),
+                        "listfiles non-ASCII pattern regex syntax is unsupported".to_string(),
                         *span,
-                        "Use supported bounded ASCII regular-expression syntax; do not substitute a literal/glob approximation.",
+                        "Use a plain Unicode literal; #189 retains full JVM regex parity.",
                     ));
                     return CallOutcome::Failed;
+                }
+                unicode_literal = Some(pattern);
+                None
+            } else {
+                let anchored = format!(r"\A(?:{pattern})\z");
+                match RegexBuilder::new(&anchored)
+                    .size_limit(1 << 20)
+                    .dfa_size_limit(1 << 20)
+                    .build()
+                {
+                    Ok(regex) => Some(regex),
+                    Err(error) => {
+                        diagnostics.push(resource_diagnostic(
+                            "E3001",
+                            format!("`.listfiles` invalid or unsupported `pattern` regex: {error}"),
+                            *span,
+                            "Use supported bounded ASCII regular-expression syntax; do not substitute a literal/glob approximation.",
+                        ));
+                        return CallOutcome::Failed;
+                    }
                 }
             }
         } else {
@@ -10312,7 +10332,9 @@ impl Evaluator {
             .filter(|entry| arguments.list_directories || entry.kind == ResourceEntryKind::File)
             .collect::<Vec<_>>();
 
-        if let Some(regex) = name_pattern.as_ref() {
+        if let Some(literal) = unicode_literal {
+            entries.retain(|entry| entry.name == literal);
+        } else if let Some(regex) = name_pattern.as_ref() {
             if let Some(entry) = entries.iter().find(|entry| !entry.name.is_ascii()) {
                 diagnostics.push(resource_diagnostic(
                     "E3001",
