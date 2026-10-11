@@ -65,3 +65,21 @@ fn pagebreak_ir_round_trips_through_wire_format() {
         [IrNode::PageBreak { .. }]
     ));
 }
+
+#[test]
+fn expanded_pagebreak_grammar_reuses_native_pagebreak_ir_and_serde() {
+    let result = compile_source(".pagebreak\n\n<<<<\n\n<<<<<\n");
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(page_break_count(&result), 3);
+    let encoded = serde_json::to_value(&result.ir).expect("serialize expanded break IR");
+    let decoded: arkst_core::ir::IrDocument =
+        serde_json::from_value(encoded).expect("deserialize expanded break IR");
+    assert_eq!(
+        decoded
+            .nodes
+            .iter()
+            .filter(|node| matches!(node, IrNode::PageBreak { .. }))
+            .count(),
+        3
+    );
+}

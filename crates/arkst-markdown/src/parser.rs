@@ -771,7 +771,12 @@ fn explicit_page_break_spans(source: &str, span: ByteSpan) -> Option<Vec<ByteSpa
             .unwrap_or(raw_line)
             .strip_suffix('\r')
             .unwrap_or_else(|| raw_line.strip_suffix('\n').unwrap_or(raw_line));
-        if line.trim() != "<<<" {
+        // Pinned v2.5.1 recognizes 3+ angle brackets, optionally preceded
+        // by at most three spaces and followed by horizontal whitespace.
+        let marker = line.trim_start_matches(' ');
+        let leading_spaces = line.len() - marker.len();
+        let marker = marker.trim_end_matches([' ', '\t']);
+        if leading_spaces > 3 || marker.len() < 3 || !marker.bytes().all(|byte| byte == b'<') {
             return None;
         }
         spans.push(ByteSpan::new(

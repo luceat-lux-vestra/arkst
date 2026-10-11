@@ -24,8 +24,8 @@ owned status counts are:
 | 'SUPPORTED_END_TO_END' | 13 |
 | 'SUPPORTED_SEMANTICS' | 3 |
 | 'PARSED_ONLY' | 1 |
-| 'PARTIAL' | 13 |
-| 'UNSUPPORTED' | 37 |
+| 'PARTIAL' | 15 |
+| 'UNSUPPORTED' | 35 |
 | 'DEFERRED' | 2 |
 | 'BLOCKED' | 1 |
 | 'UNKNOWN' | 1 |
@@ -310,3 +310,7 @@ not remote CI, a merge, or a claim of complete Quarkdown compatibility.
 ### #185 bounded callable code-span slice (2026-10-11)
 
 The callable `.codespan(text)` now uses the shared builtin binder, raw-body fallback, and String conversion path to produce the existing backend-neutral `IrInline::Code` with the call-site span. Existing Typst lowering quotes/escapes it as `#raw(...)`; the call introduces no independent parser, renderer object, or code-caption producer. The independently authored `quarkdown_codespan_185` tests cover block and nested-inline materialization, text preservation, named/positional binding, invalid shape and conflicting body/argument failures, source-defined override, and serde. This is a bounded production subset: the canonical `primitive:codespan` row remains `PARTIAL` pending independent pinned-runtime/HTML and expanded output parity evidence. No change is made to #181 shared caption/index ownership or #180 TeX state.
+
+### #185 bounded explicit-pagebreak grammar reconciliation (2026-10-11)
+
+The pinned Quarkdown v2.5.1 lexer accepts an isolated line of **three or more** angle brackets, with at most three leading spaces and optional trailing whitespace. Existing Arkst code already implemented the Quarkdown-only `Block::PageBreak`, backend-neutral `IrNode::PageBreak`, source-defined-aware zero-argument `.pagebreak` builtin, serde, and Typst `#pagebreak(weak: true)` lowering, but the block parser recognized only the literal three-character spelling. The bounded #185 grammar correction admits longer markers without broadening Markdown mode, code fences, or mixed-paragraph recognition. Parser and core tests cover delimiter lengths, malformed markers, whitespace, spans, call-vs-syntax IR identity and serialization; the selected Typst subprocess test proves actual PDF output. Both canonical #154 pagebreak rows are conservatively `PARTIAL`, not complete upstream parity: pinned `.extend {pagebreak}` interception and complete document-type/renderer equivalence remain unverified. No separate pagebreak evaluator or new IR/backend type has been introduced.
