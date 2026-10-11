@@ -10,7 +10,10 @@ fn project(source: &str, assets: &[(&str, &[u8])]) -> arkst_core::CompileResult 
     for &(path, bytes) in assets {
         builder = builder.add_asset(path, bytes.to_vec()).expect("asset");
     }
-    compile(&builder.build().expect("project"), &CompileOptions::default())
+    compile(
+        &builder.build().expect("project"),
+        &CompileOptions::default(),
+    )
 }
 
 fn output(result: &arkst_core::CompileResult) -> String {
@@ -80,7 +83,10 @@ fn unsafe_or_different_regex_dialects_fail_closed_without_content() {
         let result = project(&source, &[("data/a", b"x")]);
         assert_eq!(result.diagnostics.len(), 1, "{pattern:?}: {result:?}");
         assert_eq!(result.diagnostics[0].code, "E3001", "{pattern:?}");
-        assert!(result.diagnostics[0].message.contains("pattern"), "{result:?}");
+        assert!(
+            result.diagnostics[0].message.contains("pattern"),
+            "{result:?}"
+        );
         assert!(result.ir.nodes.is_empty(), "{pattern:?}: {result:?}");
     }
 }
@@ -92,6 +98,9 @@ fn non_ascii_name_does_not_claim_jvm_regex_compatibility() {
         &[("data/é.txt", b"x")],
     );
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-    assert!(result.diagnostics[0].message.contains("non-ASCII"), "{result:?}");
+    assert!(
+        result.diagnostics[0].message.contains("non-ASCII"),
+        "{result:?}"
+    );
     assert!(result.ir.nodes.is_empty(), "{result:?}");
 }

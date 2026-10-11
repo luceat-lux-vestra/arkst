@@ -72,12 +72,12 @@ use arkst_ir::{
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
 use arkst_source::{SourceId, SourceSpan};
+use regex::RegexBuilder;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::rc::{Rc, Weak};
-use regex::RegexBuilder;
 
 /// A resolved variable value stored in the evaluation environment.
 ///
