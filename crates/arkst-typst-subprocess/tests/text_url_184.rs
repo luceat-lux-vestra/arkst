@@ -17,7 +17,10 @@ fn assert_real_pdf(input: &str, expected_url: &str, visible: &[&str]) {
     let result = compile(&project, &CompileOptions::default());
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let source = lower_to_typst_code(&result.ir);
-    assert!(source.contains(&format!("#link(\"{expected_url}\")")), "{source}");
+    assert!(
+        source.contains(&format!("#link(\"{expected_url}\")")),
+        "{source}"
+    );
     for fragment in visible {
         assert!(source.contains(fragment), "{source}");
     }
