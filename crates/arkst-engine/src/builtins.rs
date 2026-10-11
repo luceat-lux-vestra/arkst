@@ -1076,7 +1076,9 @@ fn evaluate_text(
         IrValue::Content(nodes) if nodes.is_empty() => {
             // Upstream accepts an empty inline body, but the Typst/Link
             // projection of an empty display label is not proven here.
-            Err(error("`.text` URL requires nonempty inline content".to_string()))
+            Err(error(
+                "`.text` URL requires nonempty inline content".to_string(),
+            ))
         }
         IrValue::Content(mut nodes) if matches!(nodes.as_slice(), [IrNode::Paragraph { .. }]) => {
             if let Some(destination) = url {

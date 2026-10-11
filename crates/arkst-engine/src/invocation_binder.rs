@@ -333,7 +333,8 @@ pub(crate) fn plan<T>(
                     ),
                     primary: body.span(),
                     secondary: vec![previous_span],
-                    hint: "Remove the explicit value already occupying the body parameter.".to_string(),
+                    hint: "Remove the explicit value already occupying the body parameter."
+                        .to_string(),
                 });
             }
             slots[index] = Some(PlannedSlot::Body);

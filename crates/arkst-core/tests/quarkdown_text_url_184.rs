@@ -23,7 +23,8 @@ fn single_link(source: &str) -> (String, Vec<IrInline>) {
         destination,
         title: None,
         ..
-    }] = content.as_slice() else {
+    }] = content.as_slice()
+    else {
         panic!("expected a typed link: {content:?}");
     };
     let wire = serde_json::to_string(&result.ir).expect("serialize");
@@ -53,8 +54,7 @@ fn text_nonblank_url_uses_typed_link_and_retains_nested_emphasis() {
 
 #[test]
 fn text_explicit_named_text_and_url_share_normal_binding() {
-    let (url, content) =
-        single_link(".text text:{hello} url:{https://example.org/hello}\n");
+    let (url, content) = single_link(".text text:{hello} url:{https://example.org/hello}\n");
     assert_eq!(url, "https://example.org/hello");
     assert!(matches!(&content[..], [IrInline::Text { content, .. }] if content == "hello"));
 }
