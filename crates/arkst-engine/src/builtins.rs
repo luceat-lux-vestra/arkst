@@ -1041,6 +1041,39 @@ fn evaluate_keybinding(
 /// The default, option-free .text transform is visually transparent.
 /// Preserve every evaluated inline leaf rather than projecting to plain text;
 /// any styling arguments remain unbound/unsupported by the narrow signature.
+/// The pinned `.text url` String input may be parsed as one Markdown
+/// autolink. Preserve that exact URL without broadening scalar String
+/// conversion to arbitrary formatted or linked content.
+fn text_url_string_conversion(
+    value: &InvocationValue,
+) -> Result<String, value_conversion::ConversionError> {
+    scalar_string_conversion(value).or_else(|error| {
+        let IrValue::Content(nodes) = &value.value else {
+            return Err(error);
+        };
+        let [IrNode::Paragraph { content, .. }] = nodes.as_slice() else {
+            return Err(error);
+        };
+        let [IrInline::Link {
+            content,
+            destination,
+            title: None,
+            ..
+        }] = content.as_slice()
+        else {
+            return Err(error);
+        };
+        let [IrInline::Text { content: label, .. }] = content.as_slice() else {
+            return Err(error);
+        };
+        if label == destination {
+            Ok(destination.clone())
+        } else {
+            Err(error)
+        }
+    })
+}
+
 fn evaluate_text(
     mut arguments: BoundArguments,
     call_span: SourceSpan,
@@ -1053,7 +1086,7 @@ fn evaluate_text(
         .map(|value| match &value.value {
             IrValue::None => Ok(None),
             _ => {
-                let url = scalar_string_conversion(&value).map_err(|cause| {
+                let url = text_url_string_conversion(&value).map_err(|cause| {
                     conversion_error(
                         "`.text` `url` must be a String or None".to_string(),
                         "url",

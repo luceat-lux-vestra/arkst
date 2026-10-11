@@ -36,7 +36,7 @@ fn single_link(source: &str) -> (String, Vec<IrInline>) {
 #[test]
 fn text_nonblank_url_uses_typed_link_and_retains_nested_emphasis() {
     let (url, content) =
-        single_link(".text url:{https://example.org/notes} {**Bold** and *italic*}\n");
+        single_link(".text url:{https://example.org/notes}\n    **Bold** and *italic*\n");
     assert_eq!(url, "https://example.org/notes");
     assert!(
         content
@@ -68,7 +68,7 @@ fn text_positional_content_and_url_are_valid_and_typed() {
 
 #[test]
 fn text_none_url_still_preserves_unstyled_inline_content() {
-    let result = compile_source(".text url:{.none} {**Bold**}\n");
+    let result = compile_source(".text {**Bold**} url:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
         panic!("expected one paragraph: {result:?}");

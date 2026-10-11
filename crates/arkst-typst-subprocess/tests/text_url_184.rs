@@ -13,7 +13,7 @@ fn linked_text_rich_content_compiles_into_real_typst_pdf() {
         .expect("entry")
         .add_source(
             "text.qd",
-            ".text url:{https://example.org/docs} {**Bold** *italic*}\n",
+            ".text url:{https://example.org/docs}\n    **Bold** *italic*\n",
         )
         .expect("source")
         .build()
