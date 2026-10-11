@@ -19518,7 +19518,9 @@ fn target_parameters_from_metadata(
 fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> ExtensionBodyPolicy {
     match policy {
         builtins::BuiltinBodyPolicy::Reject => ExtensionBodyPolicy::Reject,
-        builtins::BuiltinBodyPolicy::BindRaw => ExtensionBodyPolicy::BindRaw,
+        builtins::BuiltinBodyPolicy::BindRaw | builtins::BuiltinBodyPolicy::BindRawFirst => {
+            ExtensionBodyPolicy::BindRaw
+        }
         builtins::BuiltinBodyPolicy::BindEvaluatedContent
         | builtins::BuiltinBodyPolicy::BindEvaluatedFirst => {
             ExtensionBodyPolicy::BindEvaluatedContent
