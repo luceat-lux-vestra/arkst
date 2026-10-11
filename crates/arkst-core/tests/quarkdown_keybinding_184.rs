@@ -9,7 +9,10 @@ fn compile_source(source: &str) -> (arkst_core::CompileResult, SourceId) {
         .expect("source")
         .build()
         .expect("project");
-    let id = project.sources().get_id(project.entry()).expect("source id");
+    let id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("source id");
     (compile(&project, &CompileOptions::default()), id)
 }
 
@@ -63,9 +66,18 @@ fn keybinding_parses_aliases_literal_keys_and_delimiters() {
         key_parts("meta+option+period"),
         vec![PrimaryModifier, AltModifier, Key(".".into())]
     );
-    assert_eq!(key_parts("control+minus"), vec![CtrlModifier, Key("-".into())]);
-    assert_eq!(key_parts("Cmd+comma"), vec![PrimaryModifier, Key(",".into())]);
-    assert_eq!(key_parts("command+dot"), vec![PrimaryModifier, Key(".".into())]);
+    assert_eq!(
+        key_parts("control+minus"),
+        vec![CtrlModifier, Key("-".into())]
+    );
+    assert_eq!(
+        key_parts("Cmd+comma"),
+        vec![PrimaryModifier, Key(",".into())]
+    );
+    assert_eq!(
+        key_parts("command+dot"),
+        vec![PrimaryModifier, Key(".".into())]
+    );
 }
 
 #[test]

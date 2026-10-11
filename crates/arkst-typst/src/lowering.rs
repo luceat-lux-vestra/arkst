@@ -6,9 +6,10 @@
 use arkst_ir::{
     IrCallSegment, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
     IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
-    IrExplicitErrorComponent, IrInline, IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
-    IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+    IrExplicitErrorComponent, IrInline, IrKeybindingPart, IrLandscapeComponent,
+    IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
+    IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -1146,7 +1147,9 @@ impl LoweringContext {
                         self.push_str("#h(3pt)");
                     }
                     let label = match part {
-                        IrKeybindingPart::PrimaryModifier | IrKeybindingPart::CtrlModifier => "Ctrl",
+                        IrKeybindingPart::PrimaryModifier | IrKeybindingPart::CtrlModifier => {
+                            "Ctrl"
+                        }
                         IrKeybindingPart::AltModifier => "Alt",
                         IrKeybindingPart::ShiftModifier => "Shift",
                         IrKeybindingPart::Key(value) => value.as_str(),
