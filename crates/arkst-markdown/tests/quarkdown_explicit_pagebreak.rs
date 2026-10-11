@@ -68,7 +68,10 @@ fn three_or_more_angle_brackets_share_the_quarkdown_pagebreak_contract() {
 #[test]
 fn pagebreak_grammar_rejects_short_or_suffixed_markers_without_partial_conversion() {
     for source in ["<<\n", "<<<<other\n", "other<<<<\n", "<<<\nordinary text\n"] {
-        assert!(page_break_spans(&parse_qd(source).nodes).is_empty(), "{source:?}");
+        assert!(
+            page_break_spans(&parse_qd(source).nodes).is_empty(),
+            "{source:?}"
+        );
     }
 }
 
