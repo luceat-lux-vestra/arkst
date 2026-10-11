@@ -19507,9 +19507,7 @@ fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> Extensi
 fn native_extension_body_policy(policy: BodyPolicy) -> ExtensionBodyPolicy {
     match policy {
         BodyPolicy::Reject => ExtensionBodyPolicy::Reject,
-        BodyPolicy::BindFinal | BodyPolicy::BindFirst => {
-            ExtensionBodyPolicy::BindEvaluatedContent
-        },
+        BodyPolicy::BindFinal | BodyPolicy::BindFirst => ExtensionBodyPolicy::BindEvaluatedContent,
         BodyPolicy::AllowSeparate => ExtensionBodyPolicy::AllowSeparate,
     }
 }
