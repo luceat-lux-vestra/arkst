@@ -77,6 +77,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::rc::{Rc, Weak};
+use regex::RegexBuilder;
 
 /// A resolved variable value stored in the evaluation environment.
 ///
@@ -10220,15 +10221,6 @@ impl Evaluator {
                 Err(()) => return CallOutcome::Failed,
             };
 
-        if arguments.pattern.is_some() {
-            diagnostics.push(resource_diagnostic(
-                "E3001",
-                "`.listfiles` `pattern` filtering is not implemented by the bounded logical-directory slice".to_string(),
-                *span,
-                "Omit `pattern`; #189 retains regex filtering as explicit compatibility debt.",
-            ));
-            return CallOutcome::Failed;
-        }
         if arguments.full_path {
             diagnostics.push(resource_diagnostic(
                 "E8001",
@@ -10268,10 +10260,67 @@ impl Evaluator {
             return outcome;
         }
 
+        // Pinned v2.5.1 uses Kotlin Regex.matches(file.name): a FULL
+        // basename match after directory selection and before sorting.
+        // Limit this slice to ASCII inputs and the shared Rust/Java regexp
+        // syntax. JVM-only extensions, inline flags, and Unicode-varying
+        // behavior are deliberately NOT interpreted with approximate results.
+        let name_pattern = if let Some(pattern) = arguments.pattern.as_deref() {
+            if pattern.len() > 4096
+                || !pattern.is_ascii()
+                || pattern.contains("(?")
+                || pattern.contains(r"\p")
+                || pattern.contains(r"\P")
+            {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    "`.listfiles` `pattern` uses unsupported regex syntax or exceeds the ASCII/4096-byte bound".to_string(),
+                    *span,
+                    "Use the bounded ASCII regex subset without inline flags or JVM-only constructs; #189 tracks full JVM parity.",
+                ));
+                return CallOutcome::Failed;
+            }
+            let anchored = format!(r"\A(?:{pattern})\z");
+            match RegexBuilder::new(&anchored)
+                .size_limit(1 << 20)
+                .dfa_size_limit(1 << 20)
+                .build()
+            {
+                Ok(regex) => Some(regex),
+                Err(error) => {
+                    diagnostics.push(resource_diagnostic(
+                        "E3001",
+                        format!("`.listfiles` invalid or unsupported `pattern` regex: {error}"),
+                        *span,
+                        "Use supported bounded ASCII regular-expression syntax; do not substitute a literal/glob approximation.",
+                    ));
+                    return CallOutcome::Failed;
+                }
+            }
+        } else {
+            None
+        };
+
         let mut entries = entries
             .into_iter()
             .filter(|entry| arguments.list_directories || entry.kind == ResourceEntryKind::File)
             .collect::<Vec<_>>();
+
+        if let Some(regex) = name_pattern.as_ref() {
+            if let Some(entry) = entries.iter().find(|entry| !entry.name.is_ascii()) {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    format!(
+                        "`.listfiles` `pattern` cannot claim exact JVM regex parity for non-ASCII filename `{}`",
+                        entry.name
+                    ),
+                    *span,
+                    "Filter only ASCII filenames; #189 retains Unicode/JVM regex parity as explicit debt.",
+                ));
+                return CallOutcome::Failed;
+            }
+            entries.retain(|entry| regex.is_match(&entry.name));
+        }
 
         match arguments.sort_by {
             ListFilesSort::None => {

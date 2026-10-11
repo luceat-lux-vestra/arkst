@@ -901,7 +901,7 @@ fn listfiles_rejects_unimplemented_or_host_specific_options_before_enumeration()
     for (source, code, needle) in [
         (".listfiles {data}\n", "E8001", "fullpath:true"),
         (
-            ".listfiles {data} fullpath:{false} pattern:{a}\n",
+            ".listfiles {data} fullpath:{false} pattern:{[}\n",
             "E3001",
             "pattern",
         ),
