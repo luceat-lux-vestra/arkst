@@ -58,7 +58,7 @@ fn text_rejects_unimplemented_style_and_malformed_invocations_atomically() {
         ".text\n",
         ".text {one} text:{two}\n",
         ".text weight:{bold} {one}\n",
-        ".text url:{https://example.com} {one}\n",
+        ".text url:{   } {one}\n",
         ".text {one} {two}\n",
     ] {
         let result = compile_source(source);
