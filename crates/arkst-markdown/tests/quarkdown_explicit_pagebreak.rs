@@ -56,3 +56,26 @@ fn thematic_break_remains_thematic_in_quarkdown_mode() {
     assert!(page_break_spans(&qd.nodes).is_empty());
     assert!(matches!(qd.nodes.as_slice(), [Block::ThematicBreak { .. }]));
 }
+
+#[test]
+fn three_or_more_angle_brackets_share_the_quarkdown_pagebreak_contract() {
+    let source = "FIRST\n\n<<<<\n\nSECOND\n\n<<<<<\n";
+    let qd = parse_qd(source);
+    assert_eq!(page_break_spans(&qd.nodes), vec![(7, 11), (20, 25)]);
+    assert!(page_break_spans(&parse_md(source).nodes).is_empty());
+}
+
+#[test]
+fn pagebreak_grammar_rejects_short_or_suffixed_markers_without_partial_conversion() {
+    for source in ["<<\n", "<<<<other\n", "other<<<<\n", "<<<\nordinary text\n"] {
+        assert!(page_break_spans(&parse_qd(source).nodes).is_empty(), "{source:?}");
+    }
+}
+
+#[test]
+fn pagebreak_grammar_respects_whitespace_and_code_fences() {
+    let qd = parse_qd("  <<<< \t\r\n");
+    assert_eq!(page_break_spans(&qd.nodes), vec![(0, 8)]);
+    assert!(page_break_spans(&parse_qd("    <<<<\n").nodes).is_empty());
+    assert!(page_break_spans(&parse_qd("```text\n<<<<\n```\n").nodes).is_empty());
+}
