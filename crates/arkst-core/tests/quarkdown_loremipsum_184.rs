@@ -46,7 +46,9 @@ fn loremipsum_interpolates_between_surrounding_inline_text_without_new_ir_type()
         matches!(inline, IrInline::Text { content, .. } if content.starts_with("Lorem ipsum dolor sit amet."))
     }));
     assert!(
-        content.iter().any(|inline| matches!(inline, IrInline::Text { content, .. } if content == " after")),
+        content
+            .iter()
+            .any(|inline| matches!(inline, IrInline::Text { content, .. } if content == " after")),
         "{content:?}"
     );
     let encoded = serde_json::to_string(&result.ir).expect("serialize IR");
