@@ -20,7 +20,9 @@ fn text_default_preserves_inline_structure_and_surrounding_content() {
         panic!("expected one paragraph: {:?}", result.ir.nodes);
     };
     assert!(matches!(&content[0], IrInline::Text { content, .. } if content == "before "));
-    assert!(content.iter().any(|part| matches!(part, IrInline::Text { content, .. } if content == "hello")));
+    assert!(content
+        .iter()
+        .any(|part| matches!(part, IrInline::Text { content, .. } if content == "hello")));
     assert!(matches!(content.last(), Some(IrInline::Text { content, .. }) if content == " after"));
     let wire = serde_json::to_string(&result.ir).expect("serialize");
     let decoded: arkst_core::ir::IrDocument = serde_json::from_str(&wire).expect("deserialize");
@@ -36,8 +38,18 @@ fn text_accepts_named_and_evaluated_body_content() {
     let [IrNode::Paragraph { content, .. }] = body.ir.nodes.as_slice() else {
         panic!("expected inline paragraph: {:?}", body.ir.nodes);
     };
-    assert!(content.iter().any(|part| matches!(part, IrInline::Strong { .. })), "{content:?}");
-    assert!(content.iter().any(|part| matches!(part, IrInline::Emphasis { .. })), "{content:?}");
+    assert!(
+        content
+            .iter()
+            .any(|part| matches!(part, IrInline::Strong { .. })),
+        "{content:?}"
+    );
+    assert!(
+        content
+            .iter()
+            .any(|part| matches!(part, IrInline::Emphasis { .. })),
+        "{content:?}"
+    );
 }
 
 #[test]
@@ -51,7 +63,10 @@ fn text_rejects_unimplemented_style_and_malformed_invocations_atomically() {
     ] {
         let result = compile_source(source);
         assert!(!result.diagnostics.is_empty(), "{source:?}: {result:?}");
-        assert!(result.diagnostics[0].primary.is_some(), "{source:?}: {result:?}");
+        assert!(
+            result.diagnostics[0].primary.is_some(),
+            "{source:?}: {result:?}"
+        );
         assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
     }
 }
