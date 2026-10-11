@@ -2067,6 +2067,8 @@ mod tests {
         for builtin in regular_builtins() {
             let expected = if builtin.name == "text" {
                 BuiltinBodyPolicy::BindEvaluatedFirst
+            } else if builtin.name == "math" {
+                BuiltinBodyPolicy::BindRawFirst
             } else if builtin.name == "plaintext" {
                 BuiltinBodyPolicy::BindEvaluatedContent
             } else if builtin.signature.parameter_names.is_empty() {
