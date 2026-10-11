@@ -5080,7 +5080,10 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<invocation_binder::BoundInvocation<InvocationValue>, CallOutcome> {
-        if builtin.kind != builtins::BuiltinKind::Plaintext {
+        if !matches!(
+            builtin.kind,
+            builtins::BuiltinKind::Plaintext | builtins::BuiltinKind::Text
+        ) {
             return Ok(bound);
         }
 
@@ -5104,7 +5107,11 @@ impl Evaluator {
                             parameter.and_then(|parameter| parameter.name_span),
                             call_span,
                         ),
-                        Some("`.plaintext` content"),
+                        Some(if builtin.kind == builtins::BuiltinKind::Text {
+                            "`.text` inline content"
+                        } else {
+                            "`.plaintext` content"
+                        }),
                     ));
                     return Err(CallOutcome::Failed);
                 }

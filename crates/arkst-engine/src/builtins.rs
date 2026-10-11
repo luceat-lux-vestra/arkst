@@ -98,6 +98,7 @@ pub(crate) enum BuiltinKind {
     IsNotEmpty,
     StartsWith,
     Plaintext,
+    Text,
     Codespan,
     Keybinding,
     LoremIpsum,
@@ -407,6 +408,16 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
+    // Bounded default-format .text: the target is parsed/evaluated inline
+    // content, never flattened to a String or silently styled.
+    builtin_spec(
+        "text",
+        BuiltinKind::Text,
+        &["text"],
+        1,
+        true,
+        BuiltinBodyPolicy::BindEvaluatedContent,
+    ),
     builtin_spec(
         "codespan",
         BuiltinKind::Codespan,
@@ -646,6 +657,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::IsEmpty | BuiltinKind::IsNotEmpty => evaluate_empty_check(builtin, arguments),
         BuiltinKind::StartsWith => evaluate_startswith(builtin, arguments),
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
+        BuiltinKind::Text => evaluate_text(arguments),
         BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
         BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
         BuiltinKind::LoremIpsum => Ok(IrValue::String(LOREM_IPSUM_TEXT.to_string())),
@@ -1019,6 +1031,24 @@ fn evaluate_keybinding(
         content: vec![IrInline::Keybinding { parts, span }],
         span,
     }]))
+}
+
+/// The default, option-free .text transform is visually transparent.
+/// Preserve every evaluated inline leaf rather than projecting to plain text;
+/// any styling arguments remain unbound/unsupported by the narrow signature.
+fn evaluate_text(mut arguments: BoundArguments) -> Result<IrValue, BuiltinError> {
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.text` requires inline content".to_string()))?;
+    match value.value {
+        IrValue::Content(nodes) if nodes.is_empty() => Ok(IrValue::Content(nodes)),
+        IrValue::Content(nodes) if matches!(nodes.as_slice(), [IrNode::Paragraph { .. }]) => {
+            Ok(IrValue::Content(nodes))
+        }
+        _ => Err(error(
+            "`.text` requires a single inline paragraph, not block content".to_string(),
+        )),
+    }
 }
 
 fn evaluate_plaintext(
@@ -1873,7 +1903,7 @@ mod tests {
     #[test]
     fn regular_body_fallback_policy_is_declared_per_signature() {
         for builtin in regular_builtins() {
-            let expected = if builtin.name == "plaintext" {
+            let expected = if matches!(builtin.name, "plaintext" | "text") {
                 BuiltinBodyPolicy::BindEvaluatedContent
             } else if builtin.signature.parameter_names.is_empty() {
                 BuiltinBodyPolicy::Reject
