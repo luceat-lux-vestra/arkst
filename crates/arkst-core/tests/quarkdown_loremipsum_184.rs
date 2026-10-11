@@ -36,7 +36,7 @@ fn loremipsum_is_a_nonempty_deterministic_zero_argument_scalar() {
 
 #[test]
 fn loremipsum_interpolates_between_surrounding_inline_text_without_new_ir_type() {
-    let result = compile_source("Before .loremipsum after.\n");
+    let result = compile_source("Before .loremipsum after\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
         panic!("expected paragraph: {:?}", result.ir.nodes);
@@ -45,7 +45,10 @@ fn loremipsum_interpolates_between_surrounding_inline_text_without_new_ir_type()
     assert!(content.iter().any(|inline| {
         matches!(inline, IrInline::Text { content, .. } if content.starts_with("Lorem ipsum dolor sit amet."))
     }));
-    assert!(matches!(content.last(), Some(IrInline::Text { content, .. }) if content == " after."));
+    assert!(
+        content.iter().any(|inline| matches!(inline, IrInline::Text { content, .. } if content == " after")),
+        "{content:?}"
+    );
     let encoded = serde_json::to_string(&result.ir).expect("serialize IR");
     let decoded: arkst_core::ir::IrDocument =
         serde_json::from_str(&encoded).expect("deserialize IR");

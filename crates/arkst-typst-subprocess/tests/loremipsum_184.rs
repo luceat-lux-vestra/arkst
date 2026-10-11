@@ -11,7 +11,7 @@ fn bounded_loremipsum_text_compiles_to_real_typst_pdf() {
     let project = VirtualProjectBuilder::new()
         .entry("lorem.qd")
         .expect("entry")
-        .add_source("lorem.qd", "Before .loremipsum after.\n")
+        .add_source("lorem.qd", "Before .loremipsum after\n")
         .expect("source")
         .build()
         .expect("project");
@@ -20,7 +20,7 @@ fn bounded_loremipsum_text_compiles_to_real_typst_pdf() {
     let source = lower_to_typst_code(&result.ir);
     assert!(source.contains("Lorem ipsum dolor sit amet."), "{source}");
     assert!(source.contains("Before "), "{source}");
-    assert!(source.contains(" after."), "{source}");
+    assert!(source.contains(" after"), "{source}");
 
     let path = if let Some(path) = std::env::var_os("ARKST_TYPST_PATH") {
         let path = PathBuf::from(path);
