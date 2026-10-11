@@ -19497,7 +19497,8 @@ fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> Extensi
     match policy {
         builtins::BuiltinBodyPolicy::Reject => ExtensionBodyPolicy::Reject,
         builtins::BuiltinBodyPolicy::BindRaw => ExtensionBodyPolicy::BindRaw,
-        builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
+        builtins::BuiltinBodyPolicy::BindEvaluatedContent
+        | builtins::BuiltinBodyPolicy::BindEvaluatedFirst => {
             ExtensionBodyPolicy::BindEvaluatedContent
         }
     }
@@ -19506,7 +19507,9 @@ fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> Extensi
 fn native_extension_body_policy(policy: BodyPolicy) -> ExtensionBodyPolicy {
     match policy {
         BodyPolicy::Reject => ExtensionBodyPolicy::Reject,
-        BodyPolicy::BindFinal => ExtensionBodyPolicy::BindEvaluatedContent,
+        BodyPolicy::BindFinal | BodyPolicy::BindFirst => {
+            ExtensionBodyPolicy::BindEvaluatedContent
+        },
         BodyPolicy::AllowSeparate => ExtensionBodyPolicy::AllowSeparate,
     }
 }
