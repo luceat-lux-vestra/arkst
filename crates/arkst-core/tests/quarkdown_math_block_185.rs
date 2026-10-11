@@ -9,7 +9,10 @@ fn compile_source(source: &str) -> (arkst_core::CompileResult, SourceId) {
         .expect("source")
         .build()
         .expect("project");
-    let id = project.sources().get_id(project.entry()).expect("source id");
+    let id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("source id");
     (compile(&project, &CompileOptions::default()), id)
 }
 
@@ -19,7 +22,10 @@ fn single_math(source: &str) -> (IrNode, SourceId) {
     let [node] = result.ir.nodes.as_slice() else {
         panic!("one math node expected: {:?}", result.ir.nodes);
     };
-    assert!(matches!(node, IrNode::Math { display: true, .. }), "{node:?}");
+    assert!(
+        matches!(node, IrNode::Math { display: true, .. }),
+        "{node:?}"
+    );
     (node.clone(), id)
 }
 
@@ -27,7 +33,14 @@ fn single_math(source: &str) -> (IrNode, SourceId) {
 fn explicitly_block_math_preserves_source_and_provenance() {
     let input = ".math content:{x^2 + y} block:{true}\n";
     let (node, id) = single_math(input);
-    let IrNode::Math { source, display, span } = node else { unreachable!() };
+    let IrNode::Math {
+        source,
+        display,
+        span,
+    } = node
+    else {
+        unreachable!()
+    };
     assert_eq!(source, "x^2 + y");
     assert!(display);
     assert_eq!(span.source_id, id);
@@ -57,18 +70,27 @@ fn invalid_modes_tex_or_reference_fail_atomically() {
     ] {
         let (result, _) = compile_source(input);
         assert!(!result.diagnostics.is_empty(), "{input:?}: {result:?}");
-        assert!(result.ir.nodes.iter().all(|n| !matches!(n, IrNode::Math { .. })),
-            "{input:?}: {result:?}");
+        assert!(
+            result
+                .ir
+                .nodes
+                .iter()
+                .all(|n| !matches!(n, IrNode::Math { .. })),
+            "{input:?}: {result:?}"
+        );
     }
 }
 
 #[test]
 fn source_defined_math_keeps_existing_precedence() {
-    let (result, _) = compile_source(
-        ".function {math}\n    custom\n\n.math {a + b} block:{true}\n",
-    );
+    let (result, _) =
+        compile_source(".function {math}\n    custom\n\n.math {a + b} block:{true}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
-    assert!(result.ir.nodes.iter().all(|n| !matches!(n, IrNode::Math { .. })));
+    assert!(result
+        .ir
+        .nodes
+        .iter()
+        .all(|n| !matches!(n, IrNode::Math { .. })));
 }
 
 #[test]

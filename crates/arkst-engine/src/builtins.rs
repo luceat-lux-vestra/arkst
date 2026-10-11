@@ -1042,8 +1042,7 @@ fn evaluate_math(
     if let Some(reference) = arguments.remove(0) {
         if !matches!(reference.value, IrValue::None) {
             return Err(error(
-                "`.math` ref indexing is not implemented in this bounded block slice"
-                    .to_string(),
+                "`.math` ref indexing is not implemented in this bounded block slice".to_string(),
             ));
         }
     }
