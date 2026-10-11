@@ -84,7 +84,7 @@ fn invalid_modes_tex_or_reference_fail_atomically() {
 #[test]
 fn source_defined_math_keeps_existing_precedence() {
     let (result, _) =
-        compile_source(".function {math}\n    custom\n\n.math {a + b} block:{true}\n");
+        compile_source(".function {math}\n    custom\n\n.math {a + b}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert!(result
         .ir
