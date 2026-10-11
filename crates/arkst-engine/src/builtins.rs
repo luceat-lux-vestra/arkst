@@ -1952,7 +1952,9 @@ mod tests {
     #[test]
     fn regular_body_fallback_policy_is_declared_per_signature() {
         for builtin in regular_builtins() {
-            let expected = if matches!(builtin.name, "plaintext" | "text") {
+            let expected = if builtin.name == "text" {
+                BuiltinBodyPolicy::BindEvaluatedFirst
+            } else if builtin.name == "plaintext" {
                 BuiltinBodyPolicy::BindEvaluatedContent
             } else if builtin.signature.parameter_names.is_empty() {
                 BuiltinBodyPolicy::Reject
