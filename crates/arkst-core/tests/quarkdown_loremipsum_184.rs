@@ -47,7 +47,8 @@ fn loremipsum_interpolates_between_surrounding_inline_text_without_new_ir_type()
     }));
     assert!(matches!(content.last(), Some(IrInline::Text { content, .. }) if content == " after."));
     let encoded = serde_json::to_string(&result.ir).expect("serialize IR");
-    let decoded: arkst_core::ir::IrDocument = serde_json::from_str(&encoded).expect("deserialize IR");
+    let decoded: arkst_core::ir::IrDocument =
+        serde_json::from_str(&encoded).expect("deserialize IR");
     assert_eq!(decoded, result.ir);
 }
 
