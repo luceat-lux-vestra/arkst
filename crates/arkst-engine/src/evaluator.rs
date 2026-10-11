@@ -4988,7 +4988,7 @@ impl Evaluator {
     ) -> CallOutcome {
         let body_value = match builtin.body_policy {
             builtins::BuiltinBodyPolicy::Reject => None,
-            builtins::BuiltinBodyPolicy::BindRaw => {
+            builtins::BuiltinBodyPolicy::BindRaw | builtins::BuiltinBodyPolicy::BindRawFirst => {
                 if let Some(call_body) = body {
                     let Some(raw_body) = raw_body else {
                         diagnostics.push(chain_evaluation_error(
@@ -19518,7 +19518,9 @@ fn target_parameters_from_metadata(
 fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> ExtensionBodyPolicy {
     match policy {
         builtins::BuiltinBodyPolicy::Reject => ExtensionBodyPolicy::Reject,
-        builtins::BuiltinBodyPolicy::BindRaw => ExtensionBodyPolicy::BindRaw,
+        builtins::BuiltinBodyPolicy::BindRaw | builtins::BuiltinBodyPolicy::BindRawFirst => {
+            ExtensionBodyPolicy::BindRaw
+        }
         builtins::BuiltinBodyPolicy::BindEvaluatedContent
         | builtins::BuiltinBodyPolicy::BindEvaluatedFirst => {
             ExtensionBodyPolicy::BindEvaluatedContent
