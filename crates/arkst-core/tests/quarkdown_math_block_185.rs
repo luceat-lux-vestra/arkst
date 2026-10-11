@@ -57,10 +57,35 @@ fn positional_and_raw_first_slot_body_produce_same_math() {
 }
 
 #[test]
+fn indented_body_infers_block_without_overriding_explicit_mode() {
+    let input = ".math\n    a + b\n";
+    let (inferred, id) = single_math(input);
+    let (explicit, _) = single_math(".math block:{true}\n    a + b\n");
+    let IrNode::Math {
+        source,
+        display,
+        span,
+    } = inferred
+    else {
+        unreachable!()
+    };
+    assert_eq!(source, "a + b");
+    assert!(display);
+    assert_eq!(span.source_id, id);
+    assert_eq!(span.start, 0);
+    assert!(span.end <= input.len());
+    assert!(matches!(
+        explicit,
+        IrNode::Math { source, display: true, .. } if source == "a + b"
+    ));
+}
+
+#[test]
 fn invalid_modes_tex_or_reference_fail_atomically() {
     for input in [
         ".math {a + b}\n",
         ".math {a + b} block:{false}\n",
+        ".math block:{false}\n    a + b\n",
         ".math {a + b} block:{yes} ref:{eq}\n",
         ".math {a + b} block:{true} ref:{eq}\n",
         ".math {a + b} block:{true} foreground:{red}\n",
