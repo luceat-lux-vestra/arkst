@@ -120,8 +120,7 @@ fn unicode_literal_matches_exact_case_sensitive_basenames() {
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(output(&result), "1\ncafé\n1");
     let wire = serde_json::to_string(&result.ir).expect("serialize");
-    let decoded: arkst_core::ir::IrDocument =
-        serde_json::from_str(&wire).expect("deserialize");
+    let decoded: arkst_core::ir::IrDocument = serde_json::from_str(&wire).expect("deserialize");
     assert_eq!(decoded, result.ir);
 }
 
