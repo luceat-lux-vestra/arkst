@@ -16695,6 +16695,7 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
             component: IrExplicitErrorComponent { span, .. },
         }
         | IrInline::Code { span, .. }
+        | IrInline::Keybinding { span, .. }
         | IrInline::SoftBreak { span }
         | IrInline::HardBreak { span }
         | IrInline::RawHtml { span, .. } => *span,
@@ -16918,6 +16919,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::Image { .. }
         | IrInline::ExplicitError { .. }
         | IrInline::Code { .. }
+        | IrInline::Keybinding { .. }
         | IrInline::Whitespace { .. }
         | IrInline::PageCounter { .. }
         | IrInline::PageNumberFormat { .. }
@@ -21022,6 +21024,7 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             | IrInline::PageNumberReset { span, .. }
             | IrInline::LastHeading { span, .. }
             | IrInline::Code { span, .. }
+            | IrInline::Keybinding { span, .. }
             | IrInline::SoftBreak { span }
             | IrInline::HardBreak { span }
             | IrInline::RawHtml { span, .. } => *span = source_span,
