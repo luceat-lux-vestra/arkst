@@ -240,7 +240,7 @@ fn reconciliation_records_dictionary_lookup_as_semantically_supported() {
 #[test]
 fn reconciliation_assigns_actionable_content_gaps_without_closed_owner_links() {
     let keybinding = content_row("primitive:keybinding");
-    assert_eq!(keybinding[26], "UNKNOWN");
+    assert_eq!(keybinding[26], "PARTIAL");
     assert_eq!(keybinding[27], "#184");
     assert!(keybinding[28].contains("#184"));
 
