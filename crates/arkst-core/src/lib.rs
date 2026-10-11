@@ -4389,7 +4389,10 @@ Yiddish"
         let (result, _) = compile_source(collision);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3003");
-        assert!(result.diagnostics[0].message.contains("collides"));
+        assert!(
+            result.diagnostics[0].message.contains("collides"),
+            "{result:?}"
+        );
     }
 
     #[test]
