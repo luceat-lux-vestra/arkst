@@ -6,15 +6,11 @@ use arkst_typst::lowering::lower_to_typst_code;
 use arkst_typst::{TypstBackend, TypstInput};
 use arkst_typst_subprocess::SubprocessBackend;
 
-#[test]
-fn linked_text_rich_content_compiles_into_real_typst_pdf() {
+fn assert_real_pdf(input: &str, expected_url: &str, visible: &[&str]) {
     let project = VirtualProjectBuilder::new()
         .entry("text.qd")
         .expect("entry")
-        .add_source(
-            "text.qd",
-            ".text url:{https://example.org/docs}\n    **Bold** *italic*\n",
-        )
+        .add_source("text.qd", input)
         .expect("source")
         .build()
         .expect("project");
@@ -22,11 +18,12 @@ fn linked_text_rich_content_compiles_into_real_typst_pdf() {
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let source = lower_to_typst_code(&result.ir);
     assert!(
-        source.contains("#link(\"https://example.org/docs\")"),
+        source.contains(&format!("#link(\"{expected_url}\")")),
         "{source}"
     );
-    assert!(source.contains("Bold"), "{source}");
-    assert!(source.contains("italic"), "{source}");
+    for fragment in visible {
+        assert!(source.contains(fragment), "{source}");
+    }
 
     let path = if let Some(path) = std::env::var_os("ARKST_TYPST_PATH") {
         let path = PathBuf::from(path);
@@ -55,4 +52,22 @@ fn linked_text_rich_content_compiles_into_real_typst_pdf() {
         })
         .expect("linked .text must compile");
     assert!(output.pdf.expect("PDF output").starts_with(b"%PDF-"));
+}
+
+#[test]
+fn linked_text_rich_content_compiles_into_real_typst_pdf() {
+    assert_real_pdf(
+        ".text url:{https://example.org/docs}\n    **Bold** *italic*\n",
+        "https://example.org/docs",
+        &["Bold", "italic"],
+    );
+}
+
+#[test]
+fn blank_url_code_content_derives_a_valid_link_in_real_typst_pdf() {
+    assert_real_pdf(
+        ".text url:{   }\n    `https://example.org/derived`\n",
+        "https://example.org/derived",
+        &["https://example.org/derived"],
+    );
 }

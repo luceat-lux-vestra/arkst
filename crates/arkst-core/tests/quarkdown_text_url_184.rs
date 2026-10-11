@@ -67,6 +67,20 @@ fn text_positional_content_and_url_are_valid_and_typed() {
 }
 
 #[test]
+fn text_blank_url_derives_destination_from_rich_inline_content() {
+    let (url, content) = single_link(".text url:{   }\n    **Bold**\n");
+    assert_eq!(url, "Bold");
+    assert!(matches!(content.as_slice(), [IrInline::Strong { .. }]));
+}
+
+#[test]
+fn text_blank_url_derives_code_span_without_reparsing() {
+    let (url, content) = single_link(".text url:{   }\n    `https://example.org/derived`\n");
+    assert_eq!(url, "https://example.org/derived");
+    assert!(matches!(content.as_slice(), [IrInline::Code { .. }]));
+}
+
+#[test]
 fn text_none_url_still_preserves_unstyled_inline_content() {
     let result = compile_source(".text {**Bold**} url:{.none}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
@@ -79,7 +93,7 @@ fn text_none_url_still_preserves_unstyled_inline_content() {
 #[test]
 fn text_url_invalid_and_body_collision_fail_atomically() {
     for source in [
-        ".text url:{   } {hello}\n",
+        ".text url:{   }\n",
         ".text url:{.none} text:{hello} {world}\n",
         ".text text:{hello} {world}\n",
         ".text weight:{bold} {hello}\n",
