@@ -100,6 +100,7 @@ pub(crate) enum BuiltinKind {
     Plaintext,
     Text,
     Codespan,
+    Math,
     Keybinding,
     LoremIpsum,
     None,
@@ -118,6 +119,9 @@ pub(crate) enum BuiltinBodyPolicy {
     /// candidate. The evaluator must not evaluate or stringify its parsed
     /// representation before target conversion.
     BindRaw,
+    /// Raw source-backed body occupies the first argument slot (math content),
+    /// unlike scalar builtins whose body occupies the last slot.
+    BindRawFirst,
     BindEvaluatedContent,
     /// A parsed inline body occupies the FIRST declared slot, before the
     /// optional URL parameter of pinned Quarkdown `.text`.
@@ -129,7 +133,7 @@ impl BuiltinBodyPolicy {
         match self {
             Self::Reject => BodyPolicy::Reject,
             Self::BindRaw | Self::BindEvaluatedContent => BodyPolicy::BindFinal,
-            Self::BindEvaluatedFirst => BodyPolicy::BindFirst,
+            Self::BindRawFirst | Self::BindEvaluatedFirst => BodyPolicy::BindFirst,
         }
     }
 }
@@ -431,6 +435,18 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindRaw,
     ),
+    // Pinned Primitives.kt: @Body content precedes optional block/ref.
+    // Style/extension and automatically inferred inline mode remain outside
+    // this bounded, explicit block:true implementation.
+    builtin_spec_with_defaults(
+        "math",
+        BuiltinKind::Math,
+        &["content", "block", "ref"],
+        &[1, 2],
+        3,
+        true,
+        BuiltinBodyPolicy::BindRawFirst,
+    ),
     builtin_spec(
         "keybinding",
         BuiltinKind::Keybinding,
@@ -664,6 +680,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
         BuiltinKind::Text => evaluate_text(arguments, call_span),
         BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
+        BuiltinKind::Math => evaluate_math(arguments, call_span),
         BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
         BuiltinKind::LoremIpsum => Ok(IrValue::String(LOREM_IPSUM_TEXT.to_string())),
         BuiltinKind::None => evaluate_none(builtin, arguments),
@@ -996,6 +1013,58 @@ fn evaluate_codespan(
             content,
             span: call_span,
         }],
+        span: call_span,
+    }]))
+}
+
+/// Bounded pinned-v2.5.1 `.math` block producer. The first String slot
+/// uses the shared source-backed dynamic conversion; unproven implicit
+/// inline/block inference, TeX macros, reference indexing and style are
+/// deliberately rejected instead of approximated by Typst's math dialect.
+fn evaluate_math(
+    mut arguments: BoundArguments,
+    call_span: SourceSpan,
+) -> Result<IrValue, BuiltinError> {
+    let content = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.math` requires TeX content".to_string()))?;
+    let source = scalar_string_argument_result(&content, "content")?;
+    let block = arguments.remove(0);
+    match block.as_ref().map(|value| &value.value) {
+        Some(IrValue::Boolean(true)) => {}
+        _ => {
+            return Err(error(
+                "`.math` currently requires explicit block:true; inferred/inline math is unsupported"
+                    .to_string(),
+            ));
+        }
+    }
+    if let Some(reference) = arguments.remove(0) {
+        if !matches!(reference.value, IrValue::None) {
+            return Err(error(
+                "`.math` ref indexing is not implemented in this bounded block slice"
+                    .to_string(),
+            ));
+        }
+    }
+
+    // Typst and TeX math syntaxes are not identical. Admit only independently
+    // shareable arithmetic identifier/operator syntax, never emit arbitrary
+    // TeX commands or silently misrender them as Typst expressions.
+    if source.trim().is_empty()
+        || !source.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(b, b' ' | b'+' | b'-' | b'=' | b'^' | b'_' | b'(' | b')')
+        })
+    {
+        return Err(error(
+            "`.math` requires nonempty, shared ASCII arithmetic syntax; TeX-only expressions are unsupported"
+                .to_string(),
+        ));
+    }
+    Ok(IrValue::Content(vec![IrNode::Math {
+        source,
+        display: true,
         span: call_span,
     }]))
 }

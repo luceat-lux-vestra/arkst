@@ -4988,7 +4988,8 @@ impl Evaluator {
     ) -> CallOutcome {
         let body_value = match builtin.body_policy {
             builtins::BuiltinBodyPolicy::Reject => None,
-            builtins::BuiltinBodyPolicy::BindRaw => {
+            builtins::BuiltinBodyPolicy::BindRaw
+            | builtins::BuiltinBodyPolicy::BindRawFirst => {
                 if let Some(call_body) = body {
                     let Some(raw_body) = raw_body else {
                         diagnostics.push(chain_evaluation_error(
