@@ -6,7 +6,7 @@
 use arkst_ir::{
     IrCallSegment, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
     IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
-    IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
+    IrExplicitErrorComponent, IrInline, IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
     IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit, IrStackedComponent,
     IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
 };
@@ -1135,6 +1135,26 @@ impl LoweringContext {
             IrInline::HardBreak { span } => {
                 let before = self.output.len();
                 self.push_str("\\\n");
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrInline::Keybinding { parts, span } => {
+                let before = self.output.len();
+                for (index, part) in parts.iter().enumerate() {
+                    if index != 0 {
+                        self.push_str("#h(3pt)");
+                    }
+                    let label = match part {
+                        IrKeybindingPart::PrimaryModifier | IrKeybindingPart::CtrlModifier => "Ctrl",
+                        IrKeybindingPart::AltModifier => "Alt",
+                        IrKeybindingPart::ShiftModifier => "Shift",
+                        IrKeybindingPart::Key(value) => value.as_str(),
+                    };
+                    self.push_str("#box(stroke: 0.5pt, radius: 2pt, inset: 2pt)[");
+                    self.push_str(&escape_typst_text(label));
+                    self.push(']');
+                }
                 if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }

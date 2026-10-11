@@ -15,7 +15,7 @@ use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
-use arkst_ir::{IrInline, IrNode, IrValue};
+use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrValue};
 #[cfg(test)]
 use arkst_source::SourceId;
 use arkst_source::SourceSpan;
@@ -99,6 +99,7 @@ pub(crate) enum BuiltinKind {
     StartsWith,
     Plaintext,
     Codespan,
+    Keybinding,
     None,
     Otherwise,
     IsNone,
@@ -409,6 +410,14 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
+        "keybinding",
+        BuiltinKind::Keybinding,
+        &["input"],
+        1,
+        true,
+        BuiltinBodyPolicy::BindRaw,
+    ),
+    builtin_spec(
         "none",
         BuiltinKind::None,
         &[],
@@ -624,6 +633,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::StartsWith => evaluate_startswith(builtin, arguments),
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
         BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
+        BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
         BuiltinKind::None => evaluate_none(builtin, arguments),
         BuiltinKind::Otherwise => evaluate_otherwise(builtin, arguments),
         BuiltinKind::IsNone => evaluate_isnone(builtin, arguments),
@@ -955,6 +965,44 @@ fn evaluate_codespan(
             span: call_span,
         }],
         span: call_span,
+    }]))
+}
+
+/// Produce backend-neutral ordered key parts using the shared String binder.
+fn evaluate_keybinding(
+    mut arguments: BoundArguments,
+    span: SourceSpan,
+) -> Result<IrValue, BuiltinError> {
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error("keybinding requires input".to_string()))?;
+    let input = scalar_string_argument_result(&value, "input")?;
+    let parts = input
+        .split(['+', ',', '-'])
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(|key| match key.to_lowercase().as_str() {
+            "cmd" | "command" | "meta" | "mod" => IrKeybindingPart::PrimaryModifier,
+            "ctrl" | "control" => IrKeybindingPart::CtrlModifier,
+            "alt" | "option" => IrKeybindingPart::AltModifier,
+            "shift" => IrKeybindingPart::ShiftModifier,
+            "plus" => IrKeybindingPart::Key("+".to_string()),
+            "comma" => IrKeybindingPart::Key(",".to_string()),
+            "dash" | "minus" => IrKeybindingPart::Key("-".to_string()),
+            "dot" | "period" => IrKeybindingPart::Key(".".to_string()),
+            _ => {
+                let mut chars = key.chars();
+                let first = chars.next().unwrap_or_default();
+                IrKeybindingPart::Key(format!("{}{}", first.to_uppercase(), chars.as_str()))
+            }
+        })
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return Err(error("keybinding requires at least one key".to_string()));
+    }
+    Ok(IrValue::Content(vec![IrNode::Paragraph {
+        content: vec![IrInline::Keybinding { parts, span }],
+        span,
     }]))
 }
 

@@ -279,6 +279,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             | IrInline::PageNumberReset { .. }
             | IrInline::LastHeading { .. }
             | IrInline::Code { .. }
+            | IrInline::Keybinding { .. }
             | IrInline::SoftBreak { .. }
             | IrInline::HardBreak { .. }
             | IrInline::RawHtml { .. }
@@ -1813,6 +1814,10 @@ enum WireInline {
         content: String,
         span: SourceSpan,
     },
+    Keybinding {
+        parts: Vec<IrKeybindingPart>,
+        span: SourceSpan,
+    },
     SoftBreak {
         span: SourceSpan,
     },
@@ -2274,6 +2279,10 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
         },
         IrInline::Code { content, span } => WireInline::Code {
             content: content.clone(),
+            span: *span,
+        },
+        IrInline::Keybinding { parts, span } => WireInline::Keybinding {
+            parts: parts.clone(),
             span: *span,
         },
         IrInline::SoftBreak { span } => WireInline::SoftBreak { span: *span },
@@ -2748,6 +2757,7 @@ fn wire_inline_to_ir(
         },
         WireInline::ExplicitError { component } => IrInline::ExplicitError { component },
         WireInline::Code { content, span } => IrInline::Code { content, span },
+        WireInline::Keybinding { parts, span } => IrInline::Keybinding { parts, span },
         WireInline::SoftBreak { span } => IrInline::SoftBreak { span },
         WireInline::HardBreak { span } => IrInline::HardBreak { span },
         WireInline::RawHtml { content, span } => IrInline::RawHtml { content, span },
@@ -2940,6 +2950,16 @@ fn callable_capture_from_wire(
     })
 }
 
+/// Backend-neutral keyboard combination parts. The backend owns visual glyphs.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrKeybindingPart {
+    PrimaryModifier,
+    CtrlModifier,
+    AltModifier,
+    ShiftModifier,
+    Key(String),
+}
+
 /// One Quarkdown code callout after evaluator validation and ordering.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IrCodeCallout {
@@ -3098,6 +3118,11 @@ pub enum IrPageCounterTarget {
 pub enum IrInline {
     /// Plain text content.
     Text { content: String, span: SourceSpan },
+    /// Typed inline keyboard combination.
+    Keybinding {
+        parts: Vec<IrKeybindingPart>,
+        span: SourceSpan,
+    },
     /// Quarkdown `.whitespace` with an optional fixed inline extent.
     ///
     /// `None` for both dimensions is the non-breaking whitespace form. When
