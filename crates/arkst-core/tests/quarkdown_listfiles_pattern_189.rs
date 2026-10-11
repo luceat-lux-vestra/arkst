@@ -76,7 +76,7 @@ fn directory_selection_precedes_regex_and_recursive_names_remain_bare() {
 
 #[test]
 fn unsafe_or_different_regex_dialects_fail_closed_without_content() {
-    for pattern in ["[", "(?=a)", "é", "(a)\\1"] {
+    for pattern in ["[", "(?=a)", "é.*", "(a)\\1"] {
         let source = format!(
             ".listfiles {{data}} directories:{{false}} fullpath:{{false}} pattern:{{{pattern}}}\n"
         );
@@ -102,5 +102,49 @@ fn non_ascii_name_does_not_claim_jvm_regex_compatibility() {
         result.diagnostics[0].message.contains("non-ASCII"),
         "{result:?}"
     );
+    assert!(result.ir.nodes.is_empty(), "{result:?}");
+}
+
+#[test]
+fn unicode_literal_matches_exact_case_sensitive_basenames() {
+    let result = project(
+        ".listfiles {data} directories:{false} fullpath:{false} pattern:{café}::size\n.listfiles {data} directories:{false} fullpath:{false} pattern:{café}::getat {1}\n.listfiles {data} directories:{false} fullpath:{false} pattern:{écho}::size\n",
+        &[
+            ("data/café", b"yes"),
+            ("data/café2", b"no"),
+            ("data/CAFÉ", b"no"),
+            ("data/cafe", b"no"),
+            ("data/écho", b"yes"),
+        ],
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(output(&result), "1\ncafé\n1");
+    let wire = serde_json::to_string(&result.ir).expect("serialize");
+    let decoded: arkst_core::ir::IrDocument = serde_json::from_str(&wire).expect("deserialize");
+    assert_eq!(decoded, result.ir);
+}
+
+#[test]
+fn unicode_regex_operators_remain_fail_closed() {
+    for pattern in ["café.*", "café[0-9]", "café|cafe", "é+", "(?i)é"] {
+        let source = format!(
+            ".listfiles {{data}} directories:{{false}} fullpath:{{false}} pattern:{{{pattern}}}\n"
+        );
+        let result = project(&source, &[("data/café", b"x")]);
+        assert_eq!(result.diagnostics.len(), 1, "{pattern:?}: {result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001", "{pattern:?}");
+        assert!(result.ir.nodes.is_empty(), "{pattern:?}: {result:?}");
+    }
+}
+
+#[test]
+fn unicode_literal_does_not_enable_unproven_name_sort() {
+    let result = project(
+        ".listfiles {data} directories:{false} fullpath:{false} pattern:{café} sortby:{name}\n",
+        &[("data/café", b"x")],
+    );
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    assert!(result.diagnostics[0].message.contains("sortby:name"));
     assert!(result.ir.nodes.is_empty(), "{result:?}");
 }
