@@ -333,8 +333,12 @@ pub(crate) fn plan<T>(
                     ),
                     primary: body.span(),
                     secondary: vec![previous_span],
-                    hint: "Remove the explicit value already occupying the body parameter."
-                        .to_string(),
+                    hint: if body_policy == BodyPolicy::BindFinal {
+                        "Remove the final explicit value when using a body fallback."
+                    } else {
+                        "Remove the explicit value already occupying the body parameter."
+                    }
+                    .to_string(),
                 });
             }
             slots[index] = Some(PlannedSlot::Body);
