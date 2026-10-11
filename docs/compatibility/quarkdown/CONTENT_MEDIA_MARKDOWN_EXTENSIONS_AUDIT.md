@@ -24,8 +24,8 @@ owned status counts are:
 | 'SUPPORTED_END_TO_END' | 13 |
 | 'SUPPORTED_SEMANTICS' | 3 |
 | 'PARSED_ONLY' | 1 |
-| 'PARTIAL' | 16 |
-| 'UNSUPPORTED' | 35 |
+| 'PARTIAL' | 17 |
+| 'UNSUPPORTED' | 34 |
 | 'DEFERRED' | 2 |
 | 'BLOCKED' | 1 |
 | 'UNKNOWN' | 0 |
@@ -318,3 +318,7 @@ The pinned Quarkdown v2.5.1 lexer accepts an isolated line of **three or more** 
 ### #184 bounded typed keybinding producer (2026-10-11)
 
 The callable `.keybinding(input)` uses the shared builtin binder and String conversion path, including the raw-body fallback, and retains ordered modifier/key variants in `IrInline::Keybinding`. Independent tests exercise separator/alias parsing, literal key names, input diagnostics, precedence, provenance and IR serialization; Typst renders generic keycaps and a required subprocess test checks PDF creation. Canonical `primitive:keybinding` becomes `PARTIAL` rather than `UNKNOWN`; dynamic browser/platform-aware macOS glyph replacement and full pinned HTML/CSS parity are not claimed. No shared #181 caption/index or #178 slides state is reimplemented.
+
+### #184 bounded deterministic loremipsum scalar producer (2026-10-11)
+
+Pinned v2.5.1 `.loremipsum()` exposes a zero-argument deterministic scalar String, sourced upstream from a packaged text resource. Arkst registers the same no-argument callable shape through the shared binder and returns an independently authored deterministic placeholder paragraph as `IrValue::String`; existing interpolation, inline text, serde and escaped Typst lowering are reused. Regression tests verify repeatability, invalid argument/body fail-closed diagnostics, source-defined precedence, use inside surrounding text and actual required Typst/PDF compilation. The #154 row becomes `PARTIAL` and NOT `SUPPORTED_END_TO_END`: the GPL upstream packaged paragraph is not copied, hence exact text bytes and HTML/browser output equivalence are **not** claimed. No new IR/backend/resource-read abstraction is introduced.

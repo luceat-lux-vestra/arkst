@@ -346,8 +346,8 @@ fn manifest_is_complete_pinned_and_machine_checkable() {
     assert_eq!(statuses.get("SUPPORTED_END_TO_END"), Some(&13));
     assert_eq!(statuses.get("SUPPORTED_SEMANTICS"), Some(&3));
     assert_eq!(statuses.get("PARSED_ONLY"), Some(&1));
-    assert_eq!(statuses.get("PARTIAL"), Some(&16));
-    assert_eq!(statuses.get("UNSUPPORTED"), Some(&35));
+    assert_eq!(statuses.get("PARTIAL"), Some(&17));
+    assert_eq!(statuses.get("UNSUPPORTED"), Some(&34));
     assert_eq!(statuses.get("DEFERRED"), Some(&2));
     assert_eq!(statuses.get("BLOCKED"), Some(&1));
     assert!(!statuses.contains_key("UNKNOWN"));
@@ -366,6 +366,7 @@ fn markdown_and_quarkdown_layers_are_not_promoted() {
     assert_eq!(row(&rows, "syntax:qd-code-caption")[26], "PARTIAL");
     assert_eq!(row(&rows, "syntax:qd-pagebreak")[26], "PARTIAL");
     assert_eq!(row(&rows, "primitive:pagebreak")[26], "PARTIAL");
+    assert_eq!(row(&rows, "primitive:loremipsum")[26], "PARTIAL");
     assert_eq!(row(&rows, "markdown:raw-html")[26], "PARTIAL");
     assert_eq!(row(&rows, "primitive:html")[26], "SUPPORTED_SEMANTICS");
     assert_eq!(row(&rows, "primitive:markdown")[26], "SUPPORTED_SEMANTICS");
