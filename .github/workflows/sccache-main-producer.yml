@@ -48,7 +48,7 @@ jobs:
           toolchain: 1.98.0
 
       - name: Install Typst 0.15.1 (pinned)
-        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        uses: typst-community/setup-typst@fee4b65b091cc546f02ce3be15fad8760f38a108 # v5
         with:
           typst-version: 0.15.1
 
@@ -257,7 +257,7 @@ jobs:
 
       - name: Install Typst 0.15.1 (pinned)
         if: ${{ steps.platform-rust-cache.outputs.cache-hit != 'true' }}
-        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        uses: typst-community/setup-typst@fee4b65b091cc546f02ce3be15fad8760f38a108 # v5
         with:
           typst-version: 0.15.1
 
