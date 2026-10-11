@@ -1093,12 +1093,6 @@ fn evaluate_text(
                         cause,
                     )
                 })?;
-                if url.trim().is_empty() {
-                    return Err(error(
-                        "`.text` empty `url` text-derived destination is not yet supported"
-                            .to_string(),
-                    ));
-                }
                 Ok(Some(url))
             }
         })
@@ -1116,6 +1110,24 @@ fn evaluate_text(
         IrValue::Content(mut nodes) if matches!(nodes.as_slice(), [IrNode::Paragraph { .. }]) => {
             if let Some(destination) = url {
                 if let IrNode::Paragraph { content, .. } = &mut nodes[0] {
+                    // v2.5.1 Text.kt uses text.children.toPlainText() only
+                    // when url is explicitly specified but blank. Reuse
+                    // the existing bounded inline projection: do not
+                    // broaden regular String conversion or reparse Markdown.
+                    let destination = if destination.trim().is_empty() {
+                        let mut derived = String::new();
+                        plain_text_from_inlines(content, &mut derived).ok_or_else(|| {
+                            error("`.text` blank `url` has unsupported inline content".to_string())
+                        })?;
+                        if derived.is_empty() {
+                            return Err(error(
+                                "`.text` blank `url` requires nonempty derived text".to_string(),
+                            ));
+                        }
+                        derived
+                    } else {
+                        destination
+                    };
                     let children = std::mem::take(content);
                     *content = vec![IrInline::Link {
                         content: children,
