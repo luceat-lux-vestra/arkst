@@ -1171,6 +1171,7 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         | IrInline::PageNumberFormat { .. }
         | IrInline::PageNumberReset { .. }
         | IrInline::LastHeading { .. }
+        | IrInline::Keybinding { .. }
         | IrInline::RawHtml { .. }
         | IrInline::ExplicitError { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
@@ -1233,6 +1234,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             | IrInline::PageNumberFormat { .. }
             | IrInline::PageNumberReset { .. }
             | IrInline::LastHeading { .. }
+            | IrInline::Keybinding { .. }
             | IrInline::RawHtml { .. }
             | IrInline::ExplicitError { .. }
             | IrInline::TargetSpecificContent { .. } => {
