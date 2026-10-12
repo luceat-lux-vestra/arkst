@@ -59,6 +59,7 @@ def validate(producer: str, consumer: str) -> None:
             raise ValueError(f"{reason}: missing {needle!r}")
 
     require(producer, "on:\n  push:\n    branches: [main]", "trusted main-only event")
+    require(producer, "\n  workflow_dispatch:\n", "manual cache recovery")
     validate_seed_paths(producer)
     if "\n  pull_request:" in producer or "\n  pull_request_target:" in producer:
         raise ValueError("untrusted events must not populate protected-main cache")
@@ -139,6 +140,11 @@ class MainCacheBridgeContractTests(unittest.TestCase):
 
     def test_dependency_only_seed_scope(self) -> None:
         validate_seed_paths(self.producer)
+
+    def test_manual_recovery_required(self) -> None:
+        bad = self.producer.replace("  workflow_dispatch:\n", "", 1)
+        with self.assertRaises(ValueError):
+            validate(bad, self.consumer)
 
     def test_unbounded_seed_scope_rejected(self) -> None:
         bad = self.producer.replace("      - 'Cargo.toml'", "      - '**'", 1)
