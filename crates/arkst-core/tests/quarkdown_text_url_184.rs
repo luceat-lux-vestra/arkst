@@ -96,7 +96,7 @@ fn text_url_invalid_and_body_collision_fail_atomically() {
         ".text url:{   }\n",
         ".text url:{.none} text:{hello} {world}\n",
         ".text text:{hello} {world}\n",
-        ".text weight:{bold} {hello}\n",
+        ".text weight:{heavy} {hello}\n",
         ".text url:{https://example.org} {hello} {world}\n",
     ] {
         let result = compile_source(source);

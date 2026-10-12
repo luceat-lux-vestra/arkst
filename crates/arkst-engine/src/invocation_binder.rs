@@ -22,6 +22,9 @@ pub(crate) struct ParameterMetadata<'a> {
     pub(crate) name: &'a str,
     pub(crate) aliases: &'a [&'a str],
     pub(crate) allows_named: bool,
+    /// Whether positional candidates may occupy this slot.
+    /// Name-only options keep prior positional contracts stable.
+    pub(crate) allows_positional: bool,
     pub(crate) omission: OmissionPolicy,
     pub(crate) name_span: Option<SourceSpan>,
 }
@@ -32,6 +35,7 @@ impl<'a> ParameterMetadata<'a> {
             name,
             aliases: &[],
             allows_named: true,
+            allows_positional: true,
             omission: OmissionPolicy::Required,
             name_span: None,
         }
@@ -42,6 +46,7 @@ impl<'a> ParameterMetadata<'a> {
             name,
             aliases: &[],
             allows_named: true,
+            allows_positional: true,
             omission: OmissionPolicy::Optional,
             name_span: None,
         }
@@ -52,6 +57,7 @@ impl<'a> ParameterMetadata<'a> {
             name,
             aliases: &[],
             allows_named: true,
+            allows_positional: true,
             omission: OmissionPolicy::Default,
             name_span: None,
         }
@@ -64,6 +70,11 @@ impl<'a> ParameterMetadata<'a> {
 
     pub(crate) const fn named(mut self, allowed: bool) -> Self {
         self.allows_named = allowed;
+        self
+    }
+
+    pub(crate) const fn positional(mut self, allowed: bool) -> Self {
+        self.allows_positional = allowed;
         self
     }
 
@@ -256,6 +267,20 @@ pub(crate) fn plan<T>(
                         primary: *span,
                         secondary: Vec::new(),
                         hint: "Remove the excess positional argument or bind it to a declared parameter.".to_string(),
+                    });
+                }
+                if !parameters[index].allows_positional {
+                    return Err(BindingError {
+                        message: format!(
+                            "parameter `{}` requires a named argument",
+                            parameters[index].name
+                        ),
+                        primary: *span,
+                        secondary: Vec::new(),
+                        hint: format!(
+                            "Use `{}:` to provide this option by name.",
+                            parameters[index].name
+                        ),
                     });
                 }
                 slots[index] = Some(PlannedSlot::Candidate(candidate_index));
@@ -563,6 +588,36 @@ mod tests {
         )
         .expect("default omission");
         assert_eq!(defaulted.slots, [BoundSlot::Defaulted]);
+    }
+
+    #[test]
+    fn named_only_trailing_slot_rejects_third_positional_without_reordering() {
+        let parameters = [
+            ParameterMetadata::required("text"),
+            ParameterMetadata::defaulted("url"),
+            ParameterMetadata::defaulted("weight").positional(false),
+        ];
+        let ok = bind(
+            &parameters,
+            &[positional(1, 1), positional(2, 3), named("weight", 3, 5)],
+            None,
+            BodyPolicy::BindFirst,
+            span(0, 15),
+        )
+        .expect("named option after stable positional prefix");
+        assert_eq!(ok.slots.len(), 3);
+        assert!(matches!(&ok.slots[2], BoundSlot::Explicit { value: 3, .. }));
+
+        let invalid = bind(
+            &parameters,
+            &[positional(1, 1), positional(2, 3), positional(3, 5)],
+            None,
+            BodyPolicy::BindFirst,
+            span(0, 15),
+        )
+        .expect_err("third positional must not silently bind the named-only weight");
+        assert!(invalid.message.contains("weight"));
+        assert_eq!(invalid.primary, span(5, 6));
     }
 
     #[test]
