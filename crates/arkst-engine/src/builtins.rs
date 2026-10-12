@@ -1021,8 +1021,9 @@ fn evaluate_codespan(
 }
 
 /// Bounded pinned-v2.5.1 `.math` block producer. The first String slot
-/// uses shared source-backed conversion. An indented block body may infer
-/// block:true; inline math, TeX macros, references and styling remain
+/// uses shared source-backed conversion. An omitted or explicitly None block
+/// option infers true from an indented body, following pinned nullable semantics;
+/// inline math, TeX macros, references and styling remain
 /// unsupported rather than approximated by Typst.
 fn evaluate_math(
     mut arguments: BoundArguments,
@@ -1036,7 +1037,7 @@ fn evaluate_math(
     let block = arguments.remove(0);
     match block.as_ref().map(|value| &value.value) {
         Some(IrValue::Boolean(true)) => {}
-        None if is_block_call => {}
+        None | Some(IrValue::None) if is_block_call => {}
         _ => {
             return Err(error(
                 "`.math` requires block:true or an indented block body; inline math is unsupported"
