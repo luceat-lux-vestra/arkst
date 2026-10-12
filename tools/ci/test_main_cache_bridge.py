@@ -4,12 +4,52 @@
 from __future__ import annotations
 
 import unittest
+from fnmatch import fnmatchcase
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCER = ROOT / ".github/workflows/sccache-main-producer.yml"
 CONSUMER = ROOT / ".github/workflows/ci.yml"
 RUST_CACHE = "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+
+# The producer is an optional CI cache warmer, not a second main product-test run.
+# Cargo dependency/build configuration changes seed; ordinary source/docs do not.
+EXPECTED_SEED_PATHS = {
+    "Cargo.toml", "Cargo.lock", "**/Cargo.toml", "**/Cargo.lock",
+    ".cargo/**", "**/.cargo/**", "rust-toolchain", "rust-toolchain.toml",
+    ".github/workflows/sccache-main-producer.yml",
+}
+
+
+def validate_seed_paths(producer: str) -> None:
+    header = producer.split("\njobs:", 1)[0]
+    match = re.search(
+        r"(?m)^  push:\n    branches: \[main\]\n(?:    #[^\n]*\n)*    paths:\n"
+        r"((?:      - '[^']+'\n)+)",
+        header,
+    )
+    if not match:
+        raise ValueError("protected-main cache seed requires static path gating")
+    actual = set(re.findall(r"(?m)^      - '([^']+)'$", match.group(1)))
+    if actual != EXPECTED_SEED_PATHS:
+        raise ValueError(f"seed path policy drift: {actual ^ EXPECTED_SEED_PATHS}")
+    positive = (
+        "Cargo.toml", "Cargo.lock", "crates/arkst-cli/Cargo.toml",
+        ".cargo/config.toml", "crates/x/.cargo/config.toml",
+        "rust-toolchain.toml", ".github/workflows/sccache-main-producer.yml",
+    )
+    negative = (
+        "README.md", "docs/compatibility/notes.md", "crates/arkst-cli/src/lib.rs",
+        "tools/ci/test_main_cache_bridge.py", ".github/workflows/ci.yml",
+    )
+    for path in positive:
+        if not any(fnmatchcase(path, glob) for glob in actual):
+            raise ValueError(f"required seed input ignored: {path}")
+    for path in negative:
+        if any(fnmatchcase(path, glob) for glob in actual):
+            raise ValueError(f"source-only CI cache re-seeding: {path}")
+
 
 
 def validate(producer: str, consumer: str) -> None:
@@ -19,6 +59,7 @@ def validate(producer: str, consumer: str) -> None:
             raise ValueError(f"{reason}: missing {needle!r}")
 
     require(producer, "on:\n  push:\n    branches: [main]", "trusted main-only event")
+    validate_seed_paths(producer)
     if "\n  pull_request:" in producer or "\n  pull_request_target:" in producer:
         raise ValueError("untrusted events must not populate protected-main cache")
 
@@ -95,6 +136,19 @@ class MainCacheBridgeContractTests(unittest.TestCase):
 
     def test_current_repository_contract(self) -> None:
         validate(self.producer, self.consumer)
+
+    def test_dependency_only_seed_scope(self) -> None:
+        validate_seed_paths(self.producer)
+
+    def test_unbounded_seed_scope_rejected(self) -> None:
+        bad = self.producer.replace("      - 'Cargo.toml'", "      - '**'", 1)
+        with self.assertRaises(ValueError):
+            validate(bad, self.consumer)
+
+    def test_missing_lockfile_trigger_rejected(self) -> None:
+        bad = self.producer.replace("      - 'Cargo.lock'\n", "", 1)
+        with self.assertRaises(ValueError):
+            validate(bad, self.consumer)
 
     def test_producer_without_main_identity_rejected(self) -> None:
         bad = self.producer.replace("    branches: [main]", "    branches: [feature]", 1)
