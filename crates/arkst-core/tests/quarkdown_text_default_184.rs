@@ -57,7 +57,7 @@ fn text_rejects_unimplemented_style_and_malformed_invocations_atomically() {
     for source in [
         ".text\n",
         ".text {one} text:{two}\n",
-        ".text weight:{normal} {one}\n",
+        ".text weight:{heavy} {one}\n",
         ".text url:{   }\n",
         ".text {one} {two} {three}\n",
     ] {

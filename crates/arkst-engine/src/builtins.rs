@@ -416,14 +416,14 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
-    // The existing content/url positional contract is preserved. Add the
-    // pinned named weight option only as a bounded bold transform, without
-    // changing the shared @Body-first rich-inline binding.
+    // Pinned TextTransformData has a closed normal/bold weight and
+    // normal/italic style domain. Preserve the two-position text/url prefix;
+    // both formatting options are named-only shared-binder slots.
     builtin_spec_with_defaults(
         "text",
         BuiltinKind::Text,
-        &["text", "url", "weight"],
-        &[1, 2],
+        &["text", "url", "weight", "style"],
+        &[1, 2, 3],
         2,
         true,
         BuiltinBodyPolicy::BindEvaluatedFirst,
@@ -1112,9 +1112,10 @@ fn evaluate_keybinding(
     }]))
 }
 
-/// The default .text transform is visually transparent. The bounded bold
-/// weight option wraps rich inline leaves in the existing typed Strong node;
-/// other styling options remain unsupported, without flattening content.
+/// The default .text transform is visually transparent. The pinned closed
+/// weight (normal/bold) and style (normal/italic) enum subsets reuse typed
+/// Strong and Emphasis wrappers around evaluated rich inline content.
+/// Other formatting dimensions remain unsupported, without flattening.
 /// The pinned `.text url` String input may be parsed as one Markdown
 /// autolink. Preserve that exact URL without broadening scalar String
 /// conversion to arbitrary formatted or linked content.
@@ -1181,16 +1182,37 @@ fn evaluate_text(
             let weight = scalar_string_argument_result(&value, "weight")?;
             if weight.eq_ignore_ascii_case("bold") {
                 Ok(true)
+            } else if weight.eq_ignore_ascii_case("normal") {
+                Ok(false)
             } else {
                 Err(error(
-                    "`.text` currently supports only weight:bold (or None); other weight options are unsupported".to_string(),
+                    "`.text` weight must be normal, bold, or None".to_string(),
+                ))
+            }
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let italic = arguments
+        .remove(0)
+        .map(|value| {
+            if matches!(&value.value, IrValue::None) {
+                return Ok(false);
+            }
+            let style = scalar_string_argument_result(&value, "style")?;
+            if style.eq_ignore_ascii_case("italic") {
+                Ok(true)
+            } else if style.eq_ignore_ascii_case("normal") {
+                Ok(false)
+            } else {
+                Err(error(
+                    "`.text` style must be normal, italic, or None".to_string(),
                 ))
             }
         })
         .transpose()?
         .unwrap_or(false);
     match value.value {
-        IrValue::Content(nodes) if url.is_none() && !bold && nodes.is_empty() => {
+        IrValue::Content(nodes) if url.is_none() && !bold && !italic && nodes.is_empty() => {
             Ok(IrValue::Content(nodes))
         }
         IrValue::Content(nodes) if nodes.is_empty() => {
@@ -1205,6 +1227,13 @@ fn evaluate_text(
                 if bold {
                     let original = std::mem::take(content);
                     *content = vec![IrInline::Strong {
+                        content: original,
+                        span: call_span,
+                    }];
+                }
+                if italic {
+                    let original = std::mem::take(content);
+                    *content = vec![IrInline::Emphasis {
                         content: original,
                         span: call_span,
                     }];
@@ -2076,7 +2105,7 @@ mod tests {
                 assert_eq!(builtin.signature.max_positional, 2);
                 assert_eq!(
                     builtin.signature.parameter_names,
-                    &["text", "url", "weight"]
+                    &["text", "url", "weight", "style"]
                 );
             } else {
                 assert_eq!(
