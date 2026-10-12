@@ -416,13 +416,14 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
-    // Pinned Text.kt places @Body text FIRST, ahead of optional
-    // link options. Preserve inline structure and bind the body to that slot.
+    // The existing content/url positional contract is preserved. Add the
+    // pinned named weight option only as a bounded bold transform, without
+    // changing the shared @Body-first rich-inline binding.
     builtin_spec_with_defaults(
         "text",
         BuiltinKind::Text,
-        &["text", "url"],
-        &[1],
+        &["text", "url", "weight"],
+        &[1, 2],
         2,
         true,
         BuiltinBodyPolicy::BindEvaluatedFirst,
@@ -547,7 +548,9 @@ pub(crate) fn binding_parameters(builtin: &BuiltinSpec) -> Vec<ParameterMetadata
             } else {
                 ParameterMetadata::required(name)
             };
-            parameter.named(builtin.signature.allows_named)
+            parameter
+                .named(builtin.signature.allows_named)
+                .positional(index < builtin.signature.max_positional)
         })
         .collect()
 }
@@ -1109,9 +1112,9 @@ fn evaluate_keybinding(
     }]))
 }
 
-/// The default, option-free .text transform is visually transparent.
-/// Preserve every evaluated inline leaf rather than projecting to plain text;
-/// any styling arguments remain unbound/unsupported by the narrow signature.
+/// The default .text transform is visually transparent. The bounded bold
+/// weight option wraps rich inline leaves in the existing typed Strong node;
+/// other styling options remain unsupported, without flattening content.
 /// The pinned `.text url` String input may be parsed as one Markdown
 /// autolink. Preserve that exact URL without broadening scalar String
 /// conversion to arbitrary formatted or linked content.
@@ -1169,8 +1172,27 @@ fn evaluate_text(
         })
         .transpose()?
         .flatten();
+    let bold = arguments
+        .remove(0)
+        .map(|value| {
+            if matches!(&value.value, IrValue::None) {
+                return Ok(false);
+            }
+            let weight = scalar_string_argument_result(&value, "weight")?;
+            if weight.eq_ignore_ascii_case("bold") {
+                Ok(true)
+            } else {
+                Err(error(
+                    "`.text` currently supports only weight:bold (or None); other weight options are unsupported".to_string(),
+                ))
+            }
+        })
+        .transpose()?
+        .unwrap_or(false);
     match value.value {
-        IrValue::Content(nodes) if url.is_none() && nodes.is_empty() => Ok(IrValue::Content(nodes)),
+        IrValue::Content(nodes) if url.is_none() && !bold && nodes.is_empty() => {
+            Ok(IrValue::Content(nodes))
+        }
         IrValue::Content(nodes) if nodes.is_empty() => {
             // Upstream accepts an empty inline body, but the Typst/Link
             // projection of an empty display label is not proven here.
@@ -1179,6 +1201,15 @@ fn evaluate_text(
             ))
         }
         IrValue::Content(mut nodes) if matches!(nodes.as_slice(), [IrNode::Paragraph { .. }]) => {
+            if let IrNode::Paragraph { content, .. } = &mut nodes[0] {
+                if bold {
+                    let original = std::mem::take(content);
+                    *content = vec![IrInline::Strong {
+                        content: original,
+                        span: call_span,
+                    }];
+                }
+            }
             if let Some(destination) = url {
                 if let IrNode::Paragraph { content, .. } = &mut nodes[0] {
                     // v2.5.1 Text.kt uses text.children.toPlainText() only
@@ -2036,10 +2067,25 @@ mod tests {
 
         for (index, builtin) in inventory.iter().enumerate() {
             assert_eq!(lookup(builtin.name), Some(builtin));
-            assert_eq!(
-                builtin.signature.max_positional,
-                builtin.signature.parameter_names.len()
+            assert!(
+                builtin.signature.max_positional <= builtin.signature.parameter_names.len(),
+                "{} exceeds declared parameter count",
+                builtin.name
             );
+            if builtin.name == "text" {
+                assert_eq!(builtin.signature.max_positional, 2);
+                assert_eq!(
+                    builtin.signature.parameter_names,
+                    &["text", "url", "weight"]
+                );
+            } else {
+                assert_eq!(
+                    builtin.signature.max_positional,
+                    builtin.signature.parameter_names.len(),
+                    "{} unexpectedly declares named-only parameters",
+                    builtin.name
+                );
+            }
             for (parameter_index, parameter) in builtin.signature.parameter_names.iter().enumerate()
             {
                 assert!(

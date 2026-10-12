@@ -13673,6 +13673,7 @@ impl Evaluator {
                             name: &parameter.name,
                             aliases: &[],
                             allows_named: true,
+                            allows_positional: true,
                             omission,
                             name_span: Some(parameter.name_span),
                         }
@@ -17080,6 +17081,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 name: parameter_name,
                 aliases: &[],
                 allows_named: true,
+                allows_positional: true,
                 omission: invocation_binder::OmissionPolicy::Required,
                 name_span: None,
             }],
@@ -17092,6 +17094,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 name: "message",
                 aliases: &[],
                 allows_named: true,
+                allows_positional: true,
                 omission: invocation_binder::OmissionPolicy::Required,
                 name_span: None,
             }],
@@ -17104,6 +17107,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 name: "name",
                 aliases: &[],
                 allows_named: true,
+                allows_positional: true,
                 omission: invocation_binder::OmissionPolicy::Required,
                 name_span: None,
             }],
@@ -19487,6 +19491,7 @@ fn lambda_binding_metadata(parameters: &LambdaParameters) -> Vec<ParameterMetada
                 name: &parameter.name,
                 aliases: &[],
                 allows_named: true,
+                allows_positional: true,
                 omission: if parameter.optional {
                     invocation_binder::OmissionPolicy::Optional
                 } else {
