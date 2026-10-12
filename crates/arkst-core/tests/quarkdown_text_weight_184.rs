@@ -74,14 +74,14 @@ fn named_bold_keeps_blank_url_derivation_from_unstyled_text() {
 }
 
 #[test]
-fn unsupported_weights_and_conflicting_bindings_fail_atomically() {
+fn unsupported_weight_and_style_values_and_conflicting_bindings_fail_atomically() {
     for source in [
-        ".text weight:{normal} {hello}\n",
         ".text weight:{heavy} {hello}\n",
         ".text weight:{123} {hello}\n",
+        ".text style:{oblique} text:{hello}\n",
+        ".text text:{hello} style:{underline}\n",
         ".text weight:{bold} weight:{bold} {hello}\n",
         ".text weight:{bold} text:{hello} {world}\n",
-        ".text weight:{bold} {hello} style:{italic}\n",
         ".text {hello} {https://example.org/docs} {bold}\n",
     ] {
         let result = compile_source(source);

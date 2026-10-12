@@ -992,9 +992,12 @@ impl LoweringContext {
             }
             IrInline::Emphasis { content, span } => {
                 let before = self.output.len();
-                self.push('*');
+                // Typst's asterisk markup is strong/bold; emphasis is
+                // italic. Use the explicit function to preserve adjacent
+                // inline-word boundaries instead of relying on underscores.
+                self.push_str("#emph[");
                 self.lower_inlines(content);
-                self.push('*');
+                self.push(']');
                 if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
@@ -2388,7 +2391,7 @@ mod tests {
             metadata: IrMetadata::default(),
         };
         let code = super::lower_to_typst_code(&doc);
-        assert_eq!(code, "Hello *italic* and *bold*\n\n");
+        assert_eq!(code, "Hello #emph[italic] and *bold*\n\n");
     }
 
     #[test]
