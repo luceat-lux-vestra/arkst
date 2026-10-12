@@ -81,10 +81,41 @@ fn indented_body_infers_block_without_overriding_explicit_mode() {
 }
 
 #[test]
+fn explicitly_null_block_mode_infers_indented_source_shape() {
+    for source in [
+        r#".math block:{.none}
+    a + b
+"#,
+        r#".math block:{.none} ref:{.none}
+    a + b
+"#,
+    ] {
+        let (math, id) = single_math(source);
+        let IrNode::Math {
+            source: expr,
+            display,
+            span,
+        } = math
+        else {
+            unreachable!()
+        };
+        assert_eq!(expr, "a + b");
+        assert!(display);
+        assert_eq!(span.source_id, id);
+        assert_eq!(span.start, 0);
+        assert!(span.end <= source.len());
+    }
+}
+
+#[test]
 fn invalid_modes_tex_or_reference_fail_atomically() {
     for input in [
         ".math {a + b}\n",
         ".math {a + b} block:{false}\n",
+        r#".math {a + b} block:{.none}
+"#,
+        r#".math content:{a + b} block:{.none}
+"#,
         ".math block:{false}\n    a + b\n",
         ".math {a + b} block:{yes} ref:{eq}\n",
         ".math {a + b} block:{true} ref:{eq}\n",

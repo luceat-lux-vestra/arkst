@@ -12,6 +12,18 @@ fn explicit_and_inferred_block_math_compile_to_real_typst_pdf() {
     for (input, expected) in [
         (".math {x^2 + y} block:{true}\n", "$ x^2 + y $"),
         (".math\n    a + b\n", "$ a + b $"),
+        (
+            r#".math block:{.none}
+    a + b
+"#,
+            "$ a + b $",
+        ),
+        (
+            r#".math block:{.none} ref:{.none}
+    a + b
+"#,
+            "$ a + b $",
+        ),
     ] {
         let project = VirtualProjectBuilder::new()
             .entry("math.qd")
