@@ -416,14 +416,13 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
-    // Pinned TextTransformData has a closed normal/bold weight and
-    // normal/italic style domain. Preserve the two-position text/url prefix;
-    // both formatting options are named-only shared-binder slots.
+    // Preserve the two-position text/url prefix. Closed weight, style and
+    // bounded decoration options are named-only shared-binder slots.
     builtin_spec_with_defaults(
         "text",
         BuiltinKind::Text,
-        &["text", "url", "weight", "style"],
-        &[1, 2, 3],
+        &["text", "url", "weight", "style", "decoration"],
+        &[1, 2, 3, 4],
         2,
         true,
         BuiltinBodyPolicy::BindEvaluatedFirst,
@@ -1112,10 +1111,10 @@ fn evaluate_keybinding(
     }]))
 }
 
-/// The default .text transform is visually transparent. The pinned closed
-/// weight (normal/bold) and style (normal/italic) enum subsets reuse typed
-/// Strong and Emphasis wrappers around evaluated rich inline content.
-/// Other formatting dimensions remain unsupported, without flattening.
+/// The default .text transform is visually transparent. Closed weight and
+/// style subsets reuse Strong and Emphasis; bounded decoration:none and
+/// decoration:strikethrough reuse Strikethrough IR without flattening children.
+/// Other decoration values and formatting dimensions remain unsupported.
 /// The pinned `.text url` String input may be parsed as one Markdown
 /// autolink. Preserve that exact URL without broadening scalar String
 /// conversion to arbitrary formatted or linked content.
@@ -1211,8 +1210,30 @@ fn evaluate_text(
         })
         .transpose()?
         .unwrap_or(false);
+    let strike = arguments
+        .remove(0)
+        .map(|value| {
+            if matches!(&value.value, IrValue::None) {
+                return Ok(false);
+            }
+            let decoration = scalar_string_argument_result(&value, "decoration")?;
+            if decoration.eq_ignore_ascii_case("strikethrough") {
+                Ok(true)
+            } else if decoration.eq_ignore_ascii_case("none") {
+                Ok(false)
+            } else {
+                Err(error(
+                    "`.text` decoration currently supports only none, strikethrough, or None"
+                        .to_string(),
+                ))
+            }
+        })
+        .transpose()?
+        .unwrap_or(false);
     match value.value {
-        IrValue::Content(nodes) if url.is_none() && !bold && !italic && nodes.is_empty() => {
+        IrValue::Content(nodes)
+            if url.is_none() && !bold && !italic && !strike && nodes.is_empty() =>
+        {
             Ok(IrValue::Content(nodes))
         }
         IrValue::Content(nodes) if nodes.is_empty() => {
@@ -1234,6 +1255,13 @@ fn evaluate_text(
                 if italic {
                     let original = std::mem::take(content);
                     *content = vec![IrInline::Emphasis {
+                        content: original,
+                        span: call_span,
+                    }];
+                }
+                if strike {
+                    let original = std::mem::take(content);
+                    *content = vec![IrInline::Strikethrough {
                         content: original,
                         span: call_span,
                     }];
@@ -2105,7 +2133,7 @@ mod tests {
                 assert_eq!(builtin.signature.max_positional, 2);
                 assert_eq!(
                     builtin.signature.parameter_names,
-                    &["text", "url", "weight", "style"]
+                    &["text", "url", "weight", "style", "decoration"]
                 );
             } else {
                 assert_eq!(
