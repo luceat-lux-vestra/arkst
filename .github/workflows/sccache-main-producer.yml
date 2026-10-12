@@ -3,6 +3,18 @@ name: Ubuntu Final compiler cache producer
 on:
   push:
     branches: [main]
+    # Main cache seeds only when dependency/toolchain or the producer contract changes.
+    # Existing PR restore-keys reuse compatible previous main cache after source-only merges.
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '.cargo/**'
+      - '**/.cargo/**'
+      - 'rust-toolchain'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/sccache-main-producer.yml'
 
 permissions:
   contents: read
