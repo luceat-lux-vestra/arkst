@@ -9,7 +9,7 @@ use arkst_ir::{
     IrExplicitErrorComponent, IrInline, IrKeybindingPart, IrLandscapeComponent,
     IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
     IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
-    IrValue,
+    IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -475,6 +475,7 @@ impl LoweringContext {
             IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
             IrComponent::Container(container) => self.lower_container(container),
             IrComponent::Landscape(landscape) => self.lower_landscape(landscape),
+            IrComponent::Todo(todo) => self.lower_todo(todo),
             IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
         }
     }
@@ -515,6 +516,21 @@ impl LoweringContext {
     fn lower_landscape(&mut self, component: &IrLandscapeComponent) {
         let before = self.output.len();
         self.push_str("#rotate(-90deg, reflow: true)[\n");
+        for child in &component.children {
+            self.lower_node(child);
+        }
+        self.push_str("]\n");
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_todo(&mut self, component: &IrTodoComponent) {
+        let before = self.output.len();
+        self.push_str("#block(width: 100%, inset: 8pt, stroke: 1pt)[\n");
+        self.push_str("#strong[");
+        self.push_str(&escape_typst_text(&component.title));
+        self.push_str("]\n");
         for child in &component.children {
             self.lower_node(child);
         }
