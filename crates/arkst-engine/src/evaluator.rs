@@ -56,13 +56,13 @@ use crate::{
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
-    IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext,
-    IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrColor,
-    IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
-    IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
-    IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInlineBody,
-    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
+    IrBoxComponent, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
+    IrCallableResourceContext, IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable,
+    IrCodeCallout, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
+    IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment, IrDocumentAuthor,
+    IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline,
+    IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode,
+    IrNumberingLayer, IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
     IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins,
     IrPageOrientation, IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair,
     IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
@@ -475,6 +475,7 @@ fn component_contains_explicit_error(component: &IrComponent) -> bool {
         IrComponent::Landscape(component) => {
             component.children.iter().any(node_contains_explicit_error)
         }
+        IrComponent::Box(component) => component.children.iter().any(node_contains_explicit_error),
         IrComponent::Todo(component) => component.children.iter().any(node_contains_explicit_error),
     }
 }
@@ -3878,6 +3879,10 @@ impl Evaluator {
             diagnostics.push(landscape_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_box(name) && context.get_function(name).is_none() {
+            diagnostics.push(box_inline_materialization_error(*span));
+            return Vec::new();
+        }
         if is_todo(name) && context.get_function(name).is_none() {
             diagnostics.push(todo_inline_materialization_error(*span));
             return Vec::new();
@@ -4757,6 +4762,22 @@ impl Evaluator {
             );
         }
 
+        if is_box(name) {
+            return self.evaluate_box(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
+            );
+        }
+
         if is_todo(name) {
             return self.evaluate_todo(
                 ordered_args,
@@ -5632,6 +5653,143 @@ impl Evaluator {
                 span: *span,
             },
         )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_box(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(box_argument_error(
+                "`.box` body is Markdown content, not a lambda",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                if !positional_args.is_empty()
+                    || !named_args.is_empty()
+                    || implicit_argument.is_some()
+                {
+                    return CallOutcome::Failed;
+                }
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(box_argument_error(
+                    "`.box` Markdown body must be block content",
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                let candidates = match self.evaluate_invocation_candidates(
+                    ordered_args,
+                    positional_args,
+                    named_args,
+                    span,
+                    diagnostics,
+                    context,
+                    first_origin,
+                    implicit_argument,
+                ) {
+                    Ok(candidates) => candidates,
+                    Err(outcome) => return outcome,
+                };
+                let bound = match binding_plan.bind(&candidates, None, *span) {
+                    Ok(bound) => bound,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let parameter_span = bound
+                    .parameters
+                    .first()
+                    .and_then(|parameter| parameter.name_span);
+                let Some(BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                }) = bound.slots.into_iter().next()
+                else {
+                    diagnostics.push(box_argument_error(
+                        "`.box` requires Markdown content",
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let converted = match value_conversion::convert_target_with_origin(
+                    &value,
+                    value_conversion::ConversionTarget::BlockContent,
+                    argument_span,
+                ) {
+                    Ok(converted) => converted,
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some("body"),
+                                parameter_span,
+                                *span,
+                            ),
+                            Some("`.box` body"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                match self.resolve_target_value(
+                    converted,
+                    argument_span,
+                    *span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(IrValue::Content(nodes)) => nodes,
+                    Ok(_) => {
+                        diagnostics.push(box_argument_error(
+                            "`.box` body must convert to Markdown content",
+                            argument_span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    Err(outcome) => return outcome,
+                }
+            }
+        };
+
+        if context.document_state.borrow().locale.is_some() {
+            diagnostics.push(box_argument_error(
+                "`.box` automatic localized titles are not yet implemented",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Box(IrBoxComponent {
+            children,
+            span: *span,
+        })))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -14377,6 +14535,11 @@ impl Evaluator {
                     Self::collect_evidenced_output_error_components(&component.children, components)
                 }
                 IrNode::Component {
+                    component: IrComponent::Box(component),
+                } => {
+                    Self::collect_evidenced_output_error_components(&component.children, components)
+                }
+                IrNode::Component {
                     component: IrComponent::Todo(component),
                 } => {
                     Self::collect_evidenced_output_error_components(&component.children, components)
@@ -15630,6 +15793,7 @@ pub(crate) enum NativeDispatchOwner {
     Align,
     Container,
     Landscape,
+    Box,
     Todo,
     Br,
     PageMargin,
@@ -15697,6 +15861,7 @@ const CENTER_NATIVE_NAMES: &[&str] = &["center"];
 const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
 const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
+const BOX_NATIVE_NAMES: &[&str] = &["box"];
 const TODO_NATIVE_NAMES: &[&str] = &["todo"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
 const PAGE_MARGIN_NATIVE_NAMES: &[&str] = &["pagemargin", "footer"];
@@ -15792,6 +15957,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Landscape,
         names: LANDSCAPE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Box,
+        names: BOX_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Todo,
@@ -15918,6 +16087,10 @@ fn is_container(name: &str) -> bool {
 
 fn is_landscape(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Landscape)
+}
+
+fn is_box(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Box)
 }
 
 fn is_todo(name: &str) -> bool {
@@ -17397,7 +17570,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
         "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
-        "todo" => (
+        "box" | "todo" => (
             vec![ParameterMetadata::required("body")],
             BodyPolicy::BindFinal,
         ),
@@ -20599,6 +20772,31 @@ fn landscape_inline_materialization_error(span: SourceSpan) -> Diagnostic {
     }
 }
 
+fn box_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.box` currently supports only the default untitled CALLOUT form with one required MarkdownContent body."
+                .to_string(),
+        ],
+    }
+}
+
+fn box_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "`.box` is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use `.box` as a block/content call.".to_string()],
+    }
+}
+
 fn todo_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3003".to_string(),
@@ -21506,6 +21704,10 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
             rebase_dynamic_nodes(&mut component.children, source_span);
         }
         IrComponent::Landscape(component) => {
+            component.span = source_span;
+            rebase_dynamic_nodes(&mut component.children, source_span);
+        }
+        IrComponent::Box(component) => {
             component.span = source_span;
             rebase_dynamic_nodes(&mut component.children, source_span);
         }

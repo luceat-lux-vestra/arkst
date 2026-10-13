@@ -230,6 +230,9 @@ fn collect_component_sources(
         IrComponent::Landscape(component) => {
             collect_document_sources(&component.children, sources)?;
         }
+        IrComponent::Box(component) => {
+            collect_document_sources(&component.children, sources)?;
+        }
         IrComponent::Todo(component) => {
             collect_document_sources(&component.children, sources)?;
         }
@@ -1388,6 +1391,7 @@ pub enum IrComponent {
     Stacked(IrStackedComponent),
     Container(IrContainerComponent),
     Landscape(IrLandscapeComponent),
+    Box(IrBoxComponent),
     Todo(IrTodoComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
@@ -1399,6 +1403,7 @@ impl IrComponent {
             Self::Stacked(component) => component.span,
             Self::Container(component) => component.span,
             Self::Landscape(component) => component.span,
+            Self::Box(component) => component.span,
             Self::Todo(component) => component.span,
             Self::ExplicitError(component) => component.span,
         }
@@ -1425,6 +1430,18 @@ pub struct IrExplicitErrorComponent {
 /// angle, page, and backend-specific rendering details stay out of the IR.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrLandscapeComponent {
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
+/// Bounded backend-neutral semantic state produced by the default Quarkdown
+/// `.box` callout subset.
+///
+/// This component intentionally represents only the no-option CALLOUT form.
+/// Title localization, explicit titles, alternate box types, padding, and
+/// colors remain unsupported instead of being flattened into styling strings.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrBoxComponent {
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -1928,6 +1945,7 @@ enum WireComponent {
     Stacked(WireStackedComponent),
     Container(WireContainerComponent),
     Landscape(WireLandscapeComponent),
+    Box(WireBoxComponent),
     Todo(WireTodoComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
@@ -1967,6 +1985,12 @@ struct WireContainerComponent {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireLandscapeComponent {
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireBoxComponent {
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2459,6 +2483,10 @@ fn component_to_wire(
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
+        IrComponent::Box(component) => WireComponent::Box(WireBoxComponent {
+            children: wire_nodes(&component.children, sources)?,
+            span: component.span,
+        }),
         IrComponent::Todo(component) => WireComponent::Todo(WireTodoComponent {
             title: component.title.clone(),
             children: wire_nodes(&component.children, sources)?,
@@ -2928,6 +2956,10 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::Landscape(component) => IrComponent::Landscape(IrLandscapeComponent {
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+        WireComponent::Box(component) => IrComponent::Box(IrBoxComponent {
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),

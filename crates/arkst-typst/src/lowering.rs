@@ -4,8 +4,8 @@
 //! records source map entries as it generates code.
 
 use arkst_ir::{
-    IrCallSegment, IrColor, IrComponent, IrContainerAlignment, IrContainerComponent,
-    IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
+    IrBoxComponent, IrCallSegment, IrColor, IrComponent, IrContainerAlignment,
+    IrContainerComponent, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
     IrExplicitErrorComponent, IrInline, IrKeybindingPart, IrLandscapeComponent,
     IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
     IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
@@ -475,6 +475,7 @@ impl LoweringContext {
             IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
             IrComponent::Container(container) => self.lower_container(container),
             IrComponent::Landscape(landscape) => self.lower_landscape(landscape),
+            IrComponent::Box(callout) => self.lower_box(callout),
             IrComponent::Todo(todo) => self.lower_todo(todo),
             IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
         }
@@ -516,6 +517,18 @@ impl LoweringContext {
     fn lower_landscape(&mut self, component: &IrLandscapeComponent) {
         let before = self.output.len();
         self.push_str("#rotate(-90deg, reflow: true)[\n");
+        for child in &component.children {
+            self.lower_node(child);
+        }
+        self.push_str("]\n");
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_box(&mut self, component: &IrBoxComponent) {
+        let before = self.output.len();
+        self.push_str("#block(width: 100%, inset: 8pt, stroke: 1pt)[\n");
         for child in &component.children {
             self.lower_node(child);
         }
