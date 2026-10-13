@@ -668,6 +668,9 @@ fn collect_page_margin_positions(nodes: &[IrNode], positions: &mut Vec<IrPageMar
                 IrComponent::Box(component) => {
                     collect_page_margin_positions(&component.children, positions);
                 }
+                IrComponent::Collapse(component) => {
+                    collect_page_margin_positions(&component.children, positions);
+                }
                 IrComponent::Todo(component) => {
                     collect_page_margin_positions(&component.children, positions);
                 }

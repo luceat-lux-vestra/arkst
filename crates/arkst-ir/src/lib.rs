@@ -233,6 +233,10 @@ fn collect_component_sources(
         IrComponent::Box(component) => {
             collect_document_sources(&component.children, sources)?;
         }
+        IrComponent::Collapse(component) => {
+            collect_inline_sources(&component.title, sources)?;
+            collect_document_sources(&component.children, sources)?;
+        }
         IrComponent::Todo(component) => {
             collect_document_sources(&component.children, sources)?;
         }
@@ -1392,6 +1396,7 @@ pub enum IrComponent {
     Container(IrContainerComponent),
     Landscape(IrLandscapeComponent),
     Box(IrBoxComponent),
+    Collapse(IrCollapseComponent),
     Todo(IrTodoComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
@@ -1404,6 +1409,7 @@ impl IrComponent {
             Self::Container(component) => component.span,
             Self::Landscape(component) => component.span,
             Self::Box(component) => component.span,
+            Self::Collapse(component) => component.span,
             Self::Todo(component) => component.span,
             Self::ExplicitError(component) => component.span,
         }
@@ -1442,6 +1448,20 @@ pub struct IrLandscapeComponent {
 /// colors remain unsupported instead of being flattened into styling strings.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrBoxComponent {
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
+/// Bounded backend-neutral semantic state produced by Quarkdown `.collapse`.
+///
+/// The interactive renderer behavior remains a backend capability. IR retains
+/// the rich inline title, initial open/closed state, structured body, and call
+/// provenance so a static backend can faithfully render the initial state
+/// without flattening the component.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrCollapseComponent {
+    pub title: Vec<IrInline>,
+    pub is_open: bool,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -1946,6 +1966,7 @@ enum WireComponent {
     Container(WireContainerComponent),
     Landscape(WireLandscapeComponent),
     Box(WireBoxComponent),
+    Collapse(WireCollapseComponent),
     Todo(WireTodoComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
@@ -1991,6 +2012,14 @@ struct WireLandscapeComponent {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireBoxComponent {
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireCollapseComponent {
+    title: Vec<WireInline>,
+    is_open: bool,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2487,6 +2516,12 @@ fn component_to_wire(
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
+        IrComponent::Collapse(component) => WireComponent::Collapse(WireCollapseComponent {
+            title: wire_inlines(&component.title, sources)?,
+            is_open: component.is_open,
+            children: wire_nodes(&component.children, sources)?,
+            span: component.span,
+        }),
         IrComponent::Todo(component) => WireComponent::Todo(WireTodoComponent {
             title: component.title.clone(),
             children: wire_nodes(&component.children, sources)?,
@@ -2960,6 +2995,12 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::Box(component) => IrComponent::Box(IrBoxComponent {
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+        WireComponent::Collapse(component) => IrComponent::Collapse(IrCollapseComponent {
+            title: inlines_from_wire(component.title, sources)?,
+            is_open: component.is_open,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),

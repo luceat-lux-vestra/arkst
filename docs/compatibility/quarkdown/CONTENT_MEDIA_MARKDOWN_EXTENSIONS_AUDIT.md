@@ -119,9 +119,11 @@ dependency:
 - .container is PARTIAL: bounded width/height/fullwidth behavior exists,
   while float, full-span, class, style, and complete body conversion remain
   open.
-- .box, .todo, .collapse, .textcollapse, .float, .clip, and .numbered remain
-  explicit gaps. A blockquote or generic function-call node is not their
-  semantic implementation.
+- .box, .todo, and .collapse are PARTIAL typed components with bounded
+  Typst/PDF output contracts; .collapse preserves its initial open state but
+  does not claim browser interactivity. .textcollapse, .float, .clip, and
+  .numbered remain explicit gaps. A blockquote or generic function-call node
+  is not their semantic implementation.
 
 No generic style framework, layout framework, or new semantic layer is
 introduced by this inventory.
