@@ -4,7 +4,7 @@
 //! records source map entries as it generates code.
 
 use arkst_ir::{
-    IrBoxComponent, IrCallSegment, IrColor, IrComponent, IrContainerAlignment,
+    IrBoxComponent, IrCallSegment, IrCollapseComponent, IrColor, IrComponent, IrContainerAlignment,
     IrContainerComponent, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
     IrExplicitErrorComponent, IrInline, IrKeybindingPart, IrLandscapeComponent,
     IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
@@ -476,6 +476,7 @@ impl LoweringContext {
             IrComponent::Container(container) => self.lower_container(container),
             IrComponent::Landscape(landscape) => self.lower_landscape(landscape),
             IrComponent::Box(callout) => self.lower_box(callout),
+            IrComponent::Collapse(collapse) => self.lower_collapse(collapse),
             IrComponent::Todo(todo) => self.lower_todo(todo),
             IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
         }
@@ -531,6 +532,24 @@ impl LoweringContext {
         self.push_str("#block(width: 100%, inset: 8pt, stroke: 1pt)[\n");
         for child in &component.children {
             self.lower_node(child);
+        }
+        self.push_str("]\n");
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_collapse(&mut self, component: &IrCollapseComponent) {
+        let before = self.output.len();
+        self.push_str("#block[\n");
+        for inline in &component.title {
+            self.lower_inline(inline);
+        }
+        self.push('\n');
+        if component.is_open {
+            for child in &component.children {
+                self.lower_node(child);
+            }
         }
         self.push_str("]\n");
         if component.span.source_id != SourceId(0) {

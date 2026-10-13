@@ -346,8 +346,8 @@ fn manifest_is_complete_pinned_and_machine_checkable() {
     assert_eq!(statuses.get("SUPPORTED_END_TO_END"), Some(&13));
     assert_eq!(statuses.get("SUPPORTED_SEMANTICS"), Some(&3));
     assert_eq!(statuses.get("PARSED_ONLY"), Some(&1));
-    assert_eq!(statuses.get("PARTIAL"), Some(&20));
-    assert_eq!(statuses.get("UNSUPPORTED"), Some(&31));
+    assert_eq!(statuses.get("PARTIAL"), Some(&21));
+    assert_eq!(statuses.get("UNSUPPORTED"), Some(&30));
     assert_eq!(statuses.get("DEFERRED"), Some(&2));
     assert_eq!(statuses.get("BLOCKED"), Some(&1));
     assert!(!statuses.contains_key("UNKNOWN"));

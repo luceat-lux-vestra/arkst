@@ -613,6 +613,14 @@ fn collect_unevidenced_explicit_errors_from_node<'a>(
             component: IrComponent::Box(component),
         } => collect_unevidenced_explicit_errors(&component.children, components),
         IrNode::Component {
+            component: IrComponent::Collapse(component),
+        } => {
+            collect_unevidenced_explicit_errors(&component.children, components);
+            for inline in &component.title {
+                collect_unevidenced_explicit_errors_from_inline(inline, components);
+            }
+        }
+        IrNode::Component {
             component: IrComponent::Todo(component),
         } => collect_unevidenced_explicit_errors(&component.children, components),
         IrNode::Blockquote { content, .. } => {
@@ -677,6 +685,20 @@ fn collect_evidenced_nested_explicit_errors<'a>(
                     &component.children,
                     &mut collection.unevidenced,
                 );
+            }
+            IrNode::Component {
+                component: IrComponent::Collapse(component),
+            } => {
+                collect_unevidenced_explicit_errors(
+                    &component.children,
+                    &mut collection.unevidenced,
+                );
+                for inline in &component.title {
+                    collect_unevidenced_explicit_errors_from_inline(
+                        inline,
+                        &mut collection.unevidenced,
+                    );
+                }
             }
             IrNode::Component {
                 component: IrComponent::Todo(component),
