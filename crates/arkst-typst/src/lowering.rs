@@ -1191,6 +1191,16 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::TextCollapse {
+                full,
+                short,
+                is_open,
+                span,
+            } => {
+                let before = self.output.len();
+                self.lower_inlines(if *is_open { full } else { short });
+                self.record_span(*span, self.output.len() - before);
+            }
             IrInline::Keybinding { parts, span } => {
                 let before = self.output.len();
                 for (index, part) in parts.iter().enumerate() {
