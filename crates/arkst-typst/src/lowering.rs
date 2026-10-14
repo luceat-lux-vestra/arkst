@@ -1068,6 +1068,22 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::InlineCollapse {
+                full,
+                short,
+                is_open,
+                span,
+            } => {
+                let before = self.output.len();
+                if *is_open {
+                    self.lower_inlines(full);
+                } else {
+                    self.lower_inlines(short);
+                }
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrInline::DirectiveCall {
                 name,
                 positional_args,
