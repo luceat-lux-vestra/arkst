@@ -1199,7 +1199,9 @@ impl LoweringContext {
             } => {
                 let before = self.output.len();
                 self.lower_inlines(if *is_open { full } else { short });
-                self.record_span(*span, self.output.len() - before);
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
             }
             IrInline::Keybinding { parts, span } => {
                 let before = self.output.len();
