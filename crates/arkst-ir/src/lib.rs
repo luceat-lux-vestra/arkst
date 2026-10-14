@@ -282,6 +282,10 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
                     collect_inline_sources(body, sources)?;
                 }
             }
+            IrInline::TextCollapse { full, short, .. } => {
+                collect_inline_sources(full, sources)?;
+                collect_inline_sources(short, sources)?;
+            }
             IrInline::Text { .. }
             | IrInline::Whitespace { .. }
             | IrInline::PageCounter { .. }
@@ -1872,6 +1876,12 @@ enum WireInline {
         parts: Vec<IrKeybindingPart>,
         span: SourceSpan,
     },
+    TextCollapse {
+        full: Vec<WireInline>,
+        short: Vec<WireInline>,
+        is_open: bool,
+        span: SourceSpan,
+    },
     SoftBreak {
         span: SourceSpan,
     },
@@ -2363,6 +2373,17 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             parts: parts.clone(),
             span: *span,
         },
+        IrInline::TextCollapse {
+            full,
+            short,
+            is_open,
+            span,
+        } => WireInline::TextCollapse {
+            full: wire_inlines(full, sources)?,
+            short: wire_inlines(short, sources)?,
+            is_open: *is_open,
+            span: *span,
+        },
         IrInline::SoftBreak { span } => WireInline::SoftBreak { span: *span },
         IrInline::HardBreak { span } => WireInline::HardBreak { span: *span },
         IrInline::RawHtml { content, span } => WireInline::RawHtml {
@@ -2851,6 +2872,17 @@ fn wire_inline_to_ir(
         WireInline::ExplicitError { component } => IrInline::ExplicitError { component },
         WireInline::Code { content, span } => IrInline::Code { content, span },
         WireInline::Keybinding { parts, span } => IrInline::Keybinding { parts, span },
+        WireInline::TextCollapse {
+            full,
+            short,
+            is_open,
+            span,
+        } => IrInline::TextCollapse {
+            full: inlines_from_wire(full, sources)?,
+            short: inlines_from_wire(short, sources)?,
+            is_open,
+            span,
+        },
         WireInline::SoftBreak { span } => IrInline::SoftBreak { span },
         WireInline::HardBreak { span } => IrInline::HardBreak { span },
         WireInline::RawHtml { content, span } => IrInline::RawHtml { content, span },
@@ -3229,6 +3261,14 @@ pub enum IrInline {
     /// Typed inline keyboard combination.
     Keybinding {
         parts: Vec<IrKeybindingPart>,
+        span: SourceSpan,
+    },
+    /// Bounded Quarkdown text-collapse semantic. Both authored alternatives
+    /// remain rich inline content; static backends render the initial state.
+    TextCollapse {
+        full: Vec<IrInline>,
+        short: Vec<IrInline>,
+        is_open: bool,
         span: SourceSpan,
     },
     /// Quarkdown `.whitespace` with an optional fixed inline extent.
