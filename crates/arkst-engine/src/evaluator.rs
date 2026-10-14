@@ -3684,6 +3684,17 @@ impl Evaluator {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
             }],
+            IrInline::TextCollapse {
+                full,
+                short,
+                is_open,
+                span,
+            } => vec![IrInline::TextCollapse {
+                full: self.evaluate_inlines(full, diagnostics, context),
+                short: self.evaluate_inlines(short, diagnostics, context),
+                is_open: *is_open,
+                span: *span,
+            }],
             IrInline::Link {
                 content,
                 destination,
@@ -5155,7 +5166,9 @@ impl Evaluator {
     ) -> Result<invocation_binder::BoundInvocation<InvocationValue>, CallOutcome> {
         if !matches!(
             builtin.kind,
-            builtins::BuiltinKind::Plaintext | builtins::BuiltinKind::Text
+            builtins::BuiltinKind::Plaintext
+                | builtins::BuiltinKind::Text
+                | builtins::BuiltinKind::TextCollapse
         ) {
             return Ok(bound);
         }
@@ -5164,6 +5177,9 @@ impl Evaluator {
             // Only the first .text argument is InlineMarkdownContent. The
             // second (url) is String?, not Markdown and must not be reparsed.
             if builtin.kind == builtins::BuiltinKind::Text && index != 0 {
+                continue;
+            }
+            if builtin.kind == builtins::BuiltinKind::TextCollapse && index >= 2 {
                 continue;
             }
             let BoundSlot::Explicit { value, span } = slot else {
@@ -5185,10 +5201,10 @@ impl Evaluator {
                             parameter.and_then(|parameter| parameter.name_span),
                             call_span,
                         ),
-                        Some(if builtin.kind == builtins::BuiltinKind::Text {
-                            "`.text` inline content"
-                        } else {
-                            "`.plaintext` content"
+                        Some(match builtin.kind {
+                            builtins::BuiltinKind::Text => "`.text` inline content",
+                            builtins::BuiltinKind::TextCollapse => "`.textcollapse` inline content",
+                            _ => "`.plaintext` content",
                         }),
                     ));
                     return Err(CallOutcome::Failed);
