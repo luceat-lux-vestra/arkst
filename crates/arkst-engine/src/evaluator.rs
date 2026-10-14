@@ -3680,6 +3680,14 @@ impl Evaluator {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
             }],
+            IrInline::Underline { content, span } => vec![IrInline::Underline {
+                content: self.evaluate_inlines(content, diagnostics, context),
+                span: *span,
+            }],
+            IrInline::Overline { content, span } => vec![IrInline::Overline {
+                content: self.evaluate_inlines(content, diagnostics, context),
+                span: *span,
+            }],
             IrInline::Strikethrough { content, span } => vec![IrInline::Strikethrough {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
@@ -17578,6 +17586,8 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::LastHeading { span, .. }
         | IrInline::Emphasis { span, .. }
         | IrInline::Strong { span, .. }
+        | IrInline::Underline { span, .. }
+        | IrInline::Overline { span, .. }
         | IrInline::Strikethrough { span, .. }
         | IrInline::InlineCollapse { span, .. }
         | IrInline::DirectiveCall { span, .. }
@@ -17605,6 +17615,8 @@ fn body_contains_raw_html(nodes: &[IrNode]) -> bool {
                     || match inline {
                         IrInline::Emphasis { content, .. }
                         | IrInline::Strong { content, .. }
+                        | IrInline::Underline { content, .. }
+                        | IrInline::Overline { content, .. }
                         | IrInline::Strikethrough { content, .. }
                         | IrInline::Link { content, .. }
                         | IrInline::Image { content, .. } => content
@@ -17772,6 +17784,8 @@ fn append_code_inline_text(inline: &IrInline, output: &mut String) -> Option<()>
         IrInline::SoftBreak { .. } | IrInline::HardBreak { .. } => output.push('\n'),
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
+        | IrInline::Underline { content, .. }
+        | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. } => {
             for child in content {
                 append_code_inline_text(child, output)?;
@@ -17809,6 +17823,8 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         IrInline::SoftBreak { .. } | IrInline::HardBreak { .. } => output.push('\n'),
         IrInline::Emphasis { .. }
         | IrInline::Strong { .. }
+        | IrInline::Underline { .. }
+        | IrInline::Overline { .. }
         | IrInline::Strikethrough { .. }
         | IrInline::InlineCollapse { .. }
         | IrInline::DirectiveCall { .. }
@@ -22043,6 +22059,8 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             | IrInline::RawHtml { span, .. } => *span = source_span,
             IrInline::Emphasis { content, span }
             | IrInline::Strong { content, span }
+            | IrInline::Underline { content, span }
+            | IrInline::Overline { content, span }
             | IrInline::Strikethrough { content, span } => {
                 *span = source_span;
                 rebase_dynamic_inlines(content, source_span);

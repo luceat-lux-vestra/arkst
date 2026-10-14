@@ -1113,9 +1113,9 @@ fn evaluate_keybinding(
 }
 
 /// The default .text transform is visually transparent. Closed weight and
-/// style subsets reuse Strong and Emphasis; bounded decoration:none and
-/// decoration:strikethrough reuse Strikethrough IR without flattening children.
-/// Other decoration values and formatting dimensions remain unsupported.
+/// style subsets reuse Strong and Emphasis. The closed decoration domain uses
+/// narrow Underline, Overline, and Strikethrough nodes without flattening
+/// children. Other formatting dimensions remain unsupported.
 /// The pinned `.text url` String input may be parsed as one Markdown
 /// autolink. Preserve that exact URL without broadening scalar String
 /// conversion to arbitrary formatted or linked content.
@@ -1147,6 +1147,43 @@ fn text_url_string_conversion(
             Err(error)
         }
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextDecoration {
+    None,
+    Underline,
+    Overline,
+    UnderOverline,
+    Strikethrough,
+    All,
+}
+
+fn wrap_text_decoration(content: &mut Vec<IrInline>, decoration: TextDecoration, span: SourceSpan) {
+    let wrap = |content: &mut Vec<IrInline>,
+                constructor: fn(Vec<IrInline>, SourceSpan) -> IrInline| {
+        let original = std::mem::take(content);
+        *content = vec![constructor(original, span)];
+    };
+    let underline = |content, span| IrInline::Underline { content, span };
+    let overline = |content, span| IrInline::Overline { content, span };
+    let strike = |content, span| IrInline::Strikethrough { content, span };
+
+    match decoration {
+        TextDecoration::None => {}
+        TextDecoration::Underline => wrap(content, underline),
+        TextDecoration::Overline => wrap(content, overline),
+        TextDecoration::UnderOverline => {
+            wrap(content, overline);
+            wrap(content, underline);
+        }
+        TextDecoration::Strikethrough => wrap(content, strike),
+        TextDecoration::All => {
+            wrap(content, strike);
+            wrap(content, overline);
+            wrap(content, underline);
+        }
+    }
 }
 
 fn evaluate_text(
@@ -1211,29 +1248,35 @@ fn evaluate_text(
         })
         .transpose()?
         .unwrap_or(false);
-    let strike = arguments
+    let decoration = arguments
         .remove(0)
         .map(|value| {
             if matches!(&value.value, IrValue::None) {
-                return Ok(false);
+                return Ok(TextDecoration::None);
             }
             let decoration = scalar_string_argument_result(&value, "decoration")?;
-            if decoration.eq_ignore_ascii_case("strikethrough") {
-                Ok(true)
-            } else if decoration.eq_ignore_ascii_case("none") {
-                Ok(false)
-            } else {
-                Err(error(
-                    "`.text` decoration currently supports only none, strikethrough, or None"
+            match decoration.to_ascii_lowercase().as_str() {
+                "none" => Ok(TextDecoration::None),
+                "underline" => Ok(TextDecoration::Underline),
+                "overline" => Ok(TextDecoration::Overline),
+                "underoverline" => Ok(TextDecoration::UnderOverline),
+                "strikethrough" => Ok(TextDecoration::Strikethrough),
+                "all" => Ok(TextDecoration::All),
+                _ => Err(error(
+                    "`.text` decoration must be none, underline, overline, underoverline, strikethrough, all, or None"
                         .to_string(),
-                ))
+                )),
             }
         })
         .transpose()?
-        .unwrap_or(false);
+        .unwrap_or(TextDecoration::None);
     match value.value {
         IrValue::Content(nodes)
-            if url.is_none() && !bold && !italic && !strike && nodes.is_empty() =>
+            if url.is_none()
+                && !bold
+                && !italic
+                && decoration == TextDecoration::None
+                && nodes.is_empty() =>
         {
             Ok(IrValue::Content(nodes))
         }
@@ -1260,13 +1303,7 @@ fn evaluate_text(
                         span: call_span,
                     }];
                 }
-                if strike {
-                    let original = std::mem::take(content);
-                    *content = vec![IrInline::Strikethrough {
-                        content: original,
-                        span: call_span,
-                    }];
-                }
+                wrap_text_decoration(content, decoration, call_span);
             }
             if let Some(destination) = url {
                 if let IrNode::Paragraph { content, .. } = &mut nodes[0] {
@@ -1457,6 +1494,8 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         IrInline::Whitespace { .. } => {}
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
+        | IrInline::Underline { content, .. }
+        | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
         | IrInline::Link { content, .. } => {
             for child in content {
@@ -1523,6 +1562,8 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             }
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
+            | IrInline::Underline { content, .. }
+            | IrInline::Overline { content, .. }
             | IrInline::Strikethrough { content, .. }
             | IrInline::Link { content, .. } => plain_text_from_inlines(content, output)?,
             IrInline::SoftBreak { .. } => output.push('\n'),

@@ -2,13 +2,29 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
-use arkst_typst::lowering::lower_to_typst_code;
+use arkst_typst::lowering::lower_to_typst;
 use arkst_typst::{TypstBackend, TypstInput};
 use arkst_typst_subprocess::SubprocessBackend;
 
 #[test]
-fn bounded_strikethrough_decoration_compiles_to_real_pdf() {
+fn complete_text_decoration_domain_compiles_to_real_pdf() {
     let inputs = [
+        (
+            ".text text:{Hello world} decoration:{underline}\n",
+            "#underline[Hello world]",
+        ),
+        (
+            ".text text:{Hello world} decoration:{overline}\n",
+            "#overline[Hello world]",
+        ),
+        (
+            ".text text:{Hello world} decoration:{underoverline}\n",
+            "#underline[#overline[Hello world]]",
+        ),
+        (
+            ".text text:{Hello world} decoration:{all}\n",
+            "#underline[#overline[#strike[Hello world]]]",
+        ),
         (
             ".text decoration:{strikethrough}\n    Hello world\n",
             "#strike[Hello world]",
@@ -29,8 +45,15 @@ fn bounded_strikethrough_decoration_compiles_to_real_pdf() {
             .expect("project");
         let result = compile(&project, &CompileOptions::default());
         assert!(result.diagnostics.is_empty(), "{result:?}");
-        let typst = lower_to_typst_code(&result.ir);
+        let (typst, source_map) = lower_to_typst(&result.ir);
         assert!(typst.contains(expected), "{typst}");
+        assert!(source_map.iter().any(|entry| {
+            input
+                .get(entry.original.start..entry.original.end)
+                .is_some_and(|original| original.starts_with(".text"))
+                && entry.generated_start < entry.generated_end
+                && entry.generated_end <= typst.len()
+        }));
         sources.push(typst);
     }
 
@@ -60,7 +83,7 @@ fn bounded_strikethrough_decoration_compiles_to_real_pdf() {
                 source,
                 entry_path: "text.qd".into(),
             })
-            .expect("strikethrough must compile");
+            .expect("text decoration must compile");
         assert!(output.pdf.expect("PDF output").starts_with(b"%PDF-"));
     }
 }

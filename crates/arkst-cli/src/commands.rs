@@ -500,6 +500,8 @@ fn collect_unevidenced_explicit_errors_from_inline<'a>(
         IrInline::ExplicitError { component } => components.push(component),
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
+        | IrInline::Underline { content, .. }
+        | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
         | IrInline::Link { content, .. }
         | IrInline::Image { content, .. } => {
@@ -1671,6 +1673,44 @@ mod tests {
         assert!(classification.explicit_messages.is_empty());
         assert_eq!(classification.fatal_errors, 1);
         assert!(ensure_no_fatal_build_errors(&[unrelated], &empty_document).is_err());
+    }
+
+    #[test]
+    fn text_decoration_error_owner_remains_unevidenced_and_fatal() {
+        let span = arkst_core::source::SourceSpan::new(arkst_core::source::SourceId(184), 0, 13);
+        let diagnostic = arkst_core::Diagnostic {
+            code: "E3011".to_string(),
+            severity: arkst_core::Severity::Error,
+            message:
+                "Cannot call function error(String message) with arguments (explicit): explicit"
+                    .to_string(),
+            primary: Some(span),
+            secondary: Vec::new(),
+            hints: vec![EXPLICIT_ERROR_HINT.to_string()],
+        };
+        let document = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Underline {
+                    content: vec![IrInline::Overline {
+                        content: vec![IrInline::ExplicitError {
+                            component: IrExplicitErrorComponent {
+                                message: "explicit".to_string(),
+                                source_echo: Some(".error {explicit}".to_string()),
+                                span,
+                            },
+                        }],
+                        span,
+                    }],
+                    span,
+                }],
+                span,
+            }],
+            metadata: Default::default(),
+        };
+
+        let classification = classify_build_errors(&[diagnostic], &document);
+        assert!(classification.explicit_messages.is_empty());
+        assert_eq!(classification.fatal_errors, 1);
     }
 
     #[test]

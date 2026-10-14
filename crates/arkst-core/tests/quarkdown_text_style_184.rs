@@ -94,7 +94,6 @@ fn invalid_style_domains_and_named_only_boundary_are_fail_closed() {
         ".text text:{Hello} style:{italic} style:{normal}\n",
         ".text {Hello} {https://example.org} {bold}\n",
         ".text {Hello} {https://example.org} {italic}\n",
-        ".text text:{Hello} style:{italic} decoration:{underline}\n",
     ] {
         let result = compile_source(source);
         assert!(!result.diagnostics.is_empty(), "{source:?}: {result:?}");
