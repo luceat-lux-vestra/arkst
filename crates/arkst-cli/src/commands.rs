@@ -507,6 +507,11 @@ fn collect_unevidenced_explicit_errors_from_inline<'a>(
                 collect_unevidenced_explicit_errors_from_inline(child, components);
             }
         }
+        IrInline::InlineCollapse { full, short, .. } => {
+            for child in full.iter().chain(short) {
+                collect_unevidenced_explicit_errors_from_inline(child, components);
+            }
+        }
         IrInline::DirectiveCall {
             body: Some(content),
             ..

@@ -255,6 +255,10 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             | IrInline::Image { content, .. } => {
                 collect_inline_sources(content, sources)?;
             }
+            IrInline::InlineCollapse { full, short, .. } => {
+                collect_inline_sources(full, sources)?;
+                collect_inline_sources(short, sources)?;
+            }
             IrInline::DirectiveCall {
                 positional_args,
                 named_args,
@@ -1834,6 +1838,12 @@ enum WireInline {
         content: Vec<WireInline>,
         span: SourceSpan,
     },
+    InlineCollapse {
+        full: Vec<WireInline>,
+        short: Vec<WireInline>,
+        is_open: bool,
+        span: SourceSpan,
+    },
     DirectiveCall {
         name: String,
         positional_args: Vec<WireValue>,
@@ -2290,6 +2300,17 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
         },
         IrInline::Strikethrough { content, span } => WireInline::Strikethrough {
             content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::InlineCollapse {
+            full,
+            short,
+            is_open,
+            span,
+        } => WireInline::InlineCollapse {
+            full: wire_inlines(full, sources)?,
+            short: wire_inlines(short, sources)?,
+            is_open: *is_open,
             span: *span,
         },
         IrInline::DirectiveCall {
@@ -2790,6 +2811,17 @@ fn wire_inline_to_ir(
             content: inlines_from_wire(content, sources)?,
             span,
         },
+        WireInline::InlineCollapse {
+            full,
+            short,
+            is_open,
+            span,
+        } => IrInline::InlineCollapse {
+            full: inlines_from_wire(full, sources)?,
+            short: inlines_from_wire(short, sources)?,
+            is_open,
+            span,
+        },
         WireInline::DirectiveCall {
             name,
             positional_args,
@@ -3275,6 +3307,17 @@ pub enum IrInline {
     /// A Markdown strikethrough inline fragment.
     Strikethrough {
         content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// Quarkdown `.textcollapse` rich inline alternatives and initial state.
+    ///
+    /// Interactive expansion remains a renderer capability. Static backends
+    /// can select the authored initial branch without discarding the other
+    /// branch from the backend-neutral document model.
+    InlineCollapse {
+        full: Vec<IrInline>,
+        short: Vec<IrInline>,
+        is_open: bool,
         span: SourceSpan,
     },
     /// An inline function call (`.name {arg}` inside a text flow).

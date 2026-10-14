@@ -4786,6 +4786,22 @@ impl Evaluator {
             );
         }
 
+        if is_text_collapse(name) {
+            return self.evaluate_text_collapse(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
+            );
+        }
+
         if is_box(name) {
             return self.evaluate_box(
                 ordered_args,
@@ -5852,6 +5868,212 @@ impl Evaluator {
                 span: *span,
             },
         )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_text_collapse(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if implicit_argument.is_some() {
+            diagnostics.push(text_collapse_argument_error(
+                "chained input into `.textcollapse` is outside the bounded inline component contract",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(text_collapse_argument_error(
+                "`.textcollapse` does not accept a lambda body",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if body.is_some() {
+            diagnostics.push(text_collapse_argument_error(
+                "`.textcollapse` accepts full and short inline arguments, not a body",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let bound = match binding_plan.bind(&candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter();
+
+        let Some(BoundSlot::Explicit {
+            value: full_value,
+            span: full_span,
+        }) = slots.next()
+        else {
+            diagnostics.push(text_collapse_argument_error(
+                "`.textcollapse` requires full inline Markdown content",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let full = match self.evaluate_text_collapse_inline_argument(
+            &full_value,
+            full_span,
+            "full",
+            parameters.first().and_then(|parameter| parameter.name_span),
+            *span,
+            diagnostics,
+            context,
+        ) {
+            Ok(content) => content,
+            Err(outcome) => return outcome,
+        };
+
+        let Some(BoundSlot::Explicit {
+            value: short_value,
+            span: short_span,
+        }) = slots.next()
+        else {
+            diagnostics.push(text_collapse_argument_error(
+                "`.textcollapse` requires short inline Markdown content",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let short = match self.evaluate_text_collapse_inline_argument(
+            &short_value,
+            short_span,
+            "short",
+            parameters.get(1).and_then(|parameter| parameter.name_span),
+            *span,
+            diagnostics,
+            context,
+        ) {
+            Ok(content) => content,
+            Err(outcome) => return outcome,
+        };
+
+        let is_open = match slots.next() {
+            Some(BoundSlot::Explicit {
+                value: open_value,
+                span: open_span,
+            }) => match value_conversion::convert_scalar_with_origin(
+                &open_value,
+                ScalarTarget::Boolean,
+            ) {
+                Ok(ScalarValue::Boolean(value)) => value,
+                Ok(_) => unreachable!("boolean target returned a non-boolean scalar"),
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(open_span),
+                            Some("open"),
+                            parameters.get(2).and_then(|parameter| parameter.name_span),
+                            *span,
+                        ),
+                        Some("`.textcollapse` open"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => false,
+        };
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::InlineCollapse {
+                full,
+                short,
+                is_open,
+                span: *span,
+            }],
+            span: *span,
+        }]))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_text_collapse_inline_argument(
+        &self,
+        value: &InvocationValue,
+        argument_span: SourceSpan,
+        parameter_name: &'static str,
+        parameter_span: Option<SourceSpan>,
+        call_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        let converted = value_conversion::convert_target_with_origin(
+            value,
+            value_conversion::ConversionTarget::InlineContent,
+            argument_span,
+        )
+        .map_err(|error| {
+            diagnostics.push(conversion_failure_diagnostic(
+                value_conversion::ConversionFailure::new(
+                    error,
+                    Some(argument_span),
+                    Some(parameter_name),
+                    parameter_span,
+                    call_span,
+                ),
+                Some("`.textcollapse` inline content"),
+            ));
+            CallOutcome::Failed
+        })?;
+        let value =
+            self.resolve_target_value(converted, argument_span, call_span, diagnostics, context)?;
+        match value {
+            IrValue::Content(nodes) => match nodes.as_slice() {
+                [IrNode::Paragraph { content, .. }] => Ok(content.clone()),
+                _ => {
+                    diagnostics.push(text_collapse_argument_error(
+                        &format!(
+                            "`.textcollapse` {parameter_name} must resolve to inline Markdown content"
+                        ),
+                        argument_span,
+                    ));
+                    Err(CallOutcome::Failed)
+                }
+            },
+            _ => {
+                diagnostics.push(text_collapse_argument_error(
+                    &format!(
+                        "`.textcollapse` {parameter_name} must resolve to inline Markdown content"
+                    ),
+                    argument_span,
+                ));
+                Err(CallOutcome::Failed)
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -15999,6 +16221,7 @@ pub(crate) enum NativeDispatchOwner {
     Landscape,
     Box,
     Collapse,
+    TextCollapse,
     Todo,
     Br,
     PageMargin,
@@ -16068,6 +16291,7 @@ const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
 const BOX_NATIVE_NAMES: &[&str] = &["box"];
 const COLLAPSE_NATIVE_NAMES: &[&str] = &["collapse"];
+const TEXT_COLLAPSE_NATIVE_NAMES: &[&str] = &["textcollapse"];
 const TODO_NATIVE_NAMES: &[&str] = &["todo"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
 const PAGE_MARGIN_NATIVE_NAMES: &[&str] = &["pagemargin", "footer"];
@@ -16171,6 +16395,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Collapse,
         names: COLLAPSE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::TextCollapse,
+        names: TEXT_COLLAPSE_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Todo,
@@ -16305,6 +16533,10 @@ fn is_box(name: &str) -> bool {
 
 fn is_collapse(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Collapse)
+}
+
+fn is_text_collapse(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::TextCollapse)
 }
 
 fn is_todo(name: &str) -> bool {
@@ -17347,6 +17579,7 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::Emphasis { span, .. }
         | IrInline::Strong { span, .. }
         | IrInline::Strikethrough { span, .. }
+        | IrInline::InlineCollapse { span, .. }
         | IrInline::DirectiveCall { span, .. }
         | IrInline::ChainedDirectiveCall { span, .. }
         | IrInline::Link { span, .. }
@@ -17376,6 +17609,10 @@ fn body_contains_raw_html(nodes: &[IrNode]) -> bool {
                         | IrInline::Link { content, .. }
                         | IrInline::Image { content, .. } => content
                             .iter()
+                            .any(|child| matches!(child, IrInline::RawHtml { .. })),
+                        IrInline::InlineCollapse { full, short, .. } => full
+                            .iter()
+                            .chain(short)
                             .any(|child| matches!(child, IrInline::RawHtml { .. })),
                         _ => false,
                     }
@@ -17573,6 +17810,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         IrInline::Emphasis { .. }
         | IrInline::Strong { .. }
         | IrInline::Strikethrough { .. }
+        | IrInline::InlineCollapse { .. }
         | IrInline::DirectiveCall { .. }
         | IrInline::ChainedDirectiveCall { .. }
         | IrInline::Link { .. }
@@ -17794,6 +18032,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::defaulted("open"),
             ],
             BodyPolicy::AllowSeparate,
+        ),
+        "textcollapse" => (
+            vec![
+                ParameterMetadata::required("full"),
+                ParameterMetadata::required("short"),
+                ParameterMetadata::defaulted("open"),
+            ],
+            BodyPolicy::Reject,
         ),
         "br" | "currentpage" | "totalpages" => (Vec::new(), BodyPolicy::Reject),
         "pagemargin" => (
@@ -21043,6 +21289,20 @@ fn collapse_inline_materialization_error(span: SourceSpan) -> Diagnostic {
     }
 }
 
+fn text_collapse_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.textcollapse` accepts required full and short InlineMarkdownContent arguments plus optional Boolean open."
+                .to_string(),
+        ],
+    }
+}
+
 fn todo_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3003".to_string(),
@@ -21786,6 +22046,13 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             | IrInline::Strikethrough { content, span } => {
                 *span = source_span;
                 rebase_dynamic_inlines(content, source_span);
+            }
+            IrInline::InlineCollapse {
+                full, short, span, ..
+            } => {
+                *span = source_span;
+                rebase_dynamic_inlines(full, source_span);
+                rebase_dynamic_inlines(short, source_span);
             }
             IrInline::DirectiveCall {
                 positional_args,
