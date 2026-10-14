@@ -99,6 +99,7 @@ pub(crate) enum BuiltinKind {
     StartsWith,
     Plaintext,
     Text,
+    TextCollapse,
     Codespan,
     Math,
     Keybinding,
@@ -427,6 +428,15 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindEvaluatedFirst,
     ),
+    builtin_spec_with_defaults(
+        "textcollapse",
+        BuiltinKind::TextCollapse,
+        &["full", "short", "open"],
+        &[2],
+        3,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
     builtin_spec(
         "codespan",
         BuiltinKind::Codespan,
@@ -682,6 +692,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::StartsWith => evaluate_startswith(builtin, arguments),
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
         BuiltinKind::Text => evaluate_text(arguments, call_span),
+        BuiltinKind::TextCollapse => evaluate_textcollapse(arguments, call_span),
         BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
         BuiltinKind::Math => evaluate_math(arguments, call_span, is_block_call),
         BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
@@ -1003,6 +1014,49 @@ fn is_final_sigma(characters: &[char], index: usize, boundaries: &[bool]) -> boo
 
 /// A callable inline code producer; the shared binder/converter owns the
 /// String contract while this node reuses existing Markdown code lowering.
+fn textcollapse_inline_argument(
+    value: InvocationValue,
+    parameter: &str,
+) -> Result<Vec<IrInline>, BuiltinError> {
+    match value.value {
+        IrValue::Content(nodes) => match nodes.as_slice() {
+            [IrNode::Paragraph { content, .. }] => Ok(content.clone()),
+            _ => Err(error(format!(
+                "`.textcollapse` `{parameter}` must resolve to inline Markdown content"
+            ))),
+        },
+        _ => Err(error(format!(
+            "`.textcollapse` `{parameter}` must resolve to inline Markdown content"
+        ))),
+    }
+}
+
+fn evaluate_textcollapse(
+    mut arguments: BoundArguments,
+    call_span: SourceSpan,
+) -> Result<IrValue, BuiltinError> {
+    let full = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.textcollapse` requires `full` inline content".to_string()))?;
+    let short = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.textcollapse` requires `short` inline content".to_string()))?;
+    let is_open = arguments
+        .remove(0)
+        .map(|value| boolean_argument(&value, "open"))
+        .transpose()?
+        .unwrap_or(false);
+    Ok(IrValue::Content(vec![IrNode::Paragraph {
+        content: vec![IrInline::TextCollapse {
+            full: textcollapse_inline_argument(full, "full")?,
+            short: textcollapse_inline_argument(short, "short")?,
+            is_open,
+            span: call_span,
+        }],
+        span: call_span,
+    }]))
+}
+
 fn evaluate_codespan(
     mut arguments: BoundArguments,
     call_span: SourceSpan,
@@ -1471,6 +1525,7 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         | IrInline::PageNumberReset { .. }
         | IrInline::LastHeading { .. }
         | IrInline::Keybinding { .. }
+        | IrInline::TextCollapse { .. }
         | IrInline::RawHtml { .. }
         | IrInline::ExplicitError { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
@@ -1534,6 +1589,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             | IrInline::PageNumberReset { .. }
             | IrInline::LastHeading { .. }
             | IrInline::Keybinding { .. }
+            | IrInline::TextCollapse { .. }
             | IrInline::RawHtml { .. }
             | IrInline::ExplicitError { .. }
             | IrInline::TargetSpecificContent { .. } => {
