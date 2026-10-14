@@ -250,6 +250,8 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
         match inline {
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
+            | IrInline::Underline { content, .. }
+            | IrInline::Overline { content, .. }
             | IrInline::Strikethrough { content, .. }
             | IrInline::Link { content, .. }
             | IrInline::Image { content, .. } => {
@@ -1834,6 +1836,14 @@ enum WireInline {
         content: Vec<WireInline>,
         span: SourceSpan,
     },
+    Underline {
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
+    Overline {
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
     Strikethrough {
         content: Vec<WireInline>,
         span: SourceSpan,
@@ -2295,6 +2305,14 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             span: *span,
         },
         IrInline::Strong { content, span } => WireInline::Strong {
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::Underline { content, span } => WireInline::Underline {
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::Overline { content, span } => WireInline::Overline {
             content: wire_inlines(content, sources)?,
             span: *span,
         },
@@ -2807,6 +2825,14 @@ fn wire_inline_to_ir(
             content: inlines_from_wire(content, sources)?,
             span,
         },
+        WireInline::Underline { content, span } => IrInline::Underline {
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
+        WireInline::Overline { content, span } => IrInline::Overline {
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
         WireInline::Strikethrough { content, span } => IrInline::Strikethrough {
             content: inlines_from_wire(content, sources)?,
             span,
@@ -3301,6 +3327,16 @@ pub enum IrInline {
     },
     /// Strong (bold) inline fragment.
     Strong {
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// An underlined inline fragment.
+    Underline {
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// An overlined inline fragment.
+    Overline {
         content: Vec<IrInline>,
         span: SourceSpan,
     },
