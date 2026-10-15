@@ -3689,6 +3689,15 @@ impl Evaluator {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
             }],
+            IrInline::TextCase {
+                case,
+                content,
+                span,
+            } => vec![IrInline::TextCase {
+                case: *case,
+                content: self.evaluate_inlines(content, diagnostics, context),
+                span: *span,
+            }],
             IrInline::TextVariant {
                 variant,
                 content,
@@ -17614,6 +17623,7 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::Emphasis { span, .. }
         | IrInline::Strong { span, .. }
         | IrInline::TextSize { span, .. }
+        | IrInline::TextCase { span, .. }
         | IrInline::TextVariant { span, .. }
         | IrInline::TextScript { span, .. }
         | IrInline::Underline { span, .. }
@@ -17646,6 +17656,7 @@ fn body_contains_raw_html(nodes: &[IrNode]) -> bool {
                         IrInline::Emphasis { content, .. }
                         | IrInline::Strong { content, .. }
                         | IrInline::TextSize { content, .. }
+                        | IrInline::TextCase { content, .. }
                         | IrInline::TextVariant { content, .. }
                         | IrInline::TextScript { content, .. }
                         | IrInline::Underline { content, .. }
@@ -17818,6 +17829,7 @@ fn append_code_inline_text(inline: &IrInline, output: &mut String) -> Option<()>
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::TextSize { content, .. }
+        | IrInline::TextCase { content, .. }
         | IrInline::TextVariant { content, .. }
         | IrInline::TextScript { content, .. }
         | IrInline::Underline { content, .. }
@@ -17860,6 +17872,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         IrInline::Emphasis { .. }
         | IrInline::Strong { .. }
         | IrInline::TextSize { .. }
+        | IrInline::TextCase { .. }
         | IrInline::TextVariant { .. }
         | IrInline::TextScript { .. }
         | IrInline::Underline { .. }
@@ -22099,6 +22112,7 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             IrInline::Emphasis { content, span }
             | IrInline::Strong { content, span }
             | IrInline::TextSize { content, span, .. }
+            | IrInline::TextCase { content, span, .. }
             | IrInline::TextVariant { content, span, .. }
             | IrInline::TextScript { content, span, .. }
             | IrInline::Underline { content, span }
