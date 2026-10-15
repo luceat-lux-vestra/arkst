@@ -416,13 +416,13 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
-    // Preserve the two-position text/url prefix. Closed weight, style and
-    // bounded decoration options are named-only shared-binder slots.
+    // Preserve the two-position text/url prefix. Closed weight, style,
+    // decoration and size options are named-only shared-binder slots.
     builtin_spec_with_defaults(
         "text",
         BuiltinKind::Text,
-        &["text", "url", "weight", "style", "decoration"],
-        &[1, 2, 3, 4],
+        &["text", "url", "weight", "style", "decoration", "size"],
+        &[1, 2, 3, 4, 5],
         2,
         true,
         BuiltinBodyPolicy::BindEvaluatedFirst,
@@ -1270,12 +1270,36 @@ fn evaluate_text(
         })
         .transpose()?
         .unwrap_or(TextDecoration::None);
+    let size = arguments
+        .remove(0)
+        .map(|value| {
+            if matches!(&value.value, IrValue::None) {
+                return Ok(None);
+            }
+            let size = scalar_string_argument_result(&value, "size")?;
+            match size.to_ascii_lowercase().as_str() {
+                "tiny" => Ok(Some(arkst_ir::IrTextSize::Tiny)),
+                "small" => Ok(Some(arkst_ir::IrTextSize::Small)),
+                "normal" => Ok(None),
+                "medium" => Ok(Some(arkst_ir::IrTextSize::Medium)),
+                "large" => Ok(Some(arkst_ir::IrTextSize::Large)),
+                "larger" => Ok(Some(arkst_ir::IrTextSize::Larger)),
+                "huge" => Ok(Some(arkst_ir::IrTextSize::Huge)),
+                _ => Err(error(
+                    "`.text` size must be tiny, small, normal, medium, large, larger, huge, or None"
+                        .to_string(),
+                )),
+            }
+        })
+        .transpose()?
+        .flatten();
     match value.value {
         IrValue::Content(nodes)
             if url.is_none()
                 && !bold
                 && !italic
                 && decoration == TextDecoration::None
+                && size.is_none()
                 && nodes.is_empty() =>
         {
             Ok(IrValue::Content(nodes))
@@ -1304,6 +1328,14 @@ fn evaluate_text(
                     }];
                 }
                 wrap_text_decoration(content, decoration, call_span);
+                if let Some(size) = size {
+                    let original = std::mem::take(content);
+                    *content = vec![IrInline::TextSize {
+                        size,
+                        content: original,
+                        span: call_span,
+                    }];
+                }
             }
             if let Some(destination) = url {
                 if let IrNode::Paragraph { content, .. } = &mut nodes[0] {
@@ -1494,6 +1526,7 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         IrInline::Whitespace { .. } => {}
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
+        | IrInline::TextSize { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
@@ -1562,6 +1595,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             }
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
+            | IrInline::TextSize { content, .. }
             | IrInline::Underline { content, .. }
             | IrInline::Overline { content, .. }
             | IrInline::Strikethrough { content, .. }
@@ -2177,7 +2211,7 @@ mod tests {
                 assert_eq!(builtin.signature.max_positional, 2);
                 assert_eq!(
                     builtin.signature.parameter_names,
-                    &["text", "url", "weight", "style", "decoration"]
+                    &["text", "url", "weight", "style", "decoration", "size"]
                 );
             } else {
                 assert_eq!(

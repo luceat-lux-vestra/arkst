@@ -119,6 +119,10 @@ dependency:
 - .container is PARTIAL: bounded width/height/fullwidth behavior exists,
   while float, full-span, class, style, and complete body conversion remain
   open.
+- .text is PARTIAL: rich inline content, URL wrapping, all seven relative-size
+  values, weight/style, and all six decoration values have typed semantic and
+  Typst/PDF evidence; case, variant, script, color, classname, and exact HTML/CSS
+  behavior remain open.
 - .box, .todo, .collapse, and .textcollapse are PARTIAL typed components with
   bounded Typst/PDF output contracts. The collapse forms preserve their
   authored initial state but do not claim browser interactivity. .float,
