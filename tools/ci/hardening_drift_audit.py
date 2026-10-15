@@ -102,6 +102,10 @@ def canonical_static_checks(
             [sys.executable, "tools/ci/verify_distribution_policy.py"],
         ),
         (
+            "release-codeql-policy",
+            [sys.executable, "tools/ci/verify_release_codeql_policy.py"],
+        ),
+        (
             "workflow-security",
             [sys.executable, "tools/ci/verify_workflow_security.py"],
         ),
@@ -136,7 +140,7 @@ def canonical_static_checks(
 
 
 def check_codeql_authority(root: Path = ROOT) -> list[Finding]:
-    """Require one scheduled/manual exact-main CodeQL scanner, never a PR producer."""
+    """Require one scheduled/manual protected-main CodeQL scanner, never a PR producer."""
     findings: list[Finding] = []
     try:
         with (root / ".github" / "gate-policy.toml").open("rb") as stream:
@@ -173,6 +177,7 @@ def check_codeql_authority(root: Path = ROOT) -> list[Finding]:
     if re.search(r"(?m)^  (?:pull_request|pull_request_target|push):", source):
         findings.append(Finding("codeql-authority", "routine PR/push CodeQL trigger reintroduced"))
     required_fragments = [
+        "run-name: CodeQL source",
         "workflow_dispatch:",
         "candidate_sha:",
         "schedule:",
@@ -181,8 +186,12 @@ def check_codeql_authority(root: Path = ROOT) -> list[Finding]:
         "security-events: write",
         "persist-credentials: false",
         'GITHUB_REF" = "refs/heads/main',
-        'GITHUB_SHA" = "$EXPECTED_SHA',
-        "remote_main=",
+        "compare/${EXPECTED_SHA}...${remote_main}",
+        "merge_base_commit.sha",
+        "base_commit.sha",
+        "source-identity.json",
+        "codeql-source-",
+        "cancel-in-progress: false",
         "steps.analyze.outputs.sarif-output",
         "release-codeql-verdict.py",
         "retention-days: 90",
