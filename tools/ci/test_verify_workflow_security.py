@@ -92,6 +92,30 @@ class WorkflowSecurityTests(unittest.TestCase):
     def test_clean_fixture_passes(self) -> None:
         self.verify(BASE)
 
+    def test_ephemeral_workflow_with_lifecycle_metadata_passes(self) -> None:
+        valid = (
+            "# lifecycle-owner: issue #626\n"
+            "# lifecycle-retire: remove after bounded research concludes\n"
+            + BASE
+        )
+        self.verify(valid, name="research-lifecycle-fixture.yml")
+
+    def test_ephemeral_workflow_without_lifecycle_owner_is_rejected(self) -> None:
+        invalid = "# lifecycle-retire: remove after bounded research concludes\n" + BASE
+        self.reject(
+            invalid,
+            "lacks non-empty # lifecycle-owner:",
+            name="research-lifecycle-fixture.yml",
+        )
+
+    def test_ephemeral_workflow_without_retirement_condition_is_rejected(self) -> None:
+        invalid = "# lifecycle-owner: issue #626\n" + BASE
+        self.reject(
+            invalid,
+            "lacks non-empty # lifecycle-retire:",
+            name="experiment-lifecycle-fixture.yaml",
+        )
+
     def test_named_checkout_step_with_disabled_credentials_passes(self) -> None:
         named = BASE.replace(
             "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n",
