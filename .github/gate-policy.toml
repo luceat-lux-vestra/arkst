@@ -140,16 +140,6 @@ always_present = true
 rationale = "Sole live merge requirement. Fails closed unless every authoritative internal merge component in the canonical CI graph concludes success."
 
 [[producer]]
-workflow = ".github/workflows/codeql.yml"
-job = "analyze"
-classification = "advisory"
-contexts = ["codeql (actions)", "codeql (rust)"]
-always_present = true
-matrix_axis = "language"
-matrix_values = ["actions", "rust"]
-rationale = "Always-present advisory CodeQL contexts. Actions analysis runs on every non-draft pull request; Rust analysis runs for trusted-base Rust-impacting pull requests and for scheduled/manual full scans, while non-Rust pull requests retain a successful rust context without expensive analysis."
-
-[[producer]]
 workflow = ".github/workflows/docs.yml"
 job = "spelling"
 classification = "path_scoped_optional"

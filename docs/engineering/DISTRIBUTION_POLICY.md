@@ -66,3 +66,9 @@ This contract intentionally does not create release machinery. Before the first
 #234 remains not planned while crates.io/public `cargo install` are deferred.
 Any future registry or WASM distribution proposal must update this canonical
 policy and its fail-closed verifier in a separately reviewed change.
+
+## Exact-source CodeQL publication hold (R2A #105)
+
+There is currently no automatic GitHub Release publishing workflow. The canonical channel remains the approved `arkst-cli` binary only (no crates.io, WASM distribution, or synthetic v0.1.0 tag). Before **any** UI/API/manual publication, an operator must verify that protected-main source, intended release tag, commit and tree agree, and that one eligible nonexpired *exact-candidate-SHA* CodeQL run succeeded for **both Actions and Rust**, with authenticated unmodified per-language original SARIF artifacts, logged SHA-256, healthy CodeQL query-pack/category/invocation evidence and zero High/Critical security findings. Missing artifacts, stale SHA, run-attempt ambiguity, or tag drift means **no publication**.
+
+Issue #249 owns enforcing this prepublication contract in the future GitHub Release publisher **before creating a public release or uploading assets**, including negative tests and proof of live tag protection. Owner UI/API publication can bypass repository-managed Actions, so the present control is an explicit human-held publication stop, not a technically non-bypassable release rule. The weekly/manual CodeQL transition does not create or test a real release.

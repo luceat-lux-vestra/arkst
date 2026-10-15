@@ -136,88 +136,63 @@ def canonical_static_checks(
 
 
 def check_codeql_authority(root: Path = ROOT) -> list[Finding]:
+    """Require one scheduled/manual exact-main CodeQL scanner, never a PR producer."""
     findings: list[Finding] = []
     try:
         with (root / ".github" / "gate-policy.toml").open("rb") as stream:
             policy = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         return [Finding("codeql-authority", f"cannot load gate policy: {exc}")]
-
-    codeql_producers = [
-        item
-        for item in policy.get("producer", [])
+    producers = [
+        item for item in policy.get("producer", [])
         if item.get("workflow") == ".github/workflows/codeql.yml"
-        and item.get("job") == "analyze"
     ]
-    expected = {
-        "classification": "advisory",
-        "contexts": ["codeql (actions)", "codeql (rust)"],
-        "always_present": True,
-        "matrix_axis": "language",
-        "matrix_values": ["actions", "rust"],
-    }
-    if len(codeql_producers) != 1:
-        findings.append(
-            Finding(
-                "codeql-authority",
-                f"expected exactly one canonical CodeQL producer, found {len(codeql_producers)}",
-            )
-        )
-    else:
-        producer = codeql_producers[0]
-        for key, value in expected.items():
-            if producer.get(key) != value:
-                findings.append(
-                    Finding(
-                        "codeql-authority",
-                        f"gate-policy {key} drift: expected {value!r}, got {producer.get(key)!r}",
-                    )
-                )
+    if producers:
+        findings.append(Finding("codeql-authority", "CodeQL must not be a PR-time gate producer"))
 
     scanners: list[str] = []
     for path in sorted((root / ".github" / "workflows").glob("*.y*ml")):
         try:
-            text = path.read_text(encoding="utf-8")
+            source = path.read_text(encoding="utf-8")
         except OSError as exc:
             findings.append(Finding("codeql-authority", f"cannot read {path}: {exc}"))
             continue
-        if "github/codeql-action/" in text:
+        if "github/codeql-action/" in source:
             scanners.append(path.relative_to(root).as_posix())
     if scanners != [".github/workflows/codeql.yml"]:
         findings.append(
-            Finding(
-                "codeql-authority",
-                f"checked-in CodeQL authority must be exactly codeql.yml, found {scanners!r}",
-            )
+            Finding("codeql-authority", f"checked-in CodeQL authority must be exactly codeql.yml, found {scanners!r}")
         )
 
     codeql_path = root / ".github" / "workflows" / "codeql.yml"
     try:
-        text = codeql_path.read_text(encoding="utf-8")
+        source = codeql_path.read_text(encoding="utf-8")
     except OSError as exc:
         return findings + [Finding("codeql-authority", f"cannot read codeql workflow: {exc}")]
+
+    if re.search(r"(?m)^  (?:pull_request|pull_request_target|push):", source):
+        findings.append(Finding("codeql-authority", "routine PR/push CodeQL trigger reintroduced"))
     required_fragments = [
+        "workflow_dispatch:",
+        "candidate_sha:",
+        "schedule:",
         "language: [actions, rust]",
         "build-mode: none",
         "security-events: write",
-        "pull-requests: read",
         "persist-credentials: false",
-        "id: trusted_base",
-        "ref: ${{ github.event.pull_request.base.sha }}",
-        "path: .codeql-trusted-base",
-        "continue-on-error: true",
-        "id: rust_scope",
-        "tools/ci/codeql_scope.py",
-        "steps.trusted_base.outcome",
-        "steps.rust_scope.outputs.rust_impact == 'true'",
+        'GITHUB_REF" = "refs/heads/main',
+        'GITHUB_SHA" = "$EXPECTED_SHA',
+        "remote_main=",
+        "steps.analyze.outputs.sarif-output",
+        "release-codeql-verdict.py",
+        "retention-days: 90",
     ]
     for fragment in required_fragments:
-        if fragment not in text:
+        if fragment not in source:
             findings.append(
-                Finding("codeql-authority", f"codeql workflow missing contract fragment {fragment!r}")
+                Finding("codeql-authority", f"CodeQL exact-SHA evidence contract missing {fragment!r}")
             )
     return findings
-
 
 def check_supply_chain_authority(root: Path = ROOT) -> list[Finding]:
     workflow_path = root / ".github" / "workflows" / "security.yml"
