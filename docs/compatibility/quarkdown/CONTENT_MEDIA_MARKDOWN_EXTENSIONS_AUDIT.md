@@ -125,10 +125,12 @@ dependency:
   typed semantic and Typst/PDF evidence; classname and exact HTML/CSS behavior
   remain open.
 - .box, .todo, .collapse, and .textcollapse are PARTIAL typed components with
-  bounded Typst/PDF output contracts. The collapse forms preserve their
-  authored initial state but do not claim browser interactivity. .float,
-  .clip, and .numbered remain explicit gaps. A blockquote or generic
-  function-call node is not their semantic implementation.
+  bounded Typst/PDF output contracts. .box preserves an optional authored rich
+  inline title separately from its structured body; automatic localization,
+  alternate types, and styling remain open. The collapse forms preserve their
+  authored initial state but do not claim browser interactivity. .float, .clip,
+  and .numbered remain explicit gaps. A blockquote or generic function-call
+  node is not their semantic implementation.
 
 No generic style framework, layout framework, or new semantic layer is
 introduced by this inventory.

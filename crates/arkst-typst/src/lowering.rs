@@ -530,6 +530,11 @@ impl LoweringContext {
     fn lower_box(&mut self, component: &IrBoxComponent) {
         let before = self.output.len();
         self.push_str("#block(width: 100%, inset: 8pt, stroke: 1pt)[\n");
+        if let Some(title) = &component.title {
+            self.push_str("#strong[");
+            self.lower_inlines(title);
+            self.push_str("]\n");
+        }
         for child in &component.children {
             self.lower_node(child);
         }

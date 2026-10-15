@@ -6156,103 +6156,129 @@ impl Evaluator {
             return CallOutcome::Failed;
         }
 
-        let children = match body {
+        if matches!(body, Some(CallBody::Inline(_))) {
+            diagnostics.push(box_argument_error(
+                "`.box` Markdown body must be block content",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = match body {
             Some(CallBody::Block(nodes)) => {
-                if !positional_args.is_empty()
-                    || !named_args.is_empty()
-                    || implicit_argument.is_some()
-                {
-                    return CallOutcome::Failed;
-                }
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
-                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                let value = match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => IrValue::Content(nodes),
                     outcome => return outcome,
-                }
+                };
+                Some(Candidate::Positional {
+                    value: InvocationValue::static_value(value),
+                    span: call_body_source_span(CallBody::Block(nodes), *span),
+                })
             }
             Some(CallBody::Inline(_)) => {
-                diagnostics.push(box_argument_error(
-                    "`.box` Markdown body must be block content",
-                    *span,
+                unreachable!("inline Box bodies are rejected above")
+            }
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter();
+        let mut title_slot = slots.next().unwrap_or(BoundSlot::Omitted);
+        let mut body_slot = slots.next().unwrap_or(BoundSlot::Omitted);
+
+        // Preserve the previously evidenced body-only single positional form
+        // when the parser did not expose it as a distinct call body.
+        if body.is_none()
+            && positional_args.len() == 1
+            && named_args.is_empty()
+            && matches!(body_slot, BoundSlot::Omitted | BoundSlot::Defaulted)
+        {
+            std::mem::swap(&mut title_slot, &mut body_slot);
+        }
+
+        let title = match title_slot {
+            BoundSlot::Explicit { value, .. } if matches!(&value.value, IrValue::None) => None,
+            BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } => match self.evaluate_box_title(
+                &value,
+                argument_span,
+                parameters.first().and_then(|parameter| parameter.name_span),
+                *span,
+                diagnostics,
+                context,
+            ) {
+                Ok(title) => Some(title),
+                Err(outcome) => return outcome,
+            },
+            BoundSlot::Omitted | BoundSlot::Defaulted => None,
+        };
+
+        let BoundSlot::Explicit {
+            value: body_value,
+            span: body_span,
+        } = body_slot
+        else {
+            diagnostics.push(box_argument_error(
+                "`.box` requires Markdown content",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let converted = match value_conversion::convert_target_with_origin(
+            &body_value,
+            value_conversion::ConversionTarget::BlockContent,
+            body_span,
+        ) {
+            Ok(converted) => converted,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(body_span),
+                        Some("body"),
+                        parameters.get(1).and_then(|parameter| parameter.name_span),
+                        *span,
+                    ),
+                    Some("`.box` body"),
                 ));
                 return CallOutcome::Failed;
             }
-            None => {
-                let candidates = match self.evaluate_invocation_candidates(
-                    ordered_args,
-                    positional_args,
-                    named_args,
-                    span,
-                    diagnostics,
-                    context,
-                    first_origin,
-                    implicit_argument,
-                ) {
-                    Ok(candidates) => candidates,
-                    Err(outcome) => return outcome,
-                };
-                let bound = match binding_plan.bind(&candidates, None, *span) {
-                    Ok(bound) => bound,
-                    Err(error) => {
-                        diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
-                        return CallOutcome::Failed;
-                    }
-                };
-                let parameter_span = bound
-                    .parameters
-                    .first()
-                    .and_then(|parameter| parameter.name_span);
-                let Some(BoundSlot::Explicit {
-                    value,
-                    span: argument_span,
-                }) = bound.slots.into_iter().next()
-                else {
+        };
+        let children =
+            match self.resolve_target_value(converted, body_span, *span, diagnostics, context) {
+                Ok(IrValue::Content(nodes)) => nodes,
+                Ok(_) => {
                     diagnostics.push(box_argument_error(
-                        "`.box` requires Markdown content",
-                        *span,
+                        "`.box` body must convert to Markdown content",
+                        body_span,
                     ));
                     return CallOutcome::Failed;
-                };
-                let converted = match value_conversion::convert_target_with_origin(
-                    &value,
-                    value_conversion::ConversionTarget::BlockContent,
-                    argument_span,
-                ) {
-                    Ok(converted) => converted,
-                    Err(error) => {
-                        diagnostics.push(conversion_failure_diagnostic(
-                            value_conversion::ConversionFailure::new(
-                                error,
-                                Some(argument_span),
-                                Some("body"),
-                                parameter_span,
-                                *span,
-                            ),
-                            Some("`.box` body"),
-                        ));
-                        return CallOutcome::Failed;
-                    }
-                };
-                match self.resolve_target_value(
-                    converted,
-                    argument_span,
-                    *span,
-                    diagnostics,
-                    context,
-                ) {
-                    Ok(IrValue::Content(nodes)) => nodes,
-                    Ok(_) => {
-                        diagnostics.push(box_argument_error(
-                            "`.box` body must convert to Markdown content",
-                            argument_span,
-                        ));
-                        return CallOutcome::Failed;
-                    }
-                    Err(outcome) => return outcome,
                 }
-            }
-        };
+                Err(outcome) => return outcome,
+            };
 
-        if context.document_state.borrow().locale.is_some() {
+        if title.is_none() && context.document_state.borrow().locale.is_some() {
             diagnostics.push(box_argument_error(
                 "`.box` automatic localized titles are not yet implemented",
                 *span,
@@ -6261,9 +6287,61 @@ impl Evaluator {
         }
 
         CallOutcome::Value(IrValue::Component(IrComponent::Box(IrBoxComponent {
+            title,
             children,
             span: *span,
         })))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_box_title(
+        &self,
+        value: &InvocationValue,
+        argument_span: SourceSpan,
+        parameter_span: Option<SourceSpan>,
+        call_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        let converted = value_conversion::convert_target_with_origin(
+            value,
+            value_conversion::ConversionTarget::InlineContent,
+            argument_span,
+        )
+        .map_err(|error| {
+            diagnostics.push(conversion_failure_diagnostic(
+                value_conversion::ConversionFailure::new(
+                    error,
+                    Some(argument_span),
+                    Some("title"),
+                    parameter_span,
+                    call_span,
+                ),
+                Some("`.box` title"),
+            ));
+            CallOutcome::Failed
+        })?;
+        let value =
+            self.resolve_target_value(converted, argument_span, call_span, diagnostics, context)?;
+        match value {
+            IrValue::Content(nodes) => match nodes.as_slice() {
+                [IrNode::Paragraph { content, .. }] => Ok(content.clone()),
+                _ => {
+                    diagnostics.push(box_argument_error(
+                        "`.box` title must resolve to inline Markdown content",
+                        argument_span,
+                    ));
+                    Err(CallOutcome::Failed)
+                }
+            },
+            _ => {
+                diagnostics.push(box_argument_error(
+                    "`.box` title must resolve to inline Markdown content",
+                    argument_span,
+                ));
+                Err(CallOutcome::Failed)
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -15011,6 +15089,9 @@ impl Evaluator {
                 IrNode::Component {
                     component: IrComponent::Box(component),
                 } => {
+                    if let Some(title) = &component.title {
+                        Self::collect_evidenced_inline_error_components(title, components);
+                    }
                     Self::collect_evidenced_output_error_components(&component.children, components)
                 }
                 IrNode::Component {
@@ -18103,7 +18184,17 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
         "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
-        "box" | "todo" => (
+        "box" => (
+            // Structural binding keeps both slots optional so the established
+            // body-only form remains unambiguous. The Box adapter enforces the
+            // required body after interpreting an omitted authored title.
+            vec![
+                ParameterMetadata::optional("title"),
+                ParameterMetadata::optional("body"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "todo" => (
             vec![ParameterMetadata::required("body")],
             BodyPolicy::BindFinal,
         ),
@@ -21328,7 +21419,7 @@ fn box_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec![
-            "`.box` currently supports only the default untitled CALLOUT form with one required MarkdownContent body."
+            "`.box` accepts an optional rich inline title and one required MarkdownContent body; alternate types and styling remain unsupported."
                 .to_string(),
         ],
     }
@@ -22322,6 +22413,9 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
         }
         IrComponent::Box(component) => {
             component.span = source_span;
+            if let Some(title) = &mut component.title {
+                rebase_dynamic_inlines(title, source_span);
+            }
             rebase_dynamic_nodes(&mut component.children, source_span);
         }
         IrComponent::Collapse(component) => {
