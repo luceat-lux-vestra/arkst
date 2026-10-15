@@ -419,7 +419,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
     // Preserve the two-position text/url prefix. Closed weight, style,
-    // decoration, size, case, variant, and script options are named-only
+    // decoration, size, case, variant, script, and color options are named-only
     // shared-binder slots.
     builtin_spec_with_defaults(
         "text",
@@ -434,8 +434,9 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
             "case",
             "variant",
             "script",
+            "color",
         ],
-        &[1, 2, 3, 4, 5, 6, 7, 8],
+        &[1, 2, 3, 4, 5, 6, 7, 8, 9],
         2,
         true,
         BuiltinBodyPolicy::BindEvaluatedFirst,
@@ -1360,6 +1361,22 @@ fn evaluate_text(
         })
         .transpose()?
         .flatten();
+    let color = arguments
+        .remove(0)
+        .map(|value| {
+            if matches!(&value.value, IrValue::None) {
+                return Ok(None);
+            }
+            text_color_conversion(&value).map(Some).map_err(|cause| {
+                conversion_error(
+                    "`.text` `color` must be a Color or None".to_string(),
+                    "color",
+                    cause,
+                )
+            })
+        })
+        .transpose()?
+        .flatten();
     match value.value {
         IrValue::Content(nodes)
             if url.is_none()
@@ -1370,6 +1387,7 @@ fn evaluate_text(
                 && text_case.is_none()
                 && variant.is_none()
                 && script.is_none()
+                && color.is_none()
                 && nodes.is_empty() =>
         {
             Ok(IrValue::Content(nodes))
@@ -1430,6 +1448,14 @@ fn evaluate_text(
                         span: call_span,
                     }];
                 }
+                if let Some(color) = color {
+                    let original = std::mem::take(content);
+                    *content = vec![IrInline::TextColor {
+                        color,
+                        content: original,
+                        span: call_span,
+                    }];
+                }
             }
             if let Some(destination) = url {
                 if let IrNode::Paragraph { content, .. } = &mut nodes[0] {
@@ -1466,6 +1492,33 @@ fn evaluate_text(
             "`.text` requires a single inline paragraph, not block content".to_string(),
         )),
     }
+}
+
+fn text_color_conversion(
+    value: &InvocationValue,
+) -> Result<arkst_ir::IrColor, value_conversion::ConversionError> {
+    let convert = |candidate: &InvocationValue| match value_conversion::convert_domain_with_origin(
+        candidate,
+        value_conversion::DomainTarget::Color,
+    )? {
+        value_conversion::DomainValue::Color(color) => Ok(color),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Color,
+        }),
+    };
+
+    convert(value).or_else(|error| {
+        if value.origin != value_conversion::ValueOrigin::Dynamic {
+            return Err(error);
+        }
+        let IrValue::Content(nodes) = &value.value else {
+            return Err(error);
+        };
+        let Some(text) = plain_scalar_content_argument(nodes) else {
+            return Err(error);
+        };
+        convert(&InvocationValue::dynamic_value(IrValue::String(text)))
+    })
 }
 
 fn evaluate_plaintext(
@@ -1624,6 +1677,7 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         | IrInline::TextCase { content, .. }
         | IrInline::TextVariant { content, .. }
         | IrInline::TextScript { content, .. }
+        | IrInline::TextColor { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
@@ -1696,6 +1750,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             | IrInline::TextCase { content, .. }
             | IrInline::TextVariant { content, .. }
             | IrInline::TextScript { content, .. }
+            | IrInline::TextColor { content, .. }
             | IrInline::Underline { content, .. }
             | IrInline::Overline { content, .. }
             | IrInline::Strikethrough { content, .. }
@@ -2320,7 +2375,8 @@ mod tests {
                         "size",
                         "case",
                         "variant",
-                        "script"
+                        "script",
+                        "color"
                     ]
                 );
             } else {

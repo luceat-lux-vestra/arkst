@@ -121,8 +121,9 @@ dependency:
   open.
 - .text is PARTIAL: rich inline content, URL wrapping, all seven relative-size
   values, all four text-case values, both font variants, both script positions,
-  weight/style, and all six decoration values have typed semantic and Typst/PDF
-  evidence; color, classname, and exact HTML/CSS behavior remain open.
+  weight/style, all six decoration values, and origin-aware RGBA color have
+  typed semantic and Typst/PDF evidence; classname and exact HTML/CSS behavior
+  remain open.
 - .box, .todo, .collapse, and .textcollapse are PARTIAL typed components with
   bounded Typst/PDF output contracts. The collapse forms preserve their
   authored initial state but do not claim browser interactivity. .float,

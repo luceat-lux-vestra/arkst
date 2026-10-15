@@ -254,6 +254,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             | IrInline::TextCase { content, .. }
             | IrInline::TextVariant { content, .. }
             | IrInline::TextScript { content, .. }
+            | IrInline::TextColor { content, .. }
             | IrInline::Underline { content, .. }
             | IrInline::Overline { content, .. }
             | IrInline::Strikethrough { content, .. }
@@ -1860,6 +1861,11 @@ enum WireInline {
         content: Vec<WireInline>,
         span: SourceSpan,
     },
+    TextColor {
+        color: IrColor,
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
     Underline {
         content: Vec<WireInline>,
         span: SourceSpan,
@@ -2365,6 +2371,15 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             span,
         } => WireInline::TextScript {
             script: *script,
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::TextColor {
+            color,
+            content,
+            span,
+        } => WireInline::TextColor {
+            color: color.clone(),
             content: wire_inlines(content, sources)?,
             span: *span,
         },
@@ -2918,6 +2933,15 @@ fn wire_inline_to_ir(
             span,
         } => IrInline::TextScript {
             script,
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
+        WireInline::TextColor {
+            color,
+            content,
+            span,
+        } => IrInline::TextColor {
+            color,
             content: inlines_from_wire(content, sources)?,
             span,
         },
@@ -3492,6 +3516,12 @@ pub enum IrInline {
     /// Inline content positioned as subscript or superscript.
     TextScript {
         script: IrTextScript,
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// Inline content rendered with an explicit backend-neutral RGBA color.
+    TextColor {
+        color: IrColor,
         content: Vec<IrInline>,
         span: SourceSpan,
     },

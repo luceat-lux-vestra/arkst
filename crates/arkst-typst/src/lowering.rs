@@ -1135,6 +1135,21 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::TextColor {
+                color,
+                content,
+                span,
+            } => {
+                let before = self.output.len();
+                self.push_str("#text(fill: ");
+                self.push_str(&lower_color(color));
+                self.push_str(")[");
+                self.lower_inlines(content);
+                self.push(']');
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrInline::Underline { content, span } => {
                 let before = self.output.len();
                 self.push_str("#underline[");

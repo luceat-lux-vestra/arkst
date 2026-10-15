@@ -504,6 +504,7 @@ fn collect_unevidenced_explicit_errors_from_inline<'a>(
         | IrInline::TextCase { content, .. }
         | IrInline::TextVariant { content, .. }
         | IrInline::TextScript { content, .. }
+        | IrInline::TextColor { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
