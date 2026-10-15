@@ -11,6 +11,18 @@ class WorkflowSecurityError(RuntimeError):
 
 
 SHA_REF = re.compile(r"^[0-9a-f]{40}$")
+EPHEMERAL_WORKFLOW = re.compile(
+    r"^(?:research|temporary|tmp|experiment)(?:[-_].*)?\.ya?ml$",
+    re.IGNORECASE,
+)
+LIFECYCLE_OWNER = re.compile(
+    r"^\s*#\s*lifecycle-owner:\s*(\S.*)$",
+    re.IGNORECASE,
+)
+LIFECYCLE_RETIRE = re.compile(
+    r"^\s*#\s*lifecycle-retire:\s*(\S.*)$",
+    re.IGNORECASE,
+)
 UNTRUSTED_EXPRESSIONS = (
     "github.event.pull_request.",
     "github.event.issue.",
@@ -155,6 +167,25 @@ def verify_workflow(path: Path, root: Path) -> None:
     rel = path.relative_to(root).as_posix()
     lines = path.read_text(encoding="utf-8").splitlines()
     text = "\n".join(lines)
+
+    if EPHEMERAL_WORKFLOW.fullmatch(path.name):
+        header = lines[:20]
+        owner = next(
+            (match.group(1).strip() for line in header if (match := LIFECYCLE_OWNER.match(line))),
+            "",
+        )
+        retire = next(
+            (match.group(1).strip() for line in header if (match := LIFECYCLE_RETIRE.match(line))),
+            "",
+        )
+        if not owner:
+            raise WorkflowSecurityError(
+                f"{rel}: ephemeral workflow requires non-empty # lifecycle-owner: header metadata"
+            )
+        if not retire:
+            raise WorkflowSecurityError(
+                f"{rel}: ephemeral workflow requires non-empty # lifecycle-retire: header metadata"
+            )
     workflow_allowed_writes = ALLOWED_WORKFLOW_WRITE_PERMISSIONS.get(rel, set())
 
     permissions = _top_level_block(lines, "permissions")
