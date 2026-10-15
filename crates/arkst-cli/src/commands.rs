@@ -501,6 +501,7 @@ fn collect_unevidenced_explicit_errors_from_inline<'a>(
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::TextSize { content, .. }
+        | IrInline::TextScript { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
@@ -1677,7 +1678,7 @@ mod tests {
     }
 
     #[test]
-    fn text_decoration_error_owner_remains_unevidenced_and_fatal() {
+    fn text_transform_error_owner_remains_unevidenced_and_fatal() {
         let span = arkst_core::source::SourceSpan::new(arkst_core::source::SourceId(184), 0, 13);
         let diagnostic = arkst_core::Diagnostic {
             code: "E3011".to_string(),
@@ -1693,14 +1694,18 @@ mod tests {
             nodes: vec![IrNode::Paragraph {
                 content: vec![IrInline::TextSize {
                     size: arkst_core::ir::IrTextSize::Large,
-                    content: vec![IrInline::Underline {
-                        content: vec![IrInline::Overline {
-                            content: vec![IrInline::ExplicitError {
-                                component: IrExplicitErrorComponent {
-                                    message: "explicit".to_string(),
-                                    source_echo: Some(".error {explicit}".to_string()),
-                                    span,
-                                },
+                    content: vec![IrInline::TextScript {
+                        script: arkst_core::ir::IrTextScript::Superscript,
+                        content: vec![IrInline::Underline {
+                            content: vec![IrInline::Overline {
+                                content: vec![IrInline::ExplicitError {
+                                    component: IrExplicitErrorComponent {
+                                        message: "explicit".to_string(),
+                                        source_echo: Some(".error {explicit}".to_string()),
+                                        span,
+                                    },
+                                }],
+                                span,
                             }],
                             span,
                         }],

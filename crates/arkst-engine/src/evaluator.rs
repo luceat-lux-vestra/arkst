@@ -3689,6 +3689,15 @@ impl Evaluator {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
             }],
+            IrInline::TextScript {
+                script,
+                content,
+                span,
+            } => vec![IrInline::TextScript {
+                script: *script,
+                content: self.evaluate_inlines(content, diagnostics, context),
+                span: *span,
+            }],
             IrInline::Underline { content, span } => vec![IrInline::Underline {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
@@ -17596,6 +17605,7 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::Emphasis { span, .. }
         | IrInline::Strong { span, .. }
         | IrInline::TextSize { span, .. }
+        | IrInline::TextScript { span, .. }
         | IrInline::Underline { span, .. }
         | IrInline::Overline { span, .. }
         | IrInline::Strikethrough { span, .. }
@@ -17626,6 +17636,7 @@ fn body_contains_raw_html(nodes: &[IrNode]) -> bool {
                         IrInline::Emphasis { content, .. }
                         | IrInline::Strong { content, .. }
                         | IrInline::TextSize { content, .. }
+                        | IrInline::TextScript { content, .. }
                         | IrInline::Underline { content, .. }
                         | IrInline::Overline { content, .. }
                         | IrInline::Strikethrough { content, .. }
@@ -17796,6 +17807,7 @@ fn append_code_inline_text(inline: &IrInline, output: &mut String) -> Option<()>
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::TextSize { content, .. }
+        | IrInline::TextScript { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. } => {
@@ -17836,6 +17848,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         IrInline::Emphasis { .. }
         | IrInline::Strong { .. }
         | IrInline::TextSize { .. }
+        | IrInline::TextScript { .. }
         | IrInline::Underline { .. }
         | IrInline::Overline { .. }
         | IrInline::Strikethrough { .. }
@@ -22073,6 +22086,7 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             IrInline::Emphasis { content, span }
             | IrInline::Strong { content, span }
             | IrInline::TextSize { content, span, .. }
+            | IrInline::TextScript { content, span, .. }
             | IrInline::Underline { content, span }
             | IrInline::Overline { content, span }
             | IrInline::Strikethrough { content, span } => {
