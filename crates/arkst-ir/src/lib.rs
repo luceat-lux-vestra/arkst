@@ -250,6 +250,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
         match inline {
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
+            | IrInline::TextSize { content, .. }
             | IrInline::Underline { content, .. }
             | IrInline::Overline { content, .. }
             | IrInline::Strikethrough { content, .. }
@@ -1836,6 +1837,11 @@ enum WireInline {
         content: Vec<WireInline>,
         span: SourceSpan,
     },
+    TextSize {
+        size: IrTextSize,
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
     Underline {
         content: Vec<WireInline>,
         span: SourceSpan,
@@ -2305,6 +2311,15 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             span: *span,
         },
         IrInline::Strong { content, span } => WireInline::Strong {
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::TextSize {
+            size,
+            content,
+            span,
+        } => WireInline::TextSize {
+            size: *size,
             content: wire_inlines(content, sources)?,
             span: *span,
         },
@@ -2825,6 +2840,15 @@ fn wire_inline_to_ir(
             content: inlines_from_wire(content, sources)?,
             span,
         },
+        WireInline::TextSize {
+            size,
+            content,
+            span,
+        } => IrInline::TextSize {
+            size,
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
         WireInline::Underline { content, span } => IrInline::Underline {
             content: inlines_from_wire(content, sources)?,
             span,
@@ -3279,6 +3303,22 @@ pub enum IrPageCounterTarget {
     Total,
 }
 
+/// Non-default members of the closed relative font-size domain used by
+/// Quarkdown `.text`.
+///
+/// Each variant is backend-neutral and maps to the public size ratios from
+/// the tracked Quarkdown contract. `normal` is the identity and therefore
+/// does not add a wrapper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTextSize {
+    Tiny,
+    Small,
+    Medium,
+    Large,
+    Larger,
+    Huge,
+}
+
 /// An inline fragment within a block-level IR node.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IrInline {
@@ -3327,6 +3367,12 @@ pub enum IrInline {
     },
     /// Strong (bold) inline fragment.
     Strong {
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// Inline content scaled relative to the surrounding font size.
+    TextSize {
+        size: IrTextSize,
         content: Vec<IrInline>,
         span: SourceSpan,
     },

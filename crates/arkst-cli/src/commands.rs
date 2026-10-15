@@ -500,6 +500,7 @@ fn collect_unevidenced_explicit_errors_from_inline<'a>(
         IrInline::ExplicitError { component } => components.push(component),
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
+        | IrInline::TextSize { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
@@ -1690,14 +1691,18 @@ mod tests {
         };
         let document = IrDocument {
             nodes: vec![IrNode::Paragraph {
-                content: vec![IrInline::Underline {
-                    content: vec![IrInline::Overline {
-                        content: vec![IrInline::ExplicitError {
-                            component: IrExplicitErrorComponent {
-                                message: "explicit".to_string(),
-                                source_echo: Some(".error {explicit}".to_string()),
-                                span,
-                            },
+                content: vec![IrInline::TextSize {
+                    size: arkst_core::ir::IrTextSize::Large,
+                    content: vec![IrInline::Underline {
+                        content: vec![IrInline::Overline {
+                            content: vec![IrInline::ExplicitError {
+                                component: IrExplicitErrorComponent {
+                                    message: "explicit".to_string(),
+                                    source_echo: Some(".error {explicit}".to_string()),
+                                    span,
+                                },
+                            }],
+                            span,
                         }],
                         span,
                     }],
