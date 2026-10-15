@@ -15,7 +15,7 @@ use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
-use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextScript, IrValue};
+use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextScript, IrTextVariant, IrValue};
 #[cfg(test)]
 use arkst_source::SourceId;
 use arkst_source::SourceSpan;
@@ -417,7 +417,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
     // Preserve the two-position text/url prefix. Closed weight, style,
-    // decoration, size, and script options are named-only shared-binder slots.
+    // decoration, size, variant, and script options are named-only shared-binder slots.
     builtin_spec_with_defaults(
         "text",
         BuiltinKind::Text,
@@ -428,9 +428,10 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
             "style",
             "decoration",
             "size",
+            "variant",
             "script",
         ],
-        &[1, 2, 3, 4, 5, 6],
+        &[1, 2, 3, 4, 5, 6, 7],
         2,
         true,
         BuiltinBodyPolicy::BindEvaluatedFirst,
@@ -1301,6 +1302,23 @@ fn evaluate_text(
         })
         .transpose()?
         .flatten();
+    let variant = arguments
+        .remove(0)
+        .map(|value| {
+            if matches!(&value.value, IrValue::None) {
+                return Ok(None);
+            }
+            let variant = scalar_string_argument_result(&value, "variant")?;
+            match variant.to_ascii_lowercase().as_str() {
+                "normal" => Ok(None),
+                "smallcaps" => Ok(Some(IrTextVariant::SmallCaps)),
+                _ => Err(error(
+                    "`.text` variant must be normal, smallcaps, or None".to_string(),
+                )),
+            }
+        })
+        .transpose()?
+        .flatten();
     let script = arguments
         .remove(0)
         .map(|value| {
@@ -1325,6 +1343,7 @@ fn evaluate_text(
                 && !italic
                 && decoration == TextDecoration::None
                 && size.is_none()
+                && variant.is_none()
                 && script.is_none()
                 && nodes.is_empty() =>
         {
@@ -1358,6 +1377,14 @@ fn evaluate_text(
                     let original = std::mem::take(content);
                     *content = vec![IrInline::TextSize {
                         size,
+                        content: original,
+                        span: call_span,
+                    }];
+                }
+                if let Some(variant) = variant {
+                    let original = std::mem::take(content);
+                    *content = vec![IrInline::TextVariant {
+                        variant,
                         content: original,
                         span: call_span,
                     }];
@@ -1561,6 +1588,7 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::TextSize { content, .. }
+        | IrInline::TextVariant { content, .. }
         | IrInline::TextScript { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
@@ -1631,6 +1659,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
             | IrInline::TextSize { content, .. }
+            | IrInline::TextVariant { content, .. }
             | IrInline::TextScript { content, .. }
             | IrInline::Underline { content, .. }
             | IrInline::Overline { content, .. }
@@ -2254,6 +2283,7 @@ mod tests {
                         "style",
                         "decoration",
                         "size",
+                        "variant",
                         "script"
                     ]
                 );

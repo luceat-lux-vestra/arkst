@@ -501,6 +501,7 @@ fn collect_unevidenced_explicit_errors_from_inline<'a>(
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::TextSize { content, .. }
+        | IrInline::TextVariant { content, .. }
         | IrInline::TextScript { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
@@ -1694,16 +1695,20 @@ mod tests {
             nodes: vec![IrNode::Paragraph {
                 content: vec![IrInline::TextSize {
                     size: arkst_core::ir::IrTextSize::Large,
-                    content: vec![IrInline::TextScript {
-                        script: arkst_core::ir::IrTextScript::Superscript,
-                        content: vec![IrInline::Underline {
-                            content: vec![IrInline::Overline {
-                                content: vec![IrInline::ExplicitError {
-                                    component: IrExplicitErrorComponent {
-                                        message: "explicit".to_string(),
-                                        source_echo: Some(".error {explicit}".to_string()),
-                                        span,
-                                    },
+                    content: vec![IrInline::TextVariant {
+                        variant: arkst_core::ir::IrTextVariant::SmallCaps,
+                        content: vec![IrInline::TextScript {
+                            script: arkst_core::ir::IrTextScript::Superscript,
+                            content: vec![IrInline::Underline {
+                                content: vec![IrInline::Overline {
+                                    content: vec![IrInline::ExplicitError {
+                                        component: IrExplicitErrorComponent {
+                                            message: "explicit".to_string(),
+                                            source_echo: Some(".error {explicit}".to_string()),
+                                            span,
+                                        },
+                                    }],
+                                    span,
                                 }],
                                 span,
                             }],
