@@ -251,6 +251,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
             | IrInline::TextSize { content, .. }
+            | IrInline::TextVariant { content, .. }
             | IrInline::TextScript { content, .. }
             | IrInline::Underline { content, .. }
             | IrInline::Overline { content, .. }
@@ -1843,6 +1844,11 @@ enum WireInline {
         content: Vec<WireInline>,
         span: SourceSpan,
     },
+    TextVariant {
+        variant: IrTextVariant,
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
     TextScript {
         script: IrTextScript,
         content: Vec<WireInline>,
@@ -2326,6 +2332,15 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             span,
         } => WireInline::TextSize {
             size: *size,
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::TextVariant {
+            variant,
+            content,
+            span,
+        } => WireInline::TextVariant {
+            variant: *variant,
             content: wire_inlines(content, sources)?,
             span: *span,
         },
@@ -2864,6 +2879,15 @@ fn wire_inline_to_ir(
             content: inlines_from_wire(content, sources)?,
             span,
         },
+        WireInline::TextVariant {
+            variant,
+            content,
+            span,
+        } => IrInline::TextVariant {
+            variant,
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
         WireInline::TextScript {
             script,
             content,
@@ -3343,6 +3367,15 @@ pub enum IrTextSize {
     Huge,
 }
 
+/// Non-default member of the closed font-variant domain used by
+/// Quarkdown `.text`.
+///
+/// `normal` is the identity and therefore does not add a wrapper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTextVariant {
+    SmallCaps,
+}
+
 /// The closed vertical-position domain used by Quarkdown `.text script`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrTextScript {
@@ -3404,6 +3437,12 @@ pub enum IrInline {
     /// Inline content scaled relative to the surrounding font size.
     TextSize {
         size: IrTextSize,
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// Inline content rendered with a non-default font variant.
+    TextVariant {
+        variant: IrTextVariant,
         content: Vec<IrInline>,
         span: SourceSpan,
     },
