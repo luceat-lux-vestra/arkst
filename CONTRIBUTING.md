@@ -160,6 +160,23 @@ All compatibility features with external systems (Quarkdown, etc.) require:
 - Known semantic differences documented
 - No source code copied from the original implementation
 
+## GitHub Actions lifecycle
+
+Keep production default-branch automation small and owned. Research, experiment,
+migration, and other temporary workflows should run from a bounded non-default
+branch where practical and be removed from source after their evidence is
+recorded.
+
+If an exceptional ephemeral workflow must land in `.github/workflows` on the
+default branch, filenames beginning with `research-`, `temporary-`, `tmp-`,
+or `experiment-` must declare non-empty `# lifecycle-owner:` and
+`# lifecycle-retire:` header comments. The owner identifies the issue or
+campaign responsible for the workflow; the retirement declaration states the
+explicit deletion or consolidation condition.
+
+Historical Actions runs and artifacts are evidence. They are not a reason to
+keep or recreate obsolete workflow YAML solely for sidebar cleanup.
+
 ## Pull Request Checklist
 
 - [ ] Summary
