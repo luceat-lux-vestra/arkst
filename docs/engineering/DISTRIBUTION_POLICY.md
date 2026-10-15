@@ -56,12 +56,10 @@ tools, and malformed artifact classification. It remains inside the existing aut
 This contract intentionally does not create release machinery. Before the first
 `v0.1.0` release:
 
-1. #235 must establish and verify immutable `refs/tags/v*` protection with no
-   bypass;
-2. #249 must add the narrowly scoped GitHub Release workflow, native artifact
-   matrix, deterministic archive names, and SHA-256 checksums; and
-3. the exact release workflow/tag state must be re-read before the first tag is
-   created.
+1. #235's immutable `refs/tags/v*` protection must remain active with update/deletion blocked and no bypass;
+2. #631's nonpublishing exact-SHA CodeQL preflight and `.github/release-codeql-policy.toml` must remain green;
+3. #249 must add the narrowly scoped GitHub Release workflow, native artifact matrix, deterministic archive names, and SHA-256 checksums, and must invoke `tools/ci/release_codeql_preflight.py` **before its first external release mutation**; and
+4. the exact release workflow/tag state must be re-read before the first tag is created.
 
 #234 remains not planned while crates.io/public `cargo install` are deferred.
 Any future registry or WASM distribution proposal must update this canonical
@@ -69,6 +67,10 @@ policy and its fail-closed verifier in a separately reviewed change.
 
 ## Exact-source CodeQL publication hold (R2A #105)
 
-There is currently no automatic GitHub Release publishing workflow. The canonical channel remains the approved `arkst-cli` binary only (no crates.io, WASM distribution, or synthetic v0.1.0 tag). Before **any** UI/API/manual publication, an operator must verify that protected-main source, intended release tag, commit and tree agree, and that one eligible nonexpired *exact-candidate-SHA* CodeQL run succeeded for **both Actions and Rust**, with authenticated unmodified per-language original SARIF artifacts, logged SHA-256, healthy CodeQL query-pack/category/invocation evidence and zero High/Critical security findings. Missing artifacts, stale SHA, run-attempt ambiguity, or tag drift means **no publication**.
+There is currently no automatic GitHub Release publisher. The approved public channel remains only the `arkst-cli` / `arkst` GitHub Release binary; crates.io and WASM distribution remain disabled.
 
-Issue #249 owns enforcing this prepublication contract in the future GitHub Release publisher **before creating a public release or uploading assets**, including negative tests and proof of live tag protection. Owner UI/API publication can bypass repository-managed Actions, so the present control is an explicit human-held publication stop, not a technically non-bypassable release rule. The weekly/manual CodeQL transition does not create or test a real release.
+The checked-in nonpublishing candidate preflight proves an exact candidate is current protected `main` or an immutable protected-main ancestor, then reuses, joins, or auto-dispatches the canonical Actions+Rust CodeQL scanner. Eligible evidence requires successful first-attempt language jobs, nonexpired original SARIF **and source-identity manifests** for both languages, current extraction/query-security coverage verification, fresh raw-SARIF parsing, and zero High/Critical findings. Missing/expired/malformed evidence, source drift, failed/cancelled/rerun ambiguity, duplicate active runs, API failures, or timeout means **no publication**.
+
+`.github/release-codeql-policy.toml` plus `tools/ci/verify_release_codeql_policy.py` encode the future publisher contract: a repository-managed release creator/uploader/visibility mutator is rejected by PR CI unless a preceding `codeql-preflight` job invokes the trusted preflight and every recognized publication job depends on it. #249 owns implementing that publisher without weakening this boundary.
+
+Owner/admin UI or direct API publication can bypass repository-managed Actions. Therefore operator publication outside the future managed workflow remains a governance limitation: the repository cannot technically make owner-level UI/API release creation impossible. No real release, synthetic `v0.1.0` tag, crates.io publication, or WASM/npm publication is required or permitted as proof for this CodeQL campaign.
