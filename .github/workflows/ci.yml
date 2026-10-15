@@ -146,9 +146,13 @@ jobs:
         run: |
           python3 tools/ci/test_hardening_drift_audit.py
           python3 tools/ci/test_hardening_drift_live.py
-      - name: Test release CodeQL SARIF verdict (negative controls)
+      - name: Test release CodeQL candidate preflight (negative controls)
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
-        run: python3 .github/scripts/release-codeql-verdict.py --self-test
+        run: |
+          python3 .github/scripts/release-codeql-verdict.py --self-test
+          python3 tools/ci/release_codeql_preflight.py --self-test
+          python3 tools/ci/verify_release_codeql_policy.py --self-test
+          python3 tools/ci/verify_release_codeql_policy.py
       - name: Install pinned actionlint
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
         env:
