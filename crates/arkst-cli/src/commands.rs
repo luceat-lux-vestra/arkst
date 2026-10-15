@@ -623,7 +623,14 @@ fn collect_unevidenced_explicit_errors_from_node<'a>(
         } => collect_unevidenced_explicit_errors(&component.children, components),
         IrNode::Component {
             component: IrComponent::Box(component),
-        } => collect_unevidenced_explicit_errors(&component.children, components),
+        } => {
+            collect_unevidenced_explicit_errors(&component.children, components);
+            if let Some(title) = &component.title {
+                for inline in title {
+                    collect_unevidenced_explicit_errors_from_inline(inline, components);
+                }
+            }
+        }
         IrNode::Component {
             component: IrComponent::Collapse(component),
         } => {
@@ -697,6 +704,14 @@ fn collect_evidenced_nested_explicit_errors<'a>(
                     &component.children,
                     &mut collection.unevidenced,
                 );
+                if let Some(title) = &component.title {
+                    for inline in title {
+                        collect_unevidenced_explicit_errors_from_inline(
+                            inline,
+                            &mut collection.unevidenced,
+                        );
+                    }
+                }
             }
             IrNode::Component {
                 component: IrComponent::Collapse(component),
