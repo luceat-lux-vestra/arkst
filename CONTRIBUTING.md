@@ -160,6 +160,12 @@ All compatibility features with external systems (Quarkdown, etc.) require:
 - Known semantic differences documented
 - No source code copied from the original implementation
 
+## GitHub Actions lifecycle
+
+Research, experiment, migration, and temporary workflows should stay off protected default branch where practical. If an exceptional ephemeral workflow must land under `.github/workflows`, filenames beginning with `research-`, `temporary-`, `tmp-`, or `experiment-` must declare non-empty `# lifecycle-owner:` and `# lifecycle-retire:` header metadata. The owner identifies the issue/campaign responsible for the workflow; the retirement field states the concrete deletion or consolidation condition.
+
+Historical Actions runs and artifacts remain evidence. Do not keep or recreate obsolete workflow source merely because old runs remain visible, and do not delete historical evidence solely for Actions UI cleanup.
+
 ## Pull Request Checklist
 
 - [ ] Summary
