@@ -9,7 +9,7 @@ use arkst_ir::{
     IrExplicitErrorComponent, IrInline, IrKeybindingPart, IrLandscapeComponent,
     IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
     IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
-    IrTextSize, IrTodoComponent, IrValue,
+    IrTextScript, IrTextSize, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -1076,6 +1076,22 @@ impl LoweringContext {
                 self.push_str("#text(size: ");
                 self.push_str(relative_size);
                 self.push_str(")[");
+                self.lower_inlines(content);
+                self.push(']');
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrInline::TextScript {
+                script,
+                content,
+                span,
+            } => {
+                let before = self.output.len();
+                match script {
+                    IrTextScript::Subscript => self.push_str("#sub["),
+                    IrTextScript::Superscript => self.push_str("#super["),
+                }
                 self.lower_inlines(content);
                 self.push(']');
                 if span.source_id != SourceId(0) {

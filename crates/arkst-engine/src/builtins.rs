@@ -15,7 +15,7 @@ use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
-use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrValue};
+use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextScript, IrValue};
 #[cfg(test)]
 use arkst_source::SourceId;
 use arkst_source::SourceSpan;
@@ -417,12 +417,20 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         BuiltinBodyPolicy::BindEvaluatedContent,
     ),
     // Preserve the two-position text/url prefix. Closed weight, style,
-    // decoration and size options are named-only shared-binder slots.
+    // decoration, size, and script options are named-only shared-binder slots.
     builtin_spec_with_defaults(
         "text",
         BuiltinKind::Text,
-        &["text", "url", "weight", "style", "decoration", "size"],
-        &[1, 2, 3, 4, 5],
+        &[
+            "text",
+            "url",
+            "weight",
+            "style",
+            "decoration",
+            "size",
+            "script",
+        ],
+        &[1, 2, 3, 4, 5, 6],
         2,
         true,
         BuiltinBodyPolicy::BindEvaluatedFirst,
@@ -1293,6 +1301,23 @@ fn evaluate_text(
         })
         .transpose()?
         .flatten();
+    let script = arguments
+        .remove(0)
+        .map(|value| {
+            if matches!(&value.value, IrValue::None) {
+                return Ok(None);
+            }
+            let script = scalar_string_argument_result(&value, "script")?;
+            match script.to_ascii_lowercase().as_str() {
+                "sub" => Ok(Some(IrTextScript::Subscript)),
+                "sup" => Ok(Some(IrTextScript::Superscript)),
+                _ => Err(error(
+                    "`.text` script must be sub, sup, or None".to_string(),
+                )),
+            }
+        })
+        .transpose()?
+        .flatten();
     match value.value {
         IrValue::Content(nodes)
             if url.is_none()
@@ -1300,6 +1325,7 @@ fn evaluate_text(
                 && !italic
                 && decoration == TextDecoration::None
                 && size.is_none()
+                && script.is_none()
                 && nodes.is_empty() =>
         {
             Ok(IrValue::Content(nodes))
@@ -1332,6 +1358,14 @@ fn evaluate_text(
                     let original = std::mem::take(content);
                     *content = vec![IrInline::TextSize {
                         size,
+                        content: original,
+                        span: call_span,
+                    }];
+                }
+                if let Some(script) = script {
+                    let original = std::mem::take(content);
+                    *content = vec![IrInline::TextScript {
+                        script,
                         content: original,
                         span: call_span,
                     }];
@@ -1527,6 +1561,7 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::TextSize { content, .. }
+        | IrInline::TextScript { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
@@ -1596,6 +1631,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
             | IrInline::TextSize { content, .. }
+            | IrInline::TextScript { content, .. }
             | IrInline::Underline { content, .. }
             | IrInline::Overline { content, .. }
             | IrInline::Strikethrough { content, .. }
@@ -2211,7 +2247,15 @@ mod tests {
                 assert_eq!(builtin.signature.max_positional, 2);
                 assert_eq!(
                     builtin.signature.parameter_names,
-                    &["text", "url", "weight", "style", "decoration", "size"]
+                    &[
+                        "text",
+                        "url",
+                        "weight",
+                        "style",
+                        "decoration",
+                        "size",
+                        "script"
+                    ]
                 );
             } else {
                 assert_eq!(

@@ -251,6 +251,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
             | IrInline::TextSize { content, .. }
+            | IrInline::TextScript { content, .. }
             | IrInline::Underline { content, .. }
             | IrInline::Overline { content, .. }
             | IrInline::Strikethrough { content, .. }
@@ -1842,6 +1843,11 @@ enum WireInline {
         content: Vec<WireInline>,
         span: SourceSpan,
     },
+    TextScript {
+        script: IrTextScript,
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
     Underline {
         content: Vec<WireInline>,
         span: SourceSpan,
@@ -2320,6 +2326,15 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             span,
         } => WireInline::TextSize {
             size: *size,
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::TextScript {
+            script,
+            content,
+            span,
+        } => WireInline::TextScript {
+            script: *script,
             content: wire_inlines(content, sources)?,
             span: *span,
         },
@@ -2849,6 +2864,15 @@ fn wire_inline_to_ir(
             content: inlines_from_wire(content, sources)?,
             span,
         },
+        WireInline::TextScript {
+            script,
+            content,
+            span,
+        } => IrInline::TextScript {
+            script,
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
         WireInline::Underline { content, span } => IrInline::Underline {
             content: inlines_from_wire(content, sources)?,
             span,
@@ -3319,6 +3343,13 @@ pub enum IrTextSize {
     Huge,
 }
 
+/// The closed vertical-position domain used by Quarkdown `.text script`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTextScript {
+    Subscript,
+    Superscript,
+}
+
 /// An inline fragment within a block-level IR node.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IrInline {
@@ -3373,6 +3404,12 @@ pub enum IrInline {
     /// Inline content scaled relative to the surrounding font size.
     TextSize {
         size: IrTextSize,
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// Inline content positioned as subscript or superscript.
+    TextScript {
+        script: IrTextScript,
         content: Vec<IrInline>,
         span: SourceSpan,
     },
