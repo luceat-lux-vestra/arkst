@@ -59,6 +59,9 @@ jobs:
             and .base_commit.sha == $sha
             and .merge_base_commit.sha == $sha
           ' <<<"$compare" >/dev/null || { echo "::error::Candidate is not a protected-main ancestor"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/release-codeql-verdict.py?ref=$GITHUB_SHA" \
+            --jq '.content' | base64 --decode > "$RUNNER_TEMP/release-codeql-verdict.py"
+          test -s "$RUNNER_TEMP/release-codeql-verdict.py" || { echo "::error::Trusted SARIF verifier missing"; exit 1; }
 
       - name: Check out exact candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,7 +120,7 @@ jobs:
           retention-days: 90
 
       - name: Verify SARIF verdict negative controls
-        run: python3 .github/scripts/release-codeql-verdict.py --self-test
+        run: python3 "$RUNNER_TEMP/release-codeql-verdict.py" --self-test
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
@@ -148,7 +151,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 .github/scripts/release-codeql-verdict.py \
+          python3 "$RUNNER_TEMP/release-codeql-verdict.py" \
             --sarif-dir "$SARIF_DIR" \
             --language "${{ matrix.language }}" \
             --candidate-sha "$EXPECTED_SHA"
