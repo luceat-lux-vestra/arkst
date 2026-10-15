@@ -1,25 +1,41 @@
 # Code scanning — weekly/manual exact-SHA authority
 
-Arkst retains a single checked-in CodeQL advanced-setup authority: `.github/workflows/codeql.yml`. Normal PR/push events **do not invoke CodeQL**. The existing required `Merge Gate` stays independent; `fmt`, `clippy`, tests, dependency review and cargo-deny continue to gate PR merges. Vulnerabilities introduced between merges may remain undetected until the Thursday 03:23 UTC scan or a deliberate manual prepublication scan; this is an explicit trade-off, not equivalent PR-time detection.
+Arkst retains a single checked-in CodeQL advanced-setup authority: `.github/workflows/codeql.yml`. Normal PR/push events **do not invoke CodeQL**. The existing required `Merge Gate` stays independent; `fmt`, `clippy`, tests, dependency review and cargo-deny continue to gate PR merges. Vulnerabilities introduced between merges may remain undetected until the Thursday 03:23 UTC scan or a deliberate candidate scan; this is an explicit trade-off, not equivalent PR-time detection.
 
 ## Scan and evidence contract
 
-- Scheduled (Thursday 03:23 UTC) and manual `workflow_dispatch(candidate_sha)` run both **Actions and Rust** with the previously validated `build-mode: none`; no PR change-impact skip.
-- Manual `candidate_sha` must be an exact 40-lowercase-hex commit SHA equal to the workflow event SHA and *current* protected `main` SHA; scans from other refs and stale candidates fail.
-- Checkout pins that exact SHA and verifies `git rev-parse HEAD`. Recheck `main` after analysis. This bounds the trusted source; it does not bind any future tag automatically.
-- Each language retains the original CodeQL SARIF artifact for 90 days (not just a rendered alert count). The verifier checks SARIF v2.1.0, CodeQL invocation success, matching analysis category, language query pack/rules, result severity, and rejects High/Critical (security severity >= 7.0). It logs the SHA-256 of the raw SARIF bytes and zero-High/Critical verdict, with synthetic negative controls exercised in PR CI.
-- Both per-language jobs must succeed and their artifacts and logs must be independently read back for release preflight. Workflow success alone is insufficient. Artifact expiration, missing language, run-attempt uncertainty or altered evidence fails closed.
+- Scheduled (Thursday 03:23 UTC) and manual `workflow_dispatch(candidate_sha)` scans run both **Actions and Rust** with `build-mode: none`; no PR change-impact skip is reintroduced.
+- Manual `candidate_sha` must be an exact 40-lowercase-hex commit that is either current protected `main` or an immutable ancestor of current protected `main`. The workflow definition itself always originates from current `main`; arbitrary fork/feature/diverged commits are rejected.
+- Checkout pins the exact candidate SHA. Before and after analysis, GitHub compare metadata must prove `base_commit == merge_base == candidate` against current protected `main`.
+- Each language retains **two** 90-day evidence artifacts: the unaltered original SARIF and a source-identity manifest binding repository, canonical workflow path/ref/SHA, event SHA, candidate SHA/tree, checkout SHA, run ID/attempt, and language.
+- The current SARIF verifier parses the original bytes afresh. It requires SARIF 2.1.0, successful CodeQL invocations, matching language category/query pack, complete expected-vs-extracted source diagnostics, no Rust extraction warnings/tool errors, the reviewed **17 Actions + 17 Rust security rule IDs**, valid result-to-rule references, parseable security severities, and zero High/Critical findings (security severity >= 7.0). Raw SARIF SHA-256 is reported. A descriptor-count threshold is deliberately **not** used as a proxy for executed query coverage.
+- Workflow success alone is insufficient. Missing/expired/ambiguous artifacts, missing language jobs, malformed SARIF/manifests, rerun ambiguity, source drift, reduced extraction/security coverage, or High/Critical findings fail closed.
 - Check in GitHub Settings that **Default Setup is disabled** to avoid a second scanning authority; administration settings remain a manual control.
+
+## Nonpublishing release-candidate preflight
+
+`.github/workflows/release-codeql-preflight.yml` is a manual **nonpublishing** entrypoint. It grants `actions: write` only to its `preflight` job so `tools/ci/release_codeql_preflight.py` can:
+
+1. prove the immutable candidate is on protected-main history;
+2. reuse one eligible exact-candidate completed scan when current verification accepts all evidence;
+3. join one already-active exact-candidate scan without dispatching a duplicate;
+4. otherwise dispatch the trusted current-main `codeql.yml` with that candidate;
+5. wait only a finite time for the selected run; and
+6. independently download and verify both source manifests and original Actions/Rust SARIF.
+
+Failed/cancelled scans, run-attempt ambiguity, duplicate active/auto-dispatched runs, API/dispatch/poll failures, selected-run identity drift/disappearance, invalid evidence, or timeout are terminal failures. The preflight has no GitHub Release, registry, signing, or asset-publication authority.
 
 ## Release boundary / explicit publication hold
 
-Arkst has **no GitHub Release publisher yet**. Until #249 implements a trusted prepublication guard, **do not publish any GitHub Release via Actions, the UI or API** without operator verification on the exact protected candidate and the selected tag/commit/tree. Before publication: validate the immutable release tag, full Actions/Rust CodeQL run success at that exact SHA, original nonexpired SARIF plus hashes, successful query invocation and category/packs, and zero High/Critical, then document approval. A successful scheduled scan of another SHA does not qualify. Owner/admin UI/API uploads bypass repository workflows; this is an operator hold, **not** cryptographic/non-bypassable enforcement.
+Arkst still has **no managed GitHub Release publisher**. `.github/release-codeql-policy.toml` records that state and `tools/ci/verify_release_codeql_policy.py` rejects recognized repository-managed GitHub Release mutation paths unless a future publisher defines a preceding `codeql-preflight` job and makes every publication mutation depend on it. This is the executable #249 integration contract; it does not create `v0.1.0` or any public release.
 
-The future #249 publishing workflow must block *before* GitHub Release creation or artifact upload, fail closed on SHA/tree/tag mismatch and absent/stale/tampered analysis, and treat reruns/attempts explicitly. Never mistake a `release: released` post-publication scan for a release gate.
+Until #249 implements the publisher, **do not publish any GitHub Release via Actions, UI, or API** without operator verification that the intended immutable tag/commit/tree and exact protected-main candidate agree and the candidate preflight passes. Owner/admin UI/API publication can bypass repository workflows, so this remains an explicit governance limitation rather than a cryptographically non-bypassable control.
+
+The future #249 publisher must invoke the same preflight **before the first external mutation** (release creation, asset upload, or draft/public visibility mutation), and must preserve tag/source identity checks. Never mistake a post-publication scan for a release gate.
 
 ## Trust boundaries and controls
 
-Actions remain immutable-SHA pinned, checkout does not persist credentials, CodeQL has narrowly scoped `security-events: write`, and the merge-gate's trusted-base docs-only and compatibility routing retain fail-closed semantics. Separate `.github/workflows/security.yml` cargo-deny auditing remains in place; it is not a CodeQL replacement. This migration removes the obsolete Rust PR CodeQL scope classifier; it does not reopen performance investigation #585.
+Actions remain immutable-SHA pinned, checkout does not persist credentials, the scanner alone retains narrowly scoped `security-events: write`, and the nonpublishing preflight alone gains the narrowly scoped `actions: write` required to dispatch/join CodeQL. The merge-gate's trusted-base docs-only and compatibility routing remain fail-closed. Separate `.github/workflows/security.yml` cargo-deny auditing is not a CodeQL replacement. This work does not reopen performance investigation #585.
 
 ## Historical Rust CodeQL performance research (#585)
 

@@ -200,6 +200,7 @@ class StaticAuthorityTests(unittest.TestCase):
         (root / ".github" / "workflows" / "codeql.yml").write_text(
             "\n".join(
                 [
+                    "run-name: CodeQL source",
                     "on:",
                     "  workflow_dispatch:",
                     "    inputs:",
@@ -212,8 +213,13 @@ class StaticAuthorityTests(unittest.TestCase):
                     "security-events: write",
                     "persist-credentials: false",
                     'test "$GITHUB_REF" = "refs/heads/main"',
-                    'test "$GITHUB_SHA" = "$EXPECTED_SHA"',
                     'remote_main="$(gh api repos/...)"',
+                    'compare/${EXPECTED_SHA}...${remote_main}',
+                    "merge_base_commit.sha",
+                    "base_commit.sha",
+                    "source-identity.json",
+                    "codeql-source-",
+                    "cancel-in-progress: false",
                     "path: ${{ steps.analyze.outputs.sarif-output }}",
                     "release-codeql-verdict.py",
                     "retention-days: 90",

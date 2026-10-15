@@ -36,6 +36,7 @@ UNTRUSTED_EXPRESSIONS = (
 ALLOWED_WORKFLOW_WRITE_PERMISSIONS = {}
 ALLOWED_JOB_WRITE_PERMISSIONS = {
     (".github/workflows/codeql.yml", "analyze"): {"security-events"},
+    (".github/workflows/release-codeql-preflight.yml", "preflight"): {"actions"},
     (".github/workflows/hardening-drift-audit.yml", "report"): {"issues"},
     (".github/workflows/security.yml", "report-failure"): {"issues"},
     (".github/workflows/issue-labeler.yml", "classify"): {"issues"},
