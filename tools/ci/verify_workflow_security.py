@@ -11,6 +11,7 @@ class WorkflowSecurityError(RuntimeError):
 
 
 SHA_REF = re.compile(r"^[0-9a-f]{40}$")
+EPHEMERAL_WORKFLOW = re.compile(r"^(?:research|temporary|tmp|experiment)(?:[-_].*)?\\.ya?ml$", re.IGNORECASE)
 UNTRUSTED_EXPRESSIONS = (
     "github.event.pull_request.",
     "github.event.issue.",
@@ -151,10 +152,27 @@ def _step_list_indent(lines: list[str], index: int) -> int:
     raise WorkflowSecurityError("unable to resolve workflow step boundary")
 
 
+def _verify_ephemeral_lifecycle(path: Path, lines: list[str], rel: str) -> None:
+    if EPHEMERAL_WORKFLOW.fullmatch(path.name) is None:
+        return
+    header = lines[:20]
+    owner = any(re.fullmatch(r"#\s*lifecycle-owner:[ \t]*\S[^\r\n]*", line, re.IGNORECASE) for line in header)
+    retire = any(re.fullmatch(r"#\s*lifecycle-retire:[ \t]*\S[^\r\n]*", line, re.IGNORECASE) for line in header)
+    if not owner:
+        raise WorkflowSecurityError(
+            f"{rel}: ephemeral workflow lacks non-empty # lifecycle-owner: header metadata"
+        )
+    if not retire:
+        raise WorkflowSecurityError(
+            f"{rel}: ephemeral workflow lacks non-empty # lifecycle-retire: header metadata"
+        )
+
+
 def verify_workflow(path: Path, root: Path) -> None:
     rel = path.relative_to(root).as_posix()
     lines = path.read_text(encoding="utf-8").splitlines()
     text = "\n".join(lines)
+    _verify_ephemeral_lifecycle(path, lines, rel)
     workflow_allowed_writes = ALLOWED_WORKFLOW_WRITE_PERMISSIONS.get(rel, set())
 
     permissions = _top_level_block(lines, "permissions")
