@@ -184,7 +184,7 @@ def verify_live(repo: str, sha: str, verdict: Path, timeout_seconds: int = 4200,
     while time.monotonic() < deadline:
         ancestry(repo, sha)
         if selected is None:
-            newly = [row for row in candidates(repo, wf) if row.get("event") == "workflow_dispatch" and exact(row, sha) and row.get("run_attempt") == 1]
+            newly = [row for row in candidates(repo, wf) if row.get("id") not in before and row.get("event") == "workflow_dispatch" and exact(row, sha) and row.get("run_attempt") == 1]
             if len(newly) > 1:
                 reject("ambiguous auto-dispatched CodeQL runs")
             if newly:
@@ -219,6 +219,8 @@ def self_test() -> None:
         ("rerun", lambda r, j, a: r.update(run_attempt=2)),
         ("language", lambda r, j, a: j["jobs"].pop()),
         ("expired", lambda r, j, a: a["artifacts"][0].update(expired=True)),
+        ("missing artifact", lambda r, j, a: a["artifacts"].pop()),
+        ("wrong source", lambda r, j, a: r["head_repository"].update(full_name="other/repo")),
     ):
         r, j, a = json.loads(json.dumps(run)), json.loads(json.dumps(jobs)), json.loads(json.dumps(artifacts))
         mutate(r, j, a)
@@ -228,6 +230,45 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError(f"fail-open metadata case: {label}")
+
+    with mock.patch.object(sys.modules[__name__], "api") as patched:
+        patched.side_effect = [
+            {"object": {"sha": "b" * 40}},
+            {"status": "diverged", "base_commit": {"sha": sha}, "merge_base_commit": {"sha": "b" * 40}},
+        ]
+        try:
+            ancestry(repo, sha)
+        except ValueError as exc:
+            assert "not proven reachable" in str(exc)
+        else:
+            raise AssertionError("source-drift candidate was accepted")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "source-identity.json"
+        doc = {
+            "schema": 1, "repository": repo, "workflow_path": WORKFLOW,
+            "workflow_ref": f"{repo}/{WORKFLOW}@refs/heads/main",
+            "workflow_sha": run["head_sha"], "event_name": run["event"],
+            "event_sha": run["head_sha"], "candidate_sha": sha,
+            "checkout_sha": sha, "candidate_tree": "c" * 40,
+            "run_id": run["id"], "run_attempt": 1, "language": "rust",
+        }
+        source.write_text(json.dumps(doc), encoding="utf-8")
+        manifest(Path(tmp), repo, run, sha, "c" * 40, "rust")
+        source.write_text(json.dumps({**doc, "candidate_sha": "d" * 40}), encoding="utf-8")
+        try:
+            manifest(Path(tmp), repo, run, sha, "c" * 40, "rust")
+        except ValueError as exc:
+            assert "provenance mismatch" in str(exc)
+        else:
+            raise AssertionError("wrong-SHA source manifest was accepted")
+        source.write_text("{bad", encoding="utf-8")
+        try:
+            manifest(Path(tmp), repo, run, sha, "c" * 40, "rust")
+        except json.JSONDecodeError:
+            pass
+        else:
+            raise AssertionError("malformed source manifest was accepted")
 
     def candidate(status: str, conclusion=None, run_id=71, attempt=1):
         return {**run, "id": run_id, "status": status, "conclusion": conclusion, "run_attempt": attempt}
@@ -272,6 +313,13 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError("dispatch failure did not fail closed")
+    with mock.patch.dict(os.environ, {"GH_TOKEN": "fixture"}), mock.patch.object(sys.modules[__name__], "ancestry", return_value=sha), mock.patch.object(sys.modules[__name__], "workflow", return_value=wf), mock.patch.object(sys.modules[__name__], "candidates", return_value=[candidate("in_progress")]), mock.patch.object(sys.modules[__name__], "api", side_effect=OSError("poll unavailable")), mock.patch.object(time, "monotonic", side_effect=[0, 0]):
+        try:
+            verify_live(repo, sha, Path("verdict.py"), 1, 0)
+        except ValueError as exc:
+            assert "failed polling" in str(exc)
+        else:
+            raise AssertionError("poll API failure did not fail closed")
     with mock.patch.dict(os.environ, {"GH_TOKEN": "fixture"}), mock.patch.object(sys.modules[__name__], "ancestry", return_value=sha), mock.patch.object(sys.modules[__name__], "workflow", return_value=wf), mock.patch.object(sys.modules[__name__], "candidates", return_value=[]), mock.patch.object(sys.modules[__name__], "gh", return_value=""), mock.patch.object(time, "monotonic", side_effect=[0, 2]):
         try:
             verify_live(repo, sha, Path("verdict.py"), 1, 0)
