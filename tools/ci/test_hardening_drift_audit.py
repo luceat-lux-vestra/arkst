@@ -187,39 +187,36 @@ class StaticAuthorityTests(unittest.TestCase):
         (root / ".github" / "workflows").mkdir(parents=True)
         return temp, root
 
-    def write_codeql_fixture(self, root, *, extra_scanner=False, classification="advisory"):
-        (root / ".github" / "gate-policy.toml").write_text(
-            textwrap.dedent(
-                f"""
-                schema = 1
-                [[producer]]
-                workflow = ".github/workflows/codeql.yml"
-                job = "analyze"
-                classification = "{classification}"
-                contexts = ["codeql (actions)", "codeql (rust)"]
-                always_present = true
-                matrix_axis = "language"
-                matrix_values = ["actions", "rust"]
-                """
-            ),
-            encoding="utf-8",
-        )
+    def write_codeql_fixture(self, root, *, extra_scanner=False, pr_trigger=False, old_policy=False):
+        policy = "schema = 1\n"
+        if old_policy:
+            policy += (
+                "[[producer]]\n"
+                'workflow = ".github/workflows/codeql.yml"\n'
+                'job = "analyze"\n'
+                'classification = "advisory"\n'
+            )
+        (root / ".github" / "gate-policy.toml").write_text(policy, encoding="utf-8")
         (root / ".github" / "workflows" / "codeql.yml").write_text(
             "\n".join(
                 [
+                    "on:",
+                    "  workflow_dispatch:",
+                    "    inputs:",
+                    "      candidate_sha:",
+                    "  schedule:",
+                    '    - cron: "23 3 * * 4"',
+                    "  pull_request:" if pr_trigger else "",
                     "language: [actions, rust]",
                     "build-mode: none",
                     "security-events: write",
-                    "pull-requests: read",
                     "persist-credentials: false",
-                    "id: trusted_base",
-                    "ref: ${{ github.event.pull_request.base.sha }}",
-                    "path: .codeql-trusted-base",
-                    "continue-on-error: true",
-                    "id: rust_scope",
-                    "tools/ci/codeql_scope.py",
-                    "steps.trusted_base.outcome",
-                    "steps.rust_scope.outputs.rust_impact == 'true'",
+                    'test "$GITHUB_REF" = "refs/heads/main"',
+                    'test "$GITHUB_SHA" = "$EXPECTED_SHA"',
+                    'remote_main="$(gh api repos/...)"',
+                    "path: ${{ steps.analyze.outputs.sarif-output }}",
+                    "release-codeql-verdict.py",
+                    "retention-days: 90",
                     "uses: github/codeql-action/init@0123456789012345678901234567890123456789",
                 ]
             ),
@@ -231,37 +228,37 @@ class StaticAuthorityTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-    def test_codeql_exact_authority_passes(self):
+    def test_codeql_scheduled_exact_sha_authority_passes(self):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
         self.write_codeql_fixture(root)
         self.assertEqual(AUDIT.check_codeql_authority(root), [])
 
-    def test_second_codeql_producer_fails(self):
+    def test_second_codeql_scanner_fails(self):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
         self.write_codeql_fixture(root, extra_scanner=True)
-        findings = AUDIT.check_codeql_authority(root)
-        self.assertTrue(any("exactly codeql.yml" in item.details for item in findings))
+        self.assertTrue(any("exactly codeql.yml" in x.details for x in AUDIT.check_codeql_authority(root)))
 
-    def test_codeql_required_promotion_without_policy_review_fails(self):
+    def test_stale_pr_codeql_producer_fails(self):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
-        self.write_codeql_fixture(root, classification="required")
-        findings = AUDIT.check_codeql_authority(root)
-        self.assertTrue(any("classification" in item.details for item in findings))
+        self.write_codeql_fixture(root, old_policy=True)
+        self.assertTrue(any("PR-time" in x.details for x in AUDIT.check_codeql_authority(root)))
 
-    def test_codeql_trusted_scope_contract_removal_fails(self):
+    def test_pr_codeql_trigger_reintroduction_fails(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        self.write_codeql_fixture(root, pr_trigger=True)
+        self.assertTrue(any("trigger reintroduced" in x.details for x in AUDIT.check_codeql_authority(root)))
+
+    def test_missing_exact_sha_artifact_contract_fails(self):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
         self.write_codeql_fixture(root)
         path = root / ".github" / "workflows" / "codeql.yml"
-        text = path.read_text(encoding="utf-8").replace(
-            "ref: ${{ github.event.pull_request.base.sha }}", "ref: HEAD"
-        )
-        path.write_text(text, encoding="utf-8")
-        findings = AUDIT.check_codeql_authority(root)
-        self.assertTrue(any("pull_request.base.sha" in item.details for item in findings))
+        path.write_text(path.read_text(encoding="utf-8").replace("steps.analyze.outputs.sarif-output", "unverified-output"), encoding="utf-8")
+        self.assertTrue(any("sarif-output" in x.details for x in AUDIT.check_codeql_authority(root)))
 
     def test_supply_chain_reporter_removal_fails(self):
         temp, root = self.make_root()
