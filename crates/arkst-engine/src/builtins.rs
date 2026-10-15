@@ -2211,7 +2211,7 @@ mod tests {
                 assert_eq!(builtin.signature.max_positional, 2);
                 assert_eq!(
                     builtin.signature.parameter_names,
-                    &["text", "url", "weight", "style", "decoration"]
+                    &["text", "url", "weight", "style", "decoration", "size"]
                 );
             } else {
                 assert_eq!(
