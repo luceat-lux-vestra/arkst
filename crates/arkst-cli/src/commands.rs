@@ -501,6 +501,7 @@ fn collect_unevidenced_explicit_errors_from_inline<'a>(
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::TextSize { content, .. }
+        | IrInline::TextCase { content, .. }
         | IrInline::TextVariant { content, .. }
         | IrInline::TextScript { content, .. }
         | IrInline::Underline { content, .. }

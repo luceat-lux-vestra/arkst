@@ -251,6 +251,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             IrInline::Emphasis { content, .. }
             | IrInline::Strong { content, .. }
             | IrInline::TextSize { content, .. }
+            | IrInline::TextCase { content, .. }
             | IrInline::TextVariant { content, .. }
             | IrInline::TextScript { content, .. }
             | IrInline::Underline { content, .. }
@@ -1844,6 +1845,11 @@ enum WireInline {
         content: Vec<WireInline>,
         span: SourceSpan,
     },
+    TextCase {
+        case: IrTextCase,
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
     TextVariant {
         variant: IrTextVariant,
         content: Vec<WireInline>,
@@ -2332,6 +2338,15 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             span,
         } => WireInline::TextSize {
             size: *size,
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::TextCase {
+            case,
+            content,
+            span,
+        } => WireInline::TextCase {
+            case: *case,
             content: wire_inlines(content, sources)?,
             span: *span,
         },
@@ -2879,6 +2894,15 @@ fn wire_inline_to_ir(
             content: inlines_from_wire(content, sources)?,
             span,
         },
+        WireInline::TextCase {
+            case,
+            content,
+            span,
+        } => IrInline::TextCase {
+            case,
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
         WireInline::TextVariant {
             variant,
             content,
@@ -3367,6 +3391,19 @@ pub enum IrTextSize {
     Huge,
 }
 
+/// Non-default members of the closed text-case domain used by Quarkdown
+/// `.text`.
+///
+/// `none` is the identity and therefore does not add a wrapper. The typed
+/// variants retain rich inline children so backends can apply the visual text
+/// transform without flattening authored structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTextCase {
+    Uppercase,
+    Lowercase,
+    Capitalize,
+}
+
 /// Non-default member of the closed font-variant domain used by
 /// Quarkdown `.text`.
 ///
@@ -3437,6 +3474,12 @@ pub enum IrInline {
     /// Inline content scaled relative to the surrounding font size.
     TextSize {
         size: IrTextSize,
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// Inline content rendered with a non-default text-case transform.
+    TextCase {
+        case: IrTextCase,
         content: Vec<IrInline>,
         span: SourceSpan,
     },
