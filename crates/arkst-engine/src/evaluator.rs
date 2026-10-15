@@ -3716,6 +3716,15 @@ impl Evaluator {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
             }],
+            IrInline::TextColor {
+                color,
+                content,
+                span,
+            } => vec![IrInline::TextColor {
+                color: color.clone(),
+                content: self.evaluate_inlines(content, diagnostics, context),
+                span: *span,
+            }],
             IrInline::Underline { content, span } => vec![IrInline::Underline {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
@@ -17626,6 +17635,7 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::TextCase { span, .. }
         | IrInline::TextVariant { span, .. }
         | IrInline::TextScript { span, .. }
+        | IrInline::TextColor { span, .. }
         | IrInline::Underline { span, .. }
         | IrInline::Overline { span, .. }
         | IrInline::Strikethrough { span, .. }
@@ -17659,6 +17669,7 @@ fn body_contains_raw_html(nodes: &[IrNode]) -> bool {
                         | IrInline::TextCase { content, .. }
                         | IrInline::TextVariant { content, .. }
                         | IrInline::TextScript { content, .. }
+                        | IrInline::TextColor { content, .. }
                         | IrInline::Underline { content, .. }
                         | IrInline::Overline { content, .. }
                         | IrInline::Strikethrough { content, .. }
@@ -17832,6 +17843,7 @@ fn append_code_inline_text(inline: &IrInline, output: &mut String) -> Option<()>
         | IrInline::TextCase { content, .. }
         | IrInline::TextVariant { content, .. }
         | IrInline::TextScript { content, .. }
+        | IrInline::TextColor { content, .. }
         | IrInline::Underline { content, .. }
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. } => {
@@ -17875,6 +17887,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::TextCase { .. }
         | IrInline::TextVariant { .. }
         | IrInline::TextScript { .. }
+        | IrInline::TextColor { .. }
         | IrInline::Underline { .. }
         | IrInline::Overline { .. }
         | IrInline::Strikethrough { .. }
@@ -21483,6 +21496,18 @@ fn invocation_origin(value: &IrValue, context: &EvaluationContext<'_>) -> ValueO
             }] if context.contains(name) || context.get_function(name).is_some() => {
                 ValueOrigin::Dynamic
             }
+            [IrNode::Paragraph { content, .. }]
+                if content
+                    .iter()
+                    .all(|inline| matches!(inline, IrInline::Text { .. })) =>
+            {
+                // Punctuation-bearing scalar arguments such as rgba(...) and
+                // hexadecimal colors can arrive as parser-owned plain inline
+                // content rather than Identifier. They remain authored
+                // DynamicValue candidates; evaluated builtin results keep the
+                // call-result origin selected below and are not reclassified.
+                ValueOrigin::Dynamic
+            }
             _ => ValueOrigin::Static,
         },
         _ => ValueOrigin::Static,
@@ -22115,6 +22140,7 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             | IrInline::TextCase { content, span, .. }
             | IrInline::TextVariant { content, span, .. }
             | IrInline::TextScript { content, span, .. }
+            | IrInline::TextColor { content, span, .. }
             | IrInline::Underline { content, span }
             | IrInline::Overline { content, span }
             | IrInline::Strikethrough { content, span } => {
