@@ -174,8 +174,7 @@ or `experiment-` must declare non-empty `# lifecycle-owner:` and
 campaign responsible for the workflow; the retirement declaration states the
 explicit deletion or consolidation condition.
 
-Historical Actions runs and artifacts are evidence. They are not a reason to
-keep or recreate obsolete workflow YAML solely for sidebar cleanup.
+Historical Actions runs/artifacts are not automatically evidence. Preserve them when a concrete issue, PR, R2A campaign, security/release decision, benchmark, or migration record consumes them as immutable proof. Orphaned temporary/research/one-off history with no such consumer may be deleted after exact workflow-ID/path/run-count validation; never delete evidence-bearing history solely for sidebar cosmetics. Old run history is not a reason to keep or recreate obsolete workflow source.
 
 ## Pull Request Checklist
 
