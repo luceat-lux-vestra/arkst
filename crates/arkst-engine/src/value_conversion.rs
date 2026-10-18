@@ -7,7 +7,7 @@
 //! never stringify an evaluated value and feed it back through Markdown.
 
 use arkst_ir::{
-    IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
+    IrBoxType, IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
     IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg,
     IrNode, IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange,
     IrRawBody, IrSize, IrSizeUnit, IrValue,
@@ -253,6 +253,7 @@ pub(crate) enum ClosedEnumTarget {
     StackedMainAxisAlignment,
     StackedCrossAxisAlignment,
     ContainerAlignment,
+    BoxType,
 }
 
 /// Domain-specific conversion targets kept separate from scalar conversion.
@@ -415,6 +416,31 @@ static PAGE_ORIENTATION_SPEC: ClosedEnumSpec<'static, IrPageOrientation> = Close
         ClosedEnumVariant {
             declaration_name: "LANDSCAPE",
             value: IrPageOrientation::Landscape,
+        },
+    ],
+};
+
+static BOX_TYPE_SPEC: ClosedEnumSpec<'static, IrBoxType> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "CALLOUT",
+            value: IrBoxType::Callout,
+        },
+        ClosedEnumVariant {
+            declaration_name: "TIP",
+            value: IrBoxType::Tip,
+        },
+        ClosedEnumVariant {
+            declaration_name: "NOTE",
+            value: IrBoxType::Note,
+        },
+        ClosedEnumVariant {
+            declaration_name: "WARNING",
+            value: IrBoxType::Warning,
+        },
+        ClosedEnumVariant {
+            declaration_name: "ERROR",
+            value: IrBoxType::Error,
         },
     ],
 };
@@ -1207,6 +1233,24 @@ pub(crate) fn convert_domain_with_origin(
                     CONTAINER_ALIGNMENT_SPEC
                         .value_for(value)
                         .map(|value| DomainValue::Enum(IrEnumValue::ContainerAlignment(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::BoxType => match &argument.value {
+                IrValue::Enum(IrEnumValue::BoxType(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::BoxType(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    BOX_TYPE_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::BoxType(value)))
                         .ok_or(ConversionError::InvalidText {
                             target: ConversionTarget::Enum,
                         })
@@ -2503,9 +2547,10 @@ mod tests {
         InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue, TargetValue,
     };
     use arkst_ir::{
-        IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment, IrCrossAxisAlignment,
-        IrDocumentType, IrEnumValue, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPair,
-        IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
+        IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
+        IrCrossAxisAlignment, IrDocumentType, IrEnumValue, IrInline, IrInlineBody,
+        IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrValue,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
 
@@ -3271,6 +3316,52 @@ mod tests {
             convert_domain_with_origin(
                 &InvocationValue::static_value(IrValue::String("top".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
+            ),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum
+            })
+        ));
+    }
+
+    #[test]
+    fn box_type_conversion_is_closed_case_insensitive_and_typed() {
+        for (text, expected) in [
+            ("callout", IrBoxType::Callout),
+            ("TIP", IrBoxType::Tip),
+            ("Note", IrBoxType::Note),
+            ("warning", IrBoxType::Warning),
+            ("ERROR", IrBoxType::Error),
+        ] {
+            assert_eq!(
+                convert_domain_with_origin(
+                    &InvocationValue::dynamic_value(IrValue::Identifier(text.into())),
+                    DomainTarget::ClosedEnum(ClosedEnumTarget::BoxType),
+                ),
+                Ok(DomainValue::Enum(IrEnumValue::BoxType(expected)))
+            );
+        }
+
+        let typed = IrEnumValue::BoxType(IrBoxType::Warning);
+        assert_eq!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::Enum(typed)),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::BoxType),
+            ),
+            Ok(DomainValue::Enum(typed))
+        );
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::dynamic_value(IrValue::String("urgent".into())),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::BoxType),
+            ),
+            Err(ConversionError::InvalidText {
+                target: ConversionTarget::Enum
+            })
+        ));
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::String("warning".into())),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::BoxType),
             ),
             Err(ConversionError::UnsupportedValue {
                 target: ConversionTarget::Enum

@@ -7,7 +7,7 @@ use arkst_typst::{TypstBackend, TypstInput};
 use arkst_typst_subprocess::SubprocessBackend;
 
 #[test]
-fn default_and_rich_title_boxes_compile_to_real_typst_pdf() {
+fn closed_type_domain_and_rich_title_boxes_compile_to_real_typst_pdf() {
     let path = if Command::new("typst")
         .arg("--version")
         .output()
@@ -26,11 +26,32 @@ fn default_and_rich_title_boxes_compile_to_real_typst_pdf() {
         return;
     };
 
-    for (input, expected_title) in [
-        (".box {Ship this}\n", None),
+    for (input, expected_stroke, expected_title) in [
+        (".box {Ship this}\n", "stroke: 1pt", None),
         (
             ".box {Read *this*}\n    Ship this\n",
+            "stroke: 1pt",
             Some("#strong[Read #emph[this]]"),
+        ),
+        (
+            ".box type:{tip}\n    Ship this\n",
+            "stroke: (paint: rgb(46, 125, 50, 100%), thickness: 1pt)",
+            None,
+        ),
+        (
+            ".box type:{note}\n    Ship this\n",
+            "stroke: (paint: rgb(21, 101, 192, 100%), thickness: 1pt)",
+            None,
+        ),
+        (
+            ".box type:{warning}\n    Ship this\n",
+            "stroke: (paint: rgb(237, 108, 2, 100%), thickness: 1pt)",
+            None,
+        ),
+        (
+            ".box type:{error}\n    Ship this\n",
+            "stroke: (paint: rgb(198, 40, 40, 100%), thickness: 1pt)",
+            None,
         ),
     ] {
         let project = VirtualProjectBuilder::new()
@@ -45,7 +66,9 @@ fn default_and_rich_title_boxes_compile_to_real_typst_pdf() {
 
         let (source, source_map) = lower_to_typst(&result.ir);
         assert!(
-            source.contains("#block(width: 100%, inset: 8pt, stroke: 1pt)["),
+            source.contains(&format!(
+                "#block(width: 100%, inset: 8pt, {expected_stroke})["
+            )),
             "{source}"
         );
         assert!(source.contains("Ship this"), "{source}");

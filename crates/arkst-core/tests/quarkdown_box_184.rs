@@ -1,4 +1,4 @@
-use arkst_core::ir::{IrBoxComponent, IrComponent, IrInline, IrNode};
+use arkst_core::ir::{IrBoxComponent, IrBoxType, IrComponent, IrInline, IrNode};
 use arkst_core::{compile, CompileOptions, SourceId, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -35,6 +35,7 @@ fn box_default_callout_preserves_structured_markdown_body() {
     let result = compile_source(".box {Hello, **world**!}\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let component = box_component(&result);
+    assert_eq!(component.box_type, IrBoxType::Callout);
     assert!(component.title.is_none());
     let [IrNode::Paragraph { content, .. }] = component.children.as_slice() else {
         panic!("expected one paragraph child, got {:?}", component.children);
@@ -48,6 +49,40 @@ fn box_default_callout_preserves_structured_markdown_body() {
         ] if prefix == "Hello, " && suffix == "!"
     ));
     assert_eq!(component.span.start, 0);
+}
+
+#[test]
+fn box_preserves_the_closed_type_domain_and_rejects_invalid_values() {
+    for (name, expected) in [
+        ("callout", IrBoxType::Callout),
+        ("tip", IrBoxType::Tip),
+        ("note", IrBoxType::Note),
+        ("warning", IrBoxType::Warning),
+        ("error", IrBoxType::Error),
+        ("WARNING", IrBoxType::Warning),
+    ] {
+        let source = format!(".box type:{{{name}}}\n    Body\n");
+        let result = compile_source(&source);
+        assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+        assert_eq!(box_component(&result).box_type, expected, "{source:?}");
+    }
+
+    let static_text = compile_source(".box type:{.string {note}}\n    Body\n");
+    assert_eq!(static_text.diagnostics.len(), 1, "{static_text:?}");
+    assert!(static_text.ir.nodes.is_empty(), "{static_text:?}");
+
+    let invalid_source = ".box type:{urgent}\n    Body\n";
+    let invalid = compile_source(invalid_source);
+    assert_eq!(invalid.diagnostics.len(), 1, "{invalid:?}");
+    assert!(invalid.ir.nodes.is_empty(), "{invalid:?}");
+    let primary = invalid.diagnostics[0].primary.expect("invalid type span");
+    assert_eq!(
+        invalid_source.get(primary.start..primary.end),
+        Some("type:{urgent}")
+    );
+    assert!(invalid.diagnostics[0]
+        .message
+        .contains("callout, tip, note, warning, or error"));
 }
 
 #[test]
@@ -111,7 +146,7 @@ fn explicit_none_is_untitled_and_authored_title_bypasses_automatic_localization(
 }
 
 #[test]
-fn box_fails_closed_for_automatic_localization_and_non_title_options() {
+fn box_fails_closed_for_automatic_localization_and_remaining_style_options() {
     let localized = compile_source(".doclang {english}\n.box {A}\n");
     assert_eq!(localized.diagnostics.len(), 1, "{localized:?}");
     assert!(localized.ir.nodes.is_empty(), "{localized:?}");
@@ -120,10 +155,10 @@ fn box_fails_closed_for_automatic_localization_and_non_title_options() {
         .contains("automatic localized titles are not yet implemented"));
 
     for source in [
-        ".box type:{warning}\n    A\n",
         ".box padding:{1cm}\n    A\n",
         ".box background:{red}\n    A\n",
         ".box foreground:{blue}\n    A\n",
+        ".box {Title} {warning}\n    A\n",
         ".box title:{.range {1} {2}}\n    A\n",
         ".box {One} title:{Two}\n    A\n",
         ".box title:{Heads}\n",
@@ -158,11 +193,30 @@ fn box_rejects_missing_or_inline_materialization_without_fabricated_output() {
 
 #[test]
 fn box_component_roundtrips_through_document_wire_serde() {
-    let result = compile_source(".box {Release **note**}\n    Ship it\n");
+    let result = compile_source(".box {Release **note**} type:{warning}\n    Ship it\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert!(box_component(&result).title.is_some());
+    assert_eq!(box_component(&result).box_type, IrBoxType::Warning);
     let json = serde_json::to_string(&result.ir).expect("serialize Box IR");
+    assert!(json.contains("\"box_type\":\"Warning\""), "{json}");
     let roundtrip: arkst_core::ir::IrDocument =
         serde_json::from_str(&json).expect("deserialize Box IR");
     assert_eq!(roundtrip, result.ir);
+
+    let legacy = compile_source(".box {Ship it}\n");
+    assert!(legacy.diagnostics.is_empty(), "{legacy:?}");
+    let legacy_json = serde_json::to_string(&legacy.ir).expect("serialize default Box IR");
+    assert!(!legacy_json.contains("box_type"), "{legacy_json}");
+    let legacy_roundtrip: arkst_core::ir::IrDocument =
+        serde_json::from_str(&legacy_json).expect("deserialize legacy-shape Box IR");
+    let [IrNode::Component {
+        component: IrComponent::Box(legacy_component),
+    }] = legacy_roundtrip.nodes.as_slice()
+    else {
+        panic!(
+            "expected legacy Box component, got {:?}",
+            legacy_roundtrip.nodes
+        );
+    };
+    assert_eq!(legacy_component.box_type, IrBoxType::Callout);
 }
