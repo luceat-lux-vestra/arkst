@@ -537,9 +537,24 @@ impl LoweringContext {
             IrBoxType::Warning => "(paint: rgb(237, 108, 2, 100%), thickness: 1pt)",
             IrBoxType::Error => "(paint: rgb(198, 40, 40, 100%), thickness: 1pt)",
         };
-        self.push_str("#block(width: 100%, inset: 8pt, stroke: ");
+        self.push_str("#block(width: 100%, inset: ");
+        if let Some(padding) = component.padding.as_deref() {
+            self.push_str(&lower_size(padding));
+        } else {
+            self.push_str("8pt");
+        }
+        self.push_str(", stroke: ");
         self.push_str(stroke);
+        if let Some(background) = component.background.as_deref() {
+            self.push_str(", fill: ");
+            self.push_str(&lower_color(background));
+        }
         self.push_str(")[\n");
+        if let Some(foreground) = component.foreground.as_deref() {
+            self.push_str("#set text(fill: ");
+            self.push_str(&lower_color(foreground));
+            self.push_str(")\n");
+        }
         if let Some(title) = &component.title {
             self.push_str("#strong[");
             self.lower_inlines(title);

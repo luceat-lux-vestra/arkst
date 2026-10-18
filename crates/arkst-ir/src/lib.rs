@@ -1457,15 +1457,22 @@ pub struct IrLandscapeComponent {
 /// Bounded backend-neutral semantic state produced by the Quarkdown `.box`
 /// callout subset.
 ///
-/// An authored rich inline title is distinct from an omitted title. Automatic
-/// localization, alternate box types, padding, and colors remain unsupported
-/// instead of being flattened into styling strings.
+/// An authored rich inline title is distinct from an omitted title. The closed
+/// Box type and optional typed padding/background/foreground overrides stay
+/// backend-neutral; automatic localization and exact theme/CSS parity remain
+/// renderer/product residuals instead of being flattened into styling strings.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrBoxComponent {
     #[serde(default, skip_serializing_if = "IrBoxType::is_callout")]
     pub box_type: IrBoxType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Vec<IrInline>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub padding: Option<Box<IrSize>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<Box<IrColor>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<Box<IrColor>>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2095,6 +2102,12 @@ struct WireBoxComponent {
     box_type: IrBoxType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     title: Option<Vec<WireInline>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    padding: Option<IrSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    background: Option<IrColor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    foreground: Option<IrColor>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2666,6 +2679,9 @@ fn component_to_wire(
                 .as_deref()
                 .map(|title| wire_inlines(title, sources))
                 .transpose()?,
+            padding: component.padding.as_deref().cloned(),
+            background: component.background.as_deref().cloned(),
+            foreground: component.foreground.as_deref().cloned(),
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3217,6 +3233,9 @@ fn component_from_wire(
                 .title
                 .map(|title| inlines_from_wire(title, sources))
                 .transpose()?,
+            padding: component.padding.map(Box::new),
+            background: component.background.map(Box::new),
+            foreground: component.foreground.map(Box::new),
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),

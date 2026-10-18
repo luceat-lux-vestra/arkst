@@ -1,4 +1,6 @@
-use arkst_core::ir::{IrBoxComponent, IrBoxType, IrComponent, IrInline, IrNode};
+use arkst_core::ir::{
+    IrBoxComponent, IrBoxType, IrColor, IrComponent, IrInline, IrNode, IrSizeUnit,
+};
 use arkst_core::{compile, CompileOptions, SourceId, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -37,6 +39,9 @@ fn box_default_callout_preserves_structured_markdown_body() {
     let component = box_component(&result);
     assert_eq!(component.box_type, IrBoxType::Callout);
     assert!(component.title.is_none());
+    assert!(component.padding.is_none());
+    assert!(component.background.is_none());
+    assert!(component.foreground.is_none());
     let [IrNode::Paragraph { content, .. }] = component.children.as_slice() else {
         panic!("expected one paragraph child, got {:?}", component.children);
     };
@@ -146,7 +151,51 @@ fn explicit_none_is_untitled_and_authored_title_bypasses_automatic_localization(
 }
 
 #[test]
-fn box_fails_closed_for_automatic_localization_and_remaining_style_options() {
+fn box_preserves_typed_presentation_overrides_and_explicit_none_identity() {
+    let source = ".box title:{Heads} type:{warning} padding:{1cm} background:{purple} foreground:{rgba(1,2,3,0.5)}\n    Body *copy*.\n";
+    let result = compile_source(source);
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    let component = box_component(&result);
+    assert_eq!(component.box_type, IrBoxType::Warning);
+    assert!(component.title.is_some());
+    let padding = component.padding.as_deref().expect("typed padding");
+    assert_eq!(padding.value, 1.0);
+    assert_eq!(padding.unit, IrSizeUnit::Cm);
+    assert_eq!(
+        component.background.as_deref(),
+        Some(&IrColor {
+            red: 128,
+            green: 0,
+            blue: 128,
+            alpha: 1.0,
+        })
+    );
+    assert_eq!(
+        component.foreground.as_deref(),
+        Some(&IrColor {
+            red: 1,
+            green: 2,
+            blue: 3,
+            alpha: 0.5,
+        })
+    );
+    assert!(matches!(
+        component.children.as_slice(),
+        [IrNode::Paragraph { content, .. }]
+            if content.iter().any(|inline| matches!(inline, IrInline::Emphasis { .. }))
+    ));
+
+    let none =
+        compile_source(".box padding:{.none} background:{.none} foreground:{.none}\n    A\n");
+    assert!(none.diagnostics.is_empty(), "{none:?}");
+    let component = box_component(&none);
+    assert!(component.padding.is_none());
+    assert!(component.background.is_none());
+    assert!(component.foreground.is_none());
+}
+
+#[test]
+fn box_fails_closed_for_automatic_localization_and_invalid_presentation_inputs() {
     let localized = compile_source(".doclang {english}\n.box {A}\n");
     assert_eq!(localized.diagnostics.len(), 1, "{localized:?}");
     assert!(localized.ir.nodes.is_empty(), "{localized:?}");
@@ -155,18 +204,36 @@ fn box_fails_closed_for_automatic_localization_and_remaining_style_options() {
         .contains("automatic localized titles are not yet implemented"));
 
     for source in [
-        ".box padding:{1cm}\n    A\n",
-        ".box background:{red}\n    A\n",
-        ".box foreground:{blue}\n    A\n",
+        ".box padding:{wide}\n    A\n",
+        ".box background:{not-a-color}\n    A\n",
+        ".box foreground:{not-a-color}\n    A\n",
+        ".box padding:{.string {1cm}}\n    A\n",
+        ".box foreground:{.string {red}}\n    A\n",
+        ".box padding:{1cm} padding:{2cm}\n    A\n",
         ".box {Title} {warning}\n    A\n",
         ".box title:{.range {1} {2}}\n    A\n",
         ".box {One} title:{Two}\n    A\n",
         ".box title:{Heads}\n",
     ] {
         let result = compile_source(source);
-        assert!(!result.diagnostics.is_empty(), "{result:?}");
-        assert!(result.ir.nodes.is_empty(), "{result:?}");
+        assert!(!result.diagnostics.is_empty(), "{source:?}: {result:?}");
+        assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
     }
+}
+
+#[test]
+fn box_body_conversion_diagnostic_uses_final_body_parameter_provenance() {
+    let source = ".box type:{warning} body:{.range {1} {2}}\n";
+    let result = compile_source(source);
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(result.ir.nodes.is_empty(), "{result:?}");
+    let diagnostic = &result.diagnostics[0];
+    assert!(diagnostic.message.contains("`.box` body"), "{diagnostic:?}");
+    let primary = diagnostic.primary.expect("body diagnostic span");
+    assert_eq!(
+        source.get(primary.start..primary.end),
+        Some("body:{.range {1} {2}}")
+    );
 }
 
 #[test]
@@ -193,12 +260,20 @@ fn box_rejects_missing_or_inline_materialization_without_fabricated_output() {
 
 #[test]
 fn box_component_roundtrips_through_document_wire_serde() {
-    let result = compile_source(".box {Release **note**} type:{warning}\n    Ship it\n");
+    let result = compile_source(
+        ".box {Release **note**} type:{warning} padding:{1cm} background:{purple} foreground:{rgba(1,2,3,0.5)}\n    Ship it\n",
+    );
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert!(box_component(&result).title.is_some());
     assert_eq!(box_component(&result).box_type, IrBoxType::Warning);
+    assert!(box_component(&result).padding.is_some());
+    assert!(box_component(&result).background.is_some());
+    assert!(box_component(&result).foreground.is_some());
     let json = serde_json::to_string(&result.ir).expect("serialize Box IR");
     assert!(json.contains("\"box_type\":\"Warning\""), "{json}");
+    assert!(json.contains("\"padding\""), "{json}");
+    assert!(json.contains("\"background\""), "{json}");
+    assert!(json.contains("\"foreground\""), "{json}");
     let roundtrip: arkst_core::ir::IrDocument =
         serde_json::from_str(&json).expect("deserialize Box IR");
     assert_eq!(roundtrip, result.ir);
@@ -219,4 +294,10 @@ fn box_component_roundtrips_through_document_wire_serde() {
         );
     };
     assert_eq!(legacy_component.box_type, IrBoxType::Callout);
+    assert!(legacy_component.padding.is_none());
+    assert!(legacy_component.background.is_none());
+    assert!(legacy_component.foreground.is_none());
+    assert!(!legacy_json.contains("\"padding\""), "{legacy_json}");
+    assert!(!legacy_json.contains("\"background\""), "{legacy_json}");
+    assert!(!legacy_json.contains("\"foreground\""), "{legacy_json}");
 }

@@ -1367,13 +1367,15 @@ fn evaluate_text(
             if matches!(&value.value, IrValue::None) {
                 return Ok(None);
             }
-            text_color_conversion(&value).map(Some).map_err(|cause| {
-                conversion_error(
-                    "`.text` `color` must be a Color or None".to_string(),
-                    "color",
-                    cause,
-                )
-            })
+            value_conversion::convert_color_with_origin(&value)
+                .map(Some)
+                .map_err(|cause| {
+                    conversion_error(
+                        "`.text` `color` must be a Color or None".to_string(),
+                        "color",
+                        cause,
+                    )
+                })
         })
         .transpose()?
         .flatten();
@@ -1492,33 +1494,6 @@ fn evaluate_text(
             "`.text` requires a single inline paragraph, not block content".to_string(),
         )),
     }
-}
-
-fn text_color_conversion(
-    value: &InvocationValue,
-) -> Result<arkst_ir::IrColor, value_conversion::ConversionError> {
-    let convert = |candidate: &InvocationValue| match value_conversion::convert_domain_with_origin(
-        candidate,
-        value_conversion::DomainTarget::Color,
-    )? {
-        value_conversion::DomainValue::Color(color) => Ok(color),
-        _ => Err(value_conversion::ConversionError::UnsupportedValue {
-            target: value_conversion::ConversionTarget::Color,
-        }),
-    };
-
-    convert(value).or_else(|error| {
-        if value.origin != value_conversion::ValueOrigin::Dynamic {
-            return Err(error);
-        }
-        let IrValue::Content(nodes) = &value.value else {
-            return Err(error);
-        };
-        let Some(text) = plain_scalar_content_argument(nodes) else {
-            return Err(error);
-        };
-        convert(&InvocationValue::dynamic_value(IrValue::String(text)))
-    })
 }
 
 fn evaluate_plaintext(
