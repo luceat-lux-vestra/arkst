@@ -231,6 +231,9 @@ fn collect_component_sources(
             collect_document_sources(&component.children, sources)?;
         }
         IrComponent::Box(component) => {
+            if let Some(title) = &component.title {
+                collect_inline_sources(title, sources)?;
+            }
             collect_document_sources(&component.children, sources)?;
         }
         IrComponent::Collapse(component) => {
@@ -1451,14 +1454,16 @@ pub struct IrLandscapeComponent {
     pub span: SourceSpan,
 }
 
-/// Bounded backend-neutral semantic state produced by the default Quarkdown
-/// `.box` callout subset.
+/// Bounded backend-neutral semantic state produced by the Quarkdown `.box`
+/// callout subset.
 ///
-/// This component intentionally represents only the no-option CALLOUT form.
-/// Title localization, explicit titles, alternate box types, padding, and
-/// colors remain unsupported instead of being flattened into styling strings.
+/// An authored rich inline title is distinct from an omitted title. Automatic
+/// localization, alternate box types, padding, and colors remain unsupported
+/// instead of being flattened into styling strings.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrBoxComponent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<Vec<IrInline>>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2062,6 +2067,8 @@ struct WireLandscapeComponent {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireBoxComponent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<Vec<WireInline>>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2627,6 +2634,11 @@ fn component_to_wire(
             span: component.span,
         }),
         IrComponent::Box(component) => WireComponent::Box(WireBoxComponent {
+            title: component
+                .title
+                .as_deref()
+                .map(|title| wire_inlines(title, sources))
+                .transpose()?,
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3173,6 +3185,10 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::Box(component) => IrComponent::Box(IrBoxComponent {
+            title: component
+                .title
+                .map(|title| inlines_from_wire(title, sources))
+                .transpose()?,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
