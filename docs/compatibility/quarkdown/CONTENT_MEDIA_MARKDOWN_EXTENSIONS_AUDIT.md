@@ -126,8 +126,10 @@ dependency:
   remain open.
 - .box, .todo, .collapse, and .textcollapse are PARTIAL typed components with
   bounded Typst/PDF output contracts. .box preserves an optional authored rich
-  inline title separately from its structured body; automatic localization,
-  alternate types, and styling remain open. The collapse forms preserve their
+  inline title separately from its structured body and retains the complete
+  closed callout/tip/note/warning/error type domain with deterministic distinct
+  Typst accents; automatic localization, padding, user colors, and exact theme
+  styling remain open. The collapse forms preserve their
   authored initial state but do not claim browser interactivity. .float, .clip,
   and .numbered remain explicit gaps. A blockquote or generic function-call
   node is not their semantic implementation.

@@ -1462,10 +1462,33 @@ pub struct IrLandscapeComponent {
 /// instead of being flattened into styling strings.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrBoxComponent {
+    #[serde(default, skip_serializing_if = "IrBoxType::is_callout")]
+    pub box_type: IrBoxType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Vec<IrInline>>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
+}
+
+/// The public closed type domain of a Quarkdown `.box` callout.
+///
+/// Exact theme colors and HTML/CSS presentation remain renderer concerns. The
+/// enum preserves the authored semantic identity without introducing a
+/// generic style escape hatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum IrBoxType {
+    #[default]
+    Callout,
+    Tip,
+    Note,
+    Warning,
+    Error,
+}
+
+impl IrBoxType {
+    fn is_callout(&self) -> bool {
+        matches!(self, Self::Callout)
+    }
 }
 
 /// Bounded backend-neutral semantic state produced by Quarkdown `.collapse`.
@@ -1577,6 +1600,7 @@ pub enum IrEnumValue {
     StackedMainAxisAlignment(IrMainAxisAlignment),
     StackedCrossAxisAlignment(IrCrossAxisAlignment),
     ContainerAlignment(IrContainerAlignment),
+    BoxType(IrBoxType),
 }
 
 /// A closed target discriminator for native content that remains opaque until
@@ -2067,6 +2091,8 @@ struct WireLandscapeComponent {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireBoxComponent {
+    #[serde(default, skip_serializing_if = "IrBoxType::is_callout")]
+    box_type: IrBoxType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     title: Option<Vec<WireInline>>,
     children: Vec<WireNode>,
@@ -2634,6 +2660,7 @@ fn component_to_wire(
             span: component.span,
         }),
         IrComponent::Box(component) => WireComponent::Box(WireBoxComponent {
+            box_type: component.box_type,
             title: component
                 .title
                 .as_deref()
@@ -3185,6 +3212,7 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::Box(component) => IrComponent::Box(IrBoxComponent {
+            box_type: component.box_type,
             title: component
                 .title
                 .map(|title| inlines_from_wire(title, sources))

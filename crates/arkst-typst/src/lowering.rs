@@ -4,12 +4,13 @@
 //! records source map entries as it generates code.
 
 use arkst_ir::{
-    IrBoxComponent, IrCallSegment, IrCollapseComponent, IrColor, IrComponent, IrContainerAlignment,
-    IrContainerComponent, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
-    IrExplicitErrorComponent, IrInline, IrKeybindingPart, IrLandscapeComponent,
-    IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
-    IrTextCase, IrTextScript, IrTextSize, IrTextVariant, IrTodoComponent, IrValue,
+    IrBoxComponent, IrBoxType, IrCallSegment, IrCollapseComponent, IrColor, IrComponent,
+    IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDocument,
+    IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrInline, IrKeybindingPart,
+    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition,
+    IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrTaskStatus, IrTextCase, IrTextScript, IrTextSize, IrTextVariant, IrTodoComponent,
+    IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -529,7 +530,16 @@ impl LoweringContext {
 
     fn lower_box(&mut self, component: &IrBoxComponent) {
         let before = self.output.len();
-        self.push_str("#block(width: 100%, inset: 8pt, stroke: 1pt)[\n");
+        let stroke = match component.box_type {
+            IrBoxType::Callout => "1pt",
+            IrBoxType::Tip => "(paint: rgb(46, 125, 50, 100%), thickness: 1pt)",
+            IrBoxType::Note => "(paint: rgb(21, 101, 192, 100%), thickness: 1pt)",
+            IrBoxType::Warning => "(paint: rgb(237, 108, 2, 100%), thickness: 1pt)",
+            IrBoxType::Error => "(paint: rgb(198, 40, 40, 100%), thickness: 1pt)",
+        };
+        self.push_str("#block(width: 100%, inset: 8pt, stroke: ");
+        self.push_str(stroke);
+        self.push_str(")[\n");
         if let Some(title) = &component.title {
             self.push_str("#strong[");
             self.lower_inlines(title);

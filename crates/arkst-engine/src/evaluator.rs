@@ -56,7 +56,7 @@ use crate::{
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
-    IrBoxComponent, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
+    IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
     IrCallableResourceContext, IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable,
     IrCodeCallout, IrCollapseComponent, IrColor, IrComponent, IrContainerAlignment,
     IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment,
@@ -6203,6 +6203,10 @@ impl Evaluator {
         let parameters = bound.parameters;
         let mut slots = bound.slots.into_iter();
         let mut title_slot = slots.next().unwrap_or(BoundSlot::Omitted);
+        let box_type_slot = slots.next().unwrap_or(BoundSlot::Defaulted);
+        let padding_slot = slots.next().unwrap_or(BoundSlot::Omitted);
+        let background_slot = slots.next().unwrap_or(BoundSlot::Omitted);
+        let foreground_slot = slots.next().unwrap_or(BoundSlot::Omitted);
         let mut body_slot = slots.next().unwrap_or(BoundSlot::Omitted);
 
         // Preserve the previously evidenced body-only single positional form
@@ -6233,6 +6237,50 @@ impl Evaluator {
             },
             BoundSlot::Omitted | BoundSlot::Defaulted => None,
         };
+
+        let box_type = match box_type_slot {
+            BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } => match value_conversion::convert_domain_with_origin(
+                &value,
+                value_conversion::DomainTarget::ClosedEnum(
+                    value_conversion::ClosedEnumTarget::BoxType,
+                ),
+            ) {
+                Ok(value_conversion::DomainValue::Enum(IrEnumValue::BoxType(value))) => value,
+                Ok(_) => unreachable!("Box type target returned a different closed enum"),
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic_with_detail(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("type"),
+                            parameters.get(1).and_then(|parameter| parameter.name_span),
+                            *span,
+                        ),
+                        Some("`.box` type"),
+                        Some("must be callout, tip, note, warning, or error"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            BoundSlot::Omitted | BoundSlot::Defaulted => IrBoxType::Callout,
+        };
+
+        for (slot, name) in [
+            (padding_slot, "padding"),
+            (background_slot, "background"),
+            (foreground_slot, "foreground"),
+        ] {
+            if let BoundSlot::Explicit { span, .. } = slot {
+                diagnostics.push(box_argument_error(
+                    &format!("`.box` {name} is not yet implemented"),
+                    span,
+                ));
+                return CallOutcome::Failed;
+            }
+        }
 
         let BoundSlot::Explicit {
             value: body_value,
@@ -6287,6 +6335,7 @@ impl Evaluator {
         }
 
         CallOutcome::Value(IrValue::Component(IrComponent::Box(IrBoxComponent {
+            box_type,
             title,
             children,
             span: *span,
@@ -18185,11 +18234,17 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
         "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
         "box" => (
-            // Structural binding keeps both slots optional so the established
+            // Structural binding keeps title and body optional so the established
             // body-only form remains unambiguous. The Box adapter enforces the
-            // required body after interpreting an omitted authored title.
+            // required body after interpreting an omitted authored title. All
+            // presentation options are named-only so positional title/body
+            // behavior cannot drift.
             vec![
                 ParameterMetadata::optional("title"),
+                ParameterMetadata::defaulted("type").positional(false),
+                ParameterMetadata::optional("padding").positional(false),
+                ParameterMetadata::optional("background").positional(false),
+                ParameterMetadata::optional("foreground").positional(false),
                 ParameterMetadata::optional("body"),
             ],
             BodyPolicy::BindFinal,
@@ -21419,7 +21474,7 @@ fn box_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec![
-            "`.box` accepts an optional rich inline title and one required MarkdownContent body; alternate types and styling remain unsupported."
+            "`.box` accepts an optional rich inline title, a named callout/tip/note/warning/error type, and one required MarkdownContent body; padding and colors remain unsupported."
                 .to_string(),
         ],
     }
