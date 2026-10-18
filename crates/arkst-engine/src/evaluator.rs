@@ -6268,19 +6268,72 @@ impl Evaluator {
             BoundSlot::Omitted | BoundSlot::Defaulted => IrBoxType::Callout,
         };
 
-        for (slot, name) in [
-            (padding_slot, "padding"),
-            (background_slot, "background"),
-            (foreground_slot, "foreground"),
-        ] {
-            if let BoundSlot::Explicit { span, .. } = slot {
-                diagnostics.push(box_argument_error(
-                    &format!("`.box` {name} is not yet implemented"),
-                    span,
-                ));
-                return CallOutcome::Failed;
-            }
-        }
+        let padding = match padding_slot {
+            BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } => match convert_box_padding(&value) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("padding"),
+                            parameters.get(2).and_then(|parameter| parameter.name_span),
+                            *span,
+                        ),
+                        Some("`.box` padding"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            BoundSlot::Omitted | BoundSlot::Defaulted => None,
+        };
+        let background = match background_slot {
+            BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } => match convert_box_color(&value) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("background"),
+                            parameters.get(3).and_then(|parameter| parameter.name_span),
+                            *span,
+                        ),
+                        Some("`.box` background"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            BoundSlot::Omitted | BoundSlot::Defaulted => None,
+        };
+        let foreground = match foreground_slot {
+            BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } => match convert_box_color(&value) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("foreground"),
+                            parameters.get(4).and_then(|parameter| parameter.name_span),
+                            *span,
+                        ),
+                        Some("`.box` foreground"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            BoundSlot::Omitted | BoundSlot::Defaulted => None,
+        };
 
         let BoundSlot::Explicit {
             value: body_value,
@@ -6305,7 +6358,7 @@ impl Evaluator {
                         error,
                         Some(body_span),
                         Some("body"),
-                        parameters.get(1).and_then(|parameter| parameter.name_span),
+                        parameters.get(5).and_then(|parameter| parameter.name_span),
                         *span,
                     ),
                     Some("`.box` body"),
@@ -6337,6 +6390,9 @@ impl Evaluator {
         CallOutcome::Value(IrValue::Component(IrComponent::Box(IrBoxComponent {
             box_type,
             title,
+            padding: padding.map(Box::new),
+            background: background.map(Box::new),
+            foreground: foreground.map(Box::new),
             children,
             span: *span,
         })))
@@ -17140,6 +17196,32 @@ fn convert_pageformat_color(
     }
 }
 
+fn convert_box_padding(
+    argument: &InvocationValue,
+) -> Result<Option<IrSize>, value_conversion::ConversionError> {
+    if matches!(&argument.value, IrValue::None) {
+        return Ok(None);
+    }
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::Size,
+    )? {
+        value_conversion::DomainValue::Size(value) => Ok(Some(value)),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Size,
+        }),
+    }
+}
+
+fn convert_box_color(
+    argument: &InvocationValue,
+) -> Result<Option<IrColor>, value_conversion::ConversionError> {
+    if matches!(&argument.value, IrValue::None) {
+        return Ok(None);
+    }
+    value_conversion::convert_color_with_origin(argument).map(Some)
+}
+
 fn zero_pageformat_size() -> IrSize {
     IrSize {
         value: 0.0,
@@ -21474,7 +21556,7 @@ fn box_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec![
-            "`.box` accepts an optional rich inline title, a named callout/tip/note/warning/error type, and one required MarkdownContent body; padding and colors remain unsupported."
+            "`.box` accepts an optional rich inline title, named type/padding/background/foreground presentation overrides, and one required MarkdownContent body."
                 .to_string(),
         ],
     }

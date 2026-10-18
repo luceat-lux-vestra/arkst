@@ -1027,6 +1027,55 @@ pub(crate) fn convert_range(value: &IrValue, span: SourceSpan) -> Result<IrRange
     convert_range_with_origin(&InvocationValue::dynamic_value(value.clone()), span)
 }
 
+/// Converts a public Color argument while preserving the dynamic-value
+/// boundary used by Quarkdown presentation primitives.
+///
+/// Dynamic calls such as `rgba(...)` may evaluate to one plain content
+/// paragraph before target conversion. Only that plain Text-only shape is
+/// projected back to dynamic scalar text; static/rich content remains closed.
+pub(crate) fn convert_color_with_origin(
+    argument: &InvocationValue,
+) -> Result<IrColor, ConversionError> {
+    let convert = |candidate: &InvocationValue| match convert_domain_with_origin(
+        candidate,
+        DomainTarget::Color,
+    )? {
+        DomainValue::Color(color) => Ok(color),
+        _ => Err(ConversionError::UnsupportedValue {
+            target: ConversionTarget::Color,
+        }),
+    };
+
+    convert(argument).or_else(|error| {
+        if argument.origin != ValueOrigin::Dynamic {
+            return Err(error);
+        }
+        let IrValue::Content(nodes) = &argument.value else {
+            return Err(error);
+        };
+        let Some(text) = plain_dynamic_color_content(nodes) else {
+            return Err(error);
+        };
+        convert(&InvocationValue::dynamic_value(IrValue::String(text)))
+    })
+}
+
+fn plain_dynamic_color_content(nodes: &[IrNode]) -> Option<String> {
+    let mut text = String::new();
+    for node in nodes {
+        let IrNode::Paragraph { content, .. } = node else {
+            return None;
+        };
+        for inline in content {
+            let IrInline::Text { content, .. } = inline else {
+                return None;
+            };
+            text.push_str(content);
+        }
+    }
+    Some(text)
+}
+
 /// Converts an invocation value into a typed, backend-neutral domain value.
 ///
 /// This is deliberately not a generalized scalar coercion engine. Existing
@@ -3228,6 +3277,40 @@ mod tests {
                 "unexpectedly accepted {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn color_argument_conversion_reuses_dynamic_plain_content_without_widening_static_content() {
+        let source_span = span();
+        let content = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "rgba(1,2,3,0.5)".to_string(),
+                span: source_span,
+            }],
+            span: source_span,
+        }]);
+        assert_eq!(
+            super::convert_color_with_origin(&InvocationValue::dynamic_value(content.clone())),
+            Ok(IrColor {
+                red: 1,
+                green: 2,
+                blue: 3,
+                alpha: 0.5,
+            })
+        );
+        assert!(super::convert_color_with_origin(&InvocationValue::static_value(content)).is_err());
+
+        let rich = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Emphasis {
+                content: vec![IrInline::Text {
+                    content: "red".to_string(),
+                    span: source_span,
+                }],
+                span: source_span,
+            }],
+            span: source_span,
+        }]);
+        assert!(super::convert_color_with_origin(&InvocationValue::dynamic_value(rich)).is_err());
     }
 
     #[test]
