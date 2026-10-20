@@ -211,7 +211,7 @@ follow-up owners.
 | Metadata                       | `.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | Canonical Issue #152 classification is eight `PARTIAL` evaluator/IR slices (`.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`). `.localization`/`.localize` remain #151-owned semantics and are implemented separately by #196; renderer, front-matter, and cross-owned layout/content/resource state remain separate | [#152 audit](DOCUMENT_STATE_AUDIT.md), [#151 manifest](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv), and [#196 evidence](STDLIB_BUILTINS_AUDIT.md) |
 | Layout/document configuration | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.captionposition`, `.texmacro`, `.pageformat`, `.pagemargin`, `.footer`, page counters/format/reset, `.lastheading`, automatic page breaks, `.marker`, `.navigation`, `.tableofcontents`, `.slides` | Canonical #153 result: 13 conservative `PARTIAL` bounded slices (`.captionposition`, `.numbering`/`.nonumbering`, bounded size-only `.font`, `.paragraphstyle`, bounded `.pageformat`, bounded `.currentpage`/`.totalpages`, bounded `.formatpagenumber`/`.resetpagenumber`, automatic page-break setters, bounded `.slides`) and 7 `PARSED_ONLY` rows; no complete #153 output-equivalence claim | [#153 audit](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
-| Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
+| Container layout               | `.container`, optional `width`, `height`, `fullwidth`, named `fullspan`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing plus bounded multi-column breakout | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
 | Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; direct chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Partial: direct-chain semantic slice is evidenced; #164 implements the bounded whitespace/continuation placement in the parser/frontend, while broader chain semantics remain separate |
 | Line continuation (`\`)        | `\` at end of line               | Parsed                   | Parsed-only bounded parser/frontend support: separator probes before the first/subsequent arguments and `::` commit only on an accepted candidate, while a separate root suffix consumes exactly one trailing continuation; LF is pinned evidence, actual CRLF is separate local source-preservation evidence |
@@ -454,25 +454,32 @@ pinned `CaptionPosition.kt`, `CaptionPositionInfo.kt`, `Document.kt`,
 authored `fixtures/quarkdown-conformance/cases/captionposition-document-state/`
 case.
 
-### Bounded `.container` sizing contract
+### Bounded `.container` layout contract
 
 The direct `.container` consumer is **partial/bounded**, not complete upstream
 Container support. The implemented subset is:
 
 - an empty or optional Markdown block body with structured `Vec<IrNode>`
   children;
-- `width: Size?`, `height: Size?`, and `fullwidth: Boolean` through the
-  existing origin-aware invocation conversion boundary;
+- `width: Size?`, `height: Size?`, `fullwidth: Boolean`, and the named-only
+  `fullspan: Boolean` through the existing origin-aware invocation conversion
+  boundary;
 - positional prefix binding in `width`, `height`, `fullwidth` order and named
   equivalents, with duplicate, unknown, and deferred-known parameters
   rejected by source-backed diagnostics; and
 - backend-neutral `IrComponent::Container` materialization and Typst
   `#block` sizing, where explicit width overrides `fullwidth` and an
-  unaligned container emits no `#align` wrapper.
+  unaligned container emits no `#align` wrapper; and
+- additive `full_column_span` IR state. With more than one selector-free page
+  column, Typst lowering uses the official parent-scoped top-float breakout
+  plus `place.flush()` so the container spans the full parent width and later
+  content cannot overtake it. The flag is layout-inert in a single-column
+  document. Exact Quarkdown in-flow HTML/CSS placement remains unclaimed.
 
-The deferred surface includes `float`, `fullspan`, `classname`, StyleOptions,
-container alignment/text alignment, colors, borders, margin/padding/radius,
-font/text-style properties, and inline Container insertion. Evidence is in
+The deferred surface includes `float`, `classname`, StyleOptions, container
+alignment/text alignment, colors, borders, margin/padding/radius,
+font/text-style properties, inline Container insertion, and the standalone
+`.fullspan` producer. Evidence is in
 `crates/arkst-core/tests/quarkdown_container.rs`, the IR/lowering unit
 tests, and `crates/arkst-typst-subprocess/tests/backend_integration.rs`.
 

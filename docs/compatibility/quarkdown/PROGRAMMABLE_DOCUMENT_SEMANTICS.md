@@ -268,12 +268,12 @@ does not add Typst constructs to the core IR.
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
 | `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
 | `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
-| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, and lazy validation are supported |
+| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, lazy validation, and an additive full-column-span request are supported |
 | `landscape` | no non-body arguments and one required Markdown block body | typed Landscape semantic node; 90° counter-clockwise content transformation |
 
 The remaining future surface includes broader style/layout properties and
 component families; the direct `.container` consumer remains limited to this
-sizing subset and does not become a generic layout engine.
+bounded layout subset and does not become a generic layout engine.
 
 ### Stacked layout consumer slice (2026-08-21)
 
@@ -323,28 +323,33 @@ Implemented in this slice:
 - nested, Stacked, callable, and source-provenance composition remains typed;
   native inline `.align` is block-only and fails closed.
 
-The direct `.container` consumer is implemented only for the bounded sizing
-slice:
+The direct `.container` consumer is implemented only for the bounded
+layout slice:
 
 - an empty or optional Markdown block body constructs an unaligned Container;
-- positional and named `width`, `height`, and `fullwidth` arguments use the
-  existing invocation-origin infrastructure and typed `IrSize`/Boolean
-  conversion; duplicate, unknown, and deferred-known parameters fail with a
-  source-backed diagnostic;
+- positional and named `width`, `height`, and `fullwidth` arguments plus the
+  named-only `fullspan` Boolean use the existing invocation-origin
+  infrastructure and typed `IrSize`/Boolean conversion; duplicate, unknown,
+  and deferred-known parameters fail with a source-backed diagnostic;
 - argument binding, conversion, and validation complete before the body is
   evaluated, so invalid sizing never executes a failing body or publishes a
   partial component; and
 - Typst lowering emits `#block` sizing in deterministic `width`, `height`
   order, with explicit width taking precedence over `fullwidth`, and emits no
-  `#align` wrapper when alignment is `None`.
+  `#align` wrapper when alignment is `None`; and
+- `fullspan:true` retains additive backend-neutral `full_column_span` state.
+  In a selector-free multi-column page, lowering emits Typst's documented
+  parent-scoped top-float breakout at full parent width followed by
+  `place.flush()`; it is inert for one column. Exact upstream in-flow HTML/CSS
+  placement is not claimed.
 
 Deferred from these slices:
 
 - `StyleOptions` and `.float`;
-- `.fullspan`, general String → Markdown body conversion, and inline Container
-  insertion;
-- direct `.container` style parameters including `float`, `fullspan`,
-  `classname`, alignment/text alignment, colors, borders, margin/padding,
+- standalone `.fullspan`, general String → Markdown body conversion, and
+  inline Container insertion;
+- direct `.container` style parameters including `float`, `classname`,
+  alignment/text alignment, colors, borders, margin/padding,
   radius, and font/text-style properties.
 
 Deferred from this slice:
@@ -374,9 +379,10 @@ variables and callable results before the typed block output boundary.
 
 The upstream feature is documented as experimental. `.float` remains deferred
 because Quarkdown's subsequent-content wrapping is not equivalent to Typst's
-`place(float: true)`, and `.fullspan` remains deferred because its in-flow
-multi-column full-column span is not equivalent to a parent-scoped floating
-placement. Neither is inferred from this component.
+`place(float: true)`. The standalone `.fullspan` producer also remains
+deferred. The separately evidenced direct `.container fullspan` option uses a
+bounded parent-scoped breakout and does not claim exact in-flow placement.
+None of these semantics is inferred from Landscape.
 
 ### Whitespace inline consumer slice (2026-08-21)
 
@@ -429,7 +435,7 @@ The v2.5.1 `NodeUtils.toPlainText()` projection omits `LineBreak`; Arkst's
 existing `IrInline::HardBreak` plaintext projection is therefore reused
 without a `.br`-specific `.plaintext` branch. This bounded slice does not
 implement or imply generalized inline components, `.text`, `.codespan`,
-`.clip`, `.float`, or `.fullspan`.
+`.clip`, `.float`, or the standalone `.fullspan` producer.
 
 ## Compatibility matrix
 
@@ -448,8 +454,9 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
+| `.container` | Optional width/height, `fullwidth`, named `fullspan`, and optional Markdown body | Typed Container sizing plus additive `full_column_span`; multi-column Typst output uses a parent-scoped full-width top-float and immediate flush, while single-column output stays in ordinary flow | Keep page-column count document-global and the span request component-local; no backend escape hatch | Partial bounded layout slice | Exact in-flow HTML/CSS placement, float/class/style options, standalone `.fullspan`, and generalized body conversion |
 | `.whitespace` | Inline `Whitespace` node with optional `width: Size?` and `height: Size?`; positional order is width then height; no dimensions emit NBSP, while a supplied dimension creates a fixed-size empty rectangle | `IrInline::Whitespace` preserves the inline semantic, source span, surrounding order, typed Size conversion, zero for an omitted axis, and the existing standalone output bridge | Keep Whitespace inline and backend-neutral; reuse `InvocationValue`/`ValueOrigin` and materialize only through existing output boundaries | Implemented for the bounded argument, inline, block-output, provenance, and Typst slice | General inline node/value composition and other inline layout features |
-| `.br` | Argumentless inline `LineBreak` producer; no positional/named arguments or block/lambda body; `toPlainText()` omits the line break | Existing evaluator/native-call path materializes exactly one `IrInline::HardBreak` with the call span, preserves inline order and source-defined `br` precedence, validates before body evaluation, and reuses existing plaintext/Typst paths | Reuse `IrInline::HardBreak`; do not add `IrInline::Br`, `IrValue::LineBreak`, or a generic inline component | Implemented for the bounded v2.5.1 slice | `.text`, `.codespan`, `.clip`, `.float`, `.fullspan`, and generalized inline component/value conversion |
+| `.br` | Argumentless inline `LineBreak` producer; no positional/named arguments or block/lambda body; `toPlainText()` omits the line break | Existing evaluator/native-call path materializes exactly one `IrInline::HardBreak` with the call span, preserves inline order and source-defined `br` precedence, validates before body evaluation, and reuses existing plaintext/Typst paths | Reuse `IrInline::HardBreak`; do not add `IrInline::Br`, `IrValue::LineBreak`, or a generic inline component | Implemented for the bounded v2.5.1 slice | `.text`, `.codespan`, `.clip`, `.float`, standalone `.fullspan`, and generalized inline component/value conversion |
 | `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | Backend-neutral `IrSize` conversion is consumed by row/column/grid gaps and `.whitespace` for the exact seven-unit decimal grammar, with typed identity and origin-gated text | Domain-specific origin-aware conversion adapter | Implemented for Stacked gaps and bounded `.whitespace` | Other Size consumers |
 | `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | Backend-neutral `IrColor` conversion implements the ordered Hex/RGB/RGBA/HSV-HSL/Named decoder families and numeric channels | Domain-specific origin-aware conversion adapter | Implemented | Color consumers, style, and component semantics |
 | Enum conversion | Closed enum values are matched through the allowed value set and public names | Explicit closed enum adapter preserves `DocumentType`, Stacked main-axis, and Stacked cross-axis domains with case-insensitive public names and no static String coercion | Closed domain adapter; no reflective generic coercion | Implemented for `.doctype` and Stacked layout | Other closed enum consumers |
@@ -601,7 +608,7 @@ v2.5.1 compatibility.
 Major deferred families remain separately tracked: the complete public
 stdlib/component/style/layout surface; generalized DynamicValue conversion and
 arbitrary inline component/callback bodies; `.box`, `.clip`, `.figure`, `.float`,
-`.fullspan`, and broader layout families; remaining
+the standalone `.fullspan`, and broader layout families; remaining
 document-context and data-loading functions; host/process/environment
 semantics; and unrelated M3+ work. Raw HTML policy and behavior in issue #58
 are separate and are not part of this closure audit.
@@ -611,7 +618,8 @@ are separate and are not part of this closure audit.
 This slice does not implement generic String → Markdown or String → component
 conversion; the explicit `.plaintext` Dynamic String → InlineMarkdownContent
 boundary is covered. Inline Stacked/Container insertion, the deferred direct
-`.container` style parameters, `StyleOptions`, `.float`, `.fullspan`, a generic layout
+`.container` style parameters, `StyleOptions`, `.float`, the standalone
+`.fullspan`, a generic layout
 engine, a parallel evaluator, filesystem/network features, or an evaluator rewrite. No architecture
 prototype or feature snapshot was
 necessary: the existing Rust types and exhaustive backend consumer are enough
@@ -664,4 +672,5 @@ observable evidence is retained in
 focused core/evaluator/IR tests.
 
 The `.br` slice does not promote the broader text/layout family: `.text`,
-`.codespan`, `.clip`, `.float`, and `.fullspan` remain separate deferred work.
+`.codespan`, `.clip`, `.float`, and the standalone `.fullspan` producer remain
+separate deferred work.

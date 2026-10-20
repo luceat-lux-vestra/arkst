@@ -1535,6 +1535,12 @@ pub struct IrContainerComponent {
     #[serde(default)]
     pub height: Option<IrSize>,
     pub full_width: bool,
+    /// Whether the container requests the parent multi-column span.
+    ///
+    /// This is component-local layout state. It does not select or mutate the
+    /// document-wide column count.
+    #[serde(default)]
+    pub full_column_span: bool,
     /// `None` represents an unaligned ordinary container.
     #[serde(default)]
     pub alignment: Option<IrContainerAlignment>,
@@ -2084,6 +2090,8 @@ struct WireContainerComponent {
     #[serde(default)]
     height: Option<IrSize>,
     full_width: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    full_column_span: bool,
     #[serde(default)]
     alignment: Option<IrContainerAlignment>,
     children: Vec<WireNode>,
@@ -2664,6 +2672,7 @@ fn component_to_wire(
             width: component.width.clone(),
             height: component.height.clone(),
             full_width: component.full_width,
+            full_column_span: component.full_column_span,
             alignment: component.alignment,
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
@@ -3219,6 +3228,7 @@ fn component_from_wire(
             width: component.width,
             height: component.height,
             full_width: component.full_width,
+            full_column_span: component.full_column_span,
             alignment: component.alignment,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
@@ -4340,6 +4350,7 @@ mod tests {
             width: None,
             height: None,
             full_width: true,
+            full_column_span: false,
             alignment: Some(IrContainerAlignment::Center),
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
@@ -4574,6 +4585,7 @@ mod tests {
                 width: None,
                 height: None,
                 full_width: false,
+                full_column_span: false,
                 alignment: None,
                 children: Vec::new(),
                 span,
@@ -4588,6 +4600,7 @@ mod tests {
                     unit: IrSizeUnit::Cm,
                 }),
                 full_width: true,
+                full_column_span: true,
                 alignment: None,
                 children: Vec::new(),
                 span,
@@ -4600,6 +4613,38 @@ mod tests {
             assert_eq!(first, second);
             assert_eq!(serde_json::from_str::<IrValue>(&first).unwrap(), value);
         }
+    }
+
+    #[test]
+    fn container_full_column_span_wire_is_additive_and_legacy_defaults_false() {
+        let span = SourceSpan::new(SourceId(9), 0, 12);
+        let value = IrValue::Component(IrComponent::Container(IrContainerComponent {
+            width: None,
+            height: None,
+            full_width: false,
+            full_column_span: true,
+            alignment: None,
+            children: Vec::new(),
+            span,
+        }));
+        let mut encoded = serde_json::to_value(&value).expect("container serializes");
+        let container = encoded
+            .get_mut("Component")
+            .and_then(|component| component.get_mut("Container"))
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("externally tagged container object");
+        assert_eq!(
+            container.get("full_column_span"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        container.remove("full_column_span");
+
+        let decoded = serde_json::from_value::<IrValue>(encoded)
+            .expect("legacy container without full_column_span deserializes");
+        let IrValue::Component(IrComponent::Container(component)) = decoded else {
+            panic!("expected container component");
+        };
+        assert!(!component.full_column_span);
     }
 
     #[test]
@@ -4621,6 +4666,7 @@ mod tests {
         };
         assert_eq!(component.width, None);
         assert_eq!(component.height, None);
+        assert!(!component.full_column_span);
         assert_eq!(component.alignment, Some(IrContainerAlignment::Center));
     }
 
