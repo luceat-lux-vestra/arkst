@@ -9,11 +9,11 @@ The Quarkdown v2.6 `slides` PDF-export changes are **applicable to Arkst's owned
 PR #358 implements the bounded Arkst-owned contract needed for this migration row without importing Quarkdown renderer implementation details into generic compiler state:
 
 - #175 bounded subcontract: typed complete `(width, height)` page geometry plus explicit `.pageformat` override ownership;
-- #178 bounded subcontract: document-type-gated `.slides` state with nullable vertical centering;
+- #178 bounded subcontract: document-type-gated `.slides` state with nullable vertical centering and later nullable presentation-toggle preservation;
 - #185 bounded subcontract: typed explicit `.pagebreak` / `<<<` boundaries;
 - Typst ownership: slides default PDF geometry, vertical-centering lowering, weak explicit page boundaries, and final PDF artifact production.
 
-The broader #175/#178/#185 issues remain open for their unrelated baseline scope. This migration slice does not claim controls, speaker notes, transitions, partial/selector page-format semantics, math, or code presentation support.
+The broader #175/#178/#185 issues remain open for their unrelated baseline scope. The original migration slice did not claim controls, speaker notes, transitions, partial/selector page-format semantics, math, or code presentation support. A later bounded #178 extension preserves nullable `controls` and `speakernotes` state without claiming browser controls, speaker-view behavior, or slide-content semantics.
 
 The Chromium-export adapter remains current-surface N/A as documented in `V260_PDF_EXPORT_ADAPTER.md`; that does not make slides layout N/A because Arkst itself owns `.doctype {slides}` → Typst → PDF.
 
@@ -119,7 +119,7 @@ That established a current Arkst → v2.6 target divergence. It did not establis
 Arkst now preserves only source-level semantics in shared IR:
 
 - `IrPageGeometry { width: IrSize, height: IrSize }` for a complete explicit pair;
-- `IrSlidesConfiguration { center: Option<bool> }` for the bounded `.slides` contract;
+- `IrSlidesConfiguration { center, controls, speaker_notes: Option<bool> }` for the bounded `.slides` contract;
 - `IrNode::PageBreak` for explicit semantic page boundaries.
 
 Serialization is backward-compatible for older state shapes because the new document-state fields are optional/defaulted. Explicit state round-trips through the wire representation.
@@ -137,7 +137,7 @@ Renderer resolution order is:
 1. explicit complete Arkst page geometry, when present;
 2. otherwise the Typst slides default evidenced from the v2.6 reference, `749.04pt x 546pt`.
 
-### `.slides(center:)` bounded ownership
+### `.slides(center:, controls:, speakernotes:)` bounded ownership
 
 The native `.slides` initializer is accepted only when the final document type is `slides`. Its bounded centering contract is:
 
@@ -145,6 +145,15 @@ The native `.slides` initializer is accepted only when the final document type i
 - explicit `.none` → `None`;
 - `true` → typed `Some(true)` and Typst `#set align(horizon)`;
 - `false` → typed `Some(false)` and Typst `#set align(top)`.
+
+The later nullable-toggle extension applies the same omission/explicit-`none`/
+Boolean boundary to `controls` and `speakernotes`, preserves public positional
+order, and commits the complete configuration only after every supplied value
+converts. Those two fields are presentation-only in the current Typst/PDF
+backend: they deliberately produce no Typst syntax and do not fabricate HTML
+controls or speaker-view behavior. The typed `speaker_notes` state is the
+configuration prerequisite for the separately owned #184 `.speakernote`
+content consumer.
 
 Malformed Boolean conversion fails closed and preserves the last committed state. Nested document-state writes are rolled back if the outer conversion fails. A source-defined function named `slides` retains precedence over the native initializer.
 
@@ -185,10 +194,10 @@ The substantive implementation candidate `aca8143a8f158bbe3411d4df13bf14303b822f
 |---|---:|
 | page geometry semantic/rollback/serde tests | 6/6 pass |
 | existing page-alignment regression tests | 6/6 pass |
-| `.slides` gating/nullability/rollback/shadowing/serde tests | 6/6 pass |
+| `.slides` gating/nullability/toggle-order/rollback/shadowing/serde tests | 9/9 pass |
 | explicit-break parser boundary/adversarial tests | 6/6 pass |
 | explicit-break IR/evaluator/fail-closed/shadowing/serde tests | 4/4 pass |
-| Typst slides prelude/ordering/weak-break tests | 5/5 pass |
+| Typst slides prelude/ordering/weak-break tests | 6/6 pass |
 | existing automatic-pagebreak artifact regression | 5/5 pass |
 | real in-process Typst PDF artifact matrix | 8/8 pass |
 | subprocess/in-process slides backend parity with pinned Typst 0.15.1 | pass |
@@ -202,7 +211,9 @@ The 8-case real-PDF matrix covers:
 - heading-at-start plus H1/H2 automatic boundaries without a leading empty page;
 - first body-only plus consecutive interior body-only slides;
 - short and long body-only slides without accidental pagination;
-- default layout, omitted/nullable `.slides`, explicit center true/false, and `focus` retaining the expected page contract.
+- default layout, omitted/nullable `.slides`, explicit center true/false,
+  presentation-only controls/speaker-note toggles, and `focus` retaining the
+  expected page contract.
 
 The dedicated `slides_backend_parity` integration test compares in-process and subprocess Typst PDF page counts and MediaBox geometry across explicit boundaries, centered layout, `focus`, and explicit page geometry. Production CI ran it against pinned Typst 0.15.1 on Linux, macOS, and Windows.
 

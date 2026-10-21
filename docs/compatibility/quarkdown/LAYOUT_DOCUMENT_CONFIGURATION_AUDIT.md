@@ -797,11 +797,15 @@ specified, because the upstream node constructs a transition only then.
 
 The configuration is document-wide presentation state, but upstream carries it
 as an ordered AST initializer rather than `DocumentInfo` metadata. Arkst now
-has a bounded slides state/PDF slice for the currently evidenced center/page
-geometry behavior. Controls, speaker notes, transition style/speed, complete
-v2.5.1 document-type gating/defaults, and the separate #154
-`.fragment`/`.speakernote` content rows remain open. Status is `PARTIAL`
-under #178.
+has a bounded slides state/PDF slice for center/page geometry and preserves the
+nullable `controls` and `speakernotes` settings in the same backend-neutral
+configuration. Omission and explicit `none` retain renderer defaults; supplied
+Booleans are validated with the other arguments before one atomic commit.
+Typst/PDF output intentionally remains unchanged for these presentation-only
+toggles and does not fabricate browser controls or speaker-view behavior.
+Transition style/speed, their renderer behavior, and the separate #154
+`.fragment`/`.speakernote` content rows remain open. Status is `PARTIAL` under
+#178.
 
 ## 5. Arkst pipeline and architecture boundary
 

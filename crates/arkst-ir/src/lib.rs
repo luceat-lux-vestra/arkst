@@ -1279,12 +1279,17 @@ pub struct IrPageBorderWidths {
 
 /// Backend-neutral slides document configuration.
 ///
-/// `center: None` preserves the renderer/theme default. Renderer-specific
-/// geometry and offsets remain backend-owned.
+/// A `None` field preserves the renderer/theme default. Renderer-specific
+/// geometry, interactive controls, and speaker-view behavior remain
+/// backend-owned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct IrSlidesConfiguration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controls: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_notes: Option<bool>,
 }
 
 /// Backend-neutral document-global horizontal alignment.
