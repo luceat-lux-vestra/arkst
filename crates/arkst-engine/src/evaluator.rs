@@ -9433,49 +9433,53 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 }
             };
-            let parameter_span = bound
+            let parameter_spans = bound
                 .parameters
-                .first()
-                .and_then(|parameter| parameter.name_span);
-            let center = match bound.slots.into_iter().next() {
-                Some(BoundSlot::Explicit {
-                    value,
-                    span: argument_span,
-                }) => {
-                    if matches!(value.value, IrValue::None) {
-                        None
-                    } else {
-                        match value_conversion::convert_scalar_with_origin(
-                            &value,
-                            ScalarTarget::Boolean,
-                        ) {
-                            Ok(ScalarValue::Boolean(value)) => Some(value),
-                            Ok(_) => {
-                                diagnostics.push(document_state_conversion_error(
-                                    "`.slides center` must be boolean or none".to_string(),
-                                    argument_span,
-                                ));
-                                return CallOutcome::Failed;
-                            }
-                            Err(error) => {
-                                diagnostics.push(conversion_failure_diagnostic(
-                                    value_conversion::ConversionFailure::new(
-                                        error,
-                                        Some(argument_span),
-                                        Some("center"),
-                                        parameter_span,
-                                        *span,
-                                    ),
-                                    Some("`.slides`"),
-                                ));
-                                return CallOutcome::Failed;
-                            }
-                        }
-                    }
+                .iter()
+                .map(|parameter| parameter.name_span)
+                .collect::<Vec<_>>();
+            let mut slots = bound.slots.into_iter();
+            let center = match convert_nullable_slides_boolean(
+                slots.next(),
+                "center",
+                parameter_spans.first().copied().flatten(),
+                *span,
+            ) {
+                NullableSlidesBoolean::Value(value) => value,
+                NullableSlidesBoolean::Invalid(diagnostic) => {
+                    diagnostics.push(diagnostic);
+                    return CallOutcome::Failed;
                 }
-                _ => None,
             };
-            context.set_slides_configuration(Some(IrSlidesConfiguration { center }));
+            let controls = match convert_nullable_slides_boolean(
+                slots.next(),
+                "controls",
+                parameter_spans.get(1).copied().flatten(),
+                *span,
+            ) {
+                NullableSlidesBoolean::Value(value) => value,
+                NullableSlidesBoolean::Invalid(diagnostic) => {
+                    diagnostics.push(diagnostic);
+                    return CallOutcome::Failed;
+                }
+            };
+            let speaker_notes = match convert_nullable_slides_boolean(
+                slots.next(),
+                "speakernotes",
+                parameter_spans.get(2).copied().flatten(),
+                *span,
+            ) {
+                NullableSlidesBoolean::Value(value) => value,
+                NullableSlidesBoolean::Invalid(diagnostic) => {
+                    diagnostics.push(diagnostic);
+                    return CallOutcome::Failed;
+                }
+            };
+            context.set_slides_configuration(Some(IrSlidesConfiguration {
+                center,
+                controls,
+                speaker_notes,
+            }));
             return CallOutcome::NoValue;
         }
 
@@ -18499,7 +18503,11 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "noautopagebreak" => (Vec::new(), BodyPolicy::Reject),
         "slides" => (
-            vec![ParameterMetadata::optional("center")],
+            vec![
+                ParameterMetadata::optional("center"),
+                ParameterMetadata::optional("controls"),
+                ParameterMetadata::optional("speakernotes"),
+            ],
             BodyPolicy::Reject,
         ),
         "pagebreak" => (Vec::new(), BodyPolicy::Reject),
@@ -21335,6 +21343,46 @@ fn localization_error(message: impl Into<String>, span: SourceSpan) -> Diagnosti
         hints: vec![
             "Localization state is published only after complete candidate validation.".to_string(),
         ],
+    }
+}
+
+enum NullableSlidesBoolean {
+    Value(Option<bool>),
+    Invalid(Diagnostic),
+}
+
+fn convert_nullable_slides_boolean(
+    slot: Option<BoundSlot<InvocationValue>>,
+    parameter_name: &str,
+    parameter_span: Option<SourceSpan>,
+    call_span: SourceSpan,
+) -> NullableSlidesBoolean {
+    let Some(BoundSlot::Explicit {
+        value,
+        span: argument_span,
+    }) = slot
+    else {
+        return NullableSlidesBoolean::Value(None);
+    };
+    if matches!(value.value, IrValue::None) {
+        return NullableSlidesBoolean::Value(None);
+    }
+    match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Boolean) {
+        Ok(ScalarValue::Boolean(value)) => NullableSlidesBoolean::Value(Some(value)),
+        Ok(_) => NullableSlidesBoolean::Invalid(document_state_conversion_error(
+            format!("`.slides {parameter_name}` must be boolean or none"),
+            argument_span,
+        )),
+        Err(error) => NullableSlidesBoolean::Invalid(conversion_failure_diagnostic(
+            value_conversion::ConversionFailure::new(
+                error,
+                Some(argument_span),
+                Some(parameter_name),
+                parameter_span,
+                call_span,
+            ),
+            Some("`.slides`"),
+        )),
     }
 }
 

@@ -135,6 +135,7 @@ fn default_focus_and_nullable_center_variants_preserve_slide_page_contract() {
         ".doctype {slides}\n.slides\n\nNULLABLE-CENTER\n",
         ".doctype {slides}\n.slides center:{true}\n\nCENTERED\n",
         ".doctype {slides}\n.slides center:{false}\n\nTOP\n",
+        ".doctype {slides}\n.slides controls:{false} speakernotes:{true}\n\nPRESENTATION-TOGGLES\n",
         ".doctype {slides}\n.theme layout:{focus}\n\n# FOCUS\n",
     ] {
         let pdf = compile_pdf(source);

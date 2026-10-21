@@ -8,7 +8,10 @@ use arkst_typst::lowering::lower_to_typst_code;
 fn slides_document(center: Option<bool>, focus: bool) -> IrDocument {
     let mut metadata = IrMetadata::default();
     metadata.document_state.document_type = IrDocumentType::Slides;
-    metadata.document_state.slides = Some(IrSlidesConfiguration { center });
+    metadata.document_state.slides = Some(IrSlidesConfiguration {
+        center,
+        ..IrSlidesConfiguration::default()
+    });
     if focus {
         metadata.document_state.theme = Some(IrDocumentTheme {
             color: None,
@@ -38,6 +41,18 @@ fn explicit_center_values_lower_to_closed_vertical_alignment_choices() {
 
     let top = lower_to_typst_code(&slides_document(Some(false), false));
     assert!(top.contains("#set align(top)\n"), "{top}");
+}
+
+#[test]
+fn presentation_only_toggles_do_not_fabricate_typst_pdf_behavior() {
+    let baseline = lower_to_typst_code(&slides_document(None, false));
+    let mut configured = slides_document(None, false);
+    configured.metadata.document_state.slides = Some(IrSlidesConfiguration {
+        center: None,
+        controls: Some(false),
+        speaker_notes: Some(true),
+    });
+    assert_eq!(lower_to_typst_code(&configured), baseline);
 }
 
 #[test]
