@@ -10,7 +10,8 @@ use arkst_ir::{
     IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrContainerAlignment,
     IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline,
     IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition, IrPageOrientation, IrPageSide,
-    IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrValue,
+    IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
+    IrSlideTransitionStyle, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
@@ -255,6 +256,8 @@ pub(crate) enum ClosedEnumTarget {
     ContainerAlignment,
     BoxType,
     ClipShape,
+    SlideTransitionStyle,
+    SlideTransitionSpeed,
 }
 
 /// Domain-specific conversion targets kept separate from scalar conversion.
@@ -452,6 +455,46 @@ static CLIP_SHAPE_SPEC: ClosedEnumSpec<'static, IrClipShape> = ClosedEnumSpec {
         value: IrClipShape::Circle,
     }],
 };
+
+static SLIDE_TRANSITION_STYLE_SPEC: ClosedEnumSpec<'static, IrSlideTransitionStyle> =
+    ClosedEnumSpec {
+        variants: &[
+            ClosedEnumVariant {
+                declaration_name: "NONE",
+                value: IrSlideTransitionStyle::None,
+            },
+            ClosedEnumVariant {
+                declaration_name: "FADE",
+                value: IrSlideTransitionStyle::Fade,
+            },
+            ClosedEnumVariant {
+                declaration_name: "SLIDE",
+                value: IrSlideTransitionStyle::Slide,
+            },
+            ClosedEnumVariant {
+                declaration_name: "ZOOM",
+                value: IrSlideTransitionStyle::Zoom,
+            },
+        ],
+    };
+
+static SLIDE_TRANSITION_SPEED_SPEC: ClosedEnumSpec<'static, IrSlideTransitionSpeed> =
+    ClosedEnumSpec {
+        variants: &[
+            ClosedEnumVariant {
+                declaration_name: "DEFAULT",
+                value: IrSlideTransitionSpeed::Default,
+            },
+            ClosedEnumVariant {
+                declaration_name: "FAST",
+                value: IrSlideTransitionSpeed::Fast,
+            },
+            ClosedEnumVariant {
+                declaration_name: "SLOW",
+                value: IrSlideTransitionSpeed::Slow,
+            },
+        ],
+    };
 
 static PAGE_SIDE_SPEC: ClosedEnumSpec<'static, IrPageSide> = ClosedEnumSpec {
     variants: &[
@@ -1326,6 +1369,42 @@ pub(crate) fn convert_domain_with_origin(
                     CLIP_SHAPE_SPEC
                         .value_for(value)
                         .map(|value| DomainValue::Enum(IrEnumValue::ClipShape(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::SlideTransitionStyle => match &argument.value {
+                IrValue::Enum(IrEnumValue::SlideTransitionStyle(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::SlideTransitionStyle(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    SLIDE_TRANSITION_STYLE_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionStyle(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::SlideTransitionSpeed => match &argument.value {
+                IrValue::Enum(IrEnumValue::SlideTransitionSpeed(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    SLIDE_TRANSITION_SPEED_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(value)))
                         .ok_or(ConversionError::InvalidText {
                             target: ConversionTarget::Enum,
                         })
@@ -2625,7 +2704,8 @@ mod tests {
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
         IrCrossAxisAlignment, IrDocumentType, IrEnumValue, IrInline, IrInlineBody,
         IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrValue,
+        IrSlideTransitionSpeed, IrSlideTransitionStyle, IrStackedComponent, IrStackedLayout,
+        IrValue,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
 
@@ -3425,6 +3505,68 @@ mod tests {
             convert_domain_with_origin(
                 &InvocationValue::static_value(IrValue::String("top".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
+            ),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum
+            })
+        ));
+    }
+
+    #[test]
+    fn slide_transition_domains_are_closed_case_insensitive_and_typed() {
+        for (text, expected) in [
+            ("none", IrSlideTransitionStyle::None),
+            ("FADE", IrSlideTransitionStyle::Fade),
+            ("Slide", IrSlideTransitionStyle::Slide),
+            ("zoom", IrSlideTransitionStyle::Zoom),
+        ] {
+            assert_eq!(
+                convert_domain_with_origin(
+                    &InvocationValue::dynamic_value(IrValue::Identifier(text.into())),
+                    DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionStyle),
+                ),
+                Ok(DomainValue::Enum(IrEnumValue::SlideTransitionStyle(
+                    expected
+                )))
+            );
+        }
+        for (text, expected) in [
+            ("default", IrSlideTransitionSpeed::Default),
+            ("FAST", IrSlideTransitionSpeed::Fast),
+            ("Slow", IrSlideTransitionSpeed::Slow),
+        ] {
+            assert_eq!(
+                convert_domain_with_origin(
+                    &InvocationValue::dynamic_value(IrValue::Identifier(text.into())),
+                    DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionSpeed),
+                ),
+                Ok(DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(
+                    expected
+                )))
+            );
+        }
+
+        let typed = IrEnumValue::SlideTransitionStyle(IrSlideTransitionStyle::Fade);
+        assert_eq!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::Enum(typed)),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionStyle),
+            ),
+            Ok(DomainValue::Enum(typed))
+        );
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::dynamic_value(IrValue::String("spin".into())),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionStyle),
+            ),
+            Err(ConversionError::InvalidText {
+                target: ConversionTarget::Enum
+            })
+        ));
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::String("fast".into())),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionSpeed),
             ),
             Err(ConversionError::UnsupportedValue {
                 target: ConversionTarget::Enum

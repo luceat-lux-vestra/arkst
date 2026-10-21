@@ -1280,8 +1280,8 @@ pub struct IrPageBorderWidths {
 /// Backend-neutral slides document configuration.
 ///
 /// A `None` field preserves the renderer/theme default. Renderer-specific
-/// geometry, interactive controls, and speaker-view behavior remain
-/// backend-owned.
+/// geometry, interactive controls, speaker-view behavior, and transition
+/// rendering remain backend-owned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct IrSlidesConfiguration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1290,6 +1290,42 @@ pub struct IrSlidesConfiguration {
     pub controls: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker_notes: Option<bool>,
+    /// A transition exists only when the source supplies a non-null style.
+    /// A standalone speed argument is validated but has no semantic state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<IrSlideTransition>,
+}
+
+/// Backend-neutral transition configuration for an interactive slide deck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrSlideTransition {
+    pub style: IrSlideTransitionStyle,
+    #[serde(default, skip_serializing_if = "IrSlideTransitionSpeed::is_default")]
+    pub speed: IrSlideTransitionSpeed,
+}
+
+/// The public closed slide-transition style domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrSlideTransitionStyle {
+    None,
+    Fade,
+    Slide,
+    Zoom,
+}
+
+/// The public closed slide-transition speed domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum IrSlideTransitionSpeed {
+    #[default]
+    Default,
+    Fast,
+    Slow,
+}
+
+impl IrSlideTransitionSpeed {
+    fn is_default(&self) -> bool {
+        matches!(self, Self::Default)
+    }
 }
 
 /// Backend-neutral document-global horizontal alignment.
@@ -1642,6 +1678,8 @@ pub enum IrEnumValue {
     ContainerAlignment(IrContainerAlignment),
     BoxType(IrBoxType),
     ClipShape(IrClipShape),
+    SlideTransitionStyle(IrSlideTransitionStyle),
+    SlideTransitionSpeed(IrSlideTransitionSpeed),
 }
 
 /// A closed target discriminator for native content that remains opaque until

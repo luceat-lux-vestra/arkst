@@ -1,6 +1,7 @@
 use arkst_ir::{
     IrDocument, IrDocumentTheme, IrDocumentType, IrMetadata, IrNode, IrPageGeometry, IrSize,
-    IrSizeUnit, IrSlidesConfiguration,
+    IrSizeUnit, IrSlideTransition, IrSlideTransitionSpeed, IrSlideTransitionStyle,
+    IrSlidesConfiguration,
 };
 use arkst_source::{SourceId, SourceSpan};
 use arkst_typst::lowering::lower_to_typst_code;
@@ -51,8 +52,33 @@ fn presentation_only_toggles_do_not_fabricate_typst_pdf_behavior() {
         center: None,
         controls: Some(false),
         speaker_notes: Some(true),
+        transition: None,
     });
     assert_eq!(lower_to_typst_code(&configured), baseline);
+
+    for (style, speed) in [
+        (
+            IrSlideTransitionStyle::None,
+            IrSlideTransitionSpeed::Default,
+        ),
+        (IrSlideTransitionStyle::Fade, IrSlideTransitionSpeed::Fast),
+        (IrSlideTransitionStyle::Slide, IrSlideTransitionSpeed::Slow),
+        (
+            IrSlideTransitionStyle::Zoom,
+            IrSlideTransitionSpeed::Default,
+        ),
+    ] {
+        let mut configured = slides_document(None, false);
+        configured.metadata.document_state.slides = Some(IrSlidesConfiguration {
+            transition: Some(IrSlideTransition { style, speed }),
+            ..IrSlidesConfiguration::default()
+        });
+        assert_eq!(
+            lower_to_typst_code(&configured),
+            baseline,
+            "{style:?}/{speed:?}"
+        );
+    }
 }
 
 #[test]

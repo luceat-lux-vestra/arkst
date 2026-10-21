@@ -82,6 +82,7 @@ fn slides_pdf_contract_matches_subprocess_and_inprocess_backends() {
         ".doctype {slides}\n\nFIRST\n\n<<<\n\nSECOND\n",
         ".doctype {slides}\n.slides center:{true}\n\nCENTERED\n",
         ".doctype {slides}\n.slides controls:{true} speakernotes:{false}\n\nPRESENTATION-TOGGLES\n",
+        ".doctype {slides}\n.slides transition:{zoom} speed:{fast}\n\nTRANSITION-STATE\n",
         ".doctype {slides}\n.theme layout:{focus}\n\n# FOCUS\n",
         ".doctype {slides}\n.pageformat width:{10in} height:{5in}\n\nEXPLICIT\n",
     ] {
