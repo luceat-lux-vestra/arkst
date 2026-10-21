@@ -371,6 +371,7 @@ struct BoundContainerArguments {
     width: Option<ContainerArgument>,
     height: Option<ContainerArgument>,
     full_width: Option<ContainerArgument>,
+    full_column_span: Option<ContainerArgument>,
 }
 
 struct BoundWhitespaceArguments {
@@ -5680,6 +5681,7 @@ impl Evaluator {
                 width: None,
                 height: None,
                 full_width: true,
+                full_column_span: false,
                 alignment: Some(IrContainerAlignment::Center),
                 children,
                 span: *span,
@@ -7225,6 +7227,7 @@ impl Evaluator {
                 width: None,
                 height: None,
                 full_width: true,
+                full_column_span: false,
                 alignment: Some(alignment),
                 children,
                 span: *span,
@@ -7330,6 +7333,21 @@ impl Evaluator {
             },
             None => false,
         };
+        let full_column_span = match bound.full_column_span.as_ref() {
+            Some(argument) => match convert_container_boolean(&argument.value) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(container_conversion_error(
+                        "fullspan",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => false,
+        };
 
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
@@ -7362,6 +7380,7 @@ impl Evaluator {
                 width,
                 height,
                 full_width,
+                full_column_span,
                 alignment: None,
                 children,
                 span: *span,
@@ -17301,10 +17320,12 @@ fn bind_container_arguments(
     let width = take(slots.next());
     let height = take(slots.next());
     let full_width = take(slots.next());
+    let full_column_span = take(slots.next());
     Ok(BoundContainerArguments {
         width,
         height,
         full_width,
+        full_column_span,
     })
 }
 
@@ -18377,6 +18398,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("width"),
                 ParameterMetadata::optional("height"),
                 ParameterMetadata::optional("fullwidth"),
+                ParameterMetadata::defaulted("fullspan").positional(false),
             ],
             BodyPolicy::AllowSeparate,
         ),
@@ -20293,7 +20315,6 @@ fn native_binding_message(name: &str, message: String) -> String {
             && matches!(
                 argument.trim_matches('`'),
                 "float"
-                    | "fullspan"
                     | "classname"
                     | "foreground"
                     | "background"
@@ -20314,7 +20335,7 @@ fn native_binding_message(name: &str, message: String) -> String {
             )
         {
             return format!(
-                "`.container` parameter {argument} is not supported by the bounded container sizing slice"
+                "`.container` parameter {argument} is not supported by the bounded container contract"
             );
         }
         if name == "container" {

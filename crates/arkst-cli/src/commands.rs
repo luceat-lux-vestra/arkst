@@ -1772,6 +1772,7 @@ mod tests {
                     width: None,
                     height: None,
                     full_width: false,
+                    full_column_span: false,
                     alignment: None,
                     children: vec![explicit_node()],
                     span,
@@ -1822,6 +1823,7 @@ mod tests {
                     width: None,
                     height: None,
                     full_width: false,
+                    full_column_span: false,
                     alignment: None,
                     children: vec![IrNode::Blockquote {
                         content: vec![explicit_node()],

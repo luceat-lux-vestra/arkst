@@ -2436,6 +2436,58 @@ fn integration_container_sizing_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_container_fullspan_breaks_out_of_page_columns_and_compiles_to_pdf() {
+    let source = ".pageformat columns:{2}\nBefore\n\n.container fullspan:{yes}\n    ## Across\n    Body\n\nAfter\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container-fullspan.qd")
+        .expect("valid entry path")
+        .add_source("container-fullspan.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container fullspan diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(result.ir.nodes.iter().any(|node| matches!(
+        node,
+        IrNode::Component {
+            component: IrComponent::Container(component)
+        } if component.full_column_span
+    )));
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.starts_with("#set page(columns: 2)\n"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code
+            .contains("#place(top + center, scope: \"parent\", float: true, block(width: 100%)["),
+        "{typst_code}"
+    );
+    assert!(typst_code.contains("#place.flush()"), "{typst_code}");
+    assert!(typst_code.contains("Across"), "{typst_code}");
+    assert!(typst_code.find("Before").unwrap() < typst_code.find("Across").unwrap());
+    assert!(typst_code.find("Across").unwrap() < typst_code.find("After").unwrap());
+
+    with_typst("container-fullspan", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container-fullspan.qd".to_string(),
+            })
+            .expect("container fullspan Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_whitespace_lowers_to_lossless_typst_and_pdf() {
     let source = "A .whitespace B\n\n.whitespace width:{2cm}\n\n.whitespace height:{2cm}\n\n.whitespace width:{2cm} height:{1cm}\n";
     let project = VirtualProjectBuilder::new()

@@ -116,9 +116,11 @@ dependency:
   local component consumers. The bounded row/column/grid/center/alignment/
   landscape/whitespace rows have semantic and output evidence; the remaining
   component functions do not.
-- .container is PARTIAL: bounded width/height/fullwidth behavior exists,
-  while float, full-span, class, style, and complete body conversion remain
-  open.
+- .container is PARTIAL: bounded width/height/fullwidth plus named
+  `fullspan` behavior exists. Multi-column output uses a parent-scoped
+  full-width Typst top-float and immediate flush; exact upstream in-flow
+  placement remains unclaimed. Float, class, style, and complete body
+  conversion remain open.
 - .text is PARTIAL: rich inline content, URL wrapping, all seven relative-size
   values, all four text-case values, both font variants, both script positions,
   weight/style, all six decoration values, and origin-aware RGBA color have
@@ -157,8 +159,9 @@ producer and shared-index boundaries:
   `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, and
   `.speakernote`, plus the bounded `.keybinding` and `.loremipsum` content
   producer review. The remaining component-local `.container` subcontracts
-  (`float`, `fullspan`, `classname`, `style`, and complete body conversion)
-  are linked there without transferring document-wide state ownership.
+  (`float`, `classname`, `style`, and complete body conversion) are linked
+  there without transferring document-wide state ownership. The standalone
+  `.fullspan` producer remains separately open under the same issue.
 - [#185](https://github.com/luceat-lux-vestra/arkst/issues/185) owns inline
   and display math, `.math`, code presentation/captions, `.codespan`, and
   explicit `.pagebreak`/`<<<` breaks. It consumes #181 shared caption,

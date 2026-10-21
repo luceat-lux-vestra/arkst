@@ -60,6 +60,7 @@ fn container_empty_constructs_unaligned_container() {
     assert_eq!(component.width, None);
     assert_eq!(component.height, None);
     assert!(!component.full_width);
+    assert!(!component.full_column_span);
     assert_eq!(component.alignment, None);
     assert!(component.children.is_empty());
 }
@@ -117,6 +118,14 @@ fn container_accepts_bounded_sizing_and_boolean_values() {
     let no = compile_source(".container fullwidth:{no}\n    A\n");
     assert!(no.diagnostics.is_empty(), "{no:?}");
     assert!(!container(&no).full_width);
+
+    let full_span = compile_source(".container fullspan:{yes}\n    A\n");
+    assert!(full_span.diagnostics.is_empty(), "{full_span:?}");
+    assert!(container(&full_span).full_column_span);
+
+    let column_span = compile_source(".container fullspan:{no}\n    A\n");
+    assert!(column_span.diagnostics.is_empty(), "{column_span:?}");
+    assert!(!container(&column_span).full_column_span);
 }
 
 #[test]
@@ -173,6 +182,9 @@ fn container_origin_aware_conversion_rejects_static_text() {
 
     let boolean = compile_source(".container fullwidth:{.string {yes}}\n    A\n");
     assert_one_failure(&boolean, "parameter `fullwidth`");
+
+    let full_span = compile_source(".container fullspan:{.string {yes}}\n    A\n");
+    assert_one_failure(&full_span, "parameter `fullspan`");
 }
 
 #[test]
@@ -222,10 +234,14 @@ fn container_rejects_duplicate_unknown_and_out_of_signature_arguments() {
     );
     assert_one_failure(
         &compile_source(".container {1cm} {2cm} {yes} {4cm}\n    A\n"),
-        "at most three positional arguments",
+        "parameter `fullspan` requires a named argument",
     );
     assert_one_failure(
         &compile_source(".container {4cm} width:{2cm}\n    A\n"),
+        "bound more than once",
+    );
+    assert_one_failure(
+        &compile_source(".container fullspan:{yes} fullspan:{no}\n    A\n"),
         "bound more than once",
     );
 }
@@ -234,7 +250,6 @@ fn container_rejects_duplicate_unknown_and_out_of_signature_arguments() {
 fn container_rejects_deferred_known_parameters_explicitly() {
     for parameter in [
         "float",
-        "fullspan",
         "classname",
         "padding",
         "foreground",
@@ -243,9 +258,7 @@ fn container_rejects_deferred_known_parameters_explicitly() {
         let source = format!(".container {parameter}:{{value}}\n    A\n");
         assert_one_failure(
             &compile_source(&source),
-            &format!(
-                "parameter `{parameter}` is not supported by the bounded container sizing slice"
-            ),
+            &format!("parameter `{parameter}` is not supported by the bounded container contract"),
         );
     }
 }
@@ -260,6 +273,21 @@ fn container_argument_failure_does_not_evaluate_body() {
         compile_source(".container fullwidth:{maybe}\n    .grid columns:{0}\n        A\n");
     assert_one_failure(&full_width, "parameter `fullwidth`");
     assert!(!full_width.diagnostics[0].message.contains("columns"));
+
+    let full_span_source = ".container fullspan:{maybe}\n    .grid columns:{0}\n        A\n";
+    let full_span = compile_source(full_span_source);
+    assert_one_failure(&full_span, "parameter `fullspan`");
+    assert!(!full_span.diagnostics[0].message.contains("columns"));
+    let primary = full_span.diagnostics[0]
+        .primary
+        .expect("fullspan diagnostic must retain argument provenance");
+    assert!(
+        full_span_source
+            .get(primary.start..primary.end)
+            .is_some_and(|text| text.contains("fullspan")),
+        "{:?}",
+        full_span.diagnostics[0]
+    );
 }
 
 #[test]

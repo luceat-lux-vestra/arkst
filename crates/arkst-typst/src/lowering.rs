@@ -84,6 +84,9 @@ struct LoweringContext {
     /// Final document-global alignment consumed only by row/column components
     /// whose main-axis alignment remained omitted through semantic evaluation.
     inherited_stack_main_axis: IrMainAxisAlignment,
+    /// Whether final selector-free page layout has more than one column.
+    /// Full-column container breakout is inert in a single-column document.
+    multi_column_layout: bool,
 }
 
 fn selector_free_page_alignment(doc: &IrDocument) -> Option<IrDocumentAlignment> {
@@ -98,6 +101,18 @@ fn selector_free_page_alignment(doc: &IrDocument) -> Option<IrDocumentAlignment>
     state.page_alignment
 }
 
+fn selector_free_page_columns(doc: &IrDocument) -> Option<u32> {
+    let state = &doc.metadata.document_state;
+    if !state.page_format.layers.is_empty() {
+        return state
+            .page_format
+            .resolve_exact_selector(None)
+            .and_then(|global| global.columns);
+    }
+
+    state.page_columns
+}
+
 impl LoweringContext {
     fn new() -> Self {
         Self {
@@ -110,6 +125,7 @@ impl LoweringContext {
             at_line_start: false,
             verbatim: false,
             inherited_stack_main_axis: IrMainAxisAlignment::Start,
+            multi_column_layout: false,
         }
     }
 
@@ -135,6 +151,8 @@ impl LoweringContext {
                 IrMainAxisAlignment::Start
             }
         };
+        self.multi_column_layout =
+            selector_free_page_columns(doc).is_some_and(|columns| columns > 1);
 
         // Emit metadata as Typst set-rules
         if let Some(ref title) = doc.metadata.title {
@@ -604,6 +622,12 @@ impl LoweringContext {
 
     fn lower_container(&mut self, component: &IrContainerComponent) {
         let before = self.output.len();
+        let break_out = component.full_column_span && self.multi_column_layout;
+        if break_out {
+            self.push_str(
+                "#place(top + center, scope: \"parent\", float: true, block(width: 100%)[\n",
+            );
+        }
         self.push_str("#block");
         let width = component.width.as_ref();
         if width.is_some() || component.full_width || component.height.is_some() {
@@ -644,6 +668,9 @@ impl LoweringContext {
         }
         self.push(']');
         self.push('\n');
+        if break_out {
+            self.push_str("])\n#place.flush()\n");
+        }
         if component.span.source_id != SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
         }
@@ -1839,6 +1866,7 @@ mod tests {
                 width: None,
                 height: None,
                 full_width: true,
+                full_column_span: false,
                 alignment: Some(IrContainerAlignment::Center),
                 children,
                 span: empty_span(),
@@ -1876,6 +1904,7 @@ mod tests {
                 width,
                 height,
                 full_width,
+                full_column_span: false,
                 alignment,
                 children: vec![paragraph("A")],
                 span: empty_span(),
@@ -2122,6 +2151,54 @@ mod tests {
     }
 
     #[test]
+    fn container_full_column_span_uses_bounded_parent_breakout_only_for_multiple_columns() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 42);
+        let mut document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    width: None,
+                    height: None,
+                    full_width: false,
+                    full_column_span: true,
+                    alignment: None,
+                    children: vec![paragraph("Across")],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let single_column = super::lower_to_typst_code(&document);
+        assert!(single_column.contains("#block["), "{single_column}");
+        assert!(!single_column.contains("#place("), "{single_column}");
+        assert!(!single_column.contains("#place.flush()"), "{single_column}");
+
+        document.metadata.document_state.page_columns = Some(2);
+        let (multiple_columns, source_map) = super::lower_to_typst(&document);
+        assert!(
+            multiple_columns.contains(
+                "#place(top + center, scope: \"parent\", float: true, block(width: 100%)["
+            ),
+            "{multiple_columns}"
+        );
+        assert!(
+            multiple_columns.contains("#place.flush()"),
+            "{multiple_columns}"
+        );
+        assert!(
+            multiple_columns.contains("#block[\nAcross"),
+            "{multiple_columns}"
+        );
+        let wrapper = source_map
+            .iter()
+            .find(|entry| entry.original == call_span)
+            .expect("full-span container call span is mapped");
+        let generated = &multiple_columns[wrapper.generated_start..wrapper.generated_end];
+        assert!(generated.contains("#place("), "{generated}");
+        assert!(generated.contains("#place.flush()"), "{generated}");
+    }
+
+    #[test]
     fn container_component_preserves_logical_alignment_names() {
         for (alignment, name) in [
             (IrContainerAlignment::Start, "start"),
@@ -2134,6 +2211,7 @@ mod tests {
                         width: None,
                         height: None,
                         full_width: true,
+                        full_column_span: false,
                         alignment: Some(alignment),
                         children: vec![paragraph("A")],
                         span: empty_span(),
@@ -2166,6 +2244,7 @@ mod tests {
                     width: None,
                     height: None,
                     full_width: true,
+                    full_column_span: false,
                     alignment: Some(IrContainerAlignment::Center),
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
