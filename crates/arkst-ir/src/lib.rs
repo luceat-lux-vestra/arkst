@@ -230,6 +230,9 @@ fn collect_component_sources(
         IrComponent::Landscape(component) => {
             collect_document_sources(&component.children, sources)?;
         }
+        IrComponent::Clip(component) => {
+            collect_document_sources(&component.children, sources)?;
+        }
         IrComponent::Box(component) => {
             if let Some(title) = &component.title {
                 collect_inline_sources(title, sources)?;
@@ -1409,6 +1412,7 @@ pub enum IrComponent {
     Stacked(IrStackedComponent),
     Container(IrContainerComponent),
     Landscape(IrLandscapeComponent),
+    Clip(IrClipComponent),
     Box(IrBoxComponent),
     Collapse(IrCollapseComponent),
     Todo(IrTodoComponent),
@@ -1422,6 +1426,7 @@ impl IrComponent {
             Self::Stacked(component) => component.span,
             Self::Container(component) => component.span,
             Self::Landscape(component) => component.span,
+            Self::Clip(component) => component.span,
             Self::Box(component) => component.span,
             Self::Collapse(component) => component.span,
             Self::Todo(component) => component.span,
@@ -1452,6 +1457,23 @@ pub struct IrExplicitErrorComponent {
 pub struct IrLandscapeComponent {
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
+}
+
+/// Bounded backend-neutral semantic state produced by Quarkdown `.clip`.
+///
+/// The closed shape identity is retained without embedding CSS clip paths or
+/// Typst syntax in the IR. Exact renderer geometry remains backend-owned.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrClipComponent {
+    pub shape: IrClipShape,
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
+/// The public closed shape domain of the bounded Quarkdown `.clip` contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrClipShape {
+    Circle,
 }
 
 /// Bounded backend-neutral semantic state produced by the Quarkdown `.box`
@@ -1614,6 +1636,7 @@ pub enum IrEnumValue {
     StackedCrossAxisAlignment(IrCrossAxisAlignment),
     ContainerAlignment(IrContainerAlignment),
     BoxType(IrBoxType),
+    ClipShape(IrClipShape),
 }
 
 /// A closed target discriminator for native content that remains opaque until
@@ -2057,6 +2080,7 @@ enum WireComponent {
     Stacked(WireStackedComponent),
     Container(WireContainerComponent),
     Landscape(WireLandscapeComponent),
+    Clip(WireClipComponent),
     Box(WireBoxComponent),
     Collapse(WireCollapseComponent),
     Todo(WireTodoComponent),
@@ -2100,6 +2124,13 @@ struct WireContainerComponent {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireLandscapeComponent {
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireClipComponent {
+    shape: IrClipShape,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2681,6 +2712,11 @@ fn component_to_wire(
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
+        IrComponent::Clip(component) => WireComponent::Clip(WireClipComponent {
+            shape: component.shape,
+            children: wire_nodes(&component.children, sources)?,
+            span: component.span,
+        }),
         IrComponent::Box(component) => WireComponent::Box(WireBoxComponent {
             box_type: component.box_type,
             title: component
@@ -3234,6 +3270,11 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::Landscape(component) => IrComponent::Landscape(IrLandscapeComponent {
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+        WireComponent::Clip(component) => IrComponent::Clip(IrClipComponent {
+            shape: component.shape,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),

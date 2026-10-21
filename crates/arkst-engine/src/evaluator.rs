@@ -58,15 +58,15 @@ use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
     IrCallableResourceContext, IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable,
-    IrCodeCallout, IrCollapseComponent, IrColor, IrComponent, IrContainerAlignment,
-    IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment,
-    IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent, IrFontLayer,
-    IrFontState, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
-    IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState, IrPageBorderWidths,
-    IrPageCounterTarget, IrPageFormatLayer, IrPageFormatSelector, IrPageFormatState,
-    IrPageGeometry, IrPageMarginPosition, IrPageMargins, IrPageOrientation, IrPageRange,
-    IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter,
-    IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
+    IrClipComponent, IrCodeCallout, IrCollapseComponent, IrColor, IrComponent,
+    IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
+    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
+    IrFontLayer, IrFontState, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
+    IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState,
+    IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer, IrPageFormatSelector,
+    IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins, IrPageOrientation,
+    IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
     IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTodoComponent, IrValue,
     NativeTarget, TargetSpecificContent,
 };
@@ -477,6 +477,7 @@ fn component_contains_explicit_error(component: &IrComponent) -> bool {
         IrComponent::Landscape(component) => {
             component.children.iter().any(node_contains_explicit_error)
         }
+        IrComponent::Clip(component) => component.children.iter().any(node_contains_explicit_error),
         IrComponent::Box(component) => component.children.iter().any(node_contains_explicit_error),
         IrComponent::Collapse(component) => {
             component.children.iter().any(node_contains_explicit_error)
@@ -3941,6 +3942,10 @@ impl Evaluator {
             diagnostics.push(landscape_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_clip(name) && context.get_function(name).is_none() {
+            diagnostics.push(clip_inline_materialization_error(*span));
+            return Vec::new();
+        }
         if is_box(name) && context.get_function(name).is_none() {
             diagnostics.push(box_inline_materialization_error(*span));
             return Vec::new();
@@ -4838,6 +4843,20 @@ impl Evaluator {
                 diagnostics,
                 context,
                 native_binding_plan.as_ref(),
+            );
+        }
+
+        if is_clip(name) {
+            return self.evaluate_clip(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
             );
         }
 
@@ -5828,6 +5847,122 @@ impl Evaluator {
                 span: *span,
             },
         )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_clip(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let positional_values = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let named_values =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let candidates = invocation_candidates(
+            positional_values
+                .into_iter()
+                .zip(positional_args)
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            named_values,
+        );
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let bound = match binding_plan.bind(&candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let Some(BoundSlot::Explicit {
+            value,
+            span: argument_span,
+        }) = bound.slots.into_iter().next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let shape = match value_conversion::convert_domain_with_origin(
+            &value,
+            value_conversion::DomainTarget::ClosedEnum(
+                value_conversion::ClosedEnumTarget::ClipShape,
+            ),
+        ) {
+            Ok(value_conversion::DomainValue::Enum(IrEnumValue::ClipShape(value))) => value,
+            Ok(_) => unreachable!("Clip shape target returned a different closed enum"),
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic_with_detail(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(argument_span),
+                        Some("clip"),
+                        parameter_span,
+                        *span,
+                    ),
+                    Some("`.clip` shape"),
+                    Some("must be circle"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(clip_argument_error(
+                "`.clip` body is a Markdown block, not a lambda",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(clip_argument_error("`.clip` is block-only", *span));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(clip_argument_error(
+                    "`.clip` requires a Markdown block body",
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Clip(IrClipComponent {
+            shape,
+            children,
+            span: *span,
+        })))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -15291,6 +15426,11 @@ impl Evaluator {
                     Self::collect_evidenced_output_error_components(&component.children, components)
                 }
                 IrNode::Component {
+                    component: IrComponent::Clip(component),
+                } => {
+                    Self::collect_evidenced_output_error_components(&component.children, components)
+                }
+                IrNode::Component {
                     component: IrComponent::Box(component),
                 } => {
                     if let Some(title) = &component.title {
@@ -16558,6 +16698,7 @@ pub(crate) enum NativeDispatchOwner {
     Container,
     FullSpan,
     Landscape,
+    Clip,
     Box,
     Collapse,
     TextCollapse,
@@ -16629,6 +16770,7 @@ const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
 const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const FULL_SPAN_NATIVE_NAMES: &[&str] = &["fullspan"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
+const CLIP_NATIVE_NAMES: &[&str] = &["clip"];
 const BOX_NATIVE_NAMES: &[&str] = &["box"];
 const COLLAPSE_NATIVE_NAMES: &[&str] = &["collapse"];
 const TEXT_COLLAPSE_NATIVE_NAMES: &[&str] = &["textcollapse"];
@@ -16731,6 +16873,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Landscape,
         names: LANDSCAPE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Clip,
+        names: CLIP_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Box,
@@ -16873,6 +17019,10 @@ fn is_full_span(name: &str) -> bool {
 
 fn is_landscape(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Landscape)
+}
+
+fn is_clip(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Clip)
 }
 
 fn is_box(name: &str) -> bool {
@@ -18426,6 +18576,10 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
         "center" | "fullspan" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
+        "clip" => (
+            vec![ParameterMetadata::required("clip")],
+            BodyPolicy::AllowSeparate,
+        ),
         "box" => (
             // Structural binding keeps title and body optional so the established
             // body-only form remains unambiguous. The Box adapter enforces the
@@ -21684,6 +21838,31 @@ fn landscape_inline_materialization_error(span: SourceSpan) -> Diagnostic {
     }
 }
 
+fn clip_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.clip` accepts one circle shape argument and one required Markdown block body."
+                .to_string(),
+        ],
+    }
+}
+
+fn clip_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "`.clip` is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use `.clip {circle}` as a block call with a Markdown body.".to_string()],
+    }
+}
+
 fn box_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3003".to_string(),
@@ -22681,6 +22860,10 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
             rebase_dynamic_nodes(&mut component.children, source_span);
         }
         IrComponent::Landscape(component) => {
+            component.span = source_span;
+            rebase_dynamic_nodes(&mut component.children, source_span);
+        }
+        IrComponent::Clip(component) => {
             component.span = source_span;
             rebase_dynamic_nodes(&mut component.children, source_span);
         }

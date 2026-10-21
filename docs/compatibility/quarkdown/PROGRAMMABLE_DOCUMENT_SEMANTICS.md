@@ -368,7 +368,7 @@ Deferred from this slice:
 
 - general DynamicValue String → Markdown body conversion;
 - inline Stacked insertion (Stacked is block-only);
-- `.box`, `.clip`, `.figure`, and other layout families; and
+- `.box`, `.figure`, and other layout families; and
 - pixel-identical reproduction of upstream HTML/CSS rendering.
 
 The component remains backend-neutral in value context and may pass through
@@ -395,6 +395,26 @@ because Quarkdown's subsequent-content wrapping is not equivalent to Typst's
 option and standalone `.fullspan` producer use the same bounded parent-scoped
 breakout and do not claim exact in-flow placement. None of these semantics is
 inferred from Landscape.
+
+### Clip component consumer slice (2026-10-21)
+
+`.clip` is implemented for the documented `circle` shape as a bounded typed
+component consumer:
+
+- the native block call requires one positional or named `clip` argument and
+  one Markdown block body;
+- the origin-aware closed-enum adapter accepts dynamic textual `circle` while
+  retaining typed identity and rejecting static String coercion;
+- argument shape and value conversion complete before lazy body evaluation;
+- `IrComponent::Clip` preserves the typed shape, structured children,
+  call/child provenance, source-defined shadowing, and callable/nested
+  composition; and
+- pure Typst lowering emits `#block(clip: true, radius: 50%)[...]`, with
+  source-map tests and real Typst 0.15.1 PDF evidence.
+
+Additional shapes, inline insertion, generalized String-to-Markdown body
+conversion, exact CSS `clip-path` geometry and responsive parity, and
+figure-caption special handling remain unclaimed.
 
 ### Whitespace inline consumer slice (2026-08-21)
 
@@ -446,8 +466,8 @@ lambda-body forms publish no hard-break output. The existing Typst
 The v2.5.1 `NodeUtils.toPlainText()` projection omits `LineBreak`; Arkst's
 existing `IrInline::HardBreak` plaintext projection is therefore reused
 without a `.br`-specific `.plaintext` branch. This bounded slice does not
-implement or imply generalized inline components, `.text`, `.codespan`,
-`.clip`, or `.float`.
+implement or imply generalized inline components, `.text`, `.codespan`, or
+`.float`.
 
 ## Compatibility matrix
 
@@ -468,8 +488,9 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `.container` | Optional width/height, `fullwidth`, named `fullspan`, and optional Markdown body | Typed Container sizing plus additive `full_column_span`; multi-column Typst output uses a parent-scoped full-width top-float and immediate flush, while single-column output stays in ordinary flow | Keep page-column count document-global and the span request component-local; no backend escape hatch | Partial bounded layout slice | Exact in-flow HTML/CSS placement, float/class/style options, and generalized body conversion |
 | `.fullspan` | No non-body arguments and one required Markdown block body | Existing typed Container with `full_column_span: true`; block/lambda/inline validation precedes lazy body evaluation; callable and nested composition preserve provenance | Reuse the Container IR/lowering contract without new document state or backend syntax in core | Partial bounded block-body slice | Exact in-flow HTML/CSS placement and generalized String → Markdown conversion |
+| `.clip` | Required closed `circle` shape plus one Markdown block body | Origin-aware enum conversion and pre-body validation produce typed Clip children with preserved spans and composition; Typst emits a clipped 50%-radius block | Keep clipping component-local and backend-neutral; no document state or raw backend escape | Partial bounded circle slice | Additional shapes, exact CSS/responsive geometry, figure-caption special handling, generalized body conversion, and inline insertion |
 | `.whitespace` | Inline `Whitespace` node with optional `width: Size?` and `height: Size?`; positional order is width then height; no dimensions emit NBSP, while a supplied dimension creates a fixed-size empty rectangle | `IrInline::Whitespace` preserves the inline semantic, source span, surrounding order, typed Size conversion, zero for an omitted axis, and the existing standalone output bridge | Keep Whitespace inline and backend-neutral; reuse `InvocationValue`/`ValueOrigin` and materialize only through existing output boundaries | Implemented for the bounded argument, inline, block-output, provenance, and Typst slice | General inline node/value composition and other inline layout features |
-| `.br` | Argumentless inline `LineBreak` producer; no positional/named arguments or block/lambda body; `toPlainText()` omits the line break | Existing evaluator/native-call path materializes exactly one `IrInline::HardBreak` with the call span, preserves inline order and source-defined `br` precedence, validates before body evaluation, and reuses existing plaintext/Typst paths | Reuse `IrInline::HardBreak`; do not add `IrInline::Br`, `IrValue::LineBreak`, or a generic inline component | Implemented for the bounded v2.5.1 slice | `.text`, `.codespan`, `.clip`, `.float`, and generalized inline component/value conversion |
+| `.br` | Argumentless inline `LineBreak` producer; no positional/named arguments or block/lambda body; `toPlainText()` omits the line break | Existing evaluator/native-call path materializes exactly one `IrInline::HardBreak` with the call span, preserves inline order and source-defined `br` precedence, validates before body evaluation, and reuses existing plaintext/Typst paths | Reuse `IrInline::HardBreak`; do not add `IrInline::Br`, `IrValue::LineBreak`, or a generic inline component | Implemented for the bounded v2.5.1 slice | `.text`, `.codespan`, `.float`, and generalized inline component/value conversion |
 | `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | Backend-neutral `IrSize` conversion is consumed by row/column/grid gaps and `.whitespace` for the exact seven-unit decimal grammar, with typed identity and origin-gated text | Domain-specific origin-aware conversion adapter | Implemented for Stacked gaps and bounded `.whitespace` | Other Size consumers |
 | `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | Backend-neutral `IrColor` conversion implements the ordered Hex/RGB/RGBA/HSV-HSL/Named decoder families and numeric channels | Domain-specific origin-aware conversion adapter | Implemented | Color consumers, style, and component semantics |
 | Enum conversion | Closed enum values are matched through the allowed value set and public names | Explicit closed enum adapter preserves `DocumentType`, Stacked main-axis, and Stacked cross-axis domains with case-insensitive public names and no static String coercion | Closed domain adapter; no reflective generic coercion | Implemented for `.doctype` and Stacked layout | Other closed enum consumers |
@@ -620,7 +641,7 @@ v2.5.1 compatibility.
 
 Major deferred families remain separately tracked: the complete public
 stdlib/component/style/layout surface; generalized DynamicValue conversion and
-arbitrary inline component/callback bodies; `.box`, `.clip`, `.figure`, `.float`,
+arbitrary inline component/callback bodies; `.box`, `.figure`, `.float`,
 and broader layout families; remaining
 document-context and data-loading functions; host/process/environment
 semantics; and unrelated M3+ work. Raw HTML policy and behavior in issue #58
@@ -684,4 +705,4 @@ observable evidence is retained in
 focused core/evaluator/IR tests.
 
 The `.br` slice does not promote the broader text/layout family: `.text`,
-`.codespan`, `.clip`, and `.float` remain separate deferred work.
+`.codespan`, and `.float` remain separate deferred work.
