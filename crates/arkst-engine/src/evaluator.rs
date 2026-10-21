@@ -3933,6 +3933,10 @@ impl Evaluator {
             diagnostics.push(container_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_full_span(name) && context.get_function(name).is_none() {
+            diagnostics.push(full_span_inline_materialization_error(*span));
+            return Vec::new();
+        }
         if is_landscape(name) && context.get_function(name).is_none() {
             diagnostics.push(landscape_inline_materialization_error(*span));
             return Vec::new();
@@ -4808,6 +4812,19 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
+            );
+        }
+
+        if is_full_span(name) {
+            return self.evaluate_full_span(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -5744,6 +5761,69 @@ impl Evaluator {
 
         CallOutcome::Value(IrValue::Component(IrComponent::Landscape(
             IrLandscapeComponent {
+                children,
+                span: *span,
+            },
+        )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_full_span(
+        &self,
+        _positional_args: &[IrValue],
+        _named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if binding_plan
+            .bind::<InvocationValue>(&[], None, *span)
+            .is_err()
+        {
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(full_span_argument_error(
+                "`.fullspan` body is a Markdown block, not a lambda",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(full_span_argument_error("`.fullspan` is block-only", *span));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(full_span_argument_error(
+                    "`.fullspan` requires a Markdown block body",
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Container(
+            IrContainerComponent {
+                width: None,
+                height: None,
+                full_width: false,
+                full_column_span: true,
+                alignment: None,
                 children,
                 span: *span,
             },
@@ -16476,6 +16556,7 @@ pub(crate) enum NativeDispatchOwner {
     Center,
     Align,
     Container,
+    FullSpan,
     Landscape,
     Box,
     Collapse,
@@ -16546,6 +16627,7 @@ const VARIABLE_STATE_NATIVE_NAMES: &[&str] = &["var"];
 const CENTER_NATIVE_NAMES: &[&str] = &["center"];
 const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
 const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
+const FULL_SPAN_NATIVE_NAMES: &[&str] = &["fullspan"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
 const BOX_NATIVE_NAMES: &[&str] = &["box"];
 const COLLAPSE_NATIVE_NAMES: &[&str] = &["collapse"];
@@ -16641,6 +16723,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Container,
         names: CONTAINER_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::FullSpan,
+        names: FULL_SPAN_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Landscape,
@@ -16779,6 +16865,10 @@ fn is_align(name: &str) -> bool {
 
 fn is_container(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Container)
+}
+
+fn is_full_span(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::FullSpan)
 }
 
 fn is_landscape(name: &str) -> bool {
@@ -18335,7 +18425,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             BodyPolicy::AllowSeparate,
         ),
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
-        "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
+        "center" | "fullspan" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
         "box" => (
             // Structural binding keeps title and body optional so the established
             // body-only form remains unambiguous. The Box adapter enforces the
@@ -21541,6 +21631,31 @@ fn container_inline_materialization_error(span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec!["Use `.container` as a block call with an optional Markdown body.".to_string()],
+    }
+}
+
+fn full_span_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.fullspan` accepts exactly one required Markdown block body and no arguments."
+                .to_string(),
+        ],
+    }
+}
+
+fn full_span_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "`.fullspan` is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use `.fullspan` as a block call with a Markdown body.".to_string()],
     }
 }
 
