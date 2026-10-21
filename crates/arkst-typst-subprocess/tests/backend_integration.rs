@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use arkst_core::ir::{
-    IrColor, IrComponent, IrDocumentAlignment, IrInline, IrNode, IrPageBorderWidths,
+    IrClipShape, IrColor, IrComponent, IrDocumentAlignment, IrInline, IrNode, IrPageBorderWidths,
     IrPageGeometry, IrPageMargins, IrSize, IrSizeUnit, NativeTarget,
 };
 use arkst_core::{compile, CompileOptions, VirtualPathBuf, VirtualProjectBuilder};
@@ -2535,6 +2535,51 @@ fn integration_fullspan_block_reuses_multi_column_breakout_and_compiles_to_pdf()
                 entry_path: "fullspan.qd".to_string(),
             })
             .expect("standalone fullspan Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_clip_circle_lowers_to_bounded_typst_and_compiles_to_pdf() {
+    let source = "Before\n\n.clip {circle}\n    ## Round\n    Body\n\nAfter\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("clip-circle.qd")
+        .expect("valid entry path")
+        .add_source("clip-circle.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "clip diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(result.ir.nodes.iter().any(|node| matches!(
+        node,
+        IrNode::Component {
+            component: IrComponent::Clip(component)
+        } if component.shape == IrClipShape::Circle
+    )));
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#block(clip: true, radius: 50%)[\n"),
+        "{typst_code}"
+    );
+    assert!(typst_code.find("Before").unwrap() < typst_code.find("Round").unwrap());
+    assert!(typst_code.find("Round").unwrap() < typst_code.find("After").unwrap());
+
+    with_typst("clip-circle", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "clip-circle.qd".to_string(),
+            })
+            .expect("clip circle Typst must compile");
         assert!(output
             .pdf
             .expect("PDF output must be present")

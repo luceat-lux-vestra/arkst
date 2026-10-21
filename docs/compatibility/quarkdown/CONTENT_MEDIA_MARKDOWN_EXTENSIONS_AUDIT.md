@@ -24,8 +24,8 @@ owned status counts are:
 | 'SUPPORTED_END_TO_END' | 13 |
 | 'SUPPORTED_SEMANTICS' | 3 |
 | 'PARSED_ONLY' | 1 |
-| 'PARTIAL' | 17 |
-| 'UNSUPPORTED' | 34 |
+| 'PARTIAL' | 24 |
+| 'UNSUPPORTED' | 27 |
 | 'DEFERRED' | 2 |
 | 'BLOCKED' | 1 |
 | 'UNKNOWN' | 0 |
@@ -112,9 +112,9 @@ dependency:
 - Tables are split into ordinary Markdown tables, callable .table,
   generated .tablebyrows, and the six table traversal/computation
   functions. They do not share a single unverified “table supported” claim.
-- .row, .column, .grid, .align, .center, .landscape, .fullspan, and .whitespace are
+- .row, .column, .grid, .align, .center, .landscape, .fullspan, .clip, and .whitespace are
   local component consumers. The bounded row/column/grid/center/alignment/
-  landscape/fullspan/whitespace rows have semantic and output evidence; the
+  landscape/fullspan/circle-clip/whitespace rows have semantic and output evidence; the
   remaining component functions do not.
 - .container is PARTIAL: bounded width/height/fullwidth plus named
   `fullspan` behavior exists. Multi-column output uses a parent-scoped
@@ -126,6 +126,12 @@ dependency:
   validation, preserved provenance/composition, and the same bounded
   multi-column Typst/PDF output. Exact upstream in-flow HTML/CSS placement and
   generalized String-to-Markdown conversion remain unclaimed.
+- .clip is PARTIAL: a positional or named closed `circle` shape plus a required
+  Markdown block body produces a typed Clip component. Origin-aware conversion
+  and validation precede lazy body evaluation; structured children, spans,
+  composition, wire serde, deterministic Typst lowering, and real PDF output
+  are evidenced. Exact CSS/responsive geometry and figure-caption special
+  handling remain unclaimed.
 - .text is PARTIAL: rich inline content, URL wrapping, all seven relative-size
   values, all four text-case values, both font variants, both script positions,
   weight/style, all six decoration values, and origin-aware RGBA color have
@@ -138,8 +144,8 @@ dependency:
   typed padding/background/foreground overrides with deterministic Typst/PDF
   lowering. Automatic localization, renderer default-theme values, and exact
   HTML/CSS/theme styling remain open. The collapse forms preserve their
-  authored initial state but do not claim browser interactivity. .float, .clip,
-  and .numbered remain explicit gaps. A blockquote or generic function-call
+  authored initial state but do not claim browser interactivity. .float and
+  .numbered remain explicit gaps. A blockquote or generic function-call
   node is not their semantic implementation.
 
 No generic style framework, layout framework, or new semantic layer is
@@ -167,7 +173,10 @@ producer and shared-index boundaries:
   (`float`, `classname`, `style`, and complete body conversion) are linked
   there without transferring document-wide state ownership. The standalone
   `.fullspan` producer has bounded semantic and Typst/PDF evidence under that
-  same issue; exact upstream in-flow HTML/CSS placement remains unclaimed.
+  same issue; exact upstream in-flow HTML/CSS placement remains unclaimed. The
+  bounded `.clip {circle}` producer also has typed semantic, provenance,
+  deterministic Typst, and real PDF evidence; exact CSS/responsive geometry
+  and figure-caption special handling remain residuals.
 - [#185](https://github.com/luceat-lux-vestra/arkst/issues/185) owns inline
   and display math, `.math`, code presentation/captions, `.codespan`, and
   explicit `.pagebreak`/`<<<` breaks. It consumes #181 shared caption,

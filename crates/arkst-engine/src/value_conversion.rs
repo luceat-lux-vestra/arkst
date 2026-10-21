@@ -7,10 +7,10 @@
 //! never stringify an evaluated value and feed it back through Markdown.
 
 use arkst_ir::{
-    IrBoxType, IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
-    IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrValue,
+    IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrContainerAlignment,
+    IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline,
+    IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition, IrPageOrientation, IrPageSide,
+    IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
@@ -254,6 +254,7 @@ pub(crate) enum ClosedEnumTarget {
     StackedCrossAxisAlignment,
     ContainerAlignment,
     BoxType,
+    ClipShape,
 }
 
 /// Domain-specific conversion targets kept separate from scalar conversion.
@@ -443,6 +444,13 @@ static BOX_TYPE_SPEC: ClosedEnumSpec<'static, IrBoxType> = ClosedEnumSpec {
             value: IrBoxType::Error,
         },
     ],
+};
+
+static CLIP_SHAPE_SPEC: ClosedEnumSpec<'static, IrClipShape> = ClosedEnumSpec {
+    variants: &[ClosedEnumVariant {
+        declaration_name: "CIRCLE",
+        value: IrClipShape::Circle,
+    }],
 };
 
 static PAGE_SIDE_SPEC: ClosedEnumSpec<'static, IrPageSide> = ClosedEnumSpec {
@@ -1300,6 +1308,24 @@ pub(crate) fn convert_domain_with_origin(
                     BOX_TYPE_SPEC
                         .value_for(value)
                         .map(|value| DomainValue::Enum(IrEnumValue::BoxType(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::ClipShape => match &argument.value {
+                IrValue::Enum(IrEnumValue::ClipShape(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::ClipShape(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    CLIP_SHAPE_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::ClipShape(value)))
                         .ok_or(ConversionError::InvalidText {
                             target: ConversionTarget::Enum,
                         })

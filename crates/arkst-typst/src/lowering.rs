@@ -4,13 +4,13 @@
 //! records source map entries as it generates code.
 
 use arkst_ir::{
-    IrBoxComponent, IrBoxType, IrCallSegment, IrCollapseComponent, IrColor, IrComponent,
-    IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDocument,
-    IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrInline, IrKeybindingPart,
-    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition,
-    IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrTaskStatus, IrTextCase, IrTextScript, IrTextSize, IrTextVariant, IrTodoComponent,
-    IrValue,
+    IrBoxComponent, IrBoxType, IrCallSegment, IrClipComponent, IrClipShape, IrCollapseComponent,
+    IrColor, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
+    IrDocument, IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrInline,
+    IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget,
+    IrPageMarginPosition, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextScript, IrTextSize,
+    IrTextVariant, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -494,6 +494,7 @@ impl LoweringContext {
             IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
             IrComponent::Container(container) => self.lower_container(container),
             IrComponent::Landscape(landscape) => self.lower_landscape(landscape),
+            IrComponent::Clip(clip) => self.lower_clip(clip),
             IrComponent::Box(callout) => self.lower_box(callout),
             IrComponent::Collapse(collapse) => self.lower_collapse(collapse),
             IrComponent::Todo(todo) => self.lower_todo(todo),
@@ -537,6 +538,20 @@ impl LoweringContext {
     fn lower_landscape(&mut self, component: &IrLandscapeComponent) {
         let before = self.output.len();
         self.push_str("#rotate(-90deg, reflow: true)[\n");
+        for child in &component.children {
+            self.lower_node(child);
+        }
+        self.push_str("]\n");
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_clip(&mut self, component: &IrClipComponent) {
+        let before = self.output.len();
+        match component.shape {
+            IrClipShape::Circle => self.push_str("#block(clip: true, radius: 50%)[\n"),
+        }
         for child in &component.children {
             self.lower_node(child);
         }
@@ -1813,11 +1828,11 @@ fn escape_typst_comment(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use arkst_ir::{
-        IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent,
-        IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
-        IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
-        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrValue,
+        IrCallSegment, IrClipComponent, IrClipShape, IrComponent, IrContainerAlignment,
+        IrContainerComponent, IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline,
+        IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
+        IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+        IrTableCell, IrTableRow, IrTaskStatus, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -1877,6 +1892,16 @@ mod tests {
     fn landscape_node(children: Vec<IrNode>) -> IrNode {
         IrNode::Component {
             component: IrComponent::Landscape(IrLandscapeComponent {
+                children,
+                span: empty_span(),
+            }),
+        }
+    }
+
+    fn clip_node(children: Vec<IrNode>) -> IrNode {
+        IrNode::Component {
+            component: IrComponent::Clip(IrClipComponent {
+                shape: IrClipShape::Circle,
                 children,
                 span: empty_span(),
             }),
@@ -2336,6 +2361,48 @@ mod tests {
             .find(|entry| entry.original == child_span)
             .expect("landscape child span is mapped");
         assert!(code[wrapper.generated_start..wrapper.generated_end].contains("#rotate"));
+        assert!(wrapper.generated_start <= child.generated_start);
+        assert!(wrapper.generated_end >= child.generated_end);
+    }
+
+    #[test]
+    fn clip_circle_lowers_deterministically_without_backend_syntax_in_ir() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![clip_node(vec![paragraph("Round")])],
+            metadata: IrMetadata::default(),
+        });
+        assert_eq!(code, "#block(clip: true, radius: 50%)[\nRound\n]\n\n");
+    }
+
+    #[test]
+    fn clip_source_map_contains_wrapper_and_children() {
+        let call_span = SourceSpan::new(SourceId(1), 0, 14);
+        let child_span = SourceSpan::new(SourceId(1), 18, 23);
+        let (code, map) = super::lower_to_typst(&IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Clip(IrClipComponent {
+                    shape: IrClipShape::Circle,
+                    children: vec![IrNode::Paragraph {
+                        content: vec![IrInline::Text {
+                            content: "Round".to_string(),
+                            span: child_span,
+                        }],
+                        span: child_span,
+                    }],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        });
+        let wrapper = map
+            .iter()
+            .find(|entry| entry.original == call_span)
+            .expect("clip wrapper span is mapped");
+        let child = map
+            .iter()
+            .find(|entry| entry.original == child_span)
+            .expect("clip child span is mapped");
+        assert!(code[wrapper.generated_start..wrapper.generated_end].contains("#block"));
         assert!(wrapper.generated_start <= child.generated_start);
         assert!(wrapper.generated_end >= child.generated_end);
     }
