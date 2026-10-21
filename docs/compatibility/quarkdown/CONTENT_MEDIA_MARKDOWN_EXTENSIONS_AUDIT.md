@@ -112,15 +112,20 @@ dependency:
 - Tables are split into ordinary Markdown tables, callable .table,
   generated .tablebyrows, and the six table traversal/computation
   functions. They do not share a single unverified “table supported” claim.
-- .row, .column, .grid, .align, .center, .landscape, and .whitespace are
+- .row, .column, .grid, .align, .center, .landscape, .fullspan, and .whitespace are
   local component consumers. The bounded row/column/grid/center/alignment/
-  landscape/whitespace rows have semantic and output evidence; the remaining
-  component functions do not.
+  landscape/fullspan/whitespace rows have semantic and output evidence; the
+  remaining component functions do not.
 - .container is PARTIAL: bounded width/height/fullwidth plus named
   `fullspan` behavior exists. Multi-column output uses a parent-scoped
   full-width Typst top-float and immediate flush; exact upstream in-flow
   placement remains unclaimed. Float, class, style, and complete body
   conversion remain open.
+- .fullspan is PARTIAL: a required Markdown block body produces the existing
+  typed Container semantic with `full_column_span: true`, strict pre-evaluation
+  validation, preserved provenance/composition, and the same bounded
+  multi-column Typst/PDF output. Exact upstream in-flow HTML/CSS placement and
+  generalized String-to-Markdown conversion remain unclaimed.
 - .text is PARTIAL: rich inline content, URL wrapping, all seven relative-size
   values, all four text-case values, both font variants, both script positions,
   weight/style, all six decoration values, and origin-aware RGBA color have
@@ -161,7 +166,8 @@ producer and shared-index boundaries:
   producer review. The remaining component-local `.container` subcontracts
   (`float`, `classname`, `style`, and complete body conversion) are linked
   there without transferring document-wide state ownership. The standalone
-  `.fullspan` producer remains separately open under the same issue.
+  `.fullspan` producer has bounded semantic and Typst/PDF evidence under that
+  same issue; exact upstream in-flow HTML/CSS placement remains unclaimed.
 - [#185](https://github.com/luceat-lux-vestra/arkst/issues/185) owns inline
   and display math, `.math`, code presentation/captions, `.codespan`, and
   explicit `.pagebreak`/`<<<` breaks. It consumes #181 shared caption,

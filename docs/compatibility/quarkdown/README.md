@@ -212,6 +212,7 @@ follow-up owners.
 | Layout/document configuration | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.captionposition`, `.texmacro`, `.pageformat`, `.pagemargin`, `.footer`, page counters/format/reset, `.lastheading`, automatic page breaks, `.marker`, `.navigation`, `.tableofcontents`, `.slides` | Canonical #153 result: 13 conservative `PARTIAL` bounded slices (`.captionposition`, `.numbering`/`.nonumbering`, bounded size-only `.font`, `.paragraphstyle`, bounded `.pageformat`, bounded `.currentpage`/`.totalpages`, bounded `.formatpagenumber`/`.resetpagenumber`, automatic page-break setters, bounded `.slides`) and 7 `PARSED_ONLY` rows; no complete #153 output-equivalence claim | [#153 audit](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container layout               | `.container`, optional `width`, `height`, `fullwidth`, named `fullspan`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing plus bounded multi-column breakout | Partial (bounded) |
+| Full-column block              | `.fullspan` with a required Markdown block body | Existing typed Container with additive `full_column_span`; strict block-only binding, structured children, and the bounded multi-column breakout | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
 | Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; direct chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Partial: direct-chain semantic slice is evidenced; #164 implements the bounded whitespace/continuation placement in the parser/frontend, while broader chain semantics remain separate |
 | Line continuation (`\`)        | `\` at end of line               | Parsed                   | Parsed-only bounded parser/frontend support: separator probes before the first/subsequent arguments and `::` commit only on an accepted candidate, while a separate root suffix consumes exactly one trailing continuation; LF is pinned evidence, actual CRLF is separate local source-preservation evidence |
@@ -478,10 +479,26 @@ Container support. The implemented subset is:
 
 The deferred surface includes `float`, `classname`, StyleOptions, container
 alignment/text alignment, colors, borders, margin/padding/radius,
-font/text-style properties, inline Container insertion, and the standalone
-`.fullspan` producer. Evidence is in
+font/text-style properties, and inline Container insertion. Evidence is in
 `crates/arkst-core/tests/quarkdown_container.rs`, the IR/lowering unit
 tests, and `crates/arkst-typst-subprocess/tests/backend_integration.rs`.
+
+### Bounded standalone `.fullspan` contract
+
+The standalone `.fullspan` producer is implemented as a strict block-only
+consumer with no non-body arguments and one required Markdown block body. It
+validates the invocation shape before lazy body evaluation, preserves
+source-defined shadowing, structured children, callable composition, and
+call/child provenance, then materializes the existing Container component with
+`full_column_span: true`. It does not add an IR variant or document-state
+mutation.
+
+The existing Container lowerer keeps `.fullspan` layout-inert for a
+single-column document and uses the same parent-scoped full-width top-float and
+immediate `place.flush()` contract when the selector-free page column count is
+greater than one. Exact Quarkdown in-flow HTML/CSS placement remains unclaimed.
+Evidence is in `crates/arkst-core/tests/quarkdown_fullspan.rs` and
+`crates/arkst-typst-subprocess/tests/backend_integration.rs`.
 
 ### Bounded row/column/grid (Stacked) layout contract
 
