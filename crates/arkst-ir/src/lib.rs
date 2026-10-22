@@ -246,6 +246,9 @@ fn collect_component_sources(
         IrComponent::Todo(component) => {
             collect_document_sources(&component.children, sources)?;
         }
+        IrComponent::SpeakerNote(component) => {
+            collect_document_sources(&component.children, sources)?;
+        }
         IrComponent::ExplicitError(_) => {}
     }
     Ok(())
@@ -1457,6 +1460,7 @@ pub enum IrComponent {
     Box(IrBoxComponent),
     Collapse(IrCollapseComponent),
     Todo(IrTodoComponent),
+    SpeakerNote(IrSpeakerNoteComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
 
@@ -1471,6 +1475,7 @@ impl IrComponent {
             Self::Box(component) => component.span,
             Self::Collapse(component) => component.span,
             Self::Todo(component) => component.span,
+            Self::SpeakerNote(component) => component.span,
             Self::ExplicitError(component) => component.span,
         }
     }
@@ -1583,6 +1588,17 @@ pub struct IrCollapseComponent {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrTodoComponent {
     pub title: String,
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
+/// Backend-neutral speaker-note content attached to the surrounding slide.
+///
+/// Visibility is selected by final slides document configuration at the
+/// backend boundary. The component retains structured content even when the
+/// selected renderer omits it from ordinary presentation output.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrSpeakerNoteComponent {
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2127,6 +2143,7 @@ enum WireComponent {
     Box(WireBoxComponent),
     Collapse(WireCollapseComponent),
     Todo(WireTodoComponent),
+    SpeakerNote(WireSpeakerNoteComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
 
@@ -2205,6 +2222,12 @@ struct WireCollapseComponent {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireTodoComponent {
     title: String,
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireSpeakerNoteComponent {
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2784,6 +2807,12 @@ fn component_to_wire(
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
+        IrComponent::SpeakerNote(component) => {
+            WireComponent::SpeakerNote(WireSpeakerNoteComponent {
+                children: wire_nodes(&component.children, sources)?,
+                span: component.span,
+            })
+        }
         IrComponent::ExplicitError(component) => WireComponent::ExplicitError(component.clone()),
     })
 }
@@ -3341,6 +3370,10 @@ fn component_from_wire(
         }),
         WireComponent::Todo(component) => IrComponent::Todo(IrTodoComponent {
             title: component.title,
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+        WireComponent::SpeakerNote(component) => IrComponent::SpeakerNote(IrSpeakerNoteComponent {
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),

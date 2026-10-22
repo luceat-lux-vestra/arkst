@@ -24,8 +24,8 @@ owned status counts are:
 | 'SUPPORTED_END_TO_END' | 13 |
 | 'SUPPORTED_SEMANTICS' | 3 |
 | 'PARSED_ONLY' | 1 |
-| 'PARTIAL' | 24 |
-| 'UNSUPPORTED' | 27 |
+| 'PARTIAL' | 25 |
+| 'UNSUPPORTED' | 26 |
 | 'DEFERRED' | 2 |
 | 'BLOCKED' | 1 |
 | 'UNKNOWN' | 0 |
@@ -279,9 +279,13 @@ implementation is reassigned or added here.
 
 .fragment and .speakernote are #154 slide content producers. Global .slides
 configuration, document type, controls, transitions, and speaker-note options
-remain #153. The content rows remain `UNSUPPORTED` until a bounded slide
-representation and output contract is reviewed in [#184](https://github.com/luceat-lux-vestra/arkst/issues/184),
-following the order in [`RECONCILIATION.md`](RECONCILIATION.md).
+remain #153. `.speakernote` is now `PARTIAL`: a slides-only typed component
+preserves structured Markdown and source provenance, and the static Typst/PDF
+backend exposes its content only when final `.slides speakernotes:{true}` state
+requests ordinary-output visibility. Default/nullable/false state remains
+hidden. Exact HTML/Reveal speaker view and CSS/theme styling remain open.
+`.fragment` stays `UNSUPPORTED` pending its closed behavior domain and
+multi-state PDF contract under [#184](https://github.com/luceat-lux-vestra/arkst/issues/184).
 
 ## Follow-up reconciliation
 
@@ -352,3 +356,7 @@ The callable `.keybinding(input)` uses the shared builtin binder and String conv
 ### #184 bounded deterministic loremipsum scalar producer (2026-10-11)
 
 Pinned v2.5.1 `.loremipsum()` exposes a zero-argument deterministic scalar String, sourced upstream from a packaged text resource. Arkst registers the same no-argument callable shape through the shared binder and returns an independently authored deterministic placeholder paragraph as `IrValue::String`; existing interpolation, inline text, serde and escaped Typst lowering are reused. Regression tests verify repeatability, invalid argument/body fail-closed diagnostics, source-defined precedence, use inside surrounding text and actual required Typst/PDF compilation. The #154 row becomes `PARTIAL` and NOT `SUPPORTED_END_TO_END`: the GPL upstream packaged paragraph is not copied, hence exact text bytes and HTML/browser output equivalence are **not** claimed. No new IR/backend/resource-read abstraction is introduced.
+
+### #184 bounded speaker-note PDF visibility (2026-10-22)
+
+The slides-only `.speakernote(content: MarkdownContent)` producer now binds positional, named, or indented structured Markdown through the shared component boundary and materializes a backend-neutral `IrSpeakerNoteComponent` with original call and child provenance. The document-type gate runs before body execution, while a valid hidden note still evaluates its body normally. Final `.slides speakernotes:{true}` state makes ordered note blocks visible in static Typst/PDF output; omitted, nullable, and false state use the public false default and emit no note bytes or source-map ranges. Independent core tests cover body forms, multiple-note order, gating, evaluation order, source-defined shadowing, provenance, diagnostics, and serde; deterministic lowering and real pinned-Typst PDF/backend-parity tests cover the visibility contract. The row is conservatively `PARTIAL`: HTML/Reveal speaker view, exact CSS/theme presentation, and `.fragment` state expansion remain open.
