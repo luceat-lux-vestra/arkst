@@ -176,3 +176,24 @@ fn speaker_note_visibility_variants_compile_to_one_slide_pdf() {
         assert_default_slide_geometry(&pdf);
     }
 }
+
+#[test]
+fn fragment_states_expand_to_real_pdf_pages_per_logical_slide() {
+    let all_behaviors = compile_pdf(
+        ".doctype {slides}\n\n.fragment\n    SHOW\n.fragment {hide}\n    HIDE\n.fragment {semihide}\n    SEMIHIDE\n.fragment {showhide}\n    SHOWHIDE\n",
+    );
+    assert_eq!(page_count(&all_behaviors), 6);
+    assert_default_slide_geometry(&all_behaviors);
+
+    let multiple_slides = compile_pdf(
+        ".doctype {slides}\n\n.fragment\n    FIRST\n\n<<<\n\n.fragment {showhide}\n    SECOND\n",
+    );
+    assert_eq!(page_count(&multiple_slides), 5);
+    assert_default_slide_geometry(&multiple_slides);
+
+    let automatic_boundaries = compile_pdf(
+        ".doctype {slides}\n\n# FIRST\n.fragment\n    FIRST-STATE\n\n## SECOND\n.fragment\n    SECOND-STATE\n",
+    );
+    assert_eq!(page_count(&automatic_boundaries), 4);
+    assert_default_slide_geometry(&automatic_boundaries);
+}

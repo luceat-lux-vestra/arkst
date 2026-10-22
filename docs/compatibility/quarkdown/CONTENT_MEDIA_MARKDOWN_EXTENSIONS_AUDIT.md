@@ -284,8 +284,12 @@ preserves structured Markdown and source provenance, and the static Typst/PDF
 backend exposes its content only when final `.slides speakernotes:{true}` state
 requests ordinary-output visibility. Default/nullable/false state remains
 hidden. Exact HTML/Reveal speaker view and CSS/theme styling remain open.
-`.fragment` stays `UNSUPPORTED` pending its closed behavior domain and
-multi-state PDF contract under [#184](https://github.com/luceat-lux-vestra/arkst/issues/184).
+`.fragment` is now `PARTIAL`: its closed `show`/`hide`/`semihide`/`showhide`
+domain, structured content, slides-only gate, ordered transitions, and
+multi-state Typst/PDF expansion are typed and evidenced. Interactive
+HTML/Reveal animation, exact CSS timing, and renderer-complete opacity for
+non-text visual content remain unclaimed under
+[#184](https://github.com/luceat-lux-vestra/arkst/issues/184).
 
 ## Follow-up reconciliation
 
@@ -359,4 +363,21 @@ Pinned v2.5.1 `.loremipsum()` exposes a zero-argument deterministic scalar Strin
 
 ### #184 bounded speaker-note PDF visibility (2026-10-22)
 
-The slides-only `.speakernote(content: MarkdownContent)` producer now binds positional, named, or indented structured Markdown through the shared component boundary and materializes a backend-neutral `IrSpeakerNoteComponent` with original call and child provenance. The document-type gate runs before body execution, while a valid hidden note still evaluates its body normally. Final `.slides speakernotes:{true}` state makes ordered note blocks visible in static Typst/PDF output; omitted, nullable, and false state use the public false default and emit no note bytes or source-map ranges. Independent core tests cover body forms, multiple-note order, gating, evaluation order, source-defined shadowing, provenance, diagnostics, and serde; deterministic lowering and real pinned-Typst PDF/backend-parity tests cover the visibility contract. The row is conservatively `PARTIAL`: HTML/Reveal speaker view, exact CSS/theme presentation, and `.fragment` state expansion remain open.
+The slides-only `.speakernote(content: MarkdownContent)` producer now binds positional, named, or indented structured Markdown through the shared component boundary and materializes a backend-neutral `IrSpeakerNoteComponent` with original call and child provenance. The document-type gate runs before body execution, while a valid hidden note still evaluates its body normally. Final `.slides speakernotes:{true}` state makes ordered note blocks visible in static Typst/PDF output; omitted, nullable, and false state use the public false default and emit no note bytes or source-map ranges. Independent core tests cover body forms, multiple-note order, gating, evaluation order, source-defined shadowing, provenance, diagnostics, and serde; deterministic lowering and real pinned-Typst PDF/backend-parity tests cover the visibility contract. The row is conservatively `PARTIAL`: HTML/Reveal speaker view and exact CSS/theme presentation remain open.
+
+### #184 bounded fragment PDF states (2026-10-23)
+
+The slides-only `.fragment(behavior, content)` producer now preserves the
+closed default-`show`, `hide`, `semihide`, and `showhide` behavior domain in a
+typed `IrFragmentComponent`. Binding, document-type gating, behavior
+conversion, lambda/inline rejection, and duplicate detection precede lazy body
+evaluation; source-defined functions retain precedence, and structured child
+plus call-site provenance survives document wire serde. Typst lowering groups
+top-level content by the existing explicit and automatic slide boundaries,
+then emits the initial state and each source-ordered transition as a PDF page.
+Hidden states retain layout, while semihidden text uses the current Typst text
+paint at 50% transparency. Deterministic source/source-map tests, real pinned
+Typst 0.15.1 PDF page counts, and subprocess/in-process parity cover the
+bounded static contract. The row remains `PARTIAL`: HTML/Reveal interaction,
+exact animation/CSS timing, and renderer-complete opacity for non-text visual
+content are not claimed.

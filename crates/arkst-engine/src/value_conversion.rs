@@ -8,9 +8,9 @@
 
 use arkst_ir::{
     IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrContainerAlignment,
-    IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline,
-    IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition, IrPageOrientation, IrPageSide,
-    IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
+    IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrFragmentBehavior,
+    IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition, IrPageOrientation,
+    IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
     IrSlideTransitionStyle, IrValue,
 };
 use arkst_source::SourceSpan;
@@ -258,6 +258,7 @@ pub(crate) enum ClosedEnumTarget {
     ClipShape,
     SlideTransitionStyle,
     SlideTransitionSpeed,
+    FragmentBehavior,
 }
 
 /// Domain-specific conversion targets kept separate from scalar conversion.
@@ -495,6 +496,27 @@ static SLIDE_TRANSITION_SPEED_SPEC: ClosedEnumSpec<'static, IrSlideTransitionSpe
             },
         ],
     };
+
+static FRAGMENT_BEHAVIOR_SPEC: ClosedEnumSpec<'static, IrFragmentBehavior> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "SHOW",
+            value: IrFragmentBehavior::Show,
+        },
+        ClosedEnumVariant {
+            declaration_name: "HIDE",
+            value: IrFragmentBehavior::Hide,
+        },
+        ClosedEnumVariant {
+            declaration_name: "SEMIHIDE",
+            value: IrFragmentBehavior::SemiHide,
+        },
+        ClosedEnumVariant {
+            declaration_name: "SHOWHIDE",
+            value: IrFragmentBehavior::ShowHide,
+        },
+    ],
+};
 
 static PAGE_SIDE_SPEC: ClosedEnumSpec<'static, IrPageSide> = ClosedEnumSpec {
     variants: &[
@@ -1405,6 +1427,24 @@ pub(crate) fn convert_domain_with_origin(
                     SLIDE_TRANSITION_SPEED_SPEC
                         .value_for(value)
                         .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::FragmentBehavior => match &argument.value {
+                IrValue::Enum(IrEnumValue::FragmentBehavior(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::FragmentBehavior(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    FRAGMENT_BEHAVIOR_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::FragmentBehavior(value)))
                         .ok_or(ConversionError::InvalidText {
                             target: ConversionTarget::Enum,
                         })
