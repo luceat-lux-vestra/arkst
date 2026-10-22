@@ -6,11 +6,11 @@
 use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallSegment, IrClipComponent, IrClipShape, IrCollapseComponent,
     IrColor, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-    IrDocument, IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrInline,
-    IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget,
-    IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase,
-    IrTextScript, IrTextSize, IrTextVariant, IrTodoComponent, IrValue,
+    IrDocument, IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior,
+    IrFragmentComponent, IrInline, IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment,
+    IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
+    IrTextCase, IrTextScript, IrTextSize, IrTextVariant, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -90,6 +90,29 @@ struct LoweringContext {
     /// Whether the final slides configuration exposes speaker-note content in
     /// ordinary static output. Omitted/null state uses the public false default.
     show_speaker_notes: bool,
+    /// Current interaction snapshot while expanding one logical slide.
+    /// `None` means no fragment expansion is active.
+    fragment_snapshot: Option<usize>,
+    /// Source-order transition cursor for fragments in the current snapshot.
+    fragment_cursor: usize,
+}
+
+enum SlideBoundary<'a> {
+    Synthetic,
+    Explicit(&'a IrNode),
+}
+
+#[derive(Default)]
+struct SlideChunk<'a> {
+    leading_boundaries: Vec<SlideBoundary<'a>>,
+    nodes: Vec<&'a IrNode>,
+}
+
+#[derive(Clone, Copy)]
+enum FragmentVisibility {
+    Visible,
+    Hidden,
+    SemiHidden,
 }
 
 fn selector_free_page_alignment(doc: &IrDocument) -> Option<IrDocumentAlignment> {
@@ -130,6 +153,8 @@ impl LoweringContext {
             inherited_stack_main_axis: IrMainAxisAlignment::Start,
             multi_column_layout: false,
             show_speaker_notes: false,
+            fragment_snapshot: None,
+            fragment_cursor: 0,
         }
     }
 
@@ -188,22 +213,170 @@ impl LoweringContext {
                 IrDocumentType::Docs => 0,
             });
 
-        for node in &doc.nodes {
-            if auto_page_break_max_depth > 0
+        if self.document_type == IrDocumentType::Slides
+            && self.count_fragment_transitions_in_nodes(&doc.nodes) > 0
+        {
+            self.lower_slides_with_fragments(&doc.nodes, auto_page_break_max_depth);
+        } else {
+            for node in &doc.nodes {
+                if auto_page_break_max_depth > 0
+                    && matches!(
+                        node,
+                        IrNode::Heading { level, .. }
+                            if (*level as u32) <= auto_page_break_max_depth
+                    )
+                {
+                    self.push_str("#pagebreak(weak: true)\n");
+                }
+                self.lower_top_level_node(node);
+            }
+        }
+    }
+
+    fn lower_top_level_node(&mut self, node: &IrNode) {
+        let before = self.output.len();
+        self.lower_node(node);
+        if self.output.len() > before {
+            self.push('\n');
+        }
+    }
+
+    fn lower_slides_with_fragments(&mut self, nodes: &[IrNode], auto_page_break_max_depth: u32) {
+        let mut slides = vec![SlideChunk::default()];
+        for node in nodes {
+            if matches!(node, IrNode::PageBreak { .. }) {
+                let current = slides.last_mut().expect("initial slide chunk");
+                if current.nodes.is_empty() {
+                    current
+                        .leading_boundaries
+                        .push(SlideBoundary::Explicit(node));
+                } else {
+                    slides.push(SlideChunk {
+                        leading_boundaries: vec![SlideBoundary::Explicit(node)],
+                        nodes: Vec::new(),
+                    });
+                }
+                continue;
+            }
+
+            let automatic_boundary = auto_page_break_max_depth > 0
                 && matches!(
                     node,
                     IrNode::Heading { level, .. }
                         if (*level as u32) <= auto_page_break_max_depth
-                )
-            {
-                self.push_str("#pagebreak(weak: true)\n");
+                );
+            if automatic_boundary {
+                let current = slides.last_mut().expect("initial slide chunk");
+                if current.nodes.is_empty() {
+                    current.leading_boundaries.push(SlideBoundary::Synthetic);
+                } else {
+                    slides.push(SlideChunk {
+                        leading_boundaries: vec![SlideBoundary::Synthetic],
+                        nodes: Vec::new(),
+                    });
+                }
             }
-            let before = self.output.len();
-            self.lower_node(node);
-            if self.output.len() > before {
-                self.push('\n');
+            slides
+                .last_mut()
+                .expect("initial slide chunk")
+                .nodes
+                .push(node);
+        }
+
+        for slide in slides {
+            for boundary in slide.leading_boundaries {
+                match boundary {
+                    SlideBoundary::Synthetic => self.push_str("#pagebreak(weak: true)\n"),
+                    SlideBoundary::Explicit(node) => self.lower_top_level_node(node),
+                }
+            }
+            if slide.nodes.is_empty() {
+                continue;
+            }
+
+            let transition_count = slide.nodes.iter().fold(0usize, |count, node| {
+                count.saturating_add(self.count_fragment_transitions_in_node(node))
+            });
+            for snapshot in 0..=transition_count {
+                if snapshot > 0 {
+                    self.push_str("#pagebreak(weak: true)\n");
+                }
+                self.fragment_snapshot = Some(snapshot);
+                self.fragment_cursor = 0;
+                for node in &slide.nodes {
+                    self.lower_top_level_node(node);
+                }
             }
         }
+        self.fragment_snapshot = None;
+        self.fragment_cursor = 0;
+    }
+
+    fn count_fragment_transitions_in_nodes(&self, nodes: &[IrNode]) -> usize {
+        nodes.iter().fold(0usize, |count, node| {
+            count.saturating_add(self.count_fragment_transitions_in_node(node))
+        })
+    }
+
+    fn count_fragment_transitions_in_node(&self, node: &IrNode) -> usize {
+        match node {
+            IrNode::Blockquote { content, .. } => self.count_fragment_transitions_in_nodes(content),
+            IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+                items.iter().fold(0usize, |count, item| {
+                    count.saturating_add(self.count_fragment_transitions_in_nodes(&item.nodes))
+                })
+            }
+            IrNode::Component { component } => {
+                self.count_fragment_transitions_in_component(component)
+            }
+            IrNode::FunctionCall { body, .. } | IrNode::ChainedFunctionCall { body, .. } => body
+                .as_deref()
+                .map_or(0, |body| self.count_fragment_transitions_in_nodes(body)),
+            IrNode::Heading { .. }
+            | IrNode::Paragraph { .. }
+            | IrNode::Table { .. }
+            | IrNode::CodeBlock { .. }
+            | IrNode::RawHtml { .. }
+            | IrNode::TargetSpecificContent { .. }
+            | IrNode::PageMarginContent { .. }
+            | IrNode::FunctionDeclaration { .. }
+            | IrNode::ThematicBreak { .. }
+            | IrNode::PageBreak { .. }
+            | IrNode::Math { .. } => 0,
+        }
+    }
+
+    fn count_fragment_transitions_in_component(&self, component: &IrComponent) -> usize {
+        let children = match component {
+            IrComponent::Stacked(component) => Some(component.children.as_slice()),
+            IrComponent::Container(component) => Some(component.children.as_slice()),
+            IrComponent::Landscape(component) => Some(component.children.as_slice()),
+            IrComponent::Clip(component) => Some(component.children.as_slice()),
+            IrComponent::Box(component) => Some(component.children.as_slice()),
+            IrComponent::Collapse(component) if component.is_open => {
+                Some(component.children.as_slice())
+            }
+            IrComponent::Collapse(_) => None,
+            IrComponent::Todo(component) => Some(component.children.as_slice()),
+            IrComponent::SpeakerNote(component) if self.show_speaker_notes => {
+                Some(component.children.as_slice())
+            }
+            IrComponent::SpeakerNote(_) => None,
+            IrComponent::Fragment(component) => {
+                let own = match component.behavior {
+                    IrFragmentBehavior::Show
+                    | IrFragmentBehavior::Hide
+                    | IrFragmentBehavior::SemiHide => 1usize,
+                    IrFragmentBehavior::ShowHide => 2usize,
+                };
+                return own
+                    .saturating_add(self.count_fragment_transitions_in_nodes(&component.children));
+            }
+            IrComponent::ExplicitError(_) => None,
+        };
+        children.map_or(0, |children| {
+            self.count_fragment_transitions_in_nodes(children)
+        })
     }
 
     fn lower_node(&mut self, node: &IrNode) {
@@ -511,6 +684,7 @@ impl LoweringContext {
             IrComponent::Collapse(collapse) => self.lower_collapse(collapse),
             IrComponent::Todo(todo) => self.lower_todo(todo),
             IrComponent::SpeakerNote(note) => self.lower_speaker_note(note),
+            IrComponent::Fragment(fragment) => self.lower_fragment(fragment),
             IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
         }
     }
@@ -656,6 +830,71 @@ impl LoweringContext {
         self.push_str("#block[\n");
         for child in &component.children {
             self.lower_node(child);
+        }
+        self.push_str("]\n");
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_fragment(&mut self, component: &IrFragmentComponent) {
+        let Some(snapshot) = self.fragment_snapshot else {
+            self.push_str("#panic(\"Arkst fragment output requires slides snapshot expansion\")\n");
+            return;
+        };
+        let first_transition = self.fragment_cursor.saturating_add(1);
+        let (visibility, transitions) = match component.behavior {
+            IrFragmentBehavior::Show => (
+                if snapshot < first_transition {
+                    FragmentVisibility::Hidden
+                } else {
+                    FragmentVisibility::Visible
+                },
+                1usize,
+            ),
+            IrFragmentBehavior::Hide => (
+                if snapshot < first_transition {
+                    FragmentVisibility::Visible
+                } else {
+                    FragmentVisibility::Hidden
+                },
+                1usize,
+            ),
+            IrFragmentBehavior::SemiHide => (
+                if snapshot < first_transition {
+                    FragmentVisibility::Visible
+                } else {
+                    FragmentVisibility::SemiHidden
+                },
+                1usize,
+            ),
+            IrFragmentBehavior::ShowHide => (
+                if snapshot == first_transition {
+                    FragmentVisibility::Visible
+                } else {
+                    FragmentVisibility::Hidden
+                },
+                2usize,
+            ),
+        };
+        self.fragment_cursor = self.fragment_cursor.saturating_add(transitions);
+
+        let before = self.output.len();
+        self.push_str("#block[\n");
+        match visibility {
+            FragmentVisibility::Visible => {}
+            FragmentVisibility::Hidden => self.push_str("#hide[\n"),
+            FragmentVisibility::SemiHidden => self.push_str(
+                "#context {\nlet __arkst_fragment_fill = text.fill\nset text(fill: __arkst_fragment_fill.transparentize(50%))\n[\n",
+            ),
+        }
+        for child in &component.children {
+            self.lower_node(child);
+        }
+        match visibility {
+            FragmentVisibility::Visible => {}
+            FragmentVisibility::Hidden => self.push_str("]\n"),
+            FragmentVisibility::SemiHidden => self.push_str("]\n}\n"),
         }
         self.push_str("]\n");
         if component.span.source_id != SourceId(0) {

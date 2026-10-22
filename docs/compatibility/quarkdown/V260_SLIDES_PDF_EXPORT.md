@@ -13,7 +13,7 @@ PR #358 implements the bounded Arkst-owned contract needed for this migration ro
 - #185 bounded subcontract: typed explicit `.pagebreak` / `<<<` boundaries;
 - Typst ownership: slides default PDF geometry, vertical-centering lowering, weak explicit page boundaries, and final PDF artifact production.
 
-The broader #175/#178/#185 issues remain open for their unrelated baseline scope. The original migration slice did not claim controls, speaker notes, transitions, partial/selector page-format semantics, math, or code presentation support. Later bounded #178 extensions preserve the complete public Slides configuration shape, and a bounded #184 consumer adds static-PDF speaker-note visibility. Browser controls, HTML/Reveal speaker view, transition animation, fragments, and other slide-content semantics remain unclaimed.
+The broader #175/#178/#185 issues remain open for their unrelated baseline scope. The original migration slice did not claim controls, speaker notes, transitions, partial/selector page-format semantics, math, or code presentation support. Later bounded #178 extensions preserve the complete public Slides configuration shape, while bounded #184 consumers add static-PDF speaker-note visibility and ordered fragment-state pages. Browser controls, HTML/Reveal speaker view and fragment animation, transition animation, exact CSS timing, and other slide-content semantics remain unclaimed.
 
 The Chromium-export adapter remains current-surface N/A as documented in `V260_PDF_EXPORT_ADAPTER.md`; that does not make slides layout N/A because Arkst itself owns `.doctype {slides}` → Typst → PDF.
 

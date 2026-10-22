@@ -61,15 +61,15 @@ use arkst_ir::{
     IrClipComponent, IrCodeCallout, IrCollapseComponent, IrColor, IrComponent,
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
-    IrFontLayer, IrFontState, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
-    IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState,
-    IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer, IrPageFormatSelector,
-    IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins, IrPageOrientation,
-    IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition, IrSlideTransitionSpeed,
-    IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTodoComponent, IrValue,
-    NativeTarget, TargetSpecificContent,
+    IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody,
+    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
+    IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
+    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins,
+    IrPageOrientation, IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair,
+    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition,
+    IrSlideTransitionSpeed, IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+    IrTodoComponent, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -485,6 +485,9 @@ fn component_contains_explicit_error(component: &IrComponent) -> bool {
         }
         IrComponent::Todo(component) => component.children.iter().any(node_contains_explicit_error),
         IrComponent::SpeakerNote(component) => {
+            component.children.iter().any(node_contains_explicit_error)
+        }
+        IrComponent::Fragment(component) => {
             component.children.iter().any(node_contains_explicit_error)
         }
     }
@@ -3966,6 +3969,10 @@ impl Evaluator {
             diagnostics.push(speaker_note_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_fragment(name) && context.get_function(name).is_none() {
+            diagnostics.push(fragment_inline_materialization_error(*span));
+            return Vec::new();
+        }
         let unit_is_observable_value_reference = is_variable_reference_call(
             name,
             positional_args,
@@ -4934,6 +4941,22 @@ impl Evaluator {
 
         if is_speaker_note(name) {
             return self.evaluate_speaker_note(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
+            );
+        }
+
+        if is_fragment(name) {
+            return self.evaluate_fragment(
                 ordered_args,
                 positional_args,
                 named_args,
@@ -6975,6 +6998,188 @@ impl Evaluator {
 
         CallOutcome::Value(IrValue::Component(IrComponent::SpeakerNote(
             IrSpeakerNoteComponent {
+                children,
+                span: *span,
+            },
+        )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_fragment(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+            diagnostics.push(fragment_argument_error(
+                "`.fragment` is only valid for slides documents",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(fragment_argument_error(
+                "`.fragment` body is Markdown content, not a lambda",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if matches!(body, Some(CallBody::Inline(_))) {
+            diagnostics.push(fragment_argument_error(
+                "`.fragment` Markdown body must be block content",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = match body {
+            Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
+                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                span: call_body_source_span(CallBody::Block(nodes), *span),
+            }),
+            Some(CallBody::Inline(_)) => unreachable!("inline fragment bodies are rejected above"),
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let behavior_parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let content_parameter_span = bound
+            .parameters
+            .get(1)
+            .and_then(|parameter| parameter.name_span);
+        let mut slots = bound.slots.into_iter();
+        let behavior_slot = slots.next().unwrap_or(BoundSlot::Defaulted);
+        let content_slot = slots.next().unwrap_or(BoundSlot::Omitted);
+
+        let behavior = match behavior_slot {
+            BoundSlot::Omitted | BoundSlot::Defaulted => IrFragmentBehavior::Show,
+            BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } => match value_conversion::convert_domain_with_origin(
+                &value,
+                value_conversion::DomainTarget::ClosedEnum(
+                    value_conversion::ClosedEnumTarget::FragmentBehavior,
+                ),
+            ) {
+                Ok(value_conversion::DomainValue::Enum(IrEnumValue::FragmentBehavior(value))) => {
+                    value
+                }
+                Ok(_) => unreachable!("Fragment behavior target returned a non-behavior value"),
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic_with_detail(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("behavior"),
+                            behavior_parameter_span,
+                            *span,
+                        ),
+                        Some("`.fragment` behavior"),
+                        Some("expected show, hide, semihide, or showhide"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+        };
+
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => unreachable!("inline fragment bodies are rejected above"),
+            None => {
+                let BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                } = content_slot
+                else {
+                    diagnostics.push(fragment_argument_error(
+                        "`.fragment` requires Markdown content",
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let converted = match value_conversion::convert_target_with_origin(
+                    &value,
+                    value_conversion::ConversionTarget::BlockContent,
+                    argument_span,
+                ) {
+                    Ok(converted) => converted,
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some("content"),
+                                content_parameter_span,
+                                *span,
+                            ),
+                            Some("`.fragment` content"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                match self.resolve_target_value(
+                    converted,
+                    argument_span,
+                    *span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(IrValue::Content(nodes)) => nodes,
+                    Ok(_) => {
+                        diagnostics.push(fragment_argument_error(
+                            "`.fragment` content must convert to Markdown content",
+                            argument_span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    Err(outcome) => return outcome,
+                }
+            }
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Fragment(
+            IrFragmentComponent {
+                behavior,
                 children,
                 span: *span,
             },
@@ -15652,6 +15857,11 @@ impl Evaluator {
                 } => {
                     Self::collect_evidenced_output_error_components(&component.children, components)
                 }
+                IrNode::Component {
+                    component: IrComponent::Fragment(component),
+                } => {
+                    Self::collect_evidenced_output_error_components(&component.children, components)
+                }
                 IrNode::Blockquote { content, .. } => {
                     Self::collect_evidenced_output_error_components(content, components);
                 }
@@ -16908,6 +17118,7 @@ pub(crate) enum NativeDispatchOwner {
     TextCollapse,
     Todo,
     SpeakerNote,
+    Fragment,
     Br,
     PageMargin,
     PageCounter,
@@ -16981,6 +17192,7 @@ const COLLAPSE_NATIVE_NAMES: &[&str] = &["collapse"];
 const TEXT_COLLAPSE_NATIVE_NAMES: &[&str] = &["textcollapse"];
 const TODO_NATIVE_NAMES: &[&str] = &["todo"];
 const SPEAKER_NOTE_NATIVE_NAMES: &[&str] = &["speakernote"];
+const FRAGMENT_NATIVE_NAMES: &[&str] = &["fragment"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
 const PAGE_MARGIN_NATIVE_NAMES: &[&str] = &["pagemargin", "footer"];
 const PAGE_COUNTER_NATIVE_NAMES: &[&str] = &["currentpage", "totalpages"];
@@ -17103,6 +17315,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::SpeakerNote,
         names: SPEAKER_NOTE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Fragment,
+        names: FRAGMENT_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Br,
@@ -17253,6 +17469,10 @@ fn is_todo(name: &str) -> bool {
 
 fn is_speaker_note(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::SpeakerNote)
+}
+
+fn is_fragment(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Fragment)
 }
 
 fn is_br(name: &str) -> bool {
@@ -18822,6 +19042,13 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "speakernote" => (
             vec![ParameterMetadata::required("content")],
+            BodyPolicy::BindFinal,
+        ),
+        "fragment" => (
+            vec![
+                ParameterMetadata::defaulted("behavior"),
+                ParameterMetadata::required("content"),
+            ],
             BodyPolicy::BindFinal,
         ),
         "collapse" => (
@@ -22322,6 +22549,31 @@ fn speaker_note_inline_materialization_error(span: SourceSpan) -> Diagnostic {
     }
 }
 
+fn fragment_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.fragment` is a slides-only component with optional show/hide/semihide/showhide behavior and one required MarkdownContent body."
+                .to_string(),
+        ],
+    }
+}
+
+fn fragment_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "`.fragment` is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use `.fragment` as a block/content call in a slides document.".to_string()],
+    }
+}
+
 fn br_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3003".to_string(),
@@ -23254,6 +23506,10 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
             rebase_dynamic_nodes(&mut component.children, source_span);
         }
         IrComponent::SpeakerNote(component) => {
+            component.span = source_span;
+            rebase_dynamic_nodes(&mut component.children, source_span);
+        }
+        IrComponent::Fragment(component) => {
             component.span = source_span;
             rebase_dynamic_nodes(&mut component.children, source_span);
         }

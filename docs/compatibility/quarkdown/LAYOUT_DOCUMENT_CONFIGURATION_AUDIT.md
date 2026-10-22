@@ -808,7 +808,10 @@ and does not fabricate browser controls or animation behavior. The global
 `speaker_notes` field is consumed only by the separately owned bounded #184
 `.speakernote` component: explicit true exposes note content in ordinary static
 output, while omission/nullable/false keeps it hidden. HTML/Reveal speaker view
-and the #154 `.fragment` row remain open. Status is `PARTIAL` under #178.
+remains open. The separately owned #184 `.fragment` consumer now uses this
+document type plus #185 slide boundaries for bounded static-PDF state
+expansion; it does not change #178 configuration ownership. Status is
+`PARTIAL` under #178.
 
 ## 5. Arkst pipeline and architecture boundary
 

@@ -249,6 +249,9 @@ fn collect_component_sources(
         IrComponent::SpeakerNote(component) => {
             collect_document_sources(&component.children, sources)?;
         }
+        IrComponent::Fragment(component) => {
+            collect_document_sources(&component.children, sources)?;
+        }
         IrComponent::ExplicitError(_) => {}
     }
     Ok(())
@@ -1461,6 +1464,7 @@ pub enum IrComponent {
     Collapse(IrCollapseComponent),
     Todo(IrTodoComponent),
     SpeakerNote(IrSpeakerNoteComponent),
+    Fragment(IrFragmentComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
 
@@ -1476,6 +1480,7 @@ impl IrComponent {
             Self::Collapse(component) => component.span,
             Self::Todo(component) => component.span,
             Self::SpeakerNote(component) => component.span,
+            Self::Fragment(component) => component.span,
             Self::ExplicitError(component) => component.span,
         }
     }
@@ -1603,6 +1608,36 @@ pub struct IrSpeakerNoteComponent {
     pub span: SourceSpan,
 }
 
+/// Backend-neutral content whose visibility changes across slide fragment states.
+///
+/// The closed behavior identity is retained without embedding Reveal.js or
+/// Typst syntax. Static renderers may expand the surrounding slide into an
+/// ordered sequence of snapshots while interactive renderers can consume the
+/// same semantic transitions directly.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrFragmentComponent {
+    #[serde(default, skip_serializing_if = "IrFragmentBehavior::is_show")]
+    pub behavior: IrFragmentBehavior,
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
+/// The public closed behavior domain of Quarkdown `.fragment`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum IrFragmentBehavior {
+    #[default]
+    Show,
+    Hide,
+    SemiHide,
+    ShowHide,
+}
+
+impl IrFragmentBehavior {
+    fn is_show(&self) -> bool {
+        matches!(self, Self::Show)
+    }
+}
+
 /// The backend-neutral container state consumed by `.container`, `.center`,
 /// and `.align`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1696,6 +1731,7 @@ pub enum IrEnumValue {
     ClipShape(IrClipShape),
     SlideTransitionStyle(IrSlideTransitionStyle),
     SlideTransitionSpeed(IrSlideTransitionSpeed),
+    FragmentBehavior(IrFragmentBehavior),
 }
 
 /// A closed target discriminator for native content that remains opaque until
@@ -2144,6 +2180,7 @@ enum WireComponent {
     Collapse(WireCollapseComponent),
     Todo(WireTodoComponent),
     SpeakerNote(WireSpeakerNoteComponent),
+    Fragment(WireFragmentComponent),
     ExplicitError(IrExplicitErrorComponent),
 }
 
@@ -2228,6 +2265,14 @@ struct WireTodoComponent {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireSpeakerNoteComponent {
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireFragmentComponent {
+    #[serde(default, skip_serializing_if = "IrFragmentBehavior::is_show")]
+    behavior: IrFragmentBehavior,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2813,6 +2858,11 @@ fn component_to_wire(
                 span: component.span,
             })
         }
+        IrComponent::Fragment(component) => WireComponent::Fragment(WireFragmentComponent {
+            behavior: component.behavior,
+            children: wire_nodes(&component.children, sources)?,
+            span: component.span,
+        }),
         IrComponent::ExplicitError(component) => WireComponent::ExplicitError(component.clone()),
     })
 }
@@ -3374,6 +3424,11 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::SpeakerNote(component) => IrComponent::SpeakerNote(IrSpeakerNoteComponent {
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+        WireComponent::Fragment(component) => IrComponent::Fragment(IrFragmentComponent {
+            behavior: component.behavior,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
