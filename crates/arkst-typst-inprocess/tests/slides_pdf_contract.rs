@@ -143,3 +143,20 @@ fn default_focus_and_nullable_center_variants_preserve_slide_page_contract() {
         assert_default_slide_geometry(&pdf);
     }
 }
+
+#[test]
+fn closed_transition_values_do_not_fabricate_static_pdf_behavior() {
+    for (style, speed) in [
+        ("none", "default"),
+        ("fade", "fast"),
+        ("slide", "slow"),
+        ("zoom", "default"),
+    ] {
+        let source = format!(
+            ".doctype {{slides}}\n.slides transition:{{{style}}} speed:{{{speed}}}\n\nTRANSITION-{style}-{speed}\n"
+        );
+        let pdf = compile_pdf(&source);
+        assert_eq!(page_count(&pdf), 1, "{style}/{speed}");
+        assert_default_slide_geometry(&pdf);
+    }
+}

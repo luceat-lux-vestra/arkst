@@ -1,4 +1,7 @@
-use arkst_core::ir::{IrDocumentState, IrSlidesConfiguration};
+use arkst_core::ir::{
+    IrDocumentState, IrSlideTransition, IrSlideTransitionSpeed, IrSlideTransitionStyle,
+    IrSlidesConfiguration,
+};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -81,6 +84,7 @@ fn slides_nullable_presentation_toggles_bind_by_name_and_position() {
             center: None,
             controls: Some(true),
             speaker_notes: Some(false),
+            transition: None,
         })
     );
 
@@ -92,8 +96,111 @@ fn slides_nullable_presentation_toggles_bind_by_name_and_position() {
             center: None,
             controls: Some(false),
             speaker_notes: Some(true),
+            transition: None,
         })
     );
+}
+
+#[test]
+fn slides_transition_closed_domains_and_default_speed_commit_typed_state() {
+    for (style_name, style) in [
+        ("none", IrSlideTransitionStyle::None),
+        ("fade", IrSlideTransitionStyle::Fade),
+        ("slide", IrSlideTransitionStyle::Slide),
+        ("zoom", IrSlideTransitionStyle::Zoom),
+    ] {
+        for (speed_name, speed) in [
+            ("default", IrSlideTransitionSpeed::Default),
+            ("fast", IrSlideTransitionSpeed::Fast),
+            ("slow", IrSlideTransitionSpeed::Slow),
+        ] {
+            let source = format!(
+                ".doctype {{slides}}\n.slides transition:{{{style_name}}} speed:{{{speed_name}}}\n"
+            );
+            let result = compile_source(&source);
+            assert!(
+                result.diagnostics.is_empty(),
+                "{style_name}/{speed_name}: {result:?}"
+            );
+            assert_eq!(
+                slides(&result).and_then(|configuration| configuration.transition),
+                Some(IrSlideTransition { style, speed }),
+                "{style_name}/{speed_name}"
+            );
+        }
+    }
+
+    let default_speed = compile_source(".doctype {slides}\n.slides transition:{fade}\n");
+    assert!(default_speed.diagnostics.is_empty(), "{default_speed:?}");
+    assert_eq!(
+        slides(&default_speed).and_then(|configuration| configuration.transition),
+        Some(IrSlideTransition {
+            style: IrSlideTransitionStyle::Fade,
+            speed: IrSlideTransitionSpeed::Default,
+        })
+    );
+}
+
+#[test]
+fn slides_nullable_transition_and_positional_order_preserve_upstream_construction() {
+    for source in [
+        ".doctype {slides}\n.slides transition:{.none} speed:{fast}\n",
+        ".doctype {slides}\n.slides speed:{slow}\n",
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            slides(&result).and_then(|configuration| configuration.transition),
+            None,
+            "speed has no retained meaning without a transition style"
+        );
+    }
+
+    let positional =
+        compile_source(".doctype {slides}\n.slides {.none} {.none} {.none} {zoom} {fast}\n");
+    assert!(positional.diagnostics.is_empty(), "{positional:?}");
+    assert_eq!(
+        slides(&positional).and_then(|configuration| configuration.transition),
+        Some(IrSlideTransition {
+            style: IrSlideTransitionStyle::Zoom,
+            speed: IrSlideTransitionSpeed::Fast,
+        })
+    );
+}
+
+#[test]
+fn invalid_late_transition_fields_preserve_the_previous_complete_configuration() {
+    for parameter in ["transition", "speed"] {
+        let invalid_call = match parameter {
+            "transition" => ".slides transition:{INVALID} speed:{slow}",
+            "speed" => ".slides transition:{zoom} speed:{INVALID}",
+            _ => unreachable!("closed test parameter"),
+        };
+        let source = format!(
+            ".doctype {{slides}}\n.slides center:{{true}} controls:{{false}} speakernotes:{{true}} transition:{{fade}} speed:{{fast}}\n{invalid_call}\n"
+        );
+        let result = compile_source(&source);
+        assert_eq!(result.diagnostics.len(), 1, "{parameter}: {result:?}");
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains(&format!("parameter `{parameter}`")),
+            "{parameter}: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(
+            slides(&result),
+            Some(IrSlidesConfiguration {
+                center: Some(true),
+                controls: Some(false),
+                speaker_notes: Some(true),
+                transition: Some(IrSlideTransition {
+                    style: IrSlideTransitionStyle::Fade,
+                    speed: IrSlideTransitionSpeed::Fast,
+                }),
+            })
+        );
+    }
 }
 
 #[test]
@@ -117,6 +224,7 @@ fn invalid_late_toggle_preserves_the_previous_complete_configuration() {
                 center: Some(true),
                 controls: Some(false),
                 speaker_notes: Some(true),
+                transition: None,
             })
         );
     }
@@ -191,6 +299,10 @@ fn slides_wire_is_backward_compatible_and_explicit_when_set() {
             center: Some(true),
             controls: Some(false),
             speaker_notes: Some(true),
+            transition: Some(IrSlideTransition {
+                style: IrSlideTransitionStyle::Zoom,
+                speed: IrSlideTransitionSpeed::Slow,
+            }),
         }),
         ..IrDocumentState::default()
     };
@@ -200,7 +312,11 @@ fn slides_wire_is_backward_compatible_and_explicit_when_set() {
         Some(&serde_json::json!({
             "center": true,
             "controls": false,
-            "speaker_notes": true
+            "speaker_notes": true,
+            "transition": {
+                "style": "Zoom",
+                "speed": "Slow"
+            }
         }))
     );
     let restored: IrDocumentState =
@@ -221,6 +337,7 @@ fn slides_wire_is_backward_compatible_and_explicit_when_set() {
             center: Some(false),
             controls: None,
             speaker_notes: None,
+            transition: None,
         })
     );
 }

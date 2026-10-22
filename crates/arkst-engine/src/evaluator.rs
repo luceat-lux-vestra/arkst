@@ -66,9 +66,10 @@ use arkst_ir::{
     IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer, IrPageFormatSelector,
     IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins, IrPageOrientation,
     IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTodoComponent, IrValue,
-    NativeTarget, TargetSpecificContent,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition, IrSlideTransitionSpeed,
+    IrSlideTransitionStyle, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrTodoComponent, IrValue, NativeTarget,
+    TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -9445,9 +9446,9 @@ impl Evaluator {
                 parameter_spans.first().copied().flatten(),
                 *span,
             ) {
-                NullableSlidesBoolean::Value(value) => value,
-                NullableSlidesBoolean::Invalid(diagnostic) => {
-                    diagnostics.push(diagnostic);
+                SlidesConfigurationConversion::Value(value) => value,
+                SlidesConfigurationConversion::Invalid(diagnostic) => {
+                    diagnostics.push(*diagnostic);
                     return CallOutcome::Failed;
                 }
             };
@@ -9457,9 +9458,9 @@ impl Evaluator {
                 parameter_spans.get(1).copied().flatten(),
                 *span,
             ) {
-                NullableSlidesBoolean::Value(value) => value,
-                NullableSlidesBoolean::Invalid(diagnostic) => {
-                    diagnostics.push(diagnostic);
+                SlidesConfigurationConversion::Value(value) => value,
+                SlidesConfigurationConversion::Invalid(diagnostic) => {
+                    diagnostics.push(*diagnostic);
                     return CallOutcome::Failed;
                 }
             };
@@ -9469,16 +9470,43 @@ impl Evaluator {
                 parameter_spans.get(2).copied().flatten(),
                 *span,
             ) {
-                NullableSlidesBoolean::Value(value) => value,
-                NullableSlidesBoolean::Invalid(diagnostic) => {
-                    diagnostics.push(diagnostic);
+                SlidesConfigurationConversion::Value(value) => value,
+                SlidesConfigurationConversion::Invalid(diagnostic) => {
+                    diagnostics.push(*diagnostic);
                     return CallOutcome::Failed;
                 }
             };
+            let transition_style = match convert_nullable_slide_transition_style(
+                slots.next(),
+                parameter_spans.get(3).copied().flatten(),
+                *span,
+            ) {
+                SlidesConfigurationConversion::Value(value) => value,
+                SlidesConfigurationConversion::Invalid(diagnostic) => {
+                    diagnostics.push(*diagnostic);
+                    return CallOutcome::Failed;
+                }
+            };
+            let transition_speed = match convert_slide_transition_speed(
+                slots.next(),
+                parameter_spans.get(4).copied().flatten(),
+                *span,
+            ) {
+                SlidesConfigurationConversion::Value(value) => value,
+                SlidesConfigurationConversion::Invalid(diagnostic) => {
+                    diagnostics.push(*diagnostic);
+                    return CallOutcome::Failed;
+                }
+            };
+            let transition = transition_style.map(|style| IrSlideTransition {
+                style,
+                speed: transition_speed,
+            });
             context.set_slides_configuration(Some(IrSlidesConfiguration {
                 center,
                 controls,
                 speaker_notes,
+                transition,
             }));
             return CallOutcome::NoValue;
         }
@@ -18507,6 +18535,8 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("center"),
                 ParameterMetadata::optional("controls"),
                 ParameterMetadata::optional("speakernotes"),
+                ParameterMetadata::optional("transition"),
+                ParameterMetadata::defaulted("speed"),
             ],
             BodyPolicy::Reject,
         ),
@@ -21346,9 +21376,9 @@ fn localization_error(message: impl Into<String>, span: SourceSpan) -> Diagnosti
     }
 }
 
-enum NullableSlidesBoolean {
-    Value(Option<bool>),
-    Invalid(Diagnostic),
+enum SlidesConfigurationConversion<T> {
+    Value(T),
+    Invalid(Box<Diagnostic>),
 }
 
 fn convert_nullable_slides_boolean(
@@ -21356,32 +21386,113 @@ fn convert_nullable_slides_boolean(
     parameter_name: &str,
     parameter_span: Option<SourceSpan>,
     call_span: SourceSpan,
-) -> NullableSlidesBoolean {
+) -> SlidesConfigurationConversion<Option<bool>> {
     let Some(BoundSlot::Explicit {
         value,
         span: argument_span,
     }) = slot
     else {
-        return NullableSlidesBoolean::Value(None);
+        return SlidesConfigurationConversion::Value(None);
     };
     if matches!(value.value, IrValue::None) {
-        return NullableSlidesBoolean::Value(None);
+        return SlidesConfigurationConversion::Value(None);
     }
     match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Boolean) {
-        Ok(ScalarValue::Boolean(value)) => NullableSlidesBoolean::Value(Some(value)),
-        Ok(_) => NullableSlidesBoolean::Invalid(document_state_conversion_error(
+        Ok(ScalarValue::Boolean(value)) => SlidesConfigurationConversion::Value(Some(value)),
+        Ok(_) => SlidesConfigurationConversion::Invalid(Box::new(document_state_conversion_error(
             format!("`.slides {parameter_name}` must be boolean or none"),
             argument_span,
-        )),
-        Err(error) => NullableSlidesBoolean::Invalid(conversion_failure_diagnostic(
-            value_conversion::ConversionFailure::new(
-                error,
-                Some(argument_span),
-                Some(parameter_name),
-                parameter_span,
-                call_span,
+        ))),
+        Err(error) => {
+            SlidesConfigurationConversion::Invalid(Box::new(conversion_failure_diagnostic(
+                value_conversion::ConversionFailure::new(
+                    error,
+                    Some(argument_span),
+                    Some(parameter_name),
+                    parameter_span,
+                    call_span,
+                ),
+                Some("`.slides`"),
+            )))
+        }
+    }
+}
+
+fn convert_nullable_slide_transition_style(
+    slot: Option<BoundSlot<InvocationValue>>,
+    parameter_span: Option<SourceSpan>,
+    call_span: SourceSpan,
+) -> SlidesConfigurationConversion<Option<IrSlideTransitionStyle>> {
+    let Some(BoundSlot::Explicit {
+        value,
+        span: argument_span,
+    }) = slot
+    else {
+        return SlidesConfigurationConversion::Value(None);
+    };
+    if matches!(value.value, IrValue::None) {
+        return SlidesConfigurationConversion::Value(None);
+    }
+    match value_conversion::convert_domain_with_origin(
+        &value,
+        value_conversion::DomainTarget::ClosedEnum(
+            value_conversion::ClosedEnumTarget::SlideTransitionStyle,
+        ),
+    ) {
+        Ok(value_conversion::DomainValue::Enum(IrEnumValue::SlideTransitionStyle(value))) => {
+            SlidesConfigurationConversion::Value(Some(value))
+        }
+        Ok(_) => unreachable!("Slide transition style target returned a different closed enum"),
+        Err(error) => SlidesConfigurationConversion::Invalid(Box::new(
+            conversion_failure_diagnostic_with_detail(
+                value_conversion::ConversionFailure::new(
+                    error,
+                    Some(argument_span),
+                    Some("transition"),
+                    parameter_span,
+                    call_span,
+                ),
+                Some("`.slides` transition"),
+                Some("must be none, fade, slide, or zoom"),
             ),
-            Some("`.slides`"),
+        )),
+    }
+}
+
+fn convert_slide_transition_speed(
+    slot: Option<BoundSlot<InvocationValue>>,
+    parameter_span: Option<SourceSpan>,
+    call_span: SourceSpan,
+) -> SlidesConfigurationConversion<IrSlideTransitionSpeed> {
+    let Some(BoundSlot::Explicit {
+        value,
+        span: argument_span,
+    }) = slot
+    else {
+        return SlidesConfigurationConversion::Value(IrSlideTransitionSpeed::Default);
+    };
+    match value_conversion::convert_domain_with_origin(
+        &value,
+        value_conversion::DomainTarget::ClosedEnum(
+            value_conversion::ClosedEnumTarget::SlideTransitionSpeed,
+        ),
+    ) {
+        Ok(value_conversion::DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(value))) => {
+            SlidesConfigurationConversion::Value(value)
+        }
+        Ok(_) => unreachable!("Slide transition speed target returned a different closed enum"),
+        Err(error) => SlidesConfigurationConversion::Invalid(Box::new(
+            conversion_failure_diagnostic_with_detail(
+                value_conversion::ConversionFailure::new(
+                    error,
+                    Some(argument_span),
+                    Some("speed"),
+                    parameter_span,
+                    call_span,
+                ),
+                Some("`.slides` speed"),
+                Some("must be default, fast, or slow"),
+            ),
         )),
     }
 }
