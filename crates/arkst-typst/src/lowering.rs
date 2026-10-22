@@ -8,9 +8,9 @@ use arkst_ir::{
     IrColor, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
     IrDocument, IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrInline,
     IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget,
-    IrPageMarginPosition, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextScript, IrTextSize,
-    IrTextVariant, IrTodoComponent, IrValue,
+    IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase,
+    IrTextScript, IrTextSize, IrTextVariant, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -87,6 +87,9 @@ struct LoweringContext {
     /// Whether final selector-free page layout has more than one column.
     /// Full-column container breakout is inert in a single-column document.
     multi_column_layout: bool,
+    /// Whether the final slides configuration exposes speaker-note content in
+    /// ordinary static output. Omitted/null state uses the public false default.
+    show_speaker_notes: bool,
 }
 
 fn selector_free_page_alignment(doc: &IrDocument) -> Option<IrDocumentAlignment> {
@@ -126,6 +129,7 @@ impl LoweringContext {
             verbatim: false,
             inherited_stack_main_axis: IrMainAxisAlignment::Start,
             multi_column_layout: false,
+            show_speaker_notes: false,
         }
     }
 
@@ -153,6 +157,14 @@ impl LoweringContext {
         };
         self.multi_column_layout =
             selector_free_page_columns(doc).is_some_and(|columns| columns > 1);
+        self.show_speaker_notes = self.document_type == IrDocumentType::Slides
+            && doc
+                .metadata
+                .document_state
+                .slides
+                .as_ref()
+                .and_then(|slides| slides.speaker_notes)
+                .unwrap_or(false);
 
         // Emit metadata as Typst set-rules
         if let Some(ref title) = doc.metadata.title {
@@ -498,6 +510,7 @@ impl LoweringContext {
             IrComponent::Box(callout) => self.lower_box(callout),
             IrComponent::Collapse(collapse) => self.lower_collapse(collapse),
             IrComponent::Todo(todo) => self.lower_todo(todo),
+            IrComponent::SpeakerNote(note) => self.lower_speaker_note(note),
             IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
         }
     }
@@ -626,6 +639,21 @@ impl LoweringContext {
         self.push_str("#strong[");
         self.push_str(&escape_typst_text(&component.title));
         self.push_str("]\n");
+        for child in &component.children {
+            self.lower_node(child);
+        }
+        self.push_str("]\n");
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_speaker_note(&mut self, component: &IrSpeakerNoteComponent) {
+        if !self.show_speaker_notes {
+            return;
+        }
+        let before = self.output.len();
+        self.push_str("#block[\n");
         for child in &component.children {
             self.lower_node(child);
         }

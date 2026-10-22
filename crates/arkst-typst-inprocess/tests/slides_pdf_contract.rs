@@ -160,3 +160,19 @@ fn closed_transition_values_do_not_fabricate_static_pdf_behavior() {
         assert_default_slide_geometry(&pdf);
     }
 }
+
+#[test]
+fn speaker_note_visibility_variants_compile_to_one_slide_pdf() {
+    for configuration in [
+        "",
+        ".slides speakernotes:{false}\n",
+        ".slides speakernotes:{true}\n",
+    ] {
+        let source = format!(
+            ".doctype {{slides}}\n{configuration}\nVISIBLE-SLIDE\n\n.speakernote\n    Speaker **detail**.\n"
+        );
+        let pdf = compile_pdf(&source);
+        assert_eq!(page_count(&pdf), 1, "source:\n{source}");
+        assert_default_slide_geometry(&pdf);
+    }
+}

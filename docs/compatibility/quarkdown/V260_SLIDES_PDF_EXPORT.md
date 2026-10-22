@@ -13,7 +13,7 @@ PR #358 implements the bounded Arkst-owned contract needed for this migration ro
 - #185 bounded subcontract: typed explicit `.pagebreak` / `<<<` boundaries;
 - Typst ownership: slides default PDF geometry, vertical-centering lowering, weak explicit page boundaries, and final PDF artifact production.
 
-The broader #175/#178/#185 issues remain open for their unrelated baseline scope. The original migration slice did not claim controls, speaker notes, transitions, partial/selector page-format semantics, math, or code presentation support. Later bounded #178 extensions preserve the complete public Slides configuration shape without claiming browser controls, speaker-view behavior, transition animation, or slide-content semantics.
+The broader #175/#178/#185 issues remain open for their unrelated baseline scope. The original migration slice did not claim controls, speaker notes, transitions, partial/selector page-format semantics, math, or code presentation support. Later bounded #178 extensions preserve the complete public Slides configuration shape, and a bounded #184 consumer adds static-PDF speaker-note visibility. Browser controls, HTML/Reveal speaker view, transition animation, fragments, and other slide-content semantics remain unclaimed.
 
 The Chromium-export adapter remains current-surface N/A as documented in `V260_PDF_EXPORT_ADAPTER.md`; that does not make slides layout N/A because Arkst itself owns `.doctype {slides}` → Typst → PDF.
 
@@ -149,11 +149,13 @@ The native `.slides` initializer is accepted only when the final document type i
 The later nullable-toggle extension applies the same omission/explicit-`none`/
 Boolean boundary to `controls` and `speakernotes`, preserves public positional
 order, and commits the complete configuration only after every supplied value
-converts. Those two fields are presentation-only in the current Typst/PDF
-backend: they deliberately produce no Typst syntax and do not fabricate HTML
-controls or speaker-view behavior. The typed `speaker_notes` state is the
-configuration prerequisite for the separately owned #184 `.speakernote`
-content consumer.
+converts. `controls` remains presentation-only in the current Typst/PDF backend
+and does not fabricate HTML controls. The typed `speaker_notes` state is now
+consumed by the separately owned bounded #184 `.speakernote` component:
+explicit true exposes ordered structured note content in ordinary static
+output, while omission, explicit none, and false use the public false default
+and emit no note output. This does not claim HTML/Reveal speaker-view behavior
+or exact CSS/theme styling.
 
 The closed transition extension accepts `none`/`fade`/`slide`/`zoom` styles
 and `default`/`fast`/`slow` speeds through the shared origin-aware enum
@@ -196,21 +198,23 @@ This keeps default/focus interaction testable without conflating theme-specific 
 
 ## Regression and adversarial evidence
 
-The substantive implementation candidate `aca8143a8f158bbe3411d4df13bf14303b822f0c` passed the bounded engineering proof before this evidence document was finalized:
+The current bounded regression matrix is:
 
 | Evidence | Result |
 |---|---:|
 | page geometry semantic/rollback/serde tests | 6/6 pass |
 | existing page-alignment regression tests | 6/6 pass |
 | `.slides` gating/nullability/closed-transition/order/rollback/shadowing/serde tests | 12/12 pass |
+| `.speakernote` body/gating/order/atomicity/shadowing/provenance/serde tests | 6/6 pass |
 | explicit-break parser boundary/adversarial tests | 6/6 pass |
 | explicit-break IR/evaluator/fail-closed/shadowing/serde tests | 4/4 pass |
 | Typst slides prelude/ordering/weak-break tests | 6/6 pass |
+| Typst speaker-note visibility/source-map tests | 3/3 pass |
 | existing automatic-pagebreak artifact regression | 5/5 pass |
-| real in-process Typst PDF artifact matrix | 9/9 pass |
+| real in-process Typst PDF artifact matrix | 10/10 pass |
 | subprocess/in-process slides backend parity with pinned Typst 0.15.1 | pass |
 
-The 9-case real-PDF matrix covers:
+The 10-case real-PDF matrix covers:
 
 - slides default geometry `749.04 x 546 pt`;
 - explicit `10in x 5in` override producing `720 x 360 pt`;
@@ -220,12 +224,14 @@ The 9-case real-PDF matrix covers:
 - first body-only plus consecutive interior body-only slides;
 - short and long body-only slides without accidental pagination;
 - default layout, omitted/nullable `.slides`, explicit center true/false,
-  presentation-only controls/speaker-note toggles, and `focus` retaining the
+  controls/speaker-note configuration variants, and `focus` retaining the
   expected page contract;
 - every closed transition style and speed value retaining the one-page static
-  PDF geometry contract without invented animation output.
+  PDF geometry contract without invented animation output;
+- default-hidden, explicit-false, and explicit-true speaker-note variants
+  compiling through the real Typst PDF backend with stable slide geometry.
 
-The dedicated `slides_backend_parity` integration test compares in-process and subprocess Typst PDF page counts and MediaBox geometry across explicit boundaries, centered layout, presentation toggles, representative transition state, `focus`, and explicit page geometry. Production CI ran it against pinned Typst 0.15.1 on Linux, macOS, and Windows.
+The dedicated `slides_backend_parity` integration test compares in-process and subprocess Typst PDF page counts and MediaBox geometry across explicit boundaries, centered layout, presentation toggles, visible speaker-note content, representative transition state, `focus`, and explicit page geometry. Production CI runs it against pinned Typst 0.15.1 on Linux, macOS, and Windows.
 
 ## Production verification record
 

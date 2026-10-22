@@ -803,11 +803,12 @@ explicit `none` retain renderer defaults for nullable fields. A non-null
 transition stores one closed style plus the supplied or default speed; a speed
 without a style is validated but has no retained meaning, matching the public
 construction rule. Every supplied value is validated before one atomic commit.
-Typst/PDF output intentionally remains unchanged for controls, speaker notes,
-and transitions and does not fabricate browser controls, speaker view, or
-animation behavior. Interactive renderer behavior and the separate #154
-`.fragment`/`.speakernote` content rows remain open. Status is `PARTIAL` under
-#178.
+Typst/PDF output intentionally remains unchanged for controls and transitions
+and does not fabricate browser controls or animation behavior. The global
+`speaker_notes` field is consumed only by the separately owned bounded #184
+`.speakernote` component: explicit true exposes note content in ordinary static
+output, while omission/nullable/false keeps it hidden. HTML/Reveal speaker view
+and the #154 `.fragment` row remain open. Status is `PARTIAL` under #178.
 
 ## 5. Arkst pipeline and architecture boundary
 
