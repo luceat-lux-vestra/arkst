@@ -2514,6 +2514,44 @@ fn integration_container_border_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_container_padding_lowers_to_valid_typst_and_pdf() {
+    let source = ".container width:{4cm} background:{white} padding:{1cm 2mm 3pt 8px}\n    ## Padded\n    Rich **body**\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container-padding.qd")
+        .expect("valid entry path")
+        .add_source("container-padding.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container padding diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains(
+            "#block(width: 4cm, fill: rgb(255, 255, 255, 100%), inset: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))["
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("container-padding", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container-padding.qd".to_string(),
+            })
+            .expect("container padding Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_container_alignment_lowers_to_valid_typst_and_pdf() {
     let source = ".container width:{4cm} background:{white} alignment:{center}\n    ## Centered\n    Rich **body**\n";
     let project = VirtualProjectBuilder::new()

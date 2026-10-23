@@ -1667,8 +1667,23 @@ pub struct IrContainerComponent {
     /// An explicit component-local border color, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border: Option<Box<IrColor>>,
+    /// Explicit component-local content padding expanded to all four sides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub padding: Option<Box<IrContainerPadding>>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
+}
+
+/// Backend-neutral per-side padding for a Container component.
+///
+/// The evaluator expands Quarkdown's documented one/two/four-value `Sizes`
+/// shorthand before the value crosses the IR boundary.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrContainerPadding {
+    pub top: IrSize,
+    pub right: IrSize,
+    pub bottom: IrSize,
+    pub left: IrSize,
 }
 
 /// Logical container alignment used by the bounded `.center` and `.align`
@@ -2230,6 +2245,8 @@ struct WireContainerComponent {
     foreground: Option<IrColor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     border: Option<IrColor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    padding: Option<IrContainerPadding>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2834,6 +2851,7 @@ fn component_to_wire(
             background: component.background.as_deref().cloned(),
             foreground: component.foreground.as_deref().cloned(),
             border: component.border.as_deref().cloned(),
+            padding: component.padding.as_deref().cloned(),
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3409,6 +3427,7 @@ fn component_from_wire(
             background: component.background.map(Box::new),
             foreground: component.foreground.map(Box::new),
             border: component.border.map(Box::new),
+            padding: component.padding.map(Box::new),
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
@@ -4548,6 +4567,7 @@ mod tests {
             background: None,
             foreground: None,
             border: None,
+            padding: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -4786,6 +4806,7 @@ mod tests {
                 background: None,
                 foreground: None,
                 border: None,
+                padding: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4804,6 +4825,7 @@ mod tests {
                 background: None,
                 foreground: None,
                 border: None,
+                padding: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4829,6 +4851,7 @@ mod tests {
             background: None,
             foreground: None,
             border: None,
+            padding: None,
             children: Vec::new(),
             span,
         }));

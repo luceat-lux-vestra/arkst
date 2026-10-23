@@ -456,7 +456,7 @@ pinned `CaptionPosition.kt`, `CaptionPositionInfo.kt`, `Document.kt`,
 authored `fixtures/quarkdown-conformance/cases/captionposition-document-state/`
 case.
 
-### Bounded `.container` layout, color/border, and alignment contract
+### Bounded `.container` layout, color/border, alignment, and padding contract
 
 The direct `.container` consumer is **partial/bounded**, not complete upstream
 Container support. The implemented subset is:
@@ -465,14 +465,15 @@ Container support. The implemented subset is:
   children;
 - `width: Size?`, `height: Size?`, `fullwidth: Boolean`, and the named-only
   `fullspan: Boolean`, `background: Color?`, `foreground: Color?`,
-  `border: Color?`, and closed `alignment: Alignment?` through
+  `border: Color?`, closed `alignment: Alignment?`, and one/two/four-value
+  `padding: Sizes?` through
   the existing origin-aware invocation conversion boundary;
 - positional prefix binding in `width`, `height`, `fullwidth` order and named
   equivalents, with duplicate, unknown, and deferred-known parameters
   rejected by source-backed diagnostics; and
 - backend-neutral `IrComponent::Container` materialization and Typst
   `#block` sizing/fill/stroke plus container-scoped text fill and logical
-  `start`/`center`/`end` alignment wrappers, where explicit width overrides
+  `start`/`center`/`end` alignment wrappers plus per-side `inset`, where explicit width overrides
   `fullwidth` and an omitted/`None` alignment emits no `#align` wrapper; and
 - additive `full_column_span` IR state. With more than one selector-free page
   column, Typst lowering uses the official parent-scoped top-float breakout
@@ -481,13 +482,14 @@ Container support. The implemented subset is:
   document. Exact Quarkdown in-flow HTML/CSS placement remains unclaimed.
 
 The deferred surface includes `float`, `classname`, the remaining
-StyleOptions, container text alignment, border width/style, margin/padding/
-radius, font/text-style properties, inline Container insertion, and exact
+StyleOptions, container text alignment, border width/style, margin/radius,
+font/text-style properties, inline Container insertion, and exact
 HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container.rs`,
 `crates/arkst-core/tests/quarkdown_container_colors_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_border_184.rs`,
-`crates/arkst-core/tests/quarkdown_container_alignment_184.rs`, the IR/lowering
+`crates/arkst-core/tests/quarkdown_container_alignment_184.rs`,
+`crates/arkst-core/tests/quarkdown_container_padding_184.rs`, the IR/lowering
 unit tests, and `crates/arkst-typst-subprocess/tests/backend_integration.rs`.
 
 ### Bounded standalone `.fullspan` contract
