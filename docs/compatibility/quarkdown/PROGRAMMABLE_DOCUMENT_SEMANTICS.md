@@ -269,7 +269,7 @@ backend-owned and does not add Typst constructs to the core IR.
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
 | `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
 | `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
-| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable closed content `alignment`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, lazy validation, additive full-column-span, explicit typed colors, and logical content alignment are supported |
+| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable closed content `alignment`, named-only nullable one/two/four-value `padding: Sizes`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, lazy validation, additive full-column-span, explicit typed colors, logical content alignment, and per-side padding are supported |
 | `fullspan` | no non-body arguments and one required Markdown block body | bounded Container semantic node with `full_column_span: true`; validation precedes lazy body evaluation |
 | `landscape` | no non-body arguments and one required Markdown block body | typed Landscape semantic node; 90° counter-clockwise content transformation |
 
@@ -298,7 +298,7 @@ Implemented in this slice:
   size conversion, alignment structure, source maps, and real Typst/PDF
   integration coverage.
 
-### Container component consumer slices (2026-08-21; style extensions 2026-10-23)
+### Container component consumer slices (2026-08-21; style extensions 2026-10-24)
 
 `.center` is implemented as a bounded Container component consumer:
 
@@ -333,15 +333,17 @@ layout slice:
 - positional and named `width`, `height`, and `fullwidth` arguments plus the
   named-only `fullspan` Boolean and nullable
   `background`/`foreground`/`border` colors plus named-only nullable closed
-  `alignment` use the existing invocation-origin infrastructure and typed
-  `IrSize`/Boolean/`IrColor`/`IrContainerAlignment` conversion; duplicate,
+  `alignment` and one/two/four-value `padding` use the existing
+  invocation-origin infrastructure and typed
+  `IrSize`/Boolean/`IrColor`/`IrContainerAlignment` conversion; padding is
+  expanded to explicit top/right/bottom/left sizes before entering IR; duplicate,
   unknown, and deferred-known
   parameters fail with a source-backed diagnostic;
 - argument binding, conversion, and validation complete before the body is
-  evaluated, so invalid sizing, color, or alignment never executes a failing
+  evaluated, so invalid sizing, color, alignment, or padding never executes a failing
   body or publishes a partial component; and
 - Typst lowering emits `#block` sizing, optional fill, and optional stroke in
-  deterministic `width`, `height`, `fill`, `stroke` order, applies optional
+  deterministic `width`, `height`, `fill`, `stroke`, `inset` order, applies optional
   foreground through a container-scoped text fill, keeps explicit width ahead
   of `fullwidth`, and
   emits the logical `start`/`center`/`end` `#align` wrapper only when alignment
@@ -368,7 +370,7 @@ Deferred from these slices:
 - the remaining `StyleOptions` and `.float`;
 - general String → Markdown body conversion and inline Container insertion;
 - direct `.container` style parameters including `float`, `classname`,
-  text alignment, border width/style, margin/padding, radius, and
+  text alignment, border width/style, margin, radius, and
   font/text-style properties.
 
 Deferred from this slice:

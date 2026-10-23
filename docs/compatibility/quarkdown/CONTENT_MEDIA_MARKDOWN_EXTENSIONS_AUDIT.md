@@ -118,11 +118,13 @@ dependency:
   remaining component functions do not.
 - .container is PARTIAL: bounded width/height/fullwidth, named `fullspan`,
   optional typed background/foreground/border colors, and named nullable
-  `start`/`center`/`end` content alignment exist. Multi-column
+  `start`/`center`/`end` content alignment plus named nullable one/two/four-value
+  padding exist. Multi-column
   output uses a parent-scoped full-width Typst top-float and immediate flush;
-  color output uses block fill, container-scoped text fill, and block stroke.
+  color and spacing output uses block fill, container-scoped text fill, block
+  stroke, and per-side block inset.
   Exact upstream in-flow and HTML/CSS placement remain unclaimed. Float,
-  class, text alignment, border width/style, the remaining style fields, and
+  class, text alignment, border width/style, margin/radius, the remaining style fields, and
   complete body conversion remain open.
 - .fullspan is PARTIAL: a required Markdown block body produces the existing
   typed Container semantic with `full_column_span: true`, strict pre-evaluation

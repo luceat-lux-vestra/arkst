@@ -59,17 +59,18 @@ use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
     IrCallableResourceContext, IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable,
     IrClipComponent, IrCodeCallout, IrCollapseComponent, IrColor, IrComponent,
-    IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
-    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
-    IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody,
-    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
-    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins,
-    IrPageOrientation, IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair,
-    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition,
-    IrSlideTransitionSpeed, IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-    IrTodoComponent, IrValue, NativeTarget, TargetSpecificContent,
+    IrContainerAlignment, IrContainerComponent, IrContainerPadding, IrCrossAxisAlignment,
+    IrDictionary, IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
+    IrExplicitErrorComponent, IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent,
+    IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
+    IrNode, IrNumberingLayer, IrNumberingState, IrPageBorderWidths, IrPageCounterTarget,
+    IrPageFormatLayer, IrPageFormatSelector, IrPageFormatState, IrPageGeometry,
+    IrPageMarginPosition, IrPageMargins, IrPageOrientation, IrPageRange, IrPageSide,
+    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
+    IrRawBody, IrSize, IrSizeUnit, IrSlideTransition, IrSlideTransitionSpeed,
+    IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTodoComponent, IrValue,
+    NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -377,6 +378,7 @@ struct BoundContainerArguments {
     foreground: Option<ContainerArgument>,
     border: Option<ContainerArgument>,
     alignment: Option<ContainerArgument>,
+    padding: Option<ContainerArgument>,
 }
 
 struct BoundWhitespaceArguments {
@@ -5773,6 +5775,7 @@ impl Evaluator {
                 background: None,
                 foreground: None,
                 border: None,
+                padding: None,
                 children,
                 span: *span,
             },
@@ -5900,6 +5903,7 @@ impl Evaluator {
                 background: None,
                 foreground: None,
                 border: None,
+                padding: None,
                 children,
                 span: *span,
             },
@@ -7830,6 +7834,7 @@ impl Evaluator {
                 background: None,
                 foreground: None,
                 border: None,
+                padding: None,
                 children,
                 span: *span,
             },
@@ -8010,6 +8015,22 @@ impl Evaluator {
             },
             None => None,
         };
+        let padding = match bound.padding.as_ref() {
+            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) => match convert_container_padding(&argument.value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    diagnostics.push(container_conversion_error(
+                        "padding",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
 
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
@@ -8047,6 +8068,7 @@ impl Evaluator {
                 background: background.map(Box::new),
                 foreground: foreground.map(Box::new),
                 border: border.map(Box::new),
+                padding: padding.map(Box::new),
                 children,
                 span: *span,
             },
@@ -17866,13 +17888,20 @@ fn convert_pageformat_size(
 fn convert_pageformat_margin(
     argument: &InvocationValue,
 ) -> Result<IrPageMargins, value_conversion::ConversionError> {
+    let [top, right, bottom, left] = convert_sizes(argument)?;
+    Ok(IrPageMargins {
+        top,
+        right,
+        bottom,
+        left,
+    })
+}
+
+fn convert_sizes(
+    argument: &InvocationValue,
+) -> Result<[IrSize; 4], value_conversion::ConversionError> {
     if let Ok(size) = convert_pageformat_size(argument) {
-        return Ok(IrPageMargins {
-            top: size.clone(),
-            right: size.clone(),
-            bottom: size.clone(),
-            left: size,
-        });
+        return Ok([size.clone(), size.clone(), size.clone(), size]);
     }
 
     // A multi-value Quarkdown `Sizes` argument such as `{1cm 2cm}`
@@ -17883,7 +17912,7 @@ fn convert_pageformat_margin(
         (IrValue::String(value) | IrValue::Identifier(value), ValueOrigin::Dynamic) => {
             value.clone()
         }
-        (IrValue::Content(_), _) => pageformat_margin_plain_text(&argument.value).ok_or(
+        (IrValue::Content(_), _) => sizes_plain_text(&argument.value).ok_or(
             value_conversion::ConversionError::UnsupportedValue {
                 target: value_conversion::ConversionTarget::Size,
             },
@@ -17904,36 +17933,23 @@ fn convert_pageformat_margin(
     match parts.as_slice() {
         [all] => {
             let all = parse(all)?;
-            Ok(IrPageMargins {
-                top: all.clone(),
-                right: all.clone(),
-                bottom: all.clone(),
-                left: all,
-            })
+            Ok([all.clone(), all.clone(), all.clone(), all])
         }
         [vertical, horizontal] => {
             let vertical = parse(vertical)?;
             let horizontal = parse(horizontal)?;
-            Ok(IrPageMargins {
-                top: vertical.clone(),
-                right: horizontal.clone(),
-                bottom: vertical,
-                left: horizontal,
-            })
+            Ok([vertical.clone(), horizontal.clone(), vertical, horizontal])
         }
-        [top, right, bottom, left] => Ok(IrPageMargins {
-            top: parse(top)?,
-            right: parse(right)?,
-            bottom: parse(bottom)?,
-            left: parse(left)?,
-        }),
+        [top, right, bottom, left] => {
+            Ok([parse(top)?, parse(right)?, parse(bottom)?, parse(left)?])
+        }
         _ => Err(value_conversion::ConversionError::InvalidText {
             target: value_conversion::ConversionTarget::Size,
         }),
     }
 }
 
-fn pageformat_margin_plain_text(value: &IrValue) -> Option<String> {
+fn sizes_plain_text(value: &IrValue) -> Option<String> {
     let IrValue::Content(nodes) = value else {
         return None;
     };
@@ -18076,6 +18092,7 @@ fn bind_container_arguments(
     let foreground = take(slots.next());
     let border = take(slots.next());
     let alignment = take(slots.next());
+    let padding = take(slots.next());
     Ok(BoundContainerArguments {
         width,
         height,
@@ -18085,6 +18102,19 @@ fn bind_container_arguments(
         foreground,
         border,
         alignment,
+        padding,
+    })
+}
+
+fn convert_container_padding(
+    argument: &InvocationValue,
+) -> Result<IrContainerPadding, value_conversion::ConversionError> {
+    let [top, right, bottom, left] = convert_sizes(argument)?;
+    Ok(IrContainerPadding {
+        top,
+        right,
+        bottom,
+        left,
     })
 }
 
@@ -19183,6 +19213,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("foreground").positional(false),
                 ParameterMetadata::optional("border").positional(false),
                 ParameterMetadata::optional("alignment").positional(false),
+                ParameterMetadata::optional("padding").positional(false),
             ],
             BodyPolicy::AllowSeparate,
         ),
@@ -21106,7 +21137,6 @@ fn native_binding_message(name: &str, message: String) -> String {
                     | "borderstyle"
                     | "textalignment"
                     | "margin"
-                    | "padding"
                     | "radius"
                     | "fontsize"
                     | "fontweight"

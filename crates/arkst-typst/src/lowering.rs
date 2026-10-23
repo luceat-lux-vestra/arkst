@@ -5,12 +5,13 @@
 
 use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallSegment, IrClipComponent, IrClipShape, IrCollapseComponent,
-    IrColor, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-    IrDocument, IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior,
-    IrFragmentComponent, IrInline, IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment,
-    IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
-    IrTextCase, IrTextScript, IrTextSize, IrTextVariant, IrTodoComponent, IrValue,
+    IrColor, IrComponent, IrContainerAlignment, IrContainerComponent, IrContainerPadding,
+    IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
+    IrExplicitErrorComponent, IrFragmentBehavior, IrFragmentComponent, IrInline, IrKeybindingPart,
+    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition,
+    IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextScript, IrTextSize,
+    IrTextVariant, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -917,6 +918,7 @@ impl LoweringContext {
             || component.height.is_some()
             || component.background.is_some()
             || component.border.is_some()
+            || component.padding.is_some()
         {
             self.push('(');
             let mut first = true;
@@ -950,6 +952,14 @@ impl LoweringContext {
                 }
                 self.push_str("stroke: ");
                 self.push_str(&lower_color(border));
+                first = false;
+            }
+            if let Some(padding) = component.padding.as_ref() {
+                if !first {
+                    self.push_str(", ");
+                }
+                self.push_str("inset: ");
+                self.push_str(&lower_container_padding(padding));
             }
             self.push(')');
         }
@@ -2064,6 +2074,16 @@ pub(crate) fn lower_size(size: &IrSize) -> String {
     format!("{}{unit}", format_number(value))
 }
 
+fn lower_container_padding(padding: &IrContainerPadding) -> String {
+    format!(
+        "(top: {}, right: {}, bottom: {}, left: {})",
+        lower_size(&padding.top),
+        lower_size(&padding.right),
+        lower_size(&padding.bottom),
+        lower_size(&padding.left),
+    )
+}
+
 fn format_number(value: f64) -> String {
     let mut text = format!("{value:.12}");
     while text.contains('.') && text.ends_with('0') {
@@ -2122,10 +2142,10 @@ fn escape_typst_comment(s: &str) -> String {
 mod tests {
     use arkst_ir::{
         IrCallSegment, IrClipComponent, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
-        IrContainerComponent, IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline,
-        IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
-        IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
-        IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+        IrContainerComponent, IrContainerPadding, IrCrossAxisAlignment, IrDocument,
+        IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
+        IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
+        IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2179,6 +2199,7 @@ mod tests {
                 background: None,
                 foreground: None,
                 border: None,
+                padding: None,
                 children,
                 span: empty_span(),
             }),
@@ -2230,6 +2251,7 @@ mod tests {
                 background: None,
                 foreground: None,
                 border: None,
+                padding: None,
                 children: vec![paragraph("A")],
                 span: empty_span(),
             }),
@@ -2488,6 +2510,7 @@ mod tests {
                     background: None,
                     foreground: None,
                     border: None,
+                    padding: None,
                     children: vec![paragraph("Across")],
                     span: call_span,
                 }),
@@ -2552,6 +2575,7 @@ mod tests {
                         alpha: 0.5,
                     })),
                     border: None,
+                    padding: None,
                     children: vec![paragraph("Colored")],
                     span: call_span,
                 }),
@@ -2600,6 +2624,7 @@ mod tests {
                         blue: 3,
                         alpha: 0.5,
                     })),
+                    padding: None,
                     children: vec![paragraph("Bordered")],
                     span: call_span,
                 }),
@@ -2616,6 +2641,59 @@ mod tests {
         );
         assert!(code.find("fill:").unwrap() < code.find("stroke:").unwrap());
         assert!(code.find("stroke:").unwrap() < code.find("Bordered").unwrap());
+        assert!(source_map.iter().any(|entry| entry.original == call_span));
+    }
+
+    #[test]
+    fn container_padding_lowers_to_deterministic_per_side_inset_with_source_mapping() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 64);
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    width: Some(IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Cm,
+                    }),
+                    height: None,
+                    full_width: false,
+                    full_column_span: false,
+                    alignment: None,
+                    background: None,
+                    foreground: None,
+                    border: None,
+                    padding: Some(Box::new(IrContainerPadding {
+                        top: IrSize {
+                            value: 1.0,
+                            unit: IrSizeUnit::Cm,
+                        },
+                        right: IrSize {
+                            value: 2.0,
+                            unit: IrSizeUnit::Mm,
+                        },
+                        bottom: IrSize {
+                            value: 3.0,
+                            unit: IrSizeUnit::Pt,
+                        },
+                        left: IrSize {
+                            value: 8.0,
+                            unit: IrSizeUnit::Px,
+                        },
+                    })),
+                    children: vec![paragraph("Padded")],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, source_map) = super::lower_to_typst(&document);
+        assert!(
+            code.contains(
+                "#block(width: 4cm, inset: (top: 1cm, right: 2mm, bottom: 3pt, left: 6pt))["
+            ),
+            "{code}"
+        );
+        assert!(code.find("inset:").unwrap() < code.find("Padded").unwrap());
         assert!(source_map.iter().any(|entry| entry.original == call_span));
     }
 
@@ -2637,6 +2715,7 @@ mod tests {
                         background: None,
                         foreground: None,
                         border: None,
+                        padding: None,
                         children: vec![paragraph("A")],
                         span: empty_span(),
                     }),
@@ -2673,6 +2752,7 @@ mod tests {
                     background: None,
                     foreground: None,
                     border: None,
+                    padding: None,
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
                             content: "Hello".to_string(),
