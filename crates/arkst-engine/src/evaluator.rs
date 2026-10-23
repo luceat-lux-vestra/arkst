@@ -375,6 +375,7 @@ struct BoundContainerArguments {
     full_column_span: Option<ContainerArgument>,
     background: Option<ContainerArgument>,
     foreground: Option<ContainerArgument>,
+    border: Option<ContainerArgument>,
 }
 
 struct BoundWhitespaceArguments {
@@ -5770,6 +5771,7 @@ impl Evaluator {
                 alignment: Some(IrContainerAlignment::Center),
                 background: None,
                 foreground: None,
+                border: None,
                 children,
                 span: *span,
             },
@@ -5896,6 +5898,7 @@ impl Evaluator {
                 alignment: None,
                 background: None,
                 foreground: None,
+                border: None,
                 children,
                 span: *span,
             },
@@ -7825,6 +7828,7 @@ impl Evaluator {
                 alignment: Some(alignment),
                 background: None,
                 foreground: None,
+                border: None,
                 children,
                 span: *span,
             },
@@ -7974,6 +7978,21 @@ impl Evaluator {
             },
             None => None,
         };
+        let border = match bound.border.as_ref() {
+            Some(argument) => match convert_optional_color(&argument.value) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(container_conversion_error(
+                        "border",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
 
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
@@ -8010,6 +8029,7 @@ impl Evaluator {
                 alignment: None,
                 background: background.map(Box::new),
                 foreground: foreground.map(Box::new),
+                border: border.map(Box::new),
                 children,
                 span: *span,
             },
@@ -18037,6 +18057,7 @@ fn bind_container_arguments(
     let full_column_span = take(slots.next());
     let background = take(slots.next());
     let foreground = take(slots.next());
+    let border = take(slots.next());
     Ok(BoundContainerArguments {
         width,
         height,
@@ -18044,6 +18065,7 @@ fn bind_container_arguments(
         full_column_span,
         background,
         foreground,
+        border,
     })
 }
 
@@ -19140,6 +19162,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::defaulted("fullspan").positional(false),
                 ParameterMetadata::optional("background").positional(false),
                 ParameterMetadata::optional("foreground").positional(false),
+                ParameterMetadata::optional("border").positional(false),
             ],
             BodyPolicy::AllowSeparate,
         ),
@@ -21059,7 +21082,6 @@ fn native_binding_message(name: &str, message: String) -> String {
                     | "classname"
                     | "foreground"
                     | "background"
-                    | "border"
                     | "borderwidth"
                     | "borderstyle"
                     | "alignment"

@@ -916,6 +916,7 @@ impl LoweringContext {
             || component.full_width
             || component.height.is_some()
             || component.background.is_some()
+            || component.border.is_some()
         {
             self.push('(');
             let mut first = true;
@@ -941,6 +942,14 @@ impl LoweringContext {
                 }
                 self.push_str("fill: ");
                 self.push_str(&lower_color(background));
+                first = false;
+            }
+            if let Some(border) = component.border.as_deref() {
+                if !first {
+                    self.push_str(", ");
+                }
+                self.push_str("stroke: ");
+                self.push_str(&lower_color(border));
             }
             self.push(')');
         }
@@ -2169,6 +2178,7 @@ mod tests {
                 alignment: Some(IrContainerAlignment::Center),
                 background: None,
                 foreground: None,
+                border: None,
                 children,
                 span: empty_span(),
             }),
@@ -2219,6 +2229,7 @@ mod tests {
                 alignment,
                 background: None,
                 foreground: None,
+                border: None,
                 children: vec![paragraph("A")],
                 span: empty_span(),
             }),
@@ -2476,6 +2487,7 @@ mod tests {
                     alignment: None,
                     background: None,
                     foreground: None,
+                    border: None,
                     children: vec![paragraph("Across")],
                     span: call_span,
                 }),
@@ -2539,6 +2551,7 @@ mod tests {
                         blue: 3,
                         alpha: 0.5,
                     })),
+                    border: None,
                     children: vec![paragraph("Colored")],
                     span: call_span,
                 }),
@@ -2561,6 +2574,52 @@ mod tests {
     }
 
     #[test]
+    fn container_border_lowers_after_fill_with_source_mapping() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 48);
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    width: Some(IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Cm,
+                    }),
+                    height: None,
+                    full_width: false,
+                    full_column_span: false,
+                    alignment: None,
+                    background: Some(Box::new(IrColor {
+                        red: 255,
+                        green: 255,
+                        blue: 255,
+                        alpha: 1.0,
+                    })),
+                    foreground: None,
+                    border: Some(Box::new(IrColor {
+                        red: 1,
+                        green: 2,
+                        blue: 3,
+                        alpha: 0.5,
+                    })),
+                    children: vec![paragraph("Bordered")],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, source_map) = super::lower_to_typst(&document);
+        assert!(
+            code.contains(
+                "#block(width: 4cm, fill: rgb(255, 255, 255, 100%), stroke: rgb(1, 2, 3, 50%))["
+            ),
+            "{code}"
+        );
+        assert!(code.find("fill:").unwrap() < code.find("stroke:").unwrap());
+        assert!(code.find("stroke:").unwrap() < code.find("Bordered").unwrap());
+        assert!(source_map.iter().any(|entry| entry.original == call_span));
+    }
+
+    #[test]
     fn container_component_preserves_logical_alignment_names() {
         for (alignment, name) in [
             (IrContainerAlignment::Start, "start"),
@@ -2577,6 +2636,7 @@ mod tests {
                         alignment: Some(alignment),
                         background: None,
                         foreground: None,
+                        border: None,
                         children: vec![paragraph("A")],
                         span: empty_span(),
                     }),
@@ -2612,6 +2672,7 @@ mod tests {
                     alignment: Some(IrContainerAlignment::Center),
                     background: None,
                     foreground: None,
+                    border: None,
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
                             content: "Hello".to_string(),
