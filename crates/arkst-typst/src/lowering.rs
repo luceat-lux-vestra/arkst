@@ -912,7 +912,11 @@ impl LoweringContext {
         }
         self.push_str("#block");
         let width = component.width.as_ref();
-        if width.is_some() || component.full_width || component.height.is_some() {
+        if width.is_some()
+            || component.full_width
+            || component.height.is_some()
+            || component.background.is_some()
+        {
             self.push('(');
             let mut first = true;
             if let Some(width) = width {
@@ -929,10 +933,23 @@ impl LoweringContext {
                 }
                 self.push_str("height: ");
                 self.push_str(&lower_size(height));
+                first = false;
+            }
+            if let Some(background) = component.background.as_deref() {
+                if !first {
+                    self.push_str(", ");
+                }
+                self.push_str("fill: ");
+                self.push_str(&lower_color(background));
             }
             self.push(')');
         }
         self.push_str("[\n");
+        if let Some(foreground) = component.foreground.as_deref() {
+            self.push_str("#set text(fill: ");
+            self.push_str(&lower_color(foreground));
+            self.push_str(")\n");
+        }
         if let Some(alignment) = component.alignment {
             self.push_str("#align(");
             self.push_str(match alignment {
@@ -2095,7 +2112,7 @@ fn escape_typst_comment(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use arkst_ir::{
-        IrCallSegment, IrClipComponent, IrClipShape, IrComponent, IrContainerAlignment,
+        IrCallSegment, IrClipComponent, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
         IrContainerComponent, IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline,
         IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
         IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
@@ -2150,6 +2167,8 @@ mod tests {
                 full_width: true,
                 full_column_span: false,
                 alignment: Some(IrContainerAlignment::Center),
+                background: None,
+                foreground: None,
                 children,
                 span: empty_span(),
             }),
@@ -2198,6 +2217,8 @@ mod tests {
                 full_width,
                 full_column_span: false,
                 alignment,
+                background: None,
+                foreground: None,
                 children: vec![paragraph("A")],
                 span: empty_span(),
             }),
@@ -2453,6 +2474,8 @@ mod tests {
                     full_width: false,
                     full_column_span: true,
                     alignment: None,
+                    background: None,
+                    foreground: None,
                     children: vec![paragraph("Across")],
                     span: call_span,
                 }),
@@ -2491,6 +2514,53 @@ mod tests {
     }
 
     #[test]
+    fn container_colors_lower_in_deterministic_block_and_text_scope_order() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 64);
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    width: Some(IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Cm,
+                    }),
+                    height: None,
+                    full_width: false,
+                    full_column_span: false,
+                    alignment: None,
+                    background: Some(Box::new(IrColor {
+                        red: 128,
+                        green: 0,
+                        blue: 128,
+                        alpha: 1.0,
+                    })),
+                    foreground: Some(Box::new(IrColor {
+                        red: 1,
+                        green: 2,
+                        blue: 3,
+                        alpha: 0.5,
+                    })),
+                    children: vec![paragraph("Colored")],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, source_map) = super::lower_to_typst(&document);
+        assert!(
+            code.contains("#block(width: 4cm, fill: rgb(128, 0, 128, 100%))["),
+            "{code}"
+        );
+        assert!(
+            code.contains("#set text(fill: rgb(1, 2, 3, 50%))"),
+            "{code}"
+        );
+        assert!(code.find("#block").unwrap() < code.find("#set text").unwrap());
+        assert!(code.find("#set text").unwrap() < code.find("Colored").unwrap());
+        assert!(source_map.iter().any(|entry| entry.original == call_span));
+    }
+
+    #[test]
     fn container_component_preserves_logical_alignment_names() {
         for (alignment, name) in [
             (IrContainerAlignment::Start, "start"),
@@ -2505,6 +2575,8 @@ mod tests {
                         full_width: true,
                         full_column_span: false,
                         alignment: Some(alignment),
+                        background: None,
+                        foreground: None,
                         children: vec![paragraph("A")],
                         span: empty_span(),
                     }),
@@ -2538,6 +2610,8 @@ mod tests {
                     full_width: true,
                     full_column_span: false,
                     alignment: Some(IrContainerAlignment::Center),
+                    background: None,
+                    foreground: None,
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
                             content: "Hello".to_string(),

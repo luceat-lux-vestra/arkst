@@ -116,11 +116,12 @@ dependency:
   local component consumers. The bounded row/column/grid/center/alignment/
   landscape/fullspan/circle-clip/whitespace rows have semantic and output evidence; the
   remaining component functions do not.
-- .container is PARTIAL: bounded width/height/fullwidth plus named
-  `fullspan` behavior exists. Multi-column output uses a parent-scoped
-  full-width Typst top-float and immediate flush; exact upstream in-flow
-  placement remains unclaimed. Float, class, style, and complete body
-  conversion remain open.
+- .container is PARTIAL: bounded width/height/fullwidth, named `fullspan`, and
+  optional typed background/foreground colors exist. Multi-column output uses
+  a parent-scoped full-width Typst top-float and immediate flush; color output
+  uses block fill and container-scoped text fill. Exact upstream in-flow and
+  HTML/CSS placement remain unclaimed. Float, class, the remaining style
+  fields, and complete body conversion remain open.
 - .fullspan is PARTIAL: a required Markdown block body produces the existing
   typed Container semantic with `full_column_span: true`, strict pre-evaluation
   validation, preserved provenance/composition, and the same bounded

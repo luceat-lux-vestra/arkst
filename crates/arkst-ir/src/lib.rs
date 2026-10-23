@@ -1658,6 +1658,12 @@ pub struct IrContainerComponent {
     /// `None` represents an unaligned ordinary container.
     #[serde(default)]
     pub alignment: Option<IrContainerAlignment>,
+    /// An explicit component-local background color, if one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<Box<IrColor>>,
+    /// An explicit component-local foreground/text color, if one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<Box<IrColor>>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2215,6 +2221,10 @@ struct WireContainerComponent {
     full_column_span: bool,
     #[serde(default)]
     alignment: Option<IrContainerAlignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    background: Option<IrColor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    foreground: Option<IrColor>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2816,6 +2826,8 @@ fn component_to_wire(
             full_width: component.full_width,
             full_column_span: component.full_column_span,
             alignment: component.alignment,
+            background: component.background.as_deref().cloned(),
+            foreground: component.foreground.as_deref().cloned(),
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3388,6 +3400,8 @@ fn component_from_wire(
             full_width: component.full_width,
             full_column_span: component.full_column_span,
             alignment: component.alignment,
+            background: component.background.map(Box::new),
+            foreground: component.foreground.map(Box::new),
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
@@ -4524,6 +4538,8 @@ mod tests {
             full_width: true,
             full_column_span: false,
             alignment: Some(IrContainerAlignment::Center),
+            background: None,
+            foreground: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -4759,6 +4775,8 @@ mod tests {
                 full_width: false,
                 full_column_span: false,
                 alignment: None,
+                background: None,
+                foreground: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4774,6 +4792,8 @@ mod tests {
                 full_width: true,
                 full_column_span: true,
                 alignment: None,
+                background: None,
+                foreground: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4796,6 +4816,8 @@ mod tests {
             full_width: false,
             full_column_span: true,
             alignment: None,
+            background: None,
+            foreground: None,
             children: Vec::new(),
             span,
         }));
@@ -4830,6 +4852,8 @@ mod tests {
             .expect("externally tagged container object");
         container.remove("width");
         container.remove("height");
+        container.remove("background");
+        container.remove("foreground");
 
         let decoded = serde_json::from_value::<IrValue>(old).expect("old container deserializes");
         assert_eq!(decoded, value);
@@ -4840,6 +4864,8 @@ mod tests {
         assert_eq!(component.height, None);
         assert!(!component.full_column_span);
         assert_eq!(component.alignment, Some(IrContainerAlignment::Center));
+        assert!(component.background.is_none());
+        assert!(component.foreground.is_none());
     }
 
     #[test]

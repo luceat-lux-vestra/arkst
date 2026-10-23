@@ -298,7 +298,7 @@ Implemented in this slice:
   size conversion, alignment structure, source maps, and real Typst/PDF
   integration coverage.
 
-### Container component consumer slices (2026-08-21)
+### Container component consumer slices (2026-08-21; color extension 2026-10-23)
 
 `.center` is implemented as a bounded Container component consumer:
 
@@ -330,15 +330,17 @@ layout slice:
 
 - an empty or optional Markdown block body constructs an unaligned Container;
 - positional and named `width`, `height`, and `fullwidth` arguments plus the
-  named-only `fullspan` Boolean use the existing invocation-origin
-  infrastructure and typed `IrSize`/Boolean conversion; duplicate, unknown,
-  and deferred-known parameters fail with a source-backed diagnostic;
+  named-only `fullspan` Boolean and nullable `background`/`foreground` colors
+  use the existing invocation-origin infrastructure and typed
+  `IrSize`/Boolean/`IrColor` conversion; duplicate, unknown, and deferred-known
+  parameters fail with a source-backed diagnostic;
 - argument binding, conversion, and validation complete before the body is
-  evaluated, so invalid sizing never executes a failing body or publishes a
-  partial component; and
-- Typst lowering emits `#block` sizing in deterministic `width`, `height`
-  order, with explicit width taking precedence over `fullwidth`, and emits no
-  `#align` wrapper when alignment is `None`; and
+  evaluated, so invalid sizing or color never executes a failing body or
+  publishes a partial component; and
+- Typst lowering emits `#block` sizing and optional fill in deterministic
+  `width`, `height`, `fill` order, applies optional foreground through a
+  container-scoped text fill, keeps explicit width ahead of `fullwidth`, and
+  emits no `#align` wrapper when alignment is `None`; and
 - `fullspan:true` retains additive backend-neutral `full_column_span` state.
   In a selector-free multi-column page, lowering emits Typst's documented
   parent-scoped top-float breakout at full parent width followed by
@@ -358,10 +360,10 @@ Standalone `.fullspan` reuses that exact semantic and lowering boundary:
 
 Deferred from these slices:
 
-- `StyleOptions` and `.float`;
+- the remaining `StyleOptions` and `.float`;
 - general String → Markdown body conversion and inline Container insertion;
 - direct `.container` style parameters including `float`, `classname`,
-  alignment/text alignment, colors, borders, margin/padding,
+  alignment/text alignment, borders, margin/padding,
   radius, and font/text-style properties.
 
 Deferred from this slice:
@@ -652,10 +654,10 @@ are separate and are not part of this closure audit.
 
 This slice does not implement generic String → Markdown or String → component
 conversion; the explicit `.plaintext` Dynamic String → InlineMarkdownContent
-boundary is covered. Inline Stacked/Container insertion, the deferred direct
-`.container` style parameters, `StyleOptions`, `.float`, a generic layout
-engine, a parallel evaluator, filesystem/network features, or an evaluator
-rewrite. No architecture prototype or feature snapshot was
+boundary is covered. Inline Stacked/Container insertion, the remaining direct
+`.container` style parameters, remaining `StyleOptions`, `.float`, a generic
+layout engine, a parallel evaluator, filesystem/network features, or an
+evaluator rewrite. No architecture prototype or feature snapshot was
 necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
