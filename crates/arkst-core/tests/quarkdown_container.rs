@@ -62,6 +62,8 @@ fn container_empty_constructs_unaligned_container() {
     assert!(!component.full_width);
     assert!(!component.full_column_span);
     assert_eq!(component.alignment, None);
+    assert!(component.background.is_none());
+    assert!(component.foreground.is_none());
     assert!(component.children.is_empty());
 }
 
@@ -248,13 +250,7 @@ fn container_rejects_duplicate_unknown_and_out_of_signature_arguments() {
 
 #[test]
 fn container_rejects_deferred_known_parameters_explicitly() {
-    for parameter in [
-        "float",
-        "classname",
-        "padding",
-        "foreground",
-        "textalignment",
-    ] {
+    for parameter in ["float", "classname", "padding", "textalignment"] {
         let source = format!(".container {parameter}:{{value}}\n    A\n");
         assert_one_failure(
             &compile_source(&source),
