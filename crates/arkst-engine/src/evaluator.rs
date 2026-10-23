@@ -376,6 +376,7 @@ struct BoundContainerArguments {
     background: Option<ContainerArgument>,
     foreground: Option<ContainerArgument>,
     border: Option<ContainerArgument>,
+    alignment: Option<ContainerArgument>,
 }
 
 struct BoundWhitespaceArguments {
@@ -7993,6 +7994,22 @@ impl Evaluator {
             },
             None => None,
         };
+        let alignment = match bound.alignment.as_ref() {
+            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) => match convert_align_alignment(&argument.value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    diagnostics.push(container_conversion_error(
+                        "alignment",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
 
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
@@ -8026,7 +8043,7 @@ impl Evaluator {
                 height,
                 full_width,
                 full_column_span,
-                alignment: None,
+                alignment,
                 background: background.map(Box::new),
                 foreground: foreground.map(Box::new),
                 border: border.map(Box::new),
@@ -18058,6 +18075,7 @@ fn bind_container_arguments(
     let background = take(slots.next());
     let foreground = take(slots.next());
     let border = take(slots.next());
+    let alignment = take(slots.next());
     Ok(BoundContainerArguments {
         width,
         height,
@@ -18066,6 +18084,7 @@ fn bind_container_arguments(
         background,
         foreground,
         border,
+        alignment,
     })
 }
 
@@ -19163,6 +19182,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("background").positional(false),
                 ParameterMetadata::optional("foreground").positional(false),
                 ParameterMetadata::optional("border").positional(false),
+                ParameterMetadata::optional("alignment").positional(false),
             ],
             BodyPolicy::AllowSeparate,
         ),
@@ -21084,7 +21104,6 @@ fn native_binding_message(name: &str, message: String) -> String {
                     | "background"
                     | "borderwidth"
                     | "borderstyle"
-                    | "alignment"
                     | "textalignment"
                     | "margin"
                     | "padding"

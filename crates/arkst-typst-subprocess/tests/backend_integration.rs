@@ -2514,6 +2514,42 @@ fn integration_container_border_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_container_alignment_lowers_to_valid_typst_and_pdf() {
+    let source = ".container width:{4cm} background:{white} alignment:{center}\n    ## Centered\n    Rich **body**\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container-alignment.qd")
+        .expect("valid entry path")
+        .add_source("container-alignment.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container alignment diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#block(width: 4cm, fill: rgb(255, 255, 255, 100%))[\n#align(center)["),
+        "{typst_code}"
+    );
+
+    with_typst("container-alignment", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container-alignment.qd".to_string(),
+            })
+            .expect("container alignment Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_container_fullspan_breaks_out_of_page_columns_and_compiles_to_pdf() {
     let source = ".pageformat columns:{2}\nBefore\n\n.container fullspan:{yes}\n    ## Across\n    Body\n\nAfter\n";
     let project = VirtualProjectBuilder::new()
