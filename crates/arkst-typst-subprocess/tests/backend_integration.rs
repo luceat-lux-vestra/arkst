@@ -2597,6 +2597,45 @@ fn integration_container_font_size_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_container_font_weight_lowers_to_valid_typst_and_pdf() {
+    let source = ".container width:{5cm} foreground:{purple} fontsize:{large} fontweight:{bold} padding:{2mm}\n    ## Weighted heading\n    Weighted **body**\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container-font-weight.qd")
+        .expect("valid entry path")
+        .add_source("container-font-weight.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container font-weight diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains(
+            "#block(width: 5cm, inset: (top: 2mm, right: 2mm, bottom: 2mm, left: 2mm))[\n#set text(fill: rgb(128, 0, 128, 100%))\n#set text(size: 1.5em)\n#set text(weight: \"bold\")"
+        ),
+        "{typst_code}"
+    );
+    assert!(typst_code.contains("= Weighted heading"), "{typst_code}");
+
+    with_typst("container-font-weight", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container-font-weight.qd".to_string(),
+            })
+            .expect("container font weight must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_container_padding_lowers_to_valid_typst_and_pdf() {
     let source = ".container width:{4cm} background:{white} padding:{1cm 2mm 3pt 8px}\n    ## Padded\n    Rich **body**\n";
     let project = VirtualProjectBuilder::new()

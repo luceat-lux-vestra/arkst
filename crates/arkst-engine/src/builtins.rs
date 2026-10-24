@@ -1231,15 +1231,9 @@ fn evaluate_text(
                 return Ok(false);
             }
             let weight = scalar_string_argument_result(&value, "weight")?;
-            if weight.eq_ignore_ascii_case("bold") {
-                Ok(true)
-            } else if weight.eq_ignore_ascii_case("normal") {
-                Ok(false)
-            } else {
-                Err(error(
-                    "`.text` weight must be normal, bold, or None".to_string(),
-                ))
-            }
+            value_conversion::parse_text_weight(&weight)
+                .map(|weight| weight.is_some())
+                .ok_or_else(|| error("`.text` weight must be normal, bold, or None".to_string()))
         })
         .transpose()?
         .unwrap_or(false);

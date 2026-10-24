@@ -382,6 +382,7 @@ struct BoundContainerArguments {
     padding: Option<ContainerArgument>,
     radius: Option<ContainerArgument>,
     font_size: Option<ContainerArgument>,
+    font_weight: Option<ContainerArgument>,
 }
 
 struct BoundWhitespaceArguments {
@@ -5782,6 +5783,7 @@ impl Evaluator {
                 padding: None,
                 radius: None,
                 font_size: None,
+                font_weight: None,
                 children,
                 span: *span,
             },
@@ -5913,6 +5915,7 @@ impl Evaluator {
                 padding: None,
                 radius: None,
                 font_size: None,
+                font_weight: None,
                 children,
                 span: *span,
             },
@@ -7847,6 +7850,7 @@ impl Evaluator {
                 padding: None,
                 radius: None,
                 font_size: None,
+                font_weight: None,
                 children,
                 span: *span,
             },
@@ -8092,6 +8096,23 @@ impl Evaluator {
             }
             None => None,
         };
+        let font_weight = match bound.font_weight.as_ref() {
+            Some(argument) => {
+                match value_conversion::convert_text_weight_with_origin(&argument.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(container_conversion_error(
+                            "fontweight",
+                            argument.span,
+                            argument.parameter_span,
+                            error,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                }
+            }
+            None => None,
+        };
 
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
@@ -8133,6 +8154,7 @@ impl Evaluator {
                 padding: padding.map(Box::new),
                 radius: radius.map(Box::new),
                 font_size,
+                font_weight,
                 children,
                 span: *span,
             },
@@ -18160,6 +18182,7 @@ fn bind_container_arguments(
     let padding = take(slots.next());
     let radius = take(slots.next());
     let font_size = take(slots.next());
+    let font_weight = take(slots.next());
     Ok(BoundContainerArguments {
         width,
         height,
@@ -18173,6 +18196,7 @@ fn bind_container_arguments(
         padding,
         radius,
         font_size,
+        font_weight,
     })
 }
 
@@ -19311,6 +19335,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("padding").positional(false),
                 ParameterMetadata::optional("radius").positional(false),
                 ParameterMetadata::optional("fontsize").positional(false),
+                ParameterMetadata::optional("fontweight").positional(false),
             ],
             BodyPolicy::AllowSeparate,
         ),
@@ -21233,7 +21258,6 @@ fn native_binding_message(name: &str, message: String) -> String {
                     | "borderstyle"
                     | "textalignment"
                     | "margin"
-                    | "fontweight"
                     | "fontstyle"
                     | "fontvariant"
                     | "textdecoration"
