@@ -456,7 +456,7 @@ pinned `CaptionPosition.kt`, `CaptionPositionInfo.kt`, `Document.kt`,
 authored `fixtures/quarkdown-conformance/cases/captionposition-document-state/`
 case.
 
-### Bounded `.container` layout, color/border, alignment, padding, and radius contract
+### Bounded `.container` layout, border, alignment, padding, and radius contract
 
 The direct `.container` consumer is **partial/bounded**, not complete upstream
 Container support. The implemented subset is:
@@ -465,14 +465,15 @@ Container support. The implemented subset is:
   children;
 - `width: Size?`, `height: Size?`, `fullwidth: Boolean`, and the named-only
   `fullspan: Boolean`, `background: Color?`, `foreground: Color?`,
-  `border: Color?`, closed `alignment: Alignment?`, and one/two/four-value
+  `border: Color?`, one/two/four-value `borderwidth: Sizes?`, closed
+  `alignment: Alignment?`, and one/two/four-value
   `padding: Sizes?` and `radius: Sizes?` through
   the existing origin-aware invocation conversion boundary;
 - positional prefix binding in `width`, `height`, `fullwidth` order and named
   equivalents, with duplicate, unknown, and deferred-known parameters
   rejected by source-backed diagnostics; and
 - backend-neutral `IrComponent::Container` materialization and Typst
-  `#block` sizing/fill/stroke plus container-scoped text fill and logical
+  `#block` sizing/fill/per-side stroke thickness plus container-scoped text fill and logical
   `start`/`center`/`end` alignment wrappers plus per-corner `radius` and per-side
   `inset`, where explicit width overrides
   `fullwidth` and an omitted/`None` alignment emits no `#align` wrapper; and
@@ -483,12 +484,13 @@ Container support. The implemented subset is:
   document. Exact Quarkdown in-flow HTML/CSS placement remains unclaimed.
 
 The deferred surface includes `float`, `classname`, the remaining
-StyleOptions, container text alignment, border width/style, margin,
+StyleOptions, container text alignment, border style, margin,
 font/text-style properties, inline Container insertion, and exact
 HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container.rs`,
 `crates/arkst-core/tests/quarkdown_container_colors_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_border_184.rs`,
+`crates/arkst-core/tests/quarkdown_container_border_width_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_alignment_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_padding_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_radius_184.rs`, the IR/lowering

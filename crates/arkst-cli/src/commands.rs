@@ -1788,6 +1788,7 @@ mod tests {
                     background: None,
                     foreground: None,
                     border: None,
+                    border_widths: None,
                     padding: None,
                     radius: None,
                     children: vec![explicit_node()],
@@ -1844,6 +1845,7 @@ mod tests {
                     background: None,
                     foreground: None,
                     border: None,
+                    border_widths: None,
                     padding: None,
                     radius: None,
                     children: vec![IrNode::Blockquote {

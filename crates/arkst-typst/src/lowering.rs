@@ -5,13 +5,13 @@
 
 use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallSegment, IrClipComponent, IrClipShape, IrCollapseComponent,
-    IrColor, IrComponent, IrContainerAlignment, IrContainerComponent, IrContainerPadding,
-    IrContainerRadius, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
-    IrExplicitErrorComponent, IrFragmentBehavior, IrFragmentComponent, IrInline, IrKeybindingPart,
-    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition,
-    IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextScript, IrTextSize,
-    IrTextVariant, IrTodoComponent, IrValue,
+    IrColor, IrComponent, IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent,
+    IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment,
+    IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior, IrFragmentComponent, IrInline,
+    IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget,
+    IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase,
+    IrTextScript, IrTextSize, IrTextVariant, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -918,6 +918,7 @@ impl LoweringContext {
             || component.height.is_some()
             || component.background.is_some()
             || component.border.is_some()
+            || component.border_widths.is_some()
             || component.radius.is_some()
             || component.padding.is_some()
         {
@@ -947,12 +948,19 @@ impl LoweringContext {
                 self.push_str(&lower_color(background));
                 first = false;
             }
-            if let Some(border) = component.border.as_deref() {
+            if component.border.is_some() || component.border_widths.is_some() {
                 if !first {
                     self.push_str(", ");
                 }
                 self.push_str("stroke: ");
-                self.push_str(&lower_color(border));
+                if let Some(widths) = component.border_widths.as_deref() {
+                    self.push_str(&lower_container_border_widths(
+                        widths,
+                        component.border.as_deref(),
+                    ));
+                } else if let Some(border) = component.border.as_deref() {
+                    self.push_str(&lower_color(border));
+                }
                 first = false;
             }
             if let Some(radius) = component.radius.as_ref() {
@@ -2093,6 +2101,27 @@ fn lower_container_padding(padding: &IrContainerPadding) -> String {
     )
 }
 
+fn lower_container_border_widths(
+    widths: &IrContainerBorderWidths,
+    color: Option<&IrColor>,
+) -> String {
+    let side = |width: &IrSize| match color {
+        Some(color) => format!(
+            "(paint: {}, thickness: {})",
+            lower_color(color),
+            lower_size(width)
+        ),
+        None => format!("(thickness: {})", lower_size(width)),
+    };
+    format!(
+        "(top: {}, right: {}, bottom: {}, left: {})",
+        side(&widths.top),
+        side(&widths.right),
+        side(&widths.bottom),
+        side(&widths.left),
+    )
+}
+
 fn lower_container_radius(radius: &IrContainerRadius) -> String {
     format!(
         "(top-left: {}, top-right: {}, bottom-right: {}, bottom-left: {})",
@@ -2161,10 +2190,10 @@ fn escape_typst_comment(s: &str) -> String {
 mod tests {
     use arkst_ir::{
         IrCallSegment, IrClipComponent, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
-        IrContainerComponent, IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment,
-        IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrListItem,
-        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+        IrContainerBorderWidths, IrContainerComponent, IrContainerPadding, IrContainerRadius,
+        IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
+        IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
+        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
         IrTaskStatus, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
@@ -2219,6 +2248,7 @@ mod tests {
                 background: None,
                 foreground: None,
                 border: None,
+                border_widths: None,
                 padding: None,
                 radius: None,
                 children,
@@ -2272,6 +2302,7 @@ mod tests {
                 background: None,
                 foreground: None,
                 border: None,
+                border_widths: None,
                 padding: None,
                 radius: None,
                 children: vec![paragraph("A")],
@@ -2532,6 +2563,7 @@ mod tests {
                     background: None,
                     foreground: None,
                     border: None,
+                    border_widths: None,
                     padding: None,
                     radius: None,
                     children: vec![paragraph("Across")],
@@ -2598,6 +2630,7 @@ mod tests {
                         alpha: 0.5,
                     })),
                     border: None,
+                    border_widths: None,
                     padding: None,
                     radius: None,
                     children: vec![paragraph("Colored")],
@@ -2648,6 +2681,7 @@ mod tests {
                         blue: 3,
                         alpha: 0.5,
                     })),
+                    border_widths: None,
                     padding: None,
                     radius: None,
                     children: vec![paragraph("Bordered")],
@@ -2670,6 +2704,66 @@ mod tests {
     }
 
     #[test]
+    fn container_border_widths_compose_with_color_and_preserve_source_mapping() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 72);
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    width: Some(Box::new(IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Cm,
+                    })),
+                    height: None,
+                    full_width: false,
+                    full_column_span: false,
+                    alignment: None,
+                    background: None,
+                    foreground: None,
+                    border: Some(Box::new(IrColor {
+                        red: 1,
+                        green: 2,
+                        blue: 3,
+                        alpha: 0.5,
+                    })),
+                    border_widths: Some(Box::new(IrContainerBorderWidths {
+                        top: IrSize {
+                            value: 1.0,
+                            unit: IrSizeUnit::Cm,
+                        },
+                        right: IrSize {
+                            value: 2.0,
+                            unit: IrSizeUnit::Mm,
+                        },
+                        bottom: IrSize {
+                            value: 3.0,
+                            unit: IrSizeUnit::Pt,
+                        },
+                        left: IrSize {
+                            value: 8.0,
+                            unit: IrSizeUnit::Px,
+                        },
+                    })),
+                    padding: None,
+                    radius: None,
+                    children: vec![paragraph("Border widths")],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, source_map) = super::lower_to_typst(&document);
+        assert!(
+            code.contains(
+                "#block(width: 4cm, stroke: (top: (paint: rgb(1, 2, 3, 50%), thickness: 1cm), right: (paint: rgb(1, 2, 3, 50%), thickness: 2mm), bottom: (paint: rgb(1, 2, 3, 50%), thickness: 3pt), left: (paint: rgb(1, 2, 3, 50%), thickness: 6pt)))["
+            ),
+            "{code}"
+        );
+        assert!(code.find("stroke:").unwrap() < code.find("Border widths").unwrap());
+        assert!(source_map.iter().any(|entry| entry.original == call_span));
+    }
+
+    #[test]
     fn container_padding_lowers_to_deterministic_per_side_inset_with_source_mapping() {
         let call_span = SourceSpan::new(SourceId(184), 0, 64);
         let document = IrDocument {
@@ -2686,6 +2780,7 @@ mod tests {
                     background: None,
                     foreground: None,
                     border: None,
+                    border_widths: None,
                     padding: Some(Box::new(IrContainerPadding {
                         top: IrSize {
                             value: 1.0,
@@ -2740,6 +2835,7 @@ mod tests {
                     background: None,
                     foreground: None,
                     border: None,
+                    border_widths: None,
                     padding: None,
                     radius: Some(Box::new(IrContainerRadius {
                         top_left: IrSize {
@@ -2795,6 +2891,7 @@ mod tests {
                         background: None,
                         foreground: None,
                         border: None,
+                        border_widths: None,
                         padding: None,
                         radius: None,
                         children: vec![paragraph("A")],
@@ -2833,6 +2930,7 @@ mod tests {
                     background: None,
                     foreground: None,
                     border: None,
+                    border_widths: None,
                     padding: None,
                     radius: None,
                     children: vec![IrNode::Paragraph {
