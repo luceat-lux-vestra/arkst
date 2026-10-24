@@ -2514,6 +2514,50 @@ fn integration_container_border_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_container_border_widths_lower_to_valid_typst_and_pdf() {
+    let source = ".container borderwidth:{1pt 2pt 3pt 4pt}\n    Default border\n\n.container width:{4cm} border:{purple} borderwidth:{1cm 2mm 3pt 8px} padding:{2mm}\n    ## Bordered\n    Rich **body**\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container-border-width.qd")
+        .expect("valid entry path")
+        .add_source("container-border-width.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container border-width diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains(
+            "#block(stroke: (top: (thickness: 1pt), right: (thickness: 2pt), bottom: (thickness: 3pt), left: (thickness: 4pt)))["
+        ),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains(
+            "#block(width: 4cm, stroke: (top: (paint: rgb(128, 0, 128, 100%), thickness: 1cm), right: (paint: rgb(128, 0, 128, 100%), thickness: 2mm), bottom: (paint: rgb(128, 0, 128, 100%), thickness: 3pt), left: (paint: rgb(128, 0, 128, 100%), thickness: 6pt)), inset: (top: 2mm, right: 2mm, bottom: 2mm, left: 2mm))["
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("container-border-width", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container-border-width.qd".to_string(),
+            })
+            .expect("container border widths must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_container_padding_lowers_to_valid_typst_and_pdf() {
     let source = ".container width:{4cm} background:{white} padding:{1cm 2mm 3pt 8px}\n    ## Padded\n    Rich **body**\n";
     let project = VirtualProjectBuilder::new()
