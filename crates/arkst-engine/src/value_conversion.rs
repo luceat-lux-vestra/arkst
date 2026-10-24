@@ -11,7 +11,7 @@ use arkst_ir::{
     IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrFragmentBehavior,
     IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition, IrPageOrientation,
     IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
-    IrSlideTransitionStyle, IrValue,
+    IrSlideTransitionStyle, IrTextSize, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
@@ -1457,6 +1457,46 @@ pub(crate) fn convert_domain_with_origin(
     }
 }
 
+/// Converts the closed relative text-size domain while preserving the
+/// invocation-origin boundary used by typed component arguments.
+///
+/// `normal` and explicit `None` are semantic identity. Textual enum names are
+/// accepted only from a dynamic invocation value; a static String produced by
+/// another call cannot silently acquire enum meaning.
+pub(crate) fn convert_text_size_with_origin(
+    argument: &InvocationValue,
+) -> Result<Option<IrTextSize>, ConversionError> {
+    match &argument.value {
+        IrValue::None => Ok(None),
+        IrValue::String(value) | IrValue::Identifier(value)
+            if argument.origin == ValueOrigin::Dynamic =>
+        {
+            parse_text_size(value).ok_or(ConversionError::InvalidText {
+                target: ConversionTarget::Enum,
+            })
+        }
+        _ => Err(ConversionError::UnsupportedValue {
+            target: ConversionTarget::Enum,
+        }),
+    }
+}
+
+/// Parses the single reviewed relative text-size table shared by `.text` and
+/// component-local font-size consumers. The outer `Option` represents parse
+/// success; the inner `Option` preserves `normal` as semantic identity.
+pub(crate) fn parse_text_size(value: &str) -> Option<Option<IrTextSize>> {
+    match value.to_ascii_lowercase().as_str() {
+        "tiny" => Some(Some(IrTextSize::Tiny)),
+        "small" => Some(Some(IrTextSize::Small)),
+        "normal" => Some(None),
+        "medium" => Some(Some(IrTextSize::Medium)),
+        "large" => Some(Some(IrTextSize::Large)),
+        "larger" => Some(Some(IrTextSize::Larger)),
+        "huge" => Some(Some(IrTextSize::Huge)),
+        _ => None,
+    }
+}
+
 /// Converts the bounded document-global `.pageformat alignment` domain.
 ///
 /// Dynamic text follows the same origin gate as the existing closed-enum
@@ -2736,16 +2776,17 @@ mod tests {
     use super::{
         convert_domain_with_origin, convert_integer_with_origin, convert_range,
         convert_range_with_origin, convert_scalar, convert_scalar_with_origin,
-        convert_target_with_origin, raw_body_dynamic_text, ClosedEnumSpec, ClosedEnumTarget,
-        ClosedEnumVariant, ConversionError, ConversionTarget, DomainTarget, DomainValue,
-        InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue, TargetValue,
+        convert_target_with_origin, convert_text_size_with_origin, raw_body_dynamic_text,
+        ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
+        DomainTarget, DomainValue, InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue,
+        TargetValue,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
         IrCrossAxisAlignment, IrDocumentType, IrEnumValue, IrInline, IrInlineBody,
         IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
         IrSlideTransitionSpeed, IrSlideTransitionStyle, IrStackedComponent, IrStackedLayout,
-        IrValue,
+        IrTextSize, IrValue,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
 
@@ -3457,6 +3498,48 @@ mod tests {
             span: source_span,
         }]);
         assert!(super::convert_color_with_origin(&InvocationValue::dynamic_value(rich)).is_err());
+    }
+
+    #[test]
+    fn text_size_conversion_is_closed_identity_aware_and_origin_gated() {
+        for (text, expected) in [
+            ("tiny", Some(IrTextSize::Tiny)),
+            ("SMALL", Some(IrTextSize::Small)),
+            ("normal", None),
+            ("Medium", Some(IrTextSize::Medium)),
+            ("large", Some(IrTextSize::Large)),
+            ("larger", Some(IrTextSize::Larger)),
+            ("huge", Some(IrTextSize::Huge)),
+        ] {
+            assert_eq!(
+                convert_text_size_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                    text.to_string(),
+                ))),
+                Ok(expected),
+                "{text}"
+            );
+        }
+
+        assert_eq!(
+            convert_text_size_with_origin(&InvocationValue::static_value(IrValue::None)),
+            Ok(None)
+        );
+        assert_eq!(
+            convert_text_size_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                "giant".to_string(),
+            ))),
+            Err(ConversionError::InvalidText {
+                target: ConversionTarget::Enum,
+            })
+        );
+        assert_eq!(
+            convert_text_size_with_origin(&InvocationValue::static_value(IrValue::String(
+                "large".to_string(),
+            ))),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum,
+            })
+        );
     }
 
     #[test]
