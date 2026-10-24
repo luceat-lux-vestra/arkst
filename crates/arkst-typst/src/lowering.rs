@@ -986,6 +986,11 @@ impl LoweringContext {
             self.push_str(&lower_color(foreground));
             self.push_str(")\n");
         }
+        if let Some(font_size) = component.font_size {
+            self.push_str("#set text(size: ");
+            self.push_str(lower_relative_text_size(font_size));
+            self.push_str(")\n");
+        }
         if let Some(alignment) = component.alignment {
             self.push_str("#align(");
             self.push_str(match alignment {
@@ -1457,16 +1462,8 @@ impl LoweringContext {
                 span,
             } => {
                 let before = self.output.len();
-                let relative_size = match size {
-                    IrTextSize::Tiny => "0.5em",
-                    IrTextSize::Small => "0.75em",
-                    IrTextSize::Medium => "1.25em",
-                    IrTextSize::Large => "1.5em",
-                    IrTextSize::Larger => "2em",
-                    IrTextSize::Huge => "3em",
-                };
                 self.push_str("#text(size: ");
-                self.push_str(relative_size);
+                self.push_str(lower_relative_text_size(*size));
                 self.push_str(")[");
                 self.lower_inlines(content);
                 self.push(']');
@@ -2132,6 +2129,17 @@ fn lower_container_radius(radius: &IrContainerRadius) -> String {
     )
 }
 
+fn lower_relative_text_size(size: IrTextSize) -> &'static str {
+    match size {
+        IrTextSize::Tiny => "0.5em",
+        IrTextSize::Small => "0.75em",
+        IrTextSize::Medium => "1.25em",
+        IrTextSize::Large => "1.5em",
+        IrTextSize::Larger => "2em",
+        IrTextSize::Huge => "3em",
+    }
+}
+
 fn format_number(value: f64) -> String {
     let mut text = format!("{value:.12}");
     while text.contains('.') && text.ends_with('0') {
@@ -2194,7 +2202,7 @@ mod tests {
         IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
         IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
         IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrValue,
+        IrTaskStatus, IrTextSize, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2251,6 +2259,7 @@ mod tests {
                 border_widths: None,
                 padding: None,
                 radius: None,
+                font_size: None,
                 children,
                 span: empty_span(),
             }),
@@ -2305,6 +2314,7 @@ mod tests {
                 border_widths: None,
                 padding: None,
                 radius: None,
+                font_size: None,
                 children: vec![paragraph("A")],
                 span: empty_span(),
             }),
@@ -2566,6 +2576,7 @@ mod tests {
                     border_widths: None,
                     padding: None,
                     radius: None,
+                    font_size: None,
                     children: vec![paragraph("Across")],
                     span: call_span,
                 }),
@@ -2633,6 +2644,7 @@ mod tests {
                     border_widths: None,
                     padding: None,
                     radius: None,
+                    font_size: None,
                     children: vec![paragraph("Colored")],
                     span: call_span,
                 }),
@@ -2684,6 +2696,7 @@ mod tests {
                     border_widths: None,
                     padding: None,
                     radius: None,
+                    font_size: None,
                     children: vec![paragraph("Bordered")],
                     span: call_span,
                 }),
@@ -2745,6 +2758,7 @@ mod tests {
                     })),
                     padding: None,
                     radius: None,
+                    font_size: None,
                     children: vec![paragraph("Border widths")],
                     span: call_span,
                 }),
@@ -2800,6 +2814,7 @@ mod tests {
                         },
                     })),
                     radius: None,
+                    font_size: None,
                     children: vec![paragraph("Padded")],
                     span: call_span,
                 }),
@@ -2855,6 +2870,7 @@ mod tests {
                             unit: IrSizeUnit::Px,
                         },
                     })),
+                    font_size: None,
                     children: vec![paragraph("Rounded")],
                     span: call_span,
                 }),
@@ -2870,6 +2886,50 @@ mod tests {
             "{code}"
         );
         assert!(code.find("radius:").unwrap() < code.find("Rounded").unwrap());
+        assert!(source_map.iter().any(|entry| entry.original == call_span));
+    }
+
+    #[test]
+    fn container_font_size_uses_scoped_relative_text_size_with_source_mapping() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 56);
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    width: Some(Box::new(IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Cm,
+                    })),
+                    height: None,
+                    full_width: false,
+                    full_column_span: false,
+                    alignment: None,
+                    background: None,
+                    foreground: Some(Box::new(IrColor {
+                        red: 1,
+                        green: 2,
+                        blue: 3,
+                        alpha: 1.0,
+                    })),
+                    border: None,
+                    border_widths: None,
+                    padding: None,
+                    radius: None,
+                    font_size: Some(IrTextSize::Large),
+                    children: vec![paragraph("Sized")],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, source_map) = super::lower_to_typst(&document);
+        assert!(
+            code.contains(
+                "#block(width: 4cm)[\n#set text(fill: rgb(1, 2, 3, 100%))\n#set text(size: 1.5em)\nSized"
+            ),
+            "{code}"
+        );
+        assert!(code.find("#set text(size:").unwrap() < code.find("Sized").unwrap());
         assert!(source_map.iter().any(|entry| entry.original == call_span));
     }
 
@@ -2894,6 +2954,7 @@ mod tests {
                         border_widths: None,
                         padding: None,
                         radius: None,
+                        font_size: None,
                         children: vec![paragraph("A")],
                         span: empty_span(),
                     }),
@@ -2933,6 +2994,7 @@ mod tests {
                     border_widths: None,
                     padding: None,
                     radius: None,
+                    font_size: None,
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
                             content: "Hello".to_string(),

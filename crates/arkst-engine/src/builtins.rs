@@ -1291,19 +1291,12 @@ fn evaluate_text(
                 return Ok(None);
             }
             let size = scalar_string_argument_result(&value, "size")?;
-            match size.to_ascii_lowercase().as_str() {
-                "tiny" => Ok(Some(arkst_ir::IrTextSize::Tiny)),
-                "small" => Ok(Some(arkst_ir::IrTextSize::Small)),
-                "normal" => Ok(None),
-                "medium" => Ok(Some(arkst_ir::IrTextSize::Medium)),
-                "large" => Ok(Some(arkst_ir::IrTextSize::Large)),
-                "larger" => Ok(Some(arkst_ir::IrTextSize::Larger)),
-                "huge" => Ok(Some(arkst_ir::IrTextSize::Huge)),
-                _ => Err(error(
+            value_conversion::parse_text_size(&size).ok_or_else(|| {
+                error(
                     "`.text` size must be tiny, small, normal, medium, large, larger, huge, or None"
                         .to_string(),
-                )),
-            }
+                )
+            })
         })
         .transpose()?
         .flatten();

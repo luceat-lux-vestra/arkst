@@ -1676,6 +1676,9 @@ pub struct IrContainerComponent {
     /// Explicit component-local corner radii expanded to all four corners.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radius: Option<Box<IrContainerRadius>>,
+    /// An explicit component-local relative font size, if one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<IrTextSize>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2281,6 +2284,8 @@ struct WireContainerComponent {
     padding: Option<IrContainerPadding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     radius: Option<IrContainerRadius>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    font_size: Option<IrTextSize>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2888,6 +2893,7 @@ fn component_to_wire(
             border_widths: component.border_widths.clone(),
             padding: component.padding.as_deref().cloned(),
             radius: component.radius.as_deref().cloned(),
+            font_size: component.font_size,
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3466,6 +3472,7 @@ fn component_from_wire(
             border_widths: component.border_widths,
             padding: component.padding.map(Box::new),
             radius: component.radius.map(Box::new),
+            font_size: component.font_size,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
@@ -3723,7 +3730,7 @@ pub enum IrPageCounterTarget {
 }
 
 /// Non-default members of the closed relative font-size domain used by
-/// Quarkdown `.text`.
+/// Quarkdown `.text` and bounded Container styling.
 ///
 /// Each variant is backend-neutral and maps to the public size ratios from
 /// the tracked Quarkdown contract. `normal` is the identity and therefore
@@ -4608,6 +4615,7 @@ mod tests {
             border_widths: None,
             padding: None,
             radius: None,
+            font_size: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -4849,6 +4857,7 @@ mod tests {
                 border_widths: None,
                 padding: None,
                 radius: None,
+                font_size: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4870,6 +4879,7 @@ mod tests {
                 border_widths: None,
                 padding: None,
                 radius: None,
+                font_size: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4898,6 +4908,7 @@ mod tests {
             border_widths: None,
             padding: None,
             radius: None,
+            font_size: None,
             children: Vec::new(),
             span,
         }));
