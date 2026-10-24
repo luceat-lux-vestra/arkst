@@ -1644,10 +1644,10 @@ impl IrFragmentBehavior {
 pub struct IrContainerComponent {
     /// An explicit width constraint, if one was supplied.
     #[serde(default)]
-    pub width: Option<IrSize>,
+    pub width: Option<Box<IrSize>>,
     /// An explicit height constraint, if one was supplied.
     #[serde(default)]
-    pub height: Option<IrSize>,
+    pub height: Option<Box<IrSize>>,
     pub full_width: bool,
     /// Whether the container requests the parent multi-column span.
     ///
@@ -1670,6 +1670,9 @@ pub struct IrContainerComponent {
     /// Explicit component-local content padding expanded to all four sides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub padding: Option<Box<IrContainerPadding>>,
+    /// Explicit component-local corner radii expanded to all four corners.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<Box<IrContainerRadius>>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -1684,6 +1687,18 @@ pub struct IrContainerPadding {
     pub right: IrSize,
     pub bottom: IrSize,
     pub left: IrSize,
+}
+
+/// Backend-neutral per-corner radius for a Container component.
+///
+/// The evaluator expands Quarkdown's documented one/two/four-value `Sizes`
+/// shorthand before the value crosses the IR boundary.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrContainerRadius {
+    pub top_left: IrSize,
+    pub top_right: IrSize,
+    pub bottom_right: IrSize,
+    pub bottom_left: IrSize,
 }
 
 /// Logical container alignment used by the bounded `.center` and `.align`
@@ -2247,6 +2262,8 @@ struct WireContainerComponent {
     border: Option<IrColor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     padding: Option<IrContainerPadding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    radius: Option<IrContainerRadius>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2843,8 +2860,8 @@ fn component_to_wire(
             })
         }
         IrComponent::Container(component) => WireComponent::Container(WireContainerComponent {
-            width: component.width.clone(),
-            height: component.height.clone(),
+            width: component.width.as_deref().cloned(),
+            height: component.height.as_deref().cloned(),
             full_width: component.full_width,
             full_column_span: component.full_column_span,
             alignment: component.alignment,
@@ -2852,6 +2869,7 @@ fn component_to_wire(
             foreground: component.foreground.as_deref().cloned(),
             border: component.border.as_deref().cloned(),
             padding: component.padding.as_deref().cloned(),
+            radius: component.radius.as_deref().cloned(),
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3419,8 +3437,8 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::Container(component) => IrComponent::Container(IrContainerComponent {
-            width: component.width,
-            height: component.height,
+            width: component.width.map(Box::new),
+            height: component.height.map(Box::new),
             full_width: component.full_width,
             full_column_span: component.full_column_span,
             alignment: component.alignment,
@@ -3428,6 +3446,7 @@ fn component_from_wire(
             foreground: component.foreground.map(Box::new),
             border: component.border.map(Box::new),
             padding: component.padding.map(Box::new),
+            radius: component.radius.map(Box::new),
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
@@ -4568,6 +4587,7 @@ mod tests {
             foreground: None,
             border: None,
             padding: None,
+            radius: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -4807,18 +4827,19 @@ mod tests {
                 foreground: None,
                 border: None,
                 padding: None,
+                radius: None,
                 children: Vec::new(),
                 span,
             })),
             IrValue::Component(IrComponent::Container(IrContainerComponent {
-                width: Some(IrSize {
+                width: Some(Box::new(IrSize {
                     value: 4.0,
                     unit: IrSizeUnit::Cm,
-                }),
-                height: Some(IrSize {
+                })),
+                height: Some(Box::new(IrSize {
                     value: 2.0,
                     unit: IrSizeUnit::Cm,
-                }),
+                })),
                 full_width: true,
                 full_column_span: true,
                 alignment: None,
@@ -4826,6 +4847,7 @@ mod tests {
                 foreground: None,
                 border: None,
                 padding: None,
+                radius: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4852,6 +4874,7 @@ mod tests {
             foreground: None,
             border: None,
             padding: None,
+            radius: None,
             children: Vec::new(),
             span,
         }));
