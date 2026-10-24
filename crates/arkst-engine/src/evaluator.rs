@@ -59,18 +59,18 @@ use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
     IrCallableResourceContext, IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable,
     IrClipComponent, IrCodeCallout, IrCollapseComponent, IrColor, IrComponent,
-    IrContainerAlignment, IrContainerComponent, IrContainerPadding, IrContainerRadius,
-    IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment, IrDocumentAuthor,
-    IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent, IrFontLayer, IrFontState,
-    IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody, IrLandscapeComponent,
-    IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState,
-    IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer, IrPageFormatSelector,
-    IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins, IrPageOrientation,
-    IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition, IrSlideTransitionSpeed,
-    IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTodoComponent, IrValue,
-    NativeTarget, TargetSpecificContent,
+    IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent, IrContainerPadding,
+    IrContainerRadius, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment,
+    IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent, IrFontLayer,
+    IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody,
+    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
+    IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
+    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins,
+    IrPageOrientation, IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair,
+    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition,
+    IrSlideTransitionSpeed, IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+    IrTodoComponent, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -377,6 +377,7 @@ struct BoundContainerArguments {
     background: Option<ContainerArgument>,
     foreground: Option<ContainerArgument>,
     border: Option<ContainerArgument>,
+    border_widths: Option<ContainerArgument>,
     alignment: Option<ContainerArgument>,
     padding: Option<ContainerArgument>,
     radius: Option<ContainerArgument>,
@@ -5776,6 +5777,7 @@ impl Evaluator {
                 background: None,
                 foreground: None,
                 border: None,
+                border_widths: None,
                 padding: None,
                 radius: None,
                 children,
@@ -5905,6 +5907,7 @@ impl Evaluator {
                 background: None,
                 foreground: None,
                 border: None,
+                border_widths: None,
                 padding: None,
                 radius: None,
                 children,
@@ -7837,6 +7840,7 @@ impl Evaluator {
                 background: None,
                 foreground: None,
                 border: None,
+                border_widths: None,
                 padding: None,
                 radius: None,
                 children,
@@ -8003,6 +8007,22 @@ impl Evaluator {
             },
             None => None,
         };
+        let border_widths = match bound.border_widths.as_ref() {
+            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) => match convert_container_border_widths(&argument.value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    diagnostics.push(container_conversion_error(
+                        "borderwidth",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
         let alignment = match bound.alignment.as_ref() {
             Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
             Some(argument) => match convert_align_alignment(&argument.value) {
@@ -8088,6 +8108,7 @@ impl Evaluator {
                 background: background.map(Box::new),
                 foreground: foreground.map(Box::new),
                 border: border.map(Box::new),
+                border_widths: border_widths.map(Box::new),
                 padding: padding.map(Box::new),
                 radius: radius.map(Box::new),
                 children,
@@ -18112,6 +18133,7 @@ fn bind_container_arguments(
     let background = take(slots.next());
     let foreground = take(slots.next());
     let border = take(slots.next());
+    let border_widths = take(slots.next());
     let alignment = take(slots.next());
     let padding = take(slots.next());
     let radius = take(slots.next());
@@ -18123,6 +18145,7 @@ fn bind_container_arguments(
         background,
         foreground,
         border,
+        border_widths,
         alignment,
         padding,
         radius,
@@ -18134,6 +18157,18 @@ fn convert_container_padding(
 ) -> Result<IrContainerPadding, value_conversion::ConversionError> {
     let [top, right, bottom, left] = convert_sizes(argument)?;
     Ok(IrContainerPadding {
+        top,
+        right,
+        bottom,
+        left,
+    })
+}
+
+fn convert_container_border_widths(
+    argument: &InvocationValue,
+) -> Result<IrContainerBorderWidths, value_conversion::ConversionError> {
+    let [top, right, bottom, left] = convert_sizes(argument)?;
+    Ok(IrContainerBorderWidths {
         top,
         right,
         bottom,
@@ -19247,6 +19282,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("background").positional(false),
                 ParameterMetadata::optional("foreground").positional(false),
                 ParameterMetadata::optional("border").positional(false),
+                ParameterMetadata::optional("borderwidth").positional(false),
                 ParameterMetadata::optional("alignment").positional(false),
                 ParameterMetadata::optional("padding").positional(false),
                 ParameterMetadata::optional("radius").positional(false),
@@ -21169,7 +21205,6 @@ fn native_binding_message(name: &str, message: String) -> String {
                     | "classname"
                     | "foreground"
                     | "background"
-                    | "borderwidth"
                     | "borderstyle"
                     | "textalignment"
                     | "margin"

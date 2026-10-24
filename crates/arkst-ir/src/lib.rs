@@ -1667,6 +1667,9 @@ pub struct IrContainerComponent {
     /// An explicit component-local border color, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border: Option<Box<IrColor>>,
+    /// Explicit component-local border widths expanded to all four sides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_widths: Option<Box<IrContainerBorderWidths>>,
     /// Explicit component-local content padding expanded to all four sides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub padding: Option<Box<IrContainerPadding>>,
@@ -1683,6 +1686,18 @@ pub struct IrContainerComponent {
 /// shorthand before the value crosses the IR boundary.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrContainerPadding {
+    pub top: IrSize,
+    pub right: IrSize,
+    pub bottom: IrSize,
+    pub left: IrSize,
+}
+
+/// Backend-neutral per-side border widths for a Container component.
+///
+/// The evaluator expands Quarkdown's documented one/two/four-value `Sizes`
+/// shorthand before the value crosses the IR boundary.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrContainerBorderWidths {
     pub top: IrSize,
     pub right: IrSize,
     pub bottom: IrSize,
@@ -2260,6 +2275,8 @@ struct WireContainerComponent {
     foreground: Option<IrColor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     border: Option<IrColor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    border_widths: Option<Box<IrContainerBorderWidths>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     padding: Option<IrContainerPadding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2868,6 +2885,7 @@ fn component_to_wire(
             background: component.background.as_deref().cloned(),
             foreground: component.foreground.as_deref().cloned(),
             border: component.border.as_deref().cloned(),
+            border_widths: component.border_widths.clone(),
             padding: component.padding.as_deref().cloned(),
             radius: component.radius.as_deref().cloned(),
             children: wire_nodes(&component.children, sources)?,
@@ -3445,6 +3463,7 @@ fn component_from_wire(
             background: component.background.map(Box::new),
             foreground: component.foreground.map(Box::new),
             border: component.border.map(Box::new),
+            border_widths: component.border_widths,
             padding: component.padding.map(Box::new),
             radius: component.radius.map(Box::new),
             children: nodes_from_wire(component.children, sources)?,
@@ -4586,6 +4605,7 @@ mod tests {
             background: None,
             foreground: None,
             border: None,
+            border_widths: None,
             padding: None,
             radius: None,
             children: vec![IrNode::Paragraph {
@@ -4826,6 +4846,7 @@ mod tests {
                 background: None,
                 foreground: None,
                 border: None,
+                border_widths: None,
                 padding: None,
                 radius: None,
                 children: Vec::new(),
@@ -4846,6 +4867,7 @@ mod tests {
                 background: None,
                 foreground: None,
                 border: None,
+                border_widths: None,
                 padding: None,
                 radius: None,
                 children: Vec::new(),
@@ -4873,6 +4895,7 @@ mod tests {
             background: None,
             foreground: None,
             border: None,
+            border_widths: None,
             padding: None,
             radius: None,
             children: Vec::new(),
