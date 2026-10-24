@@ -59,15 +59,15 @@ use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
     IrCallableResourceContext, IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable,
     IrClipComponent, IrCodeCallout, IrCollapseComponent, IrColor, IrComponent,
-    IrContainerAlignment, IrContainerComponent, IrContainerPadding, IrCrossAxisAlignment,
-    IrDictionary, IrDocument, IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
-    IrExplicitErrorComponent, IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent,
-    IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrNumberingLayer, IrNumberingState, IrPageBorderWidths, IrPageCounterTarget,
-    IrPageFormatLayer, IrPageFormatSelector, IrPageFormatState, IrPageGeometry,
-    IrPageMarginPosition, IrPageMargins, IrPageOrientation, IrPageRange, IrPageSide,
-    IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrSlideTransition, IrSlideTransitionSpeed,
+    IrContainerAlignment, IrContainerComponent, IrContainerPadding, IrContainerRadius,
+    IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment, IrDocumentAuthor,
+    IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent, IrFontLayer, IrFontState,
+    IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody, IrLandscapeComponent,
+    IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState,
+    IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer, IrPageFormatSelector,
+    IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins, IrPageOrientation,
+    IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition, IrSlideTransitionSpeed,
     IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent, IrStackedComponent,
     IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTodoComponent, IrValue,
     NativeTarget, TargetSpecificContent,
@@ -379,6 +379,7 @@ struct BoundContainerArguments {
     border: Option<ContainerArgument>,
     alignment: Option<ContainerArgument>,
     padding: Option<ContainerArgument>,
+    radius: Option<ContainerArgument>,
 }
 
 struct BoundWhitespaceArguments {
@@ -5776,6 +5777,7 @@ impl Evaluator {
                 foreground: None,
                 border: None,
                 padding: None,
+                radius: None,
                 children,
                 span: *span,
             },
@@ -5904,6 +5906,7 @@ impl Evaluator {
                 foreground: None,
                 border: None,
                 padding: None,
+                radius: None,
                 children,
                 span: *span,
             },
@@ -7835,6 +7838,7 @@ impl Evaluator {
                 foreground: None,
                 border: None,
                 padding: None,
+                radius: None,
                 children,
                 span: *span,
             },
@@ -8031,6 +8035,22 @@ impl Evaluator {
             },
             None => None,
         };
+        let radius = match bound.radius.as_ref() {
+            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) => match convert_container_radius(&argument.value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    diagnostics.push(container_conversion_error(
+                        "radius",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
 
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
@@ -8060,8 +8080,8 @@ impl Evaluator {
 
         CallOutcome::Value(IrValue::Component(IrComponent::Container(
             IrContainerComponent {
-                width,
-                height,
+                width: width.map(Box::new),
+                height: height.map(Box::new),
                 full_width,
                 full_column_span,
                 alignment,
@@ -8069,6 +8089,7 @@ impl Evaluator {
                 foreground: foreground.map(Box::new),
                 border: border.map(Box::new),
                 padding: padding.map(Box::new),
+                radius: radius.map(Box::new),
                 children,
                 span: *span,
             },
@@ -18093,6 +18114,7 @@ fn bind_container_arguments(
     let border = take(slots.next());
     let alignment = take(slots.next());
     let padding = take(slots.next());
+    let radius = take(slots.next());
     Ok(BoundContainerArguments {
         width,
         height,
@@ -18103,6 +18125,7 @@ fn bind_container_arguments(
         border,
         alignment,
         padding,
+        radius,
     })
 }
 
@@ -18115,6 +18138,18 @@ fn convert_container_padding(
         right,
         bottom,
         left,
+    })
+}
+
+fn convert_container_radius(
+    argument: &InvocationValue,
+) -> Result<IrContainerRadius, value_conversion::ConversionError> {
+    let [top_left, top_right, bottom_right, bottom_left] = convert_sizes(argument)?;
+    Ok(IrContainerRadius {
+        top_left,
+        top_right,
+        bottom_right,
+        bottom_left,
     })
 }
 
@@ -19214,6 +19249,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("border").positional(false),
                 ParameterMetadata::optional("alignment").positional(false),
                 ParameterMetadata::optional("padding").positional(false),
+                ParameterMetadata::optional("radius").positional(false),
             ],
             BodyPolicy::AllowSeparate,
         ),
@@ -21137,7 +21173,6 @@ fn native_binding_message(name: &str, message: String) -> String {
                     | "borderstyle"
                     | "textalignment"
                     | "margin"
-                    | "radius"
                     | "fontsize"
                     | "fontweight"
                     | "fontstyle"

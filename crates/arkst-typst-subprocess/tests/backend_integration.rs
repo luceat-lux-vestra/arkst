@@ -2552,6 +2552,44 @@ fn integration_container_padding_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_container_radius_lowers_to_valid_typst_and_pdf() {
+    let source = ".container width:{4cm} background:{white} radius:{1cm 2mm 3pt 8px} padding:{2mm}\n    ## Rounded\n    Rich **body**\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container-radius.qd")
+        .expect("valid entry path")
+        .add_source("container-radius.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container radius diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains(
+            "#block(width: 4cm, fill: rgb(255, 255, 255, 100%), radius: (top-left: 1cm, top-right: 2mm, bottom-right: 3pt, bottom-left: 6pt), inset: (top: 2mm, right: 2mm, bottom: 2mm, left: 2mm))["
+        ),
+        "{typst_code}"
+    );
+
+    with_typst("container-radius", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container-radius.qd".to_string(),
+            })
+            .expect("container radius Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_container_alignment_lowers_to_valid_typst_and_pdf() {
     let source = ".container width:{4cm} background:{white} alignment:{center}\n    ## Centered\n    Rich **body**\n";
     let project = VirtualProjectBuilder::new()

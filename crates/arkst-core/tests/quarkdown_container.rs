@@ -65,6 +65,7 @@ fn container_empty_constructs_unaligned_container() {
     assert!(component.background.is_none());
     assert!(component.foreground.is_none());
     assert!(component.padding.is_none());
+    assert!(component.radius.is_none());
     assert!(component.children.is_empty());
 }
 
@@ -86,8 +87,8 @@ fn container_accepts_bounded_sizing_and_boolean_values() {
     let width = compile_source(".container width:{4cm}\n    A\n");
     assert!(width.diagnostics.is_empty(), "{width:?}");
     assert_eq!(
-        container(&width).width,
-        Some(IrSize {
+        container(&width).width.as_deref(),
+        Some(&IrSize {
             value: 4.0,
             unit: IrSizeUnit::Cm,
         })
@@ -96,8 +97,8 @@ fn container_accepts_bounded_sizing_and_boolean_values() {
     let height = compile_source(".container height:{2cm}\n    A\n");
     assert!(height.diagnostics.is_empty(), "{height:?}");
     assert_eq!(
-        container(&height).height,
-        Some(IrSize {
+        container(&height).height.as_deref(),
+        Some(&IrSize {
             value: 2.0,
             unit: IrSizeUnit::Cm,
         })

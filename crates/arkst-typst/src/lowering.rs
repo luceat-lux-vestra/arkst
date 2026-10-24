@@ -6,7 +6,7 @@
 use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallSegment, IrClipComponent, IrClipShape, IrCollapseComponent,
     IrColor, IrComponent, IrContainerAlignment, IrContainerComponent, IrContainerPadding,
-    IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
+    IrContainerRadius, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentType,
     IrExplicitErrorComponent, IrFragmentBehavior, IrFragmentComponent, IrInline, IrKeybindingPart,
     IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition,
     IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout,
@@ -918,6 +918,7 @@ impl LoweringContext {
             || component.height.is_some()
             || component.background.is_some()
             || component.border.is_some()
+            || component.radius.is_some()
             || component.padding.is_some()
         {
             self.push('(');
@@ -952,6 +953,14 @@ impl LoweringContext {
                 }
                 self.push_str("stroke: ");
                 self.push_str(&lower_color(border));
+                first = false;
+            }
+            if let Some(radius) = component.radius.as_ref() {
+                if !first {
+                    self.push_str(", ");
+                }
+                self.push_str("radius: ");
+                self.push_str(&lower_container_radius(radius));
                 first = false;
             }
             if let Some(padding) = component.padding.as_ref() {
@@ -2084,6 +2093,16 @@ fn lower_container_padding(padding: &IrContainerPadding) -> String {
     )
 }
 
+fn lower_container_radius(radius: &IrContainerRadius) -> String {
+    format!(
+        "(top-left: {}, top-right: {}, bottom-right: {}, bottom-left: {})",
+        lower_size(&radius.top_left),
+        lower_size(&radius.top_right),
+        lower_size(&radius.bottom_right),
+        lower_size(&radius.bottom_left),
+    )
+}
+
 fn format_number(value: f64) -> String {
     let mut text = format!("{value:.12}");
     while text.contains('.') && text.ends_with('0') {
@@ -2142,10 +2161,11 @@ fn escape_typst_comment(s: &str) -> String {
 mod tests {
     use arkst_ir::{
         IrCallSegment, IrClipComponent, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
-        IrContainerComponent, IrContainerPadding, IrCrossAxisAlignment, IrDocument,
-        IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
-        IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
-        IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+        IrContainerComponent, IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment,
+        IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrListItem,
+        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+        IrTaskStatus, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2200,6 +2220,7 @@ mod tests {
                 foreground: None,
                 border: None,
                 padding: None,
+                radius: None,
                 children,
                 span: empty_span(),
             }),
@@ -2243,8 +2264,8 @@ mod tests {
     ) -> IrNode {
         IrNode::Component {
             component: IrComponent::Container(IrContainerComponent {
-                width,
-                height,
+                width: width.map(Box::new),
+                height: height.map(Box::new),
                 full_width,
                 full_column_span: false,
                 alignment,
@@ -2252,6 +2273,7 @@ mod tests {
                 foreground: None,
                 border: None,
                 padding: None,
+                radius: None,
                 children: vec![paragraph("A")],
                 span: empty_span(),
             }),
@@ -2511,6 +2533,7 @@ mod tests {
                     foreground: None,
                     border: None,
                     padding: None,
+                    radius: None,
                     children: vec![paragraph("Across")],
                     span: call_span,
                 }),
@@ -2554,10 +2577,10 @@ mod tests {
         let document = IrDocument {
             nodes: vec![IrNode::Component {
                 component: IrComponent::Container(IrContainerComponent {
-                    width: Some(IrSize {
+                    width: Some(Box::new(IrSize {
                         value: 4.0,
                         unit: IrSizeUnit::Cm,
-                    }),
+                    })),
                     height: None,
                     full_width: false,
                     full_column_span: false,
@@ -2576,6 +2599,7 @@ mod tests {
                     })),
                     border: None,
                     padding: None,
+                    radius: None,
                     children: vec![paragraph("Colored")],
                     span: call_span,
                 }),
@@ -2603,10 +2627,10 @@ mod tests {
         let document = IrDocument {
             nodes: vec![IrNode::Component {
                 component: IrComponent::Container(IrContainerComponent {
-                    width: Some(IrSize {
+                    width: Some(Box::new(IrSize {
                         value: 4.0,
                         unit: IrSizeUnit::Cm,
-                    }),
+                    })),
                     height: None,
                     full_width: false,
                     full_column_span: false,
@@ -2625,6 +2649,7 @@ mod tests {
                         alpha: 0.5,
                     })),
                     padding: None,
+                    radius: None,
                     children: vec![paragraph("Bordered")],
                     span: call_span,
                 }),
@@ -2650,10 +2675,10 @@ mod tests {
         let document = IrDocument {
             nodes: vec![IrNode::Component {
                 component: IrComponent::Container(IrContainerComponent {
-                    width: Some(IrSize {
+                    width: Some(Box::new(IrSize {
                         value: 4.0,
                         unit: IrSizeUnit::Cm,
-                    }),
+                    })),
                     height: None,
                     full_width: false,
                     full_column_span: false,
@@ -2679,6 +2704,7 @@ mod tests {
                             unit: IrSizeUnit::Px,
                         },
                     })),
+                    radius: None,
                     children: vec![paragraph("Padded")],
                     span: call_span,
                 }),
@@ -2694,6 +2720,60 @@ mod tests {
             "{code}"
         );
         assert!(code.find("inset:").unwrap() < code.find("Padded").unwrap());
+        assert!(source_map.iter().any(|entry| entry.original == call_span));
+    }
+
+    #[test]
+    fn container_radius_lowers_to_deterministic_per_corner_radius_with_source_mapping() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 64);
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    width: Some(Box::new(IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Cm,
+                    })),
+                    height: None,
+                    full_width: false,
+                    full_column_span: false,
+                    alignment: None,
+                    background: None,
+                    foreground: None,
+                    border: None,
+                    padding: None,
+                    radius: Some(Box::new(IrContainerRadius {
+                        top_left: IrSize {
+                            value: 1.0,
+                            unit: IrSizeUnit::Cm,
+                        },
+                        top_right: IrSize {
+                            value: 2.0,
+                            unit: IrSizeUnit::Mm,
+                        },
+                        bottom_right: IrSize {
+                            value: 3.0,
+                            unit: IrSizeUnit::Pt,
+                        },
+                        bottom_left: IrSize {
+                            value: 8.0,
+                            unit: IrSizeUnit::Px,
+                        },
+                    })),
+                    children: vec![paragraph("Rounded")],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, source_map) = super::lower_to_typst(&document);
+        assert!(
+            code.contains(
+                "#block(width: 4cm, radius: (top-left: 1cm, top-right: 2mm, bottom-right: 3pt, bottom-left: 6pt))["
+            ),
+            "{code}"
+        );
+        assert!(code.find("radius:").unwrap() < code.find("Rounded").unwrap());
         assert!(source_map.iter().any(|entry| entry.original == call_span));
     }
 
@@ -2716,6 +2796,7 @@ mod tests {
                         foreground: None,
                         border: None,
                         padding: None,
+                        radius: None,
                         children: vec![paragraph("A")],
                         span: empty_span(),
                     }),
@@ -2753,6 +2834,7 @@ mod tests {
                     foreground: None,
                     border: None,
                     padding: None,
+                    radius: None,
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
                             content: "Hello".to_string(),
