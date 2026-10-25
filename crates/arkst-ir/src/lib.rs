@@ -1679,6 +1679,9 @@ pub struct IrContainerComponent {
     /// An explicit component-local relative font size, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<IrTextSize>,
+    /// An explicit component-local non-default font weight, if one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<IrTextWeight>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2286,6 +2289,8 @@ struct WireContainerComponent {
     radius: Option<IrContainerRadius>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     font_size: Option<IrTextSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    font_weight: Option<IrTextWeight>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2894,6 +2899,7 @@ fn component_to_wire(
             padding: component.padding.as_deref().cloned(),
             radius: component.radius.as_deref().cloned(),
             font_size: component.font_size,
+            font_weight: component.font_weight,
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3473,6 +3479,7 @@ fn component_from_wire(
             padding: component.padding.map(Box::new),
             radius: component.radius.map(Box::new),
             font_size: component.font_size,
+            font_weight: component.font_weight,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
@@ -3743,6 +3750,16 @@ pub enum IrTextSize {
     Large,
     Larger,
     Huge,
+}
+
+/// Non-default member of the closed font-weight domain shared with Quarkdown
+/// `.text` and represented by bounded Container styling.
+///
+/// `normal` is the identity and therefore does not add a wrapper or scoped
+/// backend rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTextWeight {
+    Bold,
 }
 
 /// Non-default members of the closed text-case domain used by Quarkdown
@@ -4616,6 +4633,7 @@ mod tests {
             padding: None,
             radius: None,
             font_size: None,
+            font_weight: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -4858,6 +4876,7 @@ mod tests {
                 padding: None,
                 radius: None,
                 font_size: None,
+                font_weight: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4880,6 +4899,7 @@ mod tests {
                 padding: None,
                 radius: None,
                 font_size: None,
+                font_weight: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4909,6 +4929,7 @@ mod tests {
             padding: None,
             radius: None,
             font_size: None,
+            font_weight: None,
             children: Vec::new(),
             span,
         }));

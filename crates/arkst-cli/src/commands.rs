@@ -1792,6 +1792,7 @@ mod tests {
                     padding: None,
                     radius: None,
                     font_size: None,
+                    font_weight: None,
                     children: vec![explicit_node()],
                     span,
                 }),
@@ -1850,6 +1851,7 @@ mod tests {
                     padding: None,
                     radius: None,
                     font_size: None,
+                    font_weight: None,
                     children: vec![IrNode::Blockquote {
                         content: vec![explicit_node()],
                         span,
