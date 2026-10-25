@@ -11,7 +11,7 @@ import re
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCER = ROOT / ".github/workflows/sccache-main-producer.yml"
 CONSUMER = ROOT / ".github/workflows/ci.yml"
-RUST_CACHE = "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+RUST_CACHE = "Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0"
 
 # The producer is an optional CI cache warmer, not a second main product-test run.
 # Cargo dependency/build configuration changes seed; ordinary source/docs do not.
@@ -115,7 +115,7 @@ def validate(producer: str, consumer: str) -> None:
     # This CI-only LGPL-3.0 action was already pinned in CI before the
     # producer was introduced. Any license-policy exception must be scoped
     # to that exact reviewed SHA, never LGPL globally or a wildcard action.
-    exception = "pkg:githubactions/Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+    exception = "pkg:githubactions/Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0"
     lines = [line for line in consumer.splitlines() if "allow-dependencies-licenses:" in line]
     if len(lines) != 1:
         raise ValueError("expected one authoritative dependency license exception list")
@@ -184,7 +184,7 @@ class MainCacheBridgeContractTests(unittest.TestCase):
 
     def test_broad_action_license_exception_rejected(self) -> None:
         bad = self.consumer.replace(
-            "pkg:githubactions/Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6",
+            "pkg:githubactions/Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0",
             "pkg:githubactions/Swatinem/rust-cache",
             1,
         )
