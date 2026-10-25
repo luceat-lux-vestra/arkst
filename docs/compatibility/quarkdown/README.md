@@ -468,15 +468,16 @@ Container support. The implemented subset is:
   `border: Color?`, one/two/four-value `borderwidth: Sizes?`, closed
   `alignment: Alignment?`, and one/two/four-value
   `padding: Sizes?` and `radius: Sizes?` plus closed relative
-  `fontsize: TextTransformData.Size?` and closed `fontweight: FontWeight?`
-  (`normal`/`bold`) through
+  `fontsize: TextTransformData.Size?`, closed `fontweight: FontWeight?`
+  (`normal`/`bold`), and closed `fontstyle: TextTransformData.Style?`
+  (`normal`/`italic`) through
   the existing origin-aware invocation conversion boundary;
 - positional prefix binding in `width`, `height`, `fullwidth` order and named
   equivalents, with duplicate, unknown, and deferred-known parameters
   rejected by source-backed diagnostics; and
 - backend-neutral `IrComponent::Container` materialization and Typst
   `#block` sizing/fill/per-side stroke thickness plus container-scoped text fill,
-  relative font size, scoped bold weight, and logical
+  relative font size, scoped bold weight and italic style, and logical
   `start`/`center`/`end` alignment wrappers plus per-corner `radius` and per-side
   `inset`, where explicit width overrides
   `fullwidth` and an omitted/`None` alignment emits no `#align` wrapper; and
@@ -488,7 +489,7 @@ Container support. The implemented subset is:
 
 The deferred surface includes `float`, `classname`, the remaining
 `StyleOptions`, container text alignment, border style, margin,
-the remaining font/text-style properties other than font size and weight,
+the remaining font/text-style properties other than font size, weight, and style,
 inline Container insertion, and exact
 HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container.rs`,
@@ -499,7 +500,8 @@ HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container_padding_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_radius_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_font_size_184.rs`,
-`crates/arkst-core/tests/quarkdown_container_font_weight_184.rs`, the
+`crates/arkst-core/tests/quarkdown_container_font_weight_184.rs`,
+`crates/arkst-core/tests/quarkdown_container_font_style_184.rs`, the
 IR/lowering unit tests, and
 `crates/arkst-typst-subprocess/tests/backend_integration.rs`.
 

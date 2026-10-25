@@ -1682,6 +1682,9 @@ pub struct IrContainerComponent {
     /// An explicit component-local non-default font weight, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_weight: Option<IrTextWeight>,
+    /// An explicit component-local non-default font style, if one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_style: Option<IrTextStyle>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2291,6 +2294,8 @@ struct WireContainerComponent {
     font_size: Option<IrTextSize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     font_weight: Option<IrTextWeight>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    font_style: Option<IrTextStyle>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2900,6 +2905,7 @@ fn component_to_wire(
             radius: component.radius.as_deref().cloned(),
             font_size: component.font_size,
             font_weight: component.font_weight,
+            font_style: component.font_style,
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3480,6 +3486,7 @@ fn component_from_wire(
             radius: component.radius.map(Box::new),
             font_size: component.font_size,
             font_weight: component.font_weight,
+            font_style: component.font_style,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
@@ -3760,6 +3767,16 @@ pub enum IrTextSize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrTextWeight {
     Bold,
+}
+
+/// Non-default member of the closed font-style domain shared with Quarkdown
+/// `.text` and represented by bounded Container styling.
+///
+/// `normal` is the identity and therefore does not add a wrapper or scoped
+/// backend rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTextStyle {
+    Italic,
 }
 
 /// Non-default members of the closed text-case domain used by Quarkdown
@@ -4634,6 +4651,7 @@ mod tests {
             radius: None,
             font_size: None,
             font_weight: None,
+            font_style: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -4877,6 +4895,7 @@ mod tests {
                 radius: None,
                 font_size: None,
                 font_weight: None,
+                font_style: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4900,6 +4919,7 @@ mod tests {
                 radius: None,
                 font_size: None,
                 font_weight: None,
+                font_style: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4930,6 +4950,7 @@ mod tests {
             radius: None,
             font_size: None,
             font_weight: None,
+            font_style: None,
             children: Vec::new(),
             span,
         }));
