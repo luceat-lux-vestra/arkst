@@ -1334,7 +1334,8 @@ impl IrSlideTransitionSpeed {
     }
 }
 
-/// Backend-neutral document-global horizontal alignment.
+/// Backend-neutral horizontal text alignment shared by document-global and
+/// component-local style consumers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrDocumentAlignment {
     Start,
@@ -1658,6 +1659,10 @@ pub struct IrContainerComponent {
     /// `None` represents an unaligned ordinary container.
     #[serde(default)]
     pub alignment: Option<IrContainerAlignment>,
+    /// Explicit component-local text alignment. When omitted, text inherits
+    /// the component content alignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_alignment: Option<IrDocumentAlignment>,
     /// An explicit component-local background color, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<Box<IrColor>>,
@@ -2288,6 +2293,8 @@ struct WireContainerComponent {
     #[serde(default)]
     alignment: Option<IrContainerAlignment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    text_alignment: Option<IrDocumentAlignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     background: Option<IrColor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     foreground: Option<IrColor>,
@@ -2912,6 +2919,7 @@ fn component_to_wire(
             full_width: component.full_width,
             full_column_span: component.full_column_span,
             alignment: component.alignment,
+            text_alignment: component.text_alignment,
             background: component.background.as_deref().cloned(),
             foreground: component.foreground.as_deref().cloned(),
             border: component.border.as_deref().cloned(),
@@ -3496,6 +3504,7 @@ fn component_from_wire(
             full_width: component.full_width,
             full_column_span: component.full_column_span,
             alignment: component.alignment,
+            text_alignment: component.text_alignment,
             background: component.background.map(Box::new),
             foreground: component.foreground.map(Box::new),
             border: component.border.map(Box::new),
@@ -4241,13 +4250,13 @@ mod tests {
     use super::{
         IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
-        IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
-        IrDocumentState, IrDocumentTheme, IrDocumentType, IrExplicitErrorComponent, IrFontLayer,
-        IrFontState, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg,
-        IrNode, IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair,
-        IrParagraphStyleInfo, IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent,
-        IrStackedLayout, IrTextDecoration, IrValue, NativeTarget, SourceTable,
-        TargetSpecificContent,
+        IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment, IrDocumentAuthor,
+        IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType,
+        IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrLandscapeComponent,
+        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrNumberingFormat, IrNumberingLayer,
+        IrNumberingState, IrNumberingToken, IrPair, IrParagraphStyleInfo, IrRange, IrRawBody,
+        IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTextDecoration, IrValue,
+        NativeTarget, SourceTable, TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -4680,6 +4689,7 @@ mod tests {
             full_width: true,
             full_column_span: false,
             alignment: Some(IrContainerAlignment::Center),
+            text_alignment: None,
             background: None,
             foreground: None,
             border: None,
@@ -4946,6 +4956,34 @@ mod tests {
     }
 
     #[test]
+    fn container_text_alignment_wire_is_typed_and_legacy_defaults_to_inheritance() {
+        let mut value = container_value();
+        let IrValue::Component(IrComponent::Container(component)) = &mut value else {
+            unreachable!("container_value must produce a Container")
+        };
+        component.text_alignment = Some(IrDocumentAlignment::Justify);
+
+        let mut encoded = serde_json::to_value(&value).expect("container serializes");
+        let container = encoded
+            .get_mut("Component")
+            .and_then(|component| component.get_mut("Container"))
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("externally tagged container object");
+        assert_eq!(
+            container.get("text_alignment"),
+            Some(&serde_json::Value::String("Justify".to_string()))
+        );
+
+        container.remove("text_alignment");
+        let decoded = serde_json::from_value::<IrValue>(encoded)
+            .expect("legacy Container without text_alignment deserializes");
+        let IrValue::Component(IrComponent::Container(component)) = decoded else {
+            panic!("expected Container")
+        };
+        assert_eq!(component.text_alignment, None);
+    }
+
+    #[test]
     fn plain_and_sized_container_serde_roundtrip_deterministically() {
         let span = SourceSpan::new(SourceId(9), 0, 12);
         let values = [
@@ -4955,6 +4993,7 @@ mod tests {
                 full_width: false,
                 full_column_span: false,
                 alignment: None,
+                text_alignment: None,
                 background: None,
                 foreground: None,
                 border: None,
@@ -4982,6 +5021,7 @@ mod tests {
                 full_width: true,
                 full_column_span: true,
                 alignment: None,
+                text_alignment: None,
                 background: None,
                 foreground: None,
                 border: None,
@@ -5016,6 +5056,7 @@ mod tests {
             full_width: false,
             full_column_span: true,
             alignment: None,
+            text_alignment: None,
             background: None,
             foreground: None,
             border: None,

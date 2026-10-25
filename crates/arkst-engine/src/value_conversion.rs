@@ -1694,6 +1694,17 @@ pub(crate) fn convert_document_alignment_with_origin(
     }
 }
 
+/// Converts the nullable four-value text-alignment domain used by
+/// component-local style consumers. Explicit `None` is semantic identity.
+pub(crate) fn convert_text_alignment_with_origin(
+    argument: &InvocationValue,
+) -> Result<Option<IrDocumentAlignment>, ConversionError> {
+    if matches!(argument.value, IrValue::None) {
+        return Ok(None);
+    }
+    convert_document_alignment_with_origin(argument).map(Some)
+}
+
 /// Converts a Quarkdown `Int` boundary without truncating fractional values.
 /// Dynamic text follows the reviewed NumberValue parsing order, while static
 /// strings remain strings and cannot acquire integer meaning.
@@ -2949,17 +2960,18 @@ mod tests {
     use super::{
         convert_domain_with_origin, convert_integer_with_origin, convert_range,
         convert_range_with_origin, convert_scalar, convert_scalar_with_origin,
-        convert_target_with_origin, convert_text_case_with_origin,
-        convert_text_decoration_with_origin, convert_text_size_with_origin,
-        convert_text_style_with_origin, convert_text_variant_with_origin,
-        convert_text_weight_with_origin, raw_body_dynamic_text, ClosedEnumSpec, ClosedEnumTarget,
-        ClosedEnumVariant, ConversionError, ConversionTarget, DomainTarget, DomainValue,
-        InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue, TargetValue,
+        convert_target_with_origin, convert_text_alignment_with_origin,
+        convert_text_case_with_origin, convert_text_decoration_with_origin,
+        convert_text_size_with_origin, convert_text_style_with_origin,
+        convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
+        ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
+        DomainTarget, DomainValue, InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue,
+        TargetValue,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
-        IrCrossAxisAlignment, IrDocumentType, IrEnumValue, IrInline, IrInlineBody,
-        IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
+        IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline,
+        IrInlineBody, IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
         IrSlideTransitionSpeed, IrSlideTransitionStyle, IrStackedComponent, IrStackedLayout,
         IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight,
         IrValue,
@@ -3828,6 +3840,45 @@ mod tests {
         assert_eq!(
             convert_text_decoration_with_origin(&InvocationValue::static_value(IrValue::String(
                 "underline".to_string(),
+            ))),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum,
+            })
+        );
+    }
+
+    #[test]
+    fn text_alignment_conversion_is_closed_nullable_and_origin_gated() {
+        for (text, expected) in [
+            ("start", IrDocumentAlignment::Start),
+            ("CENTER", IrDocumentAlignment::Center),
+            ("End", IrDocumentAlignment::End),
+            ("justify", IrDocumentAlignment::Justify),
+        ] {
+            assert_eq!(
+                convert_text_alignment_with_origin(&InvocationValue::dynamic_value(
+                    IrValue::String(text.to_string()),
+                )),
+                Ok(Some(expected)),
+                "{text}"
+            );
+        }
+
+        assert_eq!(
+            convert_text_alignment_with_origin(&InvocationValue::static_value(IrValue::None)),
+            Ok(None)
+        );
+        assert_eq!(
+            convert_text_alignment_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                "sideways".to_string(),
+            ))),
+            Err(ConversionError::InvalidText {
+                target: ConversionTarget::Enum,
+            })
+        );
+        assert_eq!(
+            convert_text_alignment_with_origin(&InvocationValue::static_value(IrValue::String(
+                "center".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
                 target: ConversionTarget::Enum,

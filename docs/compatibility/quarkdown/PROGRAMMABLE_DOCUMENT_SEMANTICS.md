@@ -335,26 +335,27 @@ layout slice:
   `background`/`foreground`/`border` colors, one/two/four-value `borderwidth`,
   plus named-only nullable closed `alignment` and one/two/four-value
   `padding`/`radius` plus closed relative `fontsize`, `fontweight`,
-  `fontstyle`, `fontvariant`, and `textcase` use the existing invocation-origin
-  infrastructure and typed
+  `fontstyle`, `fontvariant`, `textdecoration`, `textcase`, and
+  `textalignment` use the existing invocation-origin infrastructure and typed
   `IrSize`/Boolean/`IrColor`/`IrContainerAlignment`/`IrTextSize`/
-  `IrTextWeight`/`IrTextStyle`/`IrTextVariant`/`IrTextCase` conversion; border width,
-  padding, and radius are expanded to explicit sides/corners before entering IR; duplicate,
-  unknown, and deferred-known
+  `IrTextWeight`/`IrTextStyle`/`IrTextVariant`/`IrTextDecoration`/`IrTextCase`/
+  `IrDocumentAlignment` conversion; border width, padding, and radius are
+  expanded to explicit sides/corners before entering IR; duplicate, unknown, and deferred-known
   parameters fail with a source-backed diagnostic;
 - argument binding, conversion, and validation complete before the body is
   evaluated, so invalid sizing, color, border width, alignment, padding,
-  radius, font size, font weight, font style, font variant, or text case never
-  executes a failing
+  radius, font size, font weight, font style, font variant, text decoration,
+  text case, or text alignment never executes a failing
   body or publishes a partial component; and
 - Typst lowering emits `#block` sizing, optional fill, and optional stroke in
   deterministic `width`, `height`, `fill`, `stroke`, `radius`, `inset` order, applies optional
   foreground through a container-scoped text fill, applies explicit non-normal
   font size through a scoped relative text-size rule, bold weight through a
   scoped weight rule, italic style through a scoped style rule, and small caps
-  through the typed content boundary, applies closed non-identity text case
-  through the existing typed upper/lower/capitalize content boundary, keeps
-  explicit width ahead of `fullwidth`, and
+  through the typed content boundary, applies closed non-identity text
+  decoration and text case through typed content boundaries, applies explicit
+  text alignment inside the content-alignment wrapper through scoped
+  alignment/justification rules, keeps explicit width ahead of `fullwidth`, and
   emits the logical `start`/`center`/`end` `#align` wrapper only when alignment
   is present; and
 - `fullspan:true` retains additive backend-neutral `full_column_span` state.
@@ -376,11 +377,8 @@ Standalone `.fullspan` reuses that exact semantic and lowering boundary:
 
 Deferred from these slices:
 
-- the remaining `StyleOptions` and `.float`;
-- general String → Markdown body conversion and inline Container insertion;
-- direct `.container` style parameters including `float`, `classname`,
-  text alignment, border style, margin, and the remaining font/text-style
-  properties other than font size, weight, style, variant, and case.
+- direct `.container` `float`, `classname`, border-style, and margin behavior;
+- general String → Markdown body conversion and inline Container insertion.
 
 Deferred from this slice:
 

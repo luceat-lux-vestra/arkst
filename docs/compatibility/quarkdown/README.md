@@ -471,8 +471,10 @@ Container support. The implemented subset is:
   `fontsize: TextTransformData.Size?`, closed `fontweight: FontWeight?`
   (`normal`/`bold`), and closed `fontstyle: TextTransformData.Style?`
   (`normal`/`italic`), closed `fontvariant: TextTransformData.Variant?`
-  (`normal`/`smallcaps`), and closed `textcase: TextTransformData.Case?`
-  (`none`/`uppercase`/`lowercase`/`capitalize`) through
+  (`normal`/`smallcaps`), closed `textdecoration: TextTransformData.Decoration?`,
+  closed `textcase: TextTransformData.Case?`
+  (`none`/`uppercase`/`lowercase`/`capitalize`), and closed
+  `textalignment: NodeStyle.TextAlignment?` through
   the existing origin-aware invocation conversion boundary;
 - positional prefix binding in `width`, `height`, `fullwidth` order and named
   equivalents, with duplicate, unknown, and deferred-known parameters
@@ -480,7 +482,8 @@ Container support. The implemented subset is:
 - backend-neutral `IrComponent::Container` materialization and Typst
   `#block` sizing/fill/per-side stroke thickness plus container-scoped text fill,
   relative font size, scoped bold weight and italic style, typed small caps,
-  closed text-case transforms, and
+  closed text-decoration/text-case transforms, scoped text alignment and
+  justification, and
   logical
   `start`/`center`/`end` alignment wrappers plus per-corner `radius` and per-side
   `inset`, where explicit width overrides
@@ -491,10 +494,7 @@ Container support. The implemented subset is:
   content cannot overtake it. The flag is layout-inert in a single-column
   document. Exact Quarkdown in-flow HTML/CSS placement remains unclaimed.
 
-The deferred surface includes `float`, `classname`, the remaining
-`StyleOptions`, container text alignment, border style, margin,
-the remaining font/text-style properties other than font size, weight, style,
-variant, and case,
+The deferred surface includes `float`, `classname`, border style, margin,
 inline Container insertion, and exact
 HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container.rs`,
@@ -508,7 +508,9 @@ HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container_font_weight_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_font_style_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_font_variant_184.rs`,
-`crates/arkst-core/tests/quarkdown_container_text_case_184.rs`, the
+`crates/arkst-core/tests/quarkdown_container_text_decoration_184.rs`,
+`crates/arkst-core/tests/quarkdown_container_text_case_184.rs`,
+`crates/arkst-core/tests/quarkdown_container_text_alignment_184.rs`, the
 IR/lowering unit tests, and
 `crates/arkst-typst-subprocess/tests/backend_integration.rs`.
 
