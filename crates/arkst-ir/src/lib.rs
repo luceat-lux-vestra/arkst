@@ -1688,6 +1688,9 @@ pub struct IrContainerComponent {
     /// An explicit component-local non-default font variant, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_variant: Option<IrTextVariant>,
+    /// An explicit component-local non-default text case, if one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_case: Option<IrTextCase>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2301,6 +2304,8 @@ struct WireContainerComponent {
     font_style: Option<IrTextStyle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     font_variant: Option<IrTextVariant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    text_case: Option<IrTextCase>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2912,6 +2917,7 @@ fn component_to_wire(
             font_weight: component.font_weight,
             font_style: component.font_style,
             font_variant: component.font_variant,
+            text_case: component.text_case,
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3494,6 +3500,7 @@ fn component_from_wire(
             font_weight: component.font_weight,
             font_style: component.font_style,
             font_variant: component.font_variant,
+            text_case: component.text_case,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
@@ -4660,6 +4667,7 @@ mod tests {
             font_weight: None,
             font_style: None,
             font_variant: None,
+            text_case: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -4905,6 +4913,7 @@ mod tests {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_case: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4930,6 +4939,7 @@ mod tests {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_case: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4962,6 +4972,7 @@ mod tests {
             font_weight: None,
             font_style: None,
             font_variant: None,
+            text_case: None,
             children: Vec::new(),
             span,
         }));

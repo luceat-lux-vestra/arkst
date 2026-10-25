@@ -122,16 +122,17 @@ dependency:
   `start`/`center`/`end` content alignment plus named nullable one/two/four-value
   padding, corner radius, named nullable closed relative font size, closed
   normal/bold font weight, closed normal/italic font style, and closed
-  normal/smallcaps font variant exist.
+  normal/smallcaps font variant, and closed none/uppercase/lowercase/capitalize
+  text case exist.
   Multi-column
   output uses a parent-scoped full-width Typst top-float and immediate flush;
   color, border, spacing, and corner output uses block fill, container-scoped
   text fill, per-side block stroke thickness, per-side block inset, and
   per-corner block radius, and scoped relative text-size, bold-weight, and
-  italic-style rules plus the typed small-caps content boundary.
+  italic-style rules plus typed small-caps and text-case content boundaries.
   Exact upstream in-flow and HTML/CSS placement remain unclaimed. Float,
-  class, text alignment, border style, margin, the remaining text transforms,
-  and complete body conversion remain open.
+  class, text alignment, border style, margin, text decoration, the remaining
+  text transforms, and complete body conversion remain open.
 - .fullspan is PARTIAL: a required Markdown block body produces the existing
   typed Container semantic with `full_column_span: true`, strict pre-evaluation
   validation, preserved provenance/composition, and the same bounded
