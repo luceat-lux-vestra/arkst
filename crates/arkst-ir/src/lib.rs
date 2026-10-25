@@ -1675,6 +1675,9 @@ pub struct IrContainerComponent {
     /// Explicit component-local border widths expanded to all four sides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_widths: Option<Box<IrContainerBorderWidths>>,
+    /// Explicit component-local outer spacing expanded to all four sides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<Box<IrContainerMargin>>,
     /// Explicit component-local content padding expanded to all four sides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub padding: Option<Box<IrContainerPadding>>,
@@ -1709,6 +1712,18 @@ pub struct IrContainerComponent {
 /// shorthand before the value crosses the IR boundary.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrContainerPadding {
+    pub top: IrSize,
+    pub right: IrSize,
+    pub bottom: IrSize,
+    pub left: IrSize,
+}
+
+/// Backend-neutral per-side outer spacing for a Container component.
+///
+/// The evaluator expands Quarkdown's documented one/two/four-value `Sizes`
+/// shorthand before the value crosses the IR boundary.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrContainerMargin {
     pub top: IrSize,
     pub right: IrSize,
     pub bottom: IrSize,
@@ -2302,6 +2317,8 @@ struct WireContainerComponent {
     border: Option<IrColor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     border_widths: Option<Box<IrContainerBorderWidths>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    margin: Option<Box<IrContainerMargin>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     padding: Option<IrContainerPadding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2924,6 +2941,7 @@ fn component_to_wire(
             foreground: component.foreground.as_deref().cloned(),
             border: component.border.as_deref().cloned(),
             border_widths: component.border_widths.clone(),
+            margin: component.margin.clone(),
             padding: component.padding.as_deref().cloned(),
             radius: component.radius.as_deref().cloned(),
             font_size: component.font_size,
@@ -3509,6 +3527,7 @@ fn component_from_wire(
             foreground: component.foreground.map(Box::new),
             border: component.border.map(Box::new),
             border_widths: component.border_widths,
+            margin: component.margin,
             padding: component.padding.map(Box::new),
             radius: component.radius.map(Box::new),
             font_size: component.font_size,
@@ -4250,8 +4269,8 @@ mod tests {
     use super::{
         IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
-        IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment, IrDocumentAuthor,
-        IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType,
+        IrContainerMargin, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment,
+        IrDocumentAuthor, IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType,
         IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrLandscapeComponent,
         IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrNumberingFormat, IrNumberingLayer,
         IrNumberingState, IrNumberingToken, IrPair, IrParagraphStyleInfo, IrRange, IrRawBody,
@@ -4694,6 +4713,7 @@ mod tests {
             foreground: None,
             border: None,
             border_widths: None,
+            margin: None,
             padding: None,
             radius: None,
             font_size: None,
@@ -4984,6 +5004,48 @@ mod tests {
     }
 
     #[test]
+    fn container_margin_wire_is_typed_and_legacy_defaults_to_absent() {
+        let mut value = container_value();
+        let IrValue::Component(IrComponent::Container(component)) = &mut value else {
+            unreachable!("container_value must produce a Container")
+        };
+        component.margin = Some(Box::new(IrContainerMargin {
+            top: IrSize {
+                value: 1.0,
+                unit: IrSizeUnit::Cm,
+            },
+            right: IrSize {
+                value: 2.0,
+                unit: IrSizeUnit::Mm,
+            },
+            bottom: IrSize {
+                value: 3.0,
+                unit: IrSizeUnit::Pt,
+            },
+            left: IrSize {
+                value: 8.0,
+                unit: IrSizeUnit::Px,
+            },
+        }));
+
+        let mut encoded = serde_json::to_value(&value).expect("container serializes");
+        let container = encoded
+            .get_mut("Component")
+            .and_then(|component| component.get_mut("Container"))
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("externally tagged container object");
+        assert!(container.get("margin").is_some());
+
+        container.remove("margin");
+        let decoded = serde_json::from_value::<IrValue>(encoded)
+            .expect("legacy Container without margin deserializes");
+        let IrValue::Component(IrComponent::Container(component)) = decoded else {
+            panic!("expected Container")
+        };
+        assert_eq!(component.margin, None);
+    }
+
+    #[test]
     fn plain_and_sized_container_serde_roundtrip_deterministically() {
         let span = SourceSpan::new(SourceId(9), 0, 12);
         let values = [
@@ -4998,6 +5060,7 @@ mod tests {
                 foreground: None,
                 border: None,
                 border_widths: None,
+                margin: None,
                 padding: None,
                 radius: None,
                 font_size: None,
@@ -5026,6 +5089,7 @@ mod tests {
                 foreground: None,
                 border: None,
                 border_widths: None,
+                margin: None,
                 padding: None,
                 radius: None,
                 font_size: None,
@@ -5061,6 +5125,7 @@ mod tests {
             foreground: None,
             border: None,
             border_widths: None,
+            margin: None,
             padding: None,
             radius: None,
             font_size: None,

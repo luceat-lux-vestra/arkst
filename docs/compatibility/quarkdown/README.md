@@ -467,7 +467,7 @@ Container support. The implemented subset is:
   `fullspan: Boolean`, `background: Color?`, `foreground: Color?`,
   `border: Color?`, one/two/four-value `borderwidth: Sizes?`, closed
   `alignment: Alignment?`, and one/two/four-value
-  `padding: Sizes?` and `radius: Sizes?` plus closed relative
+  `margin: Sizes?`, `padding: Sizes?`, and `radius: Sizes?` plus closed relative
   `fontsize: TextTransformData.Size?`, closed `fontweight: FontWeight?`
   (`normal`/`bold`), and closed `fontstyle: TextTransformData.Style?`
   (`normal`/`italic`), closed `fontvariant: TextTransformData.Variant?`
@@ -485,8 +485,9 @@ Container support. The implemented subset is:
   closed text-decoration/text-case transforms, scoped text alignment and
   justification, and
   logical
-  `start`/`center`/`end` alignment wrappers plus per-corner `radius` and per-side
-  `inset`, where explicit width overrides
+  `start`/`center`/`end` alignment wrappers plus per-corner `radius`, an outer
+  per-side `pad` wrapper for margin, and per-side `inset`, where explicit width
+  overrides
   `fullwidth` and an omitted/`None` alignment emits no `#align` wrapper; and
 - additive `full_column_span` IR state. With more than one selector-free page
   column, Typst lowering uses the official parent-scoped top-float breakout
@@ -494,7 +495,7 @@ Container support. The implemented subset is:
   content cannot overtake it. The flag is layout-inert in a single-column
   document. Exact Quarkdown in-flow HTML/CSS placement remains unclaimed.
 
-The deferred surface includes `float`, `classname`, border style, margin,
+The deferred surface includes `float`, `classname`, border style,
 inline Container insertion, and exact
 HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container.rs`,
@@ -502,6 +503,7 @@ HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container_border_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_border_width_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_alignment_184.rs`,
+`crates/arkst-core/tests/quarkdown_container_margin_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_padding_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_radius_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_font_size_184.rs`,

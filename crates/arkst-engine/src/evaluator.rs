@@ -64,10 +64,10 @@ use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
     IrCallableResourceContext, IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable,
     IrClipComponent, IrCodeCallout, IrCollapseComponent, IrColor, IrComponent,
-    IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent, IrContainerPadding,
-    IrContainerRadius, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment,
-    IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent, IrFontLayer,
-    IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody,
+    IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent, IrContainerMargin,
+    IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDictionary, IrDocument,
+    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
+    IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
     IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
     IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins,
@@ -385,6 +385,7 @@ struct BoundContainerArguments {
     border_widths: Option<ContainerArgument>,
     alignment: Option<ContainerArgument>,
     text_alignment: Option<ContainerArgument>,
+    margin: Option<ContainerArgument>,
     padding: Option<ContainerArgument>,
     radius: Option<ContainerArgument>,
     font_size: Option<ContainerArgument>,
@@ -5791,6 +5792,7 @@ impl Evaluator {
                 foreground: None,
                 border: None,
                 border_widths: None,
+                margin: None,
                 padding: None,
                 radius: None,
                 font_size: None,
@@ -5928,6 +5930,7 @@ impl Evaluator {
                 foreground: None,
                 border: None,
                 border_widths: None,
+                margin: None,
                 padding: None,
                 radius: None,
                 font_size: None,
@@ -7868,6 +7871,7 @@ impl Evaluator {
                 foreground: None,
                 border: None,
                 border_widths: None,
+                margin: None,
                 padding: None,
                 radius: None,
                 font_size: None,
@@ -8089,6 +8093,22 @@ impl Evaluator {
             }
             None => None,
         };
+        let margin = match bound.margin.as_ref() {
+            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) => match convert_container_margin(&argument.value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    diagnostics.push(container_conversion_error(
+                        "margin",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
         let padding = match bound.padding.as_ref() {
             Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
             Some(argument) => match convert_container_padding(&argument.value) {
@@ -8262,6 +8282,7 @@ impl Evaluator {
                 foreground: foreground.map(Box::new),
                 border: border.map(Box::new),
                 border_widths: border_widths.map(Box::new),
+                margin: margin.map(Box::new),
                 padding: padding.map(Box::new),
                 radius: radius.map(Box::new),
                 font_size,
@@ -18295,6 +18316,7 @@ fn bind_container_arguments(
     let border_widths = take(slots.next());
     let alignment = take(slots.next());
     let text_alignment = take(slots.next());
+    let margin = take(slots.next());
     let padding = take(slots.next());
     let radius = take(slots.next());
     let font_size = take(slots.next());
@@ -18314,6 +18336,7 @@ fn bind_container_arguments(
         border_widths,
         alignment,
         text_alignment,
+        margin,
         padding,
         radius,
         font_size,
@@ -18322,6 +18345,18 @@ fn bind_container_arguments(
         font_variant,
         text_decoration,
         text_case,
+    })
+}
+
+fn convert_container_margin(
+    argument: &InvocationValue,
+) -> Result<IrContainerMargin, value_conversion::ConversionError> {
+    let [top, right, bottom, left] = convert_sizes(argument)?;
+    Ok(IrContainerMargin {
+        top,
+        right,
+        bottom,
+        left,
     })
 }
 
@@ -19458,6 +19493,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("borderwidth").positional(false),
                 ParameterMetadata::optional("alignment").positional(false),
                 ParameterMetadata::optional("textalignment").positional(false),
+                ParameterMetadata::optional("margin").positional(false),
                 ParameterMetadata::optional("padding").positional(false),
                 ParameterMetadata::optional("radius").positional(false),
                 ParameterMetadata::optional("fontsize").positional(false),
