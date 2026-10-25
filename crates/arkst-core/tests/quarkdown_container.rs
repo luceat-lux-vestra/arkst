@@ -69,6 +69,7 @@ fn container_empty_constructs_unaligned_container() {
     assert!(component.radius.is_none());
     assert!(component.font_size.is_none());
     assert!(component.font_weight.is_none());
+    assert!(component.font_style.is_none());
     assert!(component.children.is_empty());
 }
 

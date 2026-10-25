@@ -11,7 +11,7 @@ use arkst_ir::{
     IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget,
     IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent,
     IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase,
-    IrTextScript, IrTextSize, IrTextVariant, IrTextWeight, IrTodoComponent, IrValue,
+    IrTextScript, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -993,6 +993,9 @@ impl LoweringContext {
         }
         if let Some(IrTextWeight::Bold) = component.font_weight {
             self.push_str("#set text(weight: \"bold\")\n");
+        }
+        if let Some(IrTextStyle::Italic) = component.font_style {
+            self.push_str("#set text(style: \"italic\")\n");
         }
         if let Some(alignment) = component.alignment {
             self.push_str("#align(");
@@ -2205,7 +2208,7 @@ mod tests {
         IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
         IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
         IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrTextSize, IrTextWeight, IrValue,
+        IrTaskStatus, IrTextSize, IrTextStyle, IrTextWeight, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2264,6 +2267,7 @@ mod tests {
                 radius: None,
                 font_size: None,
                 font_weight: None,
+                font_style: None,
                 children,
                 span: empty_span(),
             }),
@@ -2320,6 +2324,7 @@ mod tests {
                 radius: None,
                 font_size: None,
                 font_weight: None,
+                font_style: None,
                 children: vec![paragraph("A")],
                 span: empty_span(),
             }),
@@ -2583,6 +2588,7 @@ mod tests {
                     radius: None,
                     font_size: None,
                     font_weight: None,
+                    font_style: None,
                     children: vec![paragraph("Across")],
                     span: call_span,
                 }),
@@ -2652,6 +2658,7 @@ mod tests {
                     radius: None,
                     font_size: None,
                     font_weight: None,
+                    font_style: None,
                     children: vec![paragraph("Colored")],
                     span: call_span,
                 }),
@@ -2705,6 +2712,7 @@ mod tests {
                     radius: None,
                     font_size: None,
                     font_weight: None,
+                    font_style: None,
                     children: vec![paragraph("Bordered")],
                     span: call_span,
                 }),
@@ -2768,6 +2776,7 @@ mod tests {
                     radius: None,
                     font_size: None,
                     font_weight: None,
+                    font_style: None,
                     children: vec![paragraph("Border widths")],
                     span: call_span,
                 }),
@@ -2825,6 +2834,7 @@ mod tests {
                     radius: None,
                     font_size: None,
                     font_weight: None,
+                    font_style: None,
                     children: vec![paragraph("Padded")],
                     span: call_span,
                 }),
@@ -2882,6 +2892,7 @@ mod tests {
                     })),
                     font_size: None,
                     font_weight: None,
+                    font_style: None,
                     children: vec![paragraph("Rounded")],
                     span: call_span,
                 }),
@@ -2901,7 +2912,7 @@ mod tests {
     }
 
     #[test]
-    fn container_font_styling_uses_scoped_size_and_weight_with_source_mapping() {
+    fn container_font_styling_uses_scoped_size_weight_and_style_with_source_mapping() {
         let call_span = SourceSpan::new(SourceId(184), 0, 56);
         let document = IrDocument {
             nodes: vec![IrNode::Component {
@@ -2927,6 +2938,7 @@ mod tests {
                     radius: None,
                     font_size: Some(IrTextSize::Large),
                     font_weight: Some(IrTextWeight::Bold),
+                    font_style: Some(IrTextStyle::Italic),
                     children: vec![paragraph("Sized")],
                     span: call_span,
                 }),
@@ -2937,7 +2949,7 @@ mod tests {
         let (code, source_map) = super::lower_to_typst(&document);
         assert!(
             code.contains(
-                "#block(width: 4cm)[\n#set text(fill: rgb(1, 2, 3, 100%))\n#set text(size: 1.5em)\n#set text(weight: \"bold\")\nSized"
+                "#block(width: 4cm)[\n#set text(fill: rgb(1, 2, 3, 100%))\n#set text(size: 1.5em)\n#set text(weight: \"bold\")\n#set text(style: \"italic\")\nSized"
             ),
             "{code}"
         );
@@ -2968,6 +2980,7 @@ mod tests {
                         radius: None,
                         font_size: None,
                         font_weight: None,
+                        font_style: None,
                         children: vec![paragraph("A")],
                         span: empty_span(),
                     }),
@@ -3009,6 +3022,7 @@ mod tests {
                     radius: None,
                     font_size: None,
                     font_weight: None,
+                    font_style: None,
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
                             content: "Hello".to_string(),

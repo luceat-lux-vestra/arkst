@@ -11,7 +11,7 @@ use arkst_ir::{
     IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrFragmentBehavior,
     IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition, IrPageOrientation,
     IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
-    IrSlideTransitionStyle, IrTextSize, IrTextWeight, IrValue,
+    IrSlideTransitionStyle, IrTextSize, IrTextStyle, IrTextWeight, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
@@ -1530,6 +1530,39 @@ pub(crate) fn parse_text_weight(value: &str) -> Option<Option<IrTextWeight>> {
     }
 }
 
+/// Converts the closed font-style domain while preserving invocation origin.
+///
+/// `normal` and explicit `None` are semantic identity. Textual enum names are
+/// accepted only from a dynamic invocation value.
+pub(crate) fn convert_text_style_with_origin(
+    argument: &InvocationValue,
+) -> Result<Option<IrTextStyle>, ConversionError> {
+    match &argument.value {
+        IrValue::None => Ok(None),
+        IrValue::String(value) | IrValue::Identifier(value)
+            if argument.origin == ValueOrigin::Dynamic =>
+        {
+            parse_text_style(value).ok_or(ConversionError::InvalidText {
+                target: ConversionTarget::Enum,
+            })
+        }
+        _ => Err(ConversionError::UnsupportedValue {
+            target: ConversionTarget::Enum,
+        }),
+    }
+}
+
+/// Parses the reviewed font-style table shared by `.text` and component-local
+/// font-style consumers. The outer `Option` represents parse success; the
+/// inner `Option` preserves `normal` as semantic identity.
+pub(crate) fn parse_text_style(value: &str) -> Option<Option<IrTextStyle>> {
+    match value.to_ascii_lowercase().as_str() {
+        "normal" => Some(None),
+        "italic" => Some(Some(IrTextStyle::Italic)),
+        _ => None,
+    }
+}
+
 /// Converts the bounded document-global `.pageformat alignment` domain.
 ///
 /// Dynamic text follows the same origin gate as the existing closed-enum
@@ -2809,17 +2842,17 @@ mod tests {
     use super::{
         convert_domain_with_origin, convert_integer_with_origin, convert_range,
         convert_range_with_origin, convert_scalar, convert_scalar_with_origin,
-        convert_target_with_origin, convert_text_size_with_origin, convert_text_weight_with_origin,
-        raw_body_dynamic_text, ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant,
-        ConversionError, ConversionTarget, DomainTarget, DomainValue, InvocationValue,
-        RawMarkdownTarget, ScalarTarget, ScalarValue, TargetValue,
+        convert_target_with_origin, convert_text_size_with_origin, convert_text_style_with_origin,
+        convert_text_weight_with_origin, raw_body_dynamic_text, ClosedEnumSpec, ClosedEnumTarget,
+        ClosedEnumVariant, ConversionError, ConversionTarget, DomainTarget, DomainValue,
+        InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue, TargetValue,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
         IrCrossAxisAlignment, IrDocumentType, IrEnumValue, IrInline, IrInlineBody,
         IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
         IrSlideTransitionSpeed, IrSlideTransitionStyle, IrStackedComponent, IrStackedLayout,
-        IrTextSize, IrTextWeight, IrValue,
+        IrTextSize, IrTextStyle, IrTextWeight, IrValue,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
 
@@ -3606,6 +3639,44 @@ mod tests {
         assert_eq!(
             convert_text_weight_with_origin(&InvocationValue::static_value(IrValue::String(
                 "bold".to_string(),
+            ))),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum,
+            })
+        );
+    }
+
+    #[test]
+    fn text_style_conversion_is_closed_identity_aware_and_origin_gated() {
+        for (text, expected) in [
+            ("normal", None),
+            ("italic", Some(IrTextStyle::Italic)),
+            ("ITALIC", Some(IrTextStyle::Italic)),
+        ] {
+            assert_eq!(
+                convert_text_style_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                    text.to_string()
+                ),)),
+                Ok(expected),
+                "{text}"
+            );
+        }
+
+        assert_eq!(
+            convert_text_style_with_origin(&InvocationValue::static_value(IrValue::None)),
+            Ok(None)
+        );
+        assert_eq!(
+            convert_text_style_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                "oblique".to_string(),
+            ))),
+            Err(ConversionError::InvalidText {
+                target: ConversionTarget::Enum,
+            })
+        );
+        assert_eq!(
+            convert_text_style_with_origin(&InvocationValue::static_value(IrValue::String(
+                "italic".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
                 target: ConversionTarget::Enum,

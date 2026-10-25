@@ -1244,15 +1244,9 @@ fn evaluate_text(
                 return Ok(false);
             }
             let style = scalar_string_argument_result(&value, "style")?;
-            if style.eq_ignore_ascii_case("italic") {
-                Ok(true)
-            } else if style.eq_ignore_ascii_case("normal") {
-                Ok(false)
-            } else {
-                Err(error(
-                    "`.text` style must be normal, italic, or None".to_string(),
-                ))
-            }
+            value_conversion::parse_text_style(&style)
+                .map(|style| style.is_some())
+                .ok_or_else(|| error("`.text` style must be normal, italic, or None".to_string()))
         })
         .transpose()?
         .unwrap_or(false);
