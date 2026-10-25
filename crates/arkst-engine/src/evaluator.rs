@@ -384,6 +384,7 @@ struct BoundContainerArguments {
     border: Option<ContainerArgument>,
     border_widths: Option<ContainerArgument>,
     alignment: Option<ContainerArgument>,
+    text_alignment: Option<ContainerArgument>,
     padding: Option<ContainerArgument>,
     radius: Option<ContainerArgument>,
     font_size: Option<ContainerArgument>,
@@ -5785,6 +5786,7 @@ impl Evaluator {
                 full_width: true,
                 full_column_span: false,
                 alignment: Some(IrContainerAlignment::Center),
+                text_alignment: None,
                 background: None,
                 foreground: None,
                 border: None,
@@ -5921,6 +5923,7 @@ impl Evaluator {
                 full_width: false,
                 full_column_span: true,
                 alignment: None,
+                text_alignment: None,
                 background: None,
                 foreground: None,
                 border: None,
@@ -7860,6 +7863,7 @@ impl Evaluator {
                 full_width: true,
                 full_column_span: false,
                 alignment: Some(alignment),
+                text_alignment: None,
                 background: None,
                 foreground: None,
                 border: None,
@@ -8068,6 +8072,23 @@ impl Evaluator {
             },
             None => None,
         };
+        let text_alignment = match bound.text_alignment.as_ref() {
+            Some(argument) => {
+                match value_conversion::convert_text_alignment_with_origin(&argument.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(container_conversion_error(
+                            "textalignment",
+                            argument.span,
+                            argument.parameter_span,
+                            error,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                }
+            }
+            None => None,
+        };
         let padding = match bound.padding.as_ref() {
             Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
             Some(argument) => match convert_container_padding(&argument.value) {
@@ -8236,6 +8257,7 @@ impl Evaluator {
                 full_width,
                 full_column_span,
                 alignment,
+                text_alignment,
                 background: background.map(Box::new),
                 foreground: foreground.map(Box::new),
                 border: border.map(Box::new),
@@ -18272,6 +18294,7 @@ fn bind_container_arguments(
     let border = take(slots.next());
     let border_widths = take(slots.next());
     let alignment = take(slots.next());
+    let text_alignment = take(slots.next());
     let padding = take(slots.next());
     let radius = take(slots.next());
     let font_size = take(slots.next());
@@ -18290,6 +18313,7 @@ fn bind_container_arguments(
         border,
         border_widths,
         alignment,
+        text_alignment,
         padding,
         radius,
         font_size,
@@ -19433,6 +19457,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("border").positional(false),
                 ParameterMetadata::optional("borderwidth").positional(false),
                 ParameterMetadata::optional("alignment").positional(false),
+                ParameterMetadata::optional("textalignment").positional(false),
                 ParameterMetadata::optional("padding").positional(false),
                 ParameterMetadata::optional("radius").positional(false),
                 ParameterMetadata::optional("fontsize").positional(false),
@@ -21356,13 +21381,7 @@ fn native_binding_message(name: &str, message: String) -> String {
         if name == "container"
             && matches!(
                 argument.trim_matches('`'),
-                "float"
-                    | "classname"
-                    | "foreground"
-                    | "background"
-                    | "borderstyle"
-                    | "textalignment"
-                    | "margin"
+                "float" | "classname" | "foreground" | "background" | "borderstyle" | "margin"
             )
         {
             return format!(

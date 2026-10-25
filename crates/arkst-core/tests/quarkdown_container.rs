@@ -257,7 +257,7 @@ fn container_rejects_duplicate_unknown_and_out_of_signature_arguments() {
 
 #[test]
 fn container_rejects_deferred_known_parameters_explicitly() {
-    for parameter in ["float", "classname", "textalignment"] {
+    for parameter in ["float", "classname"] {
         let source = format!(".container {parameter}:{{value}}\n    A\n");
         assert_one_failure(
             &compile_source(&source),

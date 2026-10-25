@@ -1032,6 +1032,16 @@ impl LoweringContext {
             });
             self.push_str(")[\n");
         }
+        if let Some(text_alignment) = component.text_alignment {
+            match text_alignment {
+                IrDocumentAlignment::Start => self.push_str("#set align(start)\n"),
+                IrDocumentAlignment::Center => self.push_str("#set align(center)\n"),
+                IrDocumentAlignment::End => self.push_str("#set align(end)\n"),
+                IrDocumentAlignment::Justify => {
+                    self.push_str("#set align(start)\n#set par(justify: true)\n");
+                }
+            }
+        }
         for child in &component.children {
             self.lower_node(child);
         }
@@ -2252,11 +2262,11 @@ mod tests {
     use arkst_ir::{
         IrCallSegment, IrClipComponent, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
         IrContainerBorderWidths, IrContainerComponent, IrContainerPadding, IrContainerRadius,
-        IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
-        IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
-        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
-        IrTextWeight, IrValue,
+        IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrExplicitErrorComponent, IrInline,
+        IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
+        IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+        IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize,
+        IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2307,6 +2317,7 @@ mod tests {
                 full_width: true,
                 full_column_span: false,
                 alignment: Some(IrContainerAlignment::Center),
+                text_alignment: None,
                 background: None,
                 foreground: None,
                 border: None,
@@ -2367,6 +2378,7 @@ mod tests {
                 full_width,
                 full_column_span: false,
                 alignment,
+                text_alignment: None,
                 background: None,
                 foreground: None,
                 border: None,
@@ -2634,6 +2646,7 @@ mod tests {
                     full_width: false,
                     full_column_span: true,
                     alignment: None,
+                    text_alignment: None,
                     background: None,
                     foreground: None,
                     border: None,
@@ -2697,6 +2710,7 @@ mod tests {
                     full_width: false,
                     full_column_span: false,
                     alignment: None,
+                    text_alignment: None,
                     background: Some(Box::new(IrColor {
                         red: 128,
                         green: 0,
@@ -2754,6 +2768,7 @@ mod tests {
                     full_width: false,
                     full_column_span: false,
                     alignment: None,
+                    text_alignment: None,
                     background: Some(Box::new(IrColor {
                         red: 255,
                         green: 255,
@@ -2809,6 +2824,7 @@ mod tests {
                     full_width: false,
                     full_column_span: false,
                     alignment: None,
+                    text_alignment: None,
                     background: None,
                     foreground: None,
                     border: Some(Box::new(IrColor {
@@ -2875,6 +2891,7 @@ mod tests {
                     full_width: false,
                     full_column_span: false,
                     alignment: None,
+                    text_alignment: None,
                     background: None,
                     foreground: None,
                     border: None,
@@ -2936,6 +2953,7 @@ mod tests {
                     full_width: false,
                     full_column_span: false,
                     alignment: None,
+                    text_alignment: None,
                     background: None,
                     foreground: None,
                     border: None,
@@ -2997,6 +3015,7 @@ mod tests {
                     full_width: false,
                     full_column_span: false,
                     alignment: None,
+                    text_alignment: None,
                     background: None,
                     foreground: Some(Box::new(IrColor {
                         red: 1,
@@ -3098,6 +3117,42 @@ mod tests {
     }
 
     #[test]
+    fn container_text_alignment_lowers_inside_content_alignment_with_source_mapping() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 48);
+        for (text_alignment, expected) in [
+            (IrDocumentAlignment::Start, "#set align(start)\n"),
+            (IrDocumentAlignment::Center, "#set align(center)\n"),
+            (IrDocumentAlignment::End, "#set align(end)\n"),
+            (
+                IrDocumentAlignment::Justify,
+                "#set align(start)\n#set par(justify: true)\n",
+            ),
+        ] {
+            let mut node = container_node(vec![paragraph("Aligned")]);
+            let IrNode::Component {
+                component: IrComponent::Container(component),
+            } = &mut node
+            else {
+                unreachable!("container_node must produce a Container")
+            };
+            component.alignment = Some(IrContainerAlignment::Center);
+            component.text_alignment = Some(text_alignment);
+            component.span = call_span;
+            let document = IrDocument {
+                nodes: vec![node],
+                metadata: IrMetadata::default(),
+            };
+
+            let (code, source_map) = super::lower_to_typst(&document);
+            assert!(
+                code.contains(&format!("#align(center)[\n{expected}Aligned")),
+                "{text_alignment:?}: {code}"
+            );
+            assert!(source_map.iter().any(|entry| entry.original == call_span));
+        }
+    }
+
+    #[test]
     fn container_component_preserves_logical_alignment_names() {
         for (alignment, name) in [
             (IrContainerAlignment::Start, "start"),
@@ -3112,6 +3167,7 @@ mod tests {
                         full_width: true,
                         full_column_span: false,
                         alignment: Some(alignment),
+                        text_alignment: None,
                         background: None,
                         foreground: None,
                         border: None,
@@ -3157,6 +3213,7 @@ mod tests {
                     full_width: true,
                     full_column_span: false,
                     alignment: Some(IrContainerAlignment::Center),
+                    text_alignment: None,
                     background: None,
                     foreground: None,
                     border: None,
