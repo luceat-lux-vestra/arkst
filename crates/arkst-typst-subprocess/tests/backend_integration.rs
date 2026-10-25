@@ -2830,6 +2830,48 @@ fn integration_container_text_alignment_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_container_margin_lowers_outside_block_and_composes_with_fullspan() {
+    let source = ".pageformat columns:{2}\n.container fullspan:{yes} width:{4cm} margin:{1cm 2mm 3pt 8px} padding:{2mm}\n    ## Margined\n    Rich **body**\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container-margin.qd")
+        .expect("valid entry path")
+        .add_source("container-margin.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container margin diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains(
+            "#place(top + center, scope: \"parent\", float: true, block(width: 100%)[\n#pad(top: 1cm, right: 2mm, bottom: 3pt, left: 6pt)[\n#block(width: 4cm, inset: (top: 2mm, right: 2mm, bottom: 2mm, left: 2mm))["
+        ),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("]\n]\n])\n#place.flush()"),
+        "{typst_code}"
+    );
+
+    with_typst("container-margin", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container-margin.qd".to_string(),
+            })
+            .expect("container margin Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_container_padding_lowers_to_valid_typst_and_pdf() {
     let source = ".container width:{4cm} background:{white} padding:{1cm 2mm 3pt 8px}\n    ## Padded\n    Rich **body**\n";
     let project = VirtualProjectBuilder::new()

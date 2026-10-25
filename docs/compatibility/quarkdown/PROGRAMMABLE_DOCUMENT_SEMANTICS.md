@@ -298,7 +298,7 @@ Implemented in this slice:
   size conversion, alignment structure, source maps, and real Typst/PDF
   integration coverage.
 
-### Container component consumer slices (2026-08-21; style extensions 2026-10-25)
+### Container component consumer slices (2026-08-21; style and spacing extensions 2026-10-26)
 
 `.center` is implemented as a bounded Container component consumer:
 
@@ -334,20 +334,21 @@ layout slice:
   named-only `fullspan` Boolean and nullable
   `background`/`foreground`/`border` colors, one/two/four-value `borderwidth`,
   plus named-only nullable closed `alignment` and one/two/four-value
-  `padding`/`radius` plus closed relative `fontsize`, `fontweight`,
+  `margin`/`padding`/`radius` plus closed relative `fontsize`, `fontweight`,
   `fontstyle`, `fontvariant`, `textdecoration`, `textcase`, and
   `textalignment` use the existing invocation-origin infrastructure and typed
   `IrSize`/Boolean/`IrColor`/`IrContainerAlignment`/`IrTextSize`/
   `IrTextWeight`/`IrTextStyle`/`IrTextVariant`/`IrTextDecoration`/`IrTextCase`/
-  `IrDocumentAlignment` conversion; border width, padding, and radius are
+  `IrDocumentAlignment` conversion; border width, margin, padding, and radius are
   expanded to explicit sides/corners before entering IR; duplicate, unknown, and deferred-known
   parameters fail with a source-backed diagnostic;
 - argument binding, conversion, and validation complete before the body is
-  evaluated, so invalid sizing, color, border width, alignment, padding,
+  evaluated, so invalid sizing, color, border width, alignment, margin, padding,
   radius, font size, font weight, font style, font variant, text decoration,
   text case, or text alignment never executes a failing
   body or publishes a partial component; and
-- Typst lowering emits `#block` sizing, optional fill, and optional stroke in
+- Typst lowering emits an outer `#pad` wrapper for explicit margin, then `#block`
+  sizing, optional fill, and optional stroke in
   deterministic `width`, `height`, `fill`, `stroke`, `radius`, `inset` order, applies optional
   foreground through a container-scoped text fill, applies explicit non-normal
   font size through a scoped relative text-size rule, bold weight through a
@@ -377,7 +378,7 @@ Standalone `.fullspan` reuses that exact semantic and lowering boundary:
 
 Deferred from these slices:
 
-- direct `.container` `float`, `classname`, border-style, and margin behavior;
+- direct `.container` `float`, `classname`, and border-style behavior;
 - general String → Markdown body conversion and inline Container insertion.
 
 Deferred from this slice:

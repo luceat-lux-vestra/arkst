@@ -6,13 +6,13 @@
 use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallSegment, IrClipComponent, IrClipShape, IrCollapseComponent,
     IrColor, IrComponent, IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent,
-    IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment,
-    IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior, IrFragmentComponent, IrInline,
-    IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget,
-    IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase,
-    IrTextDecoration, IrTextScript, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight,
-    IrTodoComponent, IrValue,
+    IrContainerMargin, IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDocument,
+    IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior,
+    IrFragmentComponent, IrInline, IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment,
+    IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
+    IrTextCase, IrTextDecoration, IrTextScript, IrTextSize, IrTextStyle, IrTextVariant,
+    IrTextWeight, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -912,6 +912,11 @@ impl LoweringContext {
                 "#place(top + center, scope: \"parent\", float: true, block(width: 100%)[\n",
             );
         }
+        if let Some(margin) = component.margin.as_ref() {
+            self.push_str("#pad(");
+            self.push_str(&lower_container_margin(margin));
+            self.push_str(")[\n");
+        }
         self.push_str("#block");
         let width = component.width.as_ref();
         if width.is_some()
@@ -1071,6 +1076,9 @@ impl LoweringContext {
         }
         self.push(']');
         self.push('\n');
+        if component.margin.is_some() {
+            self.push_str("]\n");
+        }
         if break_out {
             self.push_str("])\n#place.flush()\n");
         }
@@ -2161,6 +2169,16 @@ fn lower_container_padding(padding: &IrContainerPadding) -> String {
     )
 }
 
+fn lower_container_margin(margin: &IrContainerMargin) -> String {
+    format!(
+        "top: {}, right: {}, bottom: {}, left: {}",
+        lower_size(&margin.top),
+        lower_size(&margin.right),
+        lower_size(&margin.bottom),
+        lower_size(&margin.left),
+    )
+}
+
 fn lower_container_border_widths(
     widths: &IrContainerBorderWidths,
     color: Option<&IrColor>,
@@ -2261,12 +2279,12 @@ fn escape_typst_comment(s: &str) -> String {
 mod tests {
     use arkst_ir::{
         IrCallSegment, IrClipComponent, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
-        IrContainerBorderWidths, IrContainerComponent, IrContainerPadding, IrContainerRadius,
-        IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrExplicitErrorComponent, IrInline,
-        IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
-        IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
-        IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize,
-        IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
+        IrContainerBorderWidths, IrContainerComponent, IrContainerMargin, IrContainerPadding,
+        IrContainerRadius, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment,
+        IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
+        IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
+        IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase,
+        IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2322,6 +2340,7 @@ mod tests {
                 foreground: None,
                 border: None,
                 border_widths: None,
+                margin: None,
                 padding: None,
                 radius: None,
                 font_size: None,
@@ -2383,6 +2402,7 @@ mod tests {
                 foreground: None,
                 border: None,
                 border_widths: None,
+                margin: None,
                 padding: None,
                 radius: None,
                 font_size: None,
@@ -2651,6 +2671,7 @@ mod tests {
                     foreground: None,
                     border: None,
                     border_widths: None,
+                    margin: None,
                     padding: None,
                     radius: None,
                     font_size: None,
@@ -2725,6 +2746,7 @@ mod tests {
                     })),
                     border: None,
                     border_widths: None,
+                    margin: None,
                     padding: None,
                     radius: None,
                     font_size: None,
@@ -2783,6 +2805,7 @@ mod tests {
                         alpha: 0.5,
                     })),
                     border_widths: None,
+                    margin: None,
                     padding: None,
                     radius: None,
                     font_size: None,
@@ -2851,6 +2874,7 @@ mod tests {
                             unit: IrSizeUnit::Px,
                         },
                     })),
+                    margin: None,
                     padding: None,
                     radius: None,
                     font_size: None,
@@ -2896,6 +2920,7 @@ mod tests {
                     foreground: None,
                     border: None,
                     border_widths: None,
+                    margin: None,
                     padding: Some(Box::new(IrContainerPadding {
                         top: IrSize {
                             value: 1.0,
@@ -2940,6 +2965,87 @@ mod tests {
     }
 
     #[test]
+    fn container_margin_wraps_the_block_outside_padding_with_source_mapping() {
+        let call_span = SourceSpan::new(SourceId(184), 0, 82);
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    width: Some(Box::new(IrSize {
+                        value: 4.0,
+                        unit: IrSizeUnit::Cm,
+                    })),
+                    height: None,
+                    full_width: false,
+                    full_column_span: false,
+                    alignment: None,
+                    text_alignment: None,
+                    background: None,
+                    foreground: None,
+                    border: None,
+                    border_widths: None,
+                    margin: Some(Box::new(IrContainerMargin {
+                        top: IrSize {
+                            value: 1.0,
+                            unit: IrSizeUnit::Cm,
+                        },
+                        right: IrSize {
+                            value: 2.0,
+                            unit: IrSizeUnit::Mm,
+                        },
+                        bottom: IrSize {
+                            value: 3.0,
+                            unit: IrSizeUnit::Pt,
+                        },
+                        left: IrSize {
+                            value: 8.0,
+                            unit: IrSizeUnit::Px,
+                        },
+                    })),
+                    padding: Some(Box::new(IrContainerPadding {
+                        top: IrSize {
+                            value: 2.0,
+                            unit: IrSizeUnit::Mm,
+                        },
+                        right: IrSize {
+                            value: 2.0,
+                            unit: IrSizeUnit::Mm,
+                        },
+                        bottom: IrSize {
+                            value: 2.0,
+                            unit: IrSizeUnit::Mm,
+                        },
+                        left: IrSize {
+                            value: 2.0,
+                            unit: IrSizeUnit::Mm,
+                        },
+                    })),
+                    radius: None,
+                    font_size: None,
+                    font_weight: None,
+                    font_style: None,
+                    font_variant: None,
+                    text_decoration: None,
+                    text_case: None,
+                    children: vec![paragraph("Margined")],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, source_map) = super::lower_to_typst(&document);
+        assert!(
+            code.contains(
+                "#pad(top: 1cm, right: 2mm, bottom: 3pt, left: 6pt)[\n#block(width: 4cm, inset: (top: 2mm, right: 2mm, bottom: 2mm, left: 2mm))["
+            ),
+            "{code}"
+        );
+        assert!(code.find("#pad(").unwrap() < code.find("#block(").unwrap());
+        assert!(code.find("#block(").unwrap() < code.find("Margined").unwrap());
+        assert!(source_map.iter().any(|entry| entry.original == call_span));
+    }
+
+    #[test]
     fn container_radius_lowers_to_deterministic_per_corner_radius_with_source_mapping() {
         let call_span = SourceSpan::new(SourceId(184), 0, 64);
         let document = IrDocument {
@@ -2958,6 +3064,7 @@ mod tests {
                     foreground: None,
                     border: None,
                     border_widths: None,
+                    margin: None,
                     padding: None,
                     radius: Some(Box::new(IrContainerRadius {
                         top_left: IrSize {
@@ -3025,6 +3132,7 @@ mod tests {
                     })),
                     border: None,
                     border_widths: None,
+                    margin: None,
                     padding: None,
                     radius: None,
                     font_size: Some(IrTextSize::Large),
@@ -3172,6 +3280,7 @@ mod tests {
                         foreground: None,
                         border: None,
                         border_widths: None,
+                        margin: None,
                         padding: None,
                         radius: None,
                         font_size: None,
@@ -3218,6 +3327,7 @@ mod tests {
                     foreground: None,
                     border: None,
                     border_widths: None,
+                    margin: None,
                     padding: None,
                     radius: None,
                     font_size: None,
