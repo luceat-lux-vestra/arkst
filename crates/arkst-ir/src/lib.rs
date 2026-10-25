@@ -1688,6 +1688,9 @@ pub struct IrContainerComponent {
     /// An explicit component-local non-default font variant, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_variant: Option<IrTextVariant>,
+    /// An explicit component-local non-default text decoration, if one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_decoration: Option<IrTextDecoration>,
     /// An explicit component-local non-default text case, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_case: Option<IrTextCase>,
@@ -2180,7 +2183,7 @@ enum WireValue {
     Pair(WirePair),
     Dictionary(WireDictionary),
     Content(Vec<WireNode>),
-    Component(WireComponent),
+    Component(Box<WireComponent>),
     Unit,
     None,
     Callable(WireCallable),
@@ -2304,6 +2307,8 @@ struct WireContainerComponent {
     font_style: Option<IrTextStyle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     font_variant: Option<IrTextVariant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    text_decoration: Option<IrTextDecoration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     text_case: Option<IrTextCase>,
     children: Vec<WireNode>,
@@ -2808,7 +2813,7 @@ fn value_to_wire(value: &IrValue, sources: &SourceTable) -> Result<WireValue, St
         }),
         IrValue::Content(nodes) => WireValue::Content(wire_nodes(nodes, sources)?),
         IrValue::Component(component) => {
-            WireValue::Component(component_to_wire(component, sources)?)
+            WireValue::Component(Box::new(component_to_wire(component, sources)?))
         }
         IrValue::Unit => WireValue::Unit,
         IrValue::None => WireValue::None,
@@ -2917,6 +2922,7 @@ fn component_to_wire(
             font_weight: component.font_weight,
             font_style: component.font_style,
             font_variant: component.font_variant,
+            text_decoration: component.text_decoration,
             text_case: component.text_case,
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
@@ -3394,7 +3400,7 @@ fn wire_value_to_ir(value: WireValue, sources: Option<&[SourceText]>) -> Result<
         }),
         WireValue::Content(nodes) => IrValue::Content(nodes_from_wire(nodes, sources)?),
         WireValue::Component(component) => {
-            IrValue::Component(component_from_wire(component, sources)?)
+            IrValue::Component(component_from_wire(*component, sources)?)
         }
         WireValue::Unit => IrValue::Unit,
         WireValue::None => IrValue::None,
@@ -3500,6 +3506,7 @@ fn component_from_wire(
             font_weight: component.font_weight,
             font_style: component.font_style,
             font_variant: component.font_variant,
+            text_decoration: component.text_decoration,
             text_case: component.text_case,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
@@ -3793,8 +3800,23 @@ pub enum IrTextStyle {
     Italic,
 }
 
-/// Non-default members of the closed text-case domain used by Quarkdown
-/// `.text`.
+/// Non-default members of the closed text-decoration domain shared by
+/// Quarkdown `.text` and component-local text-decoration consumers.
+///
+/// `none` is the identity and therefore does not add a wrapper. Combined
+/// variants retain their authored semantic identity instead of leaking a
+/// backend-specific list of decoration primitives into the IR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTextDecoration {
+    Underline,
+    Overline,
+    UnderOverline,
+    Strikethrough,
+    All,
+}
+
+/// Non-default members of the closed text-case domain shared by Quarkdown
+/// `.text` and component-local text-case consumers.
 ///
 /// `none` is the identity and therefore does not add a wrapper. The typed
 /// variants retain rich inline children so backends can apply the visual text
@@ -4224,7 +4246,8 @@ mod tests {
         IrFontState, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg,
         IrNode, IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair,
         IrParagraphStyleInfo, IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent,
-        IrStackedLayout, IrValue, NativeTarget, SourceTable, TargetSpecificContent,
+        IrStackedLayout, IrTextDecoration, IrValue, NativeTarget, SourceTable,
+        TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -4667,6 +4690,7 @@ mod tests {
             font_weight: None,
             font_style: None,
             font_variant: None,
+            text_decoration: None,
             text_case: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
@@ -4894,6 +4918,34 @@ mod tests {
     }
 
     #[test]
+    fn container_text_decoration_wire_is_typed_and_legacy_defaults_to_identity() {
+        let mut value = container_value();
+        let IrValue::Component(IrComponent::Container(component)) = &mut value else {
+            unreachable!("container_value must produce a Container")
+        };
+        component.text_decoration = Some(IrTextDecoration::All);
+
+        let mut encoded = serde_json::to_value(&value).expect("container serializes");
+        let container = encoded
+            .get_mut("Component")
+            .and_then(|component| component.get_mut("Container"))
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("externally tagged container object");
+        assert_eq!(
+            container.get("text_decoration"),
+            Some(&serde_json::Value::String("All".to_string()))
+        );
+
+        container.remove("text_decoration");
+        let decoded = serde_json::from_value::<IrValue>(encoded)
+            .expect("legacy Container without text_decoration deserializes");
+        let IrValue::Component(IrComponent::Container(component)) = decoded else {
+            panic!("expected Container")
+        };
+        assert_eq!(component.text_decoration, None);
+    }
+
+    #[test]
     fn plain_and_sized_container_serde_roundtrip_deterministically() {
         let span = SourceSpan::new(SourceId(9), 0, 12);
         let values = [
@@ -4913,6 +4965,7 @@ mod tests {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_decoration: None,
                 text_case: None,
                 children: Vec::new(),
                 span,
@@ -4939,6 +4992,7 @@ mod tests {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_decoration: None,
                 text_case: None,
                 children: Vec::new(),
                 span,
@@ -4972,6 +5026,7 @@ mod tests {
             font_weight: None,
             font_style: None,
             font_variant: None,
+            text_decoration: None,
             text_case: None,
             children: Vec::new(),
             span,
