@@ -269,7 +269,7 @@ backend-owned and does not add Typst constructs to the core IR.
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
 | `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
 | `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
-| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable one/two/four-value `borderwidth: Sizes`, named-only nullable closed content `alignment`, named-only nullable one/two/four-value `padding: Sizes` and `radius: Sizes`, named-only nullable closed relative `fontsize`, `fontweight`, and `fontstyle`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, lazy validation, additive full-column-span, explicit typed colors and per-side border widths, logical content alignment, per-side padding, per-corner radius, and scoped relative font size, bold weight, and italic style are supported |
+| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable one/two/four-value `borderwidth: Sizes`, named-only nullable closed content `alignment`, named-only nullable one/two/four-value `padding: Sizes` and `radius: Sizes`, named-only nullable closed relative `fontsize`, `fontweight`, `fontstyle`, and `fontvariant`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, lazy validation, additive full-column-span, explicit typed colors and per-side border widths, logical content alignment, per-side padding, per-corner radius, and scoped relative font size, bold weight, italic style, and small-caps variant are supported |
 | `fullspan` | no non-body arguments and one required Markdown block body | bounded Container semantic node with `full_column_span: true`; validation precedes lazy body evaluation |
 | `landscape` | no non-body arguments and one required Markdown block body | typed Landscape semantic node; 90° counter-clockwise content transformation |
 
@@ -298,7 +298,7 @@ Implemented in this slice:
   size conversion, alignment structure, source maps, and real Typst/PDF
   integration coverage.
 
-### Container component consumer slices (2026-08-21; style extensions 2026-10-24)
+### Container component consumer slices (2026-08-21; style extensions 2026-10-25)
 
 `.center` is implemented as a bounded Container component consumer:
 
@@ -334,22 +334,25 @@ layout slice:
   named-only `fullspan` Boolean and nullable
   `background`/`foreground`/`border` colors, one/two/four-value `borderwidth`,
   plus named-only nullable closed `alignment` and one/two/four-value
-  `padding`/`radius` plus closed relative `fontsize`, `fontweight`, and
-  `fontstyle` use the existing invocation-origin infrastructure and typed
+  `padding`/`radius` plus closed relative `fontsize`, `fontweight`,
+  `fontstyle`, and `fontvariant` use the existing invocation-origin infrastructure
+  and typed
   `IrSize`/Boolean/`IrColor`/`IrContainerAlignment`/`IrTextSize`/
-  `IrTextWeight`/`IrTextStyle` conversion; border width,
+  `IrTextWeight`/`IrTextStyle`/`IrTextVariant` conversion; border width,
   padding, and radius are expanded to explicit sides/corners before entering IR; duplicate,
   unknown, and deferred-known
   parameters fail with a source-backed diagnostic;
 - argument binding, conversion, and validation complete before the body is
   evaluated, so invalid sizing, color, border width, alignment, padding,
-  radius, font size, font weight, or font style never executes a failing
+  radius, font size, font weight, font style, or font variant never executes a
+  failing
   body or publishes a partial component; and
 - Typst lowering emits `#block` sizing, optional fill, and optional stroke in
   deterministic `width`, `height`, `fill`, `stroke`, `radius`, `inset` order, applies optional
   foreground through a container-scoped text fill, applies explicit non-normal
   font size through a scoped relative text-size rule, bold weight through a
-  scoped weight rule, and italic style through a scoped style rule, keeps
+  scoped weight rule, italic style through a scoped style rule, and small caps
+  through the typed content boundary, keeps
   explicit width ahead of `fullwidth`, and
   emits the logical `start`/`center`/`end` `#align` wrapper only when alignment
   is present; and
@@ -376,7 +379,7 @@ Deferred from these slices:
 - general String → Markdown body conversion and inline Container insertion;
 - direct `.container` style parameters including `float`, `classname`,
   text alignment, border style, margin, and the remaining font/text-style
-  properties other than font size, weight, and style.
+  properties other than font size, weight, style, and variant.
 
 Deferred from this slice:
 

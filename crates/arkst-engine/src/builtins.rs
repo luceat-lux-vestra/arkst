@@ -15,9 +15,7 @@ use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
-use arkst_ir::{
-    IrInline, IrKeybindingPart, IrNode, IrTextCase, IrTextScript, IrTextVariant, IrValue,
-};
+use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextCase, IrTextScript, IrValue};
 #[cfg(test)]
 use arkst_source::SourceId;
 use arkst_source::SourceSpan;
@@ -1315,13 +1313,9 @@ fn evaluate_text(
                 return Ok(None);
             }
             let variant = scalar_string_argument_result(&value, "variant")?;
-            match variant.to_ascii_lowercase().as_str() {
-                "normal" => Ok(None),
-                "smallcaps" => Ok(Some(IrTextVariant::SmallCaps)),
-                _ => Err(error(
-                    "`.text` variant must be normal, smallcaps, or None".to_string(),
-                )),
-            }
+            value_conversion::parse_text_variant(&variant).ok_or_else(|| {
+                error("`.text` variant must be normal, smallcaps, or None".to_string())
+            })
         })
         .transpose()?
         .flatten();

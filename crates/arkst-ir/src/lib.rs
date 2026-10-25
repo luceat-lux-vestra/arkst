@@ -1685,6 +1685,9 @@ pub struct IrContainerComponent {
     /// An explicit component-local non-default font style, if one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_style: Option<IrTextStyle>,
+    /// An explicit component-local non-default font variant, if one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_variant: Option<IrTextVariant>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -2296,6 +2299,8 @@ struct WireContainerComponent {
     font_weight: Option<IrTextWeight>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     font_style: Option<IrTextStyle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    font_variant: Option<IrTextVariant>,
     children: Vec<WireNode>,
     span: SourceSpan,
 }
@@ -2906,6 +2911,7 @@ fn component_to_wire(
             font_size: component.font_size,
             font_weight: component.font_weight,
             font_style: component.font_style,
+            font_variant: component.font_variant,
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
@@ -3487,6 +3493,7 @@ fn component_from_wire(
             font_size: component.font_size,
             font_weight: component.font_weight,
             font_style: component.font_style,
+            font_variant: component.font_variant,
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
@@ -3792,8 +3799,8 @@ pub enum IrTextCase {
     Capitalize,
 }
 
-/// Non-default member of the closed font-variant domain used by
-/// Quarkdown `.text`.
+/// Non-default member of the closed font-variant domain used by Quarkdown
+/// `.text` and component-local font-variant consumers.
 ///
 /// `normal` is the identity and therefore does not add a wrapper.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -4652,6 +4659,7 @@ mod tests {
             font_size: None,
             font_weight: None,
             font_style: None,
+            font_variant: None,
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -4896,6 +4904,7 @@ mod tests {
                 font_size: None,
                 font_weight: None,
                 font_style: None,
+                font_variant: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4920,6 +4929,7 @@ mod tests {
                 font_size: None,
                 font_weight: None,
                 font_style: None,
+                font_variant: None,
                 children: Vec::new(),
                 span,
             })),
@@ -4951,6 +4961,7 @@ mod tests {
             font_size: None,
             font_weight: None,
             font_style: None,
+            font_variant: None,
             children: Vec::new(),
             span,
         }));
