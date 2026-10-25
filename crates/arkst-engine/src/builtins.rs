@@ -15,7 +15,7 @@ use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
-use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextCase, IrTextScript, IrValue};
+use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextScript, IrValue};
 #[cfg(test)]
 use arkst_source::SourceId;
 use arkst_source::SourceSpan;
@@ -1293,16 +1293,12 @@ fn evaluate_text(
                 return Ok(None);
             }
             let text_case = scalar_string_argument_result(&value, "case")?;
-            match text_case.to_ascii_lowercase().as_str() {
-                "none" => Ok(None),
-                "uppercase" => Ok(Some(IrTextCase::Uppercase)),
-                "lowercase" => Ok(Some(IrTextCase::Lowercase)),
-                "capitalize" => Ok(Some(IrTextCase::Capitalize)),
-                _ => Err(error(
+            value_conversion::parse_text_case(&text_case).ok_or_else(|| {
+                error(
                     "`.text` case must be none, uppercase, lowercase, capitalize, or None"
                         .to_string(),
-                )),
-            }
+                )
+            })
         })
         .transpose()?
         .flatten();

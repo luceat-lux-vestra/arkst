@@ -385,6 +385,7 @@ struct BoundContainerArguments {
     font_weight: Option<ContainerArgument>,
     font_style: Option<ContainerArgument>,
     font_variant: Option<ContainerArgument>,
+    text_case: Option<ContainerArgument>,
 }
 
 struct BoundWhitespaceArguments {
@@ -5788,6 +5789,7 @@ impl Evaluator {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_case: None,
                 children,
                 span: *span,
             },
@@ -5922,6 +5924,7 @@ impl Evaluator {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_case: None,
                 children,
                 span: *span,
             },
@@ -7859,6 +7862,7 @@ impl Evaluator {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_case: None,
                 children,
                 span: *span,
             },
@@ -8155,6 +8159,23 @@ impl Evaluator {
             }
             None => None,
         };
+        let text_case = match bound.text_case.as_ref() {
+            Some(argument) => {
+                match value_conversion::convert_text_case_with_origin(&argument.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(container_conversion_error(
+                            "textcase",
+                            argument.span,
+                            argument.parameter_span,
+                            error,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                }
+            }
+            None => None,
+        };
 
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
@@ -8199,6 +8220,7 @@ impl Evaluator {
                 font_weight,
                 font_style,
                 font_variant,
+                text_case,
                 children,
                 span: *span,
             },
@@ -18229,6 +18251,7 @@ fn bind_container_arguments(
     let font_weight = take(slots.next());
     let font_style = take(slots.next());
     let font_variant = take(slots.next());
+    let text_case = take(slots.next());
     Ok(BoundContainerArguments {
         width,
         height,
@@ -18245,6 +18268,7 @@ fn bind_container_arguments(
         font_weight,
         font_style,
         font_variant,
+        text_case,
     })
 }
 
@@ -19386,6 +19410,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("fontweight").positional(false),
                 ParameterMetadata::optional("fontstyle").positional(false),
                 ParameterMetadata::optional("fontvariant").positional(false),
+                ParameterMetadata::optional("textcase").positional(false),
             ],
             BodyPolicy::AllowSeparate,
         ),
@@ -21309,7 +21334,6 @@ fn native_binding_message(name: &str, message: String) -> String {
                     | "textalignment"
                     | "margin"
                     | "textdecoration"
-                    | "textcase"
             )
         {
             return format!(

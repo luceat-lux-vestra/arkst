@@ -1000,6 +1000,15 @@ impl LoweringContext {
         if let Some(IrTextVariant::SmallCaps) = component.font_variant {
             self.push_str("#smallcaps[\n");
         }
+        if let Some(case) = component.text_case {
+            match case {
+                IrTextCase::Uppercase => self.push_str("#upper[\n"),
+                IrTextCase::Lowercase => self.push_str("#lower[\n"),
+                IrTextCase::Capitalize => {
+                    self.push_str("#{ show regex(\"\\\\b\\\\p{L}\"): upper; [\n");
+                }
+            }
+        }
         if let Some(alignment) = component.alignment {
             self.push_str("#align(");
             self.push_str(match alignment {
@@ -1014,6 +1023,12 @@ impl LoweringContext {
         }
         if component.alignment.is_some() {
             self.push_str("]\n");
+        }
+        if let Some(case) = component.text_case {
+            match case {
+                IrTextCase::Uppercase | IrTextCase::Lowercase => self.push_str("]\n"),
+                IrTextCase::Capitalize => self.push_str("] }\n"),
+            }
         }
         if component.font_variant.is_some() {
             self.push_str("]\n");
@@ -2214,7 +2229,7 @@ mod tests {
         IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
         IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
         IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
+        IrTaskStatus, IrTextCase, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2275,6 +2290,7 @@ mod tests {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_case: None,
                 children,
                 span: empty_span(),
             }),
@@ -2333,6 +2349,7 @@ mod tests {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_case: None,
                 children: vec![paragraph("A")],
                 span: empty_span(),
             }),
@@ -2598,6 +2615,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_case: None,
                     children: vec![paragraph("Across")],
                     span: call_span,
                 }),
@@ -2669,6 +2687,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_case: None,
                     children: vec![paragraph("Colored")],
                     span: call_span,
                 }),
@@ -2724,6 +2743,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_case: None,
                     children: vec![paragraph("Bordered")],
                     span: call_span,
                 }),
@@ -2789,6 +2809,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_case: None,
                     children: vec![paragraph("Border widths")],
                     span: call_span,
                 }),
@@ -2848,6 +2869,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_case: None,
                     children: vec![paragraph("Padded")],
                     span: call_span,
                 }),
@@ -2907,6 +2929,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_case: None,
                     children: vec![paragraph("Rounded")],
                     span: call_span,
                 }),
@@ -2926,7 +2949,7 @@ mod tests {
     }
 
     #[test]
-    fn container_font_styling_uses_scoped_size_weight_style_and_variant_with_source_mapping() {
+    fn container_font_styling_uses_scoped_size_weight_style_variant_and_case_with_source_mapping() {
         let call_span = SourceSpan::new(SourceId(184), 0, 56);
         let document = IrDocument {
             nodes: vec![IrNode::Component {
@@ -2954,6 +2977,7 @@ mod tests {
                     font_weight: Some(IrTextWeight::Bold),
                     font_style: Some(IrTextStyle::Italic),
                     font_variant: Some(IrTextVariant::SmallCaps),
+                    text_case: Some(IrTextCase::Capitalize),
                     children: vec![paragraph("Sized")],
                     span: call_span,
                 }),
@@ -2964,12 +2988,43 @@ mod tests {
         let (code, source_map) = super::lower_to_typst(&document);
         assert!(
             code.contains(
-                "#block(width: 4cm)[\n#set text(fill: rgb(1, 2, 3, 100%))\n#set text(size: 1.5em)\n#set text(weight: \"bold\")\n#set text(style: \"italic\")\n#smallcaps[\nSized"
+                "#block(width: 4cm)[\n#set text(fill: rgb(1, 2, 3, 100%))\n#set text(size: 1.5em)\n#set text(weight: \"bold\")\n#set text(style: \"italic\")\n#smallcaps[\n#{ show regex(\"\\\\b\\\\p{L}\"): upper; [\nSized"
             ),
             "{code}"
         );
         assert!(code.find("#set text(size:").unwrap() < code.find("Sized").unwrap());
         assert!(source_map.iter().any(|entry| entry.original == call_span));
+    }
+
+    #[test]
+    fn container_text_case_lowering_covers_the_complete_nonidentity_domain() {
+        for (case, opening, closing) in [
+            (IrTextCase::Uppercase, "#upper[\nMixed\n]", "]\n"),
+            (IrTextCase::Lowercase, "#lower[\nMixed\n]", "]\n"),
+            (
+                IrTextCase::Capitalize,
+                "#{ show regex(\"\\\\b\\\\p{L}\"): upper; [\nMixed\n] }",
+                "] }\n",
+            ),
+        ] {
+            let mut node = container_node(vec![paragraph("Mixed")]);
+            let IrNode::Component {
+                component: IrComponent::Container(component),
+            } = &mut node
+            else {
+                unreachable!("container_node must produce a Container")
+            };
+            component.alignment = None;
+            component.text_case = Some(case);
+            let document = IrDocument {
+                nodes: vec![node],
+                metadata: IrMetadata::default(),
+            };
+
+            let (code, _) = super::lower_to_typst(&document);
+            assert!(code.contains(opening), "{case:?}: {code}");
+            assert!(code.contains(closing), "{case:?}: {code}");
+        }
     }
 
     #[test]
@@ -2997,6 +3052,7 @@ mod tests {
                         font_weight: None,
                         font_style: None,
                         font_variant: None,
+                        text_case: None,
                         children: vec![paragraph("A")],
                         span: empty_span(),
                     }),
@@ -3040,6 +3096,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_case: None,
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
                             content: "Hello".to_string(),

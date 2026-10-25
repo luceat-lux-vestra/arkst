@@ -2714,6 +2714,45 @@ fn integration_container_font_variant_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_container_text_case_lowers_to_valid_typst_and_pdf() {
+    let source = ".container width:{5cm} foreground:{purple} fontsize:{large} fontweight:{bold} fontstyle:{italic} fontvariant:{smallcaps} textcase:{capitalize} padding:{2mm}\n    ## mixed heading\n    mixed **body**\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container-text-case.qd")
+        .expect("valid entry path")
+        .add_source("container-text-case.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container text-case diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains(
+            "#block(width: 5cm, inset: (top: 2mm, right: 2mm, bottom: 2mm, left: 2mm))[\n#set text(fill: rgb(128, 0, 128, 100%))\n#set text(size: 1.5em)\n#set text(weight: \"bold\")\n#set text(style: \"italic\")\n#smallcaps[\n#{ show regex(\"\\\\b\\\\p{L}\"): upper; ["
+        ),
+        "{typst_code}"
+    );
+    assert!(typst_code.contains("= mixed heading"), "{typst_code}");
+
+    with_typst("container-text-case", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container-text-case.qd".to_string(),
+            })
+            .expect("container text case must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_container_padding_lowers_to_valid_typst_and_pdf() {
     let source = ".container width:{4cm} background:{white} padding:{1cm 2mm 3pt 8px}\n    ## Padded\n    Rich **body**\n";
     let project = VirtualProjectBuilder::new()
