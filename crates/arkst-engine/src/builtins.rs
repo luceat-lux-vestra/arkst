@@ -15,7 +15,7 @@ use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
-use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextScript, IrValue};
+use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextDecoration, IrTextScript, IrValue};
 #[cfg(test)]
 use arkst_source::SourceId;
 use arkst_source::SourceSpan;
@@ -1161,17 +1161,11 @@ fn text_url_string_conversion(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TextDecoration {
-    None,
-    Underline,
-    Overline,
-    UnderOverline,
-    Strikethrough,
-    All,
-}
-
-fn wrap_text_decoration(content: &mut Vec<IrInline>, decoration: TextDecoration, span: SourceSpan) {
+fn wrap_text_decoration(
+    content: &mut Vec<IrInline>,
+    decoration: Option<IrTextDecoration>,
+    span: SourceSpan,
+) {
     let wrap = |content: &mut Vec<IrInline>,
                 constructor: fn(Vec<IrInline>, SourceSpan) -> IrInline| {
         let original = std::mem::take(content);
@@ -1182,15 +1176,15 @@ fn wrap_text_decoration(content: &mut Vec<IrInline>, decoration: TextDecoration,
     let strike = |content, span| IrInline::Strikethrough { content, span };
 
     match decoration {
-        TextDecoration::None => {}
-        TextDecoration::Underline => wrap(content, underline),
-        TextDecoration::Overline => wrap(content, overline),
-        TextDecoration::UnderOverline => {
+        None => {}
+        Some(IrTextDecoration::Underline) => wrap(content, underline),
+        Some(IrTextDecoration::Overline) => wrap(content, overline),
+        Some(IrTextDecoration::UnderOverline) => {
             wrap(content, overline);
             wrap(content, underline);
         }
-        TextDecoration::Strikethrough => wrap(content, strike),
-        TextDecoration::All => {
+        Some(IrTextDecoration::Strikethrough) => wrap(content, strike),
+        Some(IrTextDecoration::All) => {
             wrap(content, strike);
             wrap(content, overline);
             wrap(content, underline);
@@ -1252,24 +1246,18 @@ fn evaluate_text(
         .remove(0)
         .map(|value| {
             if matches!(&value.value, IrValue::None) {
-                return Ok(TextDecoration::None);
+                return Ok(None);
             }
             let decoration = scalar_string_argument_result(&value, "decoration")?;
-            match decoration.to_ascii_lowercase().as_str() {
-                "none" => Ok(TextDecoration::None),
-                "underline" => Ok(TextDecoration::Underline),
-                "overline" => Ok(TextDecoration::Overline),
-                "underoverline" => Ok(TextDecoration::UnderOverline),
-                "strikethrough" => Ok(TextDecoration::Strikethrough),
-                "all" => Ok(TextDecoration::All),
-                _ => Err(error(
+            value_conversion::parse_text_decoration(&decoration).ok_or_else(|| {
+                error(
                     "`.text` decoration must be none, underline, overline, underoverline, strikethrough, all, or None"
                         .to_string(),
-                )),
-            }
+                )
+            })
         })
         .transpose()?
-        .unwrap_or(TextDecoration::None);
+        .flatten();
     let size = arguments
         .remove(0)
         .map(|value| {
@@ -1355,7 +1343,7 @@ fn evaluate_text(
             if url.is_none()
                 && !bold
                 && !italic
-                && decoration == TextDecoration::None
+                && decoration.is_none()
                 && size.is_none()
                 && text_case.is_none()
                 && variant.is_none()

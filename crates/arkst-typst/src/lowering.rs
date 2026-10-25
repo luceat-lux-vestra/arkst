@@ -11,7 +11,8 @@ use arkst_ir::{
     IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget,
     IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent,
     IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase,
-    IrTextScript, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrTodoComponent, IrValue,
+    IrTextDecoration, IrTextScript, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight,
+    IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -1009,6 +1010,19 @@ impl LoweringContext {
                 }
             }
         }
+        if let Some(decoration) = component.text_decoration {
+            match decoration {
+                IrTextDecoration::Underline => self.push_str("#underline[\n"),
+                IrTextDecoration::Overline => self.push_str("#overline[\n"),
+                IrTextDecoration::UnderOverline => {
+                    self.push_str("#underline[\n#overline[\n");
+                }
+                IrTextDecoration::Strikethrough => self.push_str("#strike[\n"),
+                IrTextDecoration::All => {
+                    self.push_str("#underline[\n#overline[\n#strike[\n");
+                }
+            }
+        }
         if let Some(alignment) = component.alignment {
             self.push_str("#align(");
             self.push_str(match alignment {
@@ -1023,6 +1037,18 @@ impl LoweringContext {
         }
         if component.alignment.is_some() {
             self.push_str("]\n");
+        }
+        if let Some(decoration) = component.text_decoration {
+            let wrappers = match decoration {
+                IrTextDecoration::Underline
+                | IrTextDecoration::Overline
+                | IrTextDecoration::Strikethrough => 1,
+                IrTextDecoration::UnderOverline => 2,
+                IrTextDecoration::All => 3,
+            };
+            for _ in 0..wrappers {
+                self.push_str("]\n");
+            }
         }
         if let Some(case) = component.text_case {
             match case {
@@ -2229,7 +2255,8 @@ mod tests {
         IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
         IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
         IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrTextCase, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
+        IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
+        IrTextWeight, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2290,6 +2317,7 @@ mod tests {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_decoration: None,
                 text_case: None,
                 children,
                 span: empty_span(),
@@ -2349,6 +2377,7 @@ mod tests {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_decoration: None,
                 text_case: None,
                 children: vec![paragraph("A")],
                 span: empty_span(),
@@ -2615,6 +2644,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_decoration: None,
                     text_case: None,
                     children: vec![paragraph("Across")],
                     span: call_span,
@@ -2687,6 +2717,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_decoration: None,
                     text_case: None,
                     children: vec![paragraph("Colored")],
                     span: call_span,
@@ -2743,6 +2774,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_decoration: None,
                     text_case: None,
                     children: vec![paragraph("Bordered")],
                     span: call_span,
@@ -2809,6 +2841,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_decoration: None,
                     text_case: None,
                     children: vec![paragraph("Border widths")],
                     span: call_span,
@@ -2869,6 +2902,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_decoration: None,
                     text_case: None,
                     children: vec![paragraph("Padded")],
                     span: call_span,
@@ -2929,6 +2963,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_decoration: None,
                     text_case: None,
                     children: vec![paragraph("Rounded")],
                     span: call_span,
@@ -2949,7 +2984,7 @@ mod tests {
     }
 
     #[test]
-    fn container_font_styling_uses_scoped_size_weight_style_variant_and_case_with_source_mapping() {
+    fn container_font_styling_uses_typed_scoped_transforms_with_source_mapping() {
         let call_span = SourceSpan::new(SourceId(184), 0, 56);
         let document = IrDocument {
             nodes: vec![IrNode::Component {
@@ -2977,6 +3012,7 @@ mod tests {
                     font_weight: Some(IrTextWeight::Bold),
                     font_style: Some(IrTextStyle::Italic),
                     font_variant: Some(IrTextVariant::SmallCaps),
+                    text_decoration: Some(IrTextDecoration::All),
                     text_case: Some(IrTextCase::Capitalize),
                     children: vec![paragraph("Sized")],
                     span: call_span,
@@ -2988,7 +3024,7 @@ mod tests {
         let (code, source_map) = super::lower_to_typst(&document);
         assert!(
             code.contains(
-                "#block(width: 4cm)[\n#set text(fill: rgb(1, 2, 3, 100%))\n#set text(size: 1.5em)\n#set text(weight: \"bold\")\n#set text(style: \"italic\")\n#smallcaps[\n#{ show regex(\"\\\\b\\\\p{L}\"): upper; [\nSized"
+                "#block(width: 4cm)[\n#set text(fill: rgb(1, 2, 3, 100%))\n#set text(size: 1.5em)\n#set text(weight: \"bold\")\n#set text(style: \"italic\")\n#smallcaps[\n#{ show regex(\"\\\\b\\\\p{L}\"): upper; [\n#underline[\n#overline[\n#strike[\nSized"
             ),
             "{code}"
         );
@@ -3028,6 +3064,40 @@ mod tests {
     }
 
     #[test]
+    fn container_text_decoration_lowering_covers_the_complete_nonidentity_domain() {
+        for (decoration, expected) in [
+            (IrTextDecoration::Underline, "#underline[\nMixed\n]\n"),
+            (IrTextDecoration::Overline, "#overline[\nMixed\n]\n"),
+            (
+                IrTextDecoration::UnderOverline,
+                "#underline[\n#overline[\nMixed\n]\n]\n",
+            ),
+            (IrTextDecoration::Strikethrough, "#strike[\nMixed\n]\n"),
+            (
+                IrTextDecoration::All,
+                "#underline[\n#overline[\n#strike[\nMixed\n]\n]\n]\n",
+            ),
+        ] {
+            let mut node = container_node(vec![paragraph("Mixed")]);
+            let IrNode::Component {
+                component: IrComponent::Container(component),
+            } = &mut node
+            else {
+                unreachable!("container_node must produce a Container")
+            };
+            component.alignment = None;
+            component.text_decoration = Some(decoration);
+            let document = IrDocument {
+                nodes: vec![node],
+                metadata: IrMetadata::default(),
+            };
+
+            let (code, _) = super::lower_to_typst(&document);
+            assert!(code.contains(expected), "{decoration:?}: {code}");
+        }
+    }
+
+    #[test]
     fn container_component_preserves_logical_alignment_names() {
         for (alignment, name) in [
             (IrContainerAlignment::Start, "start"),
@@ -3052,6 +3122,7 @@ mod tests {
                         font_weight: None,
                         font_style: None,
                         font_variant: None,
+                        text_decoration: None,
                         text_case: None,
                         children: vec![paragraph("A")],
                         span: empty_span(),
@@ -3096,6 +3167,7 @@ mod tests {
                     font_weight: None,
                     font_style: None,
                     font_variant: None,
+                    text_decoration: None,
                     text_case: None,
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::result_large_err,
+    reason = "CallOutcome is private control flow; boxing its ordinary Value path would allocate successful evaluation"
+)]
+
 //! M1/M2 evaluator: resolves Quarkdown conditionals, variables, scoped `.let`
 //! calls, user-defined functions, and the first value-flow builtins used by
 //! `::` call chains.
@@ -385,6 +390,7 @@ struct BoundContainerArguments {
     font_weight: Option<ContainerArgument>,
     font_style: Option<ContainerArgument>,
     font_variant: Option<ContainerArgument>,
+    text_decoration: Option<ContainerArgument>,
     text_case: Option<ContainerArgument>,
 }
 
@@ -5789,6 +5795,7 @@ impl Evaluator {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_decoration: None,
                 text_case: None,
                 children,
                 span: *span,
@@ -5924,6 +5931,7 @@ impl Evaluator {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_decoration: None,
                 text_case: None,
                 children,
                 span: *span,
@@ -7862,6 +7870,7 @@ impl Evaluator {
                 font_weight: None,
                 font_style: None,
                 font_variant: None,
+                text_decoration: None,
                 text_case: None,
                 children,
                 span: *span,
@@ -8159,6 +8168,23 @@ impl Evaluator {
             }
             None => None,
         };
+        let text_decoration = match bound.text_decoration.as_ref() {
+            Some(argument) => {
+                match value_conversion::convert_text_decoration_with_origin(&argument.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(container_conversion_error(
+                            "textdecoration",
+                            argument.span,
+                            argument.parameter_span,
+                            error,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                }
+            }
+            None => None,
+        };
         let text_case = match bound.text_case.as_ref() {
             Some(argument) => {
                 match value_conversion::convert_text_case_with_origin(&argument.value) {
@@ -8220,6 +8246,7 @@ impl Evaluator {
                 font_weight,
                 font_style,
                 font_variant,
+                text_decoration,
                 text_case,
                 children,
                 span: *span,
@@ -18251,6 +18278,7 @@ fn bind_container_arguments(
     let font_weight = take(slots.next());
     let font_style = take(slots.next());
     let font_variant = take(slots.next());
+    let text_decoration = take(slots.next());
     let text_case = take(slots.next());
     Ok(BoundContainerArguments {
         width,
@@ -18268,6 +18296,7 @@ fn bind_container_arguments(
         font_weight,
         font_style,
         font_variant,
+        text_decoration,
         text_case,
     })
 }
@@ -19410,6 +19439,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("fontweight").positional(false),
                 ParameterMetadata::optional("fontstyle").positional(false),
                 ParameterMetadata::optional("fontvariant").positional(false),
+                ParameterMetadata::optional("textdecoration").positional(false),
                 ParameterMetadata::optional("textcase").positional(false),
             ],
             BodyPolicy::AllowSeparate,
@@ -21333,7 +21363,6 @@ fn native_binding_message(name: &str, message: String) -> String {
                     | "borderstyle"
                     | "textalignment"
                     | "margin"
-                    | "textdecoration"
             )
         {
             return format!(
