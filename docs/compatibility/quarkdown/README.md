@@ -211,7 +211,7 @@ follow-up owners.
 | Metadata                       | `.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | Canonical Issue #152 classification is eight `PARTIAL` evaluator/IR slices (`.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`). `.localization`/`.localize` remain #151-owned semantics and are implemented separately by #196; renderer, front-matter, and cross-owned layout/content/resource state remain separate | [#152 audit](DOCUMENT_STATE_AUDIT.md), [#151 manifest](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv), and [#196 evidence](STDLIB_BUILTINS_AUDIT.md) |
 | Layout/document configuration | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.captionposition`, `.texmacro`, `.pageformat`, `.pagemargin`, `.footer`, page counters/format/reset, `.lastheading`, automatic page breaks, `.marker`, `.navigation`, `.tableofcontents`, `.slides` | Canonical #153 result: 13 conservative `PARTIAL` bounded slices (`.captionposition`, `.numbering`/`.nonumbering`, bounded size-only `.font`, `.paragraphstyle`, bounded `.pageformat`, bounded `.currentpage`/`.totalpages`, bounded `.formatpagenumber`/`.resetpagenumber`, automatic page-break setters, bounded typed `.slides` configuration state) and 7 `PARSED_ONLY` rows; interactive slide rendering and complete #153 output equivalence remain unclaimed | [#153 audit](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
-| Container layout               | `.container`, optional `width`, `height`, `fullwidth`, named `fullspan`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing plus bounded multi-column breakout | Partial (bounded) |
+| Container layout               | `.container`, optional `width`, `height`, `fullwidth`, named `fullspan`, and optional final MarkdownContent body | Empty/indented/explicit rich or scalar body Container; origin-aware Size/Boolean and shared block-content conversion; deterministic Typst block sizing plus bounded multi-column breakout | Partial (bounded) |
 | Full-column block              | `.fullspan` with a required Markdown block body | Existing typed Container with additive `full_column_span`; strict block-only binding, structured children, and the bounded multi-column breakout | Partial (bounded) |
 | Circle clipping                | `.clip {circle}` with a required Markdown block body | Closed `circle` shape, typed Clip component, origin-aware conversion, structured children, and bounded Typst circle clipping | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -461,8 +461,11 @@ case.
 The direct `.container` consumer is **partial/bounded**, not complete upstream
 Container support. The implemented subset is:
 
-- an empty or optional Markdown block body with structured `Vec<IrNode>`
-  children;
+- an empty, indented, or explicit optional final `body: MarkdownContent?` with
+  structured `Vec<IrNode>` children; explicit literal/variable/evaluated String
+  bodies use the shared block Markdown target, Number/Boolean results become
+  literal paragraphs, None becomes empty content, and existing rich Content is
+  preserved;
 - `width: Size?`, `height: Size?`, `fullwidth: Boolean`, and the named-only
   `fullspan: Boolean`, `background: Color?`, `foreground: Color?`,
   `border: Color?`, one/two/four-value `borderwidth: Sizes?`, closed
@@ -495,8 +498,9 @@ Container support. The implemented subset is:
   content cannot overtake it. The flag is layout-inert in a single-column
   document. Exact Quarkdown in-flow HTML/CSS placement remains unclaimed.
 
-The deferred surface includes `float`, `classname`, border style,
-inline Container insertion, and exact
+The deferred surface includes `float`, `classname`, border style, unevidenced
+Range/collection/dictionary/component body conversions, complete captured
+evaluation-context parity, inline Container insertion, and exact
 HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container.rs`,
 `crates/arkst-core/tests/quarkdown_container_colors_184.rs`,
@@ -512,6 +516,8 @@ HTML/CSS color/border parity. Evidence is in
 `crates/arkst-core/tests/quarkdown_container_font_variant_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_text_decoration_184.rs`,
 `crates/arkst-core/tests/quarkdown_container_text_case_184.rs`,
+`crates/arkst-core/tests/quarkdown_container_body_665.rs`, the independent
+`container-markdown-body-values` conformance case,
 `crates/arkst-core/tests/quarkdown_container_text_alignment_184.rs`, the
 IR/lowering unit tests, and
 `crates/arkst-typst-subprocess/tests/backend_integration.rs`.

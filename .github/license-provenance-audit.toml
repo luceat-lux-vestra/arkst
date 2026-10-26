@@ -183,6 +183,11 @@ status = "REMEDIATED"
 basis = "Originally seeded source-free in #31 and later changed by source-influenced #86; the current range/size witness was provenance-reviewed and is not recorded as an upstream test/example input."
 
 [[fixture]]
+id = "container-markdown-body-values"
+status = "INDEPENDENT"
+basis = "Created for #665 from the public v2.6.4 container signature and independently observed official-binary behavior; the wording, values, and composition are Arkst-authored and do not copy upstream tests or examples."
+
+[[fixture]]
 id = "captionposition-document-state"
 status = "REMEDIATED"
 basis = "Created in source-exposed #146; current multi-call state witness was reviewed as Arkst-authored evidence and no exact upstream fixture/test input is identified in repository provenance."
