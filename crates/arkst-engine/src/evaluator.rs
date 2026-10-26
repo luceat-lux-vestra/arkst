@@ -394,6 +394,7 @@ struct BoundContainerArguments {
     font_variant: Option<ContainerArgument>,
     text_decoration: Option<ContainerArgument>,
     text_case: Option<ContainerArgument>,
+    body: Option<ContainerArgument>,
 }
 
 struct BoundWhitespaceArguments {
@@ -7926,10 +7927,18 @@ impl Evaluator {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
         };
+        let body_candidate = body.map(|body| Candidate::Positional {
+            // Binding needs only the already-validated body slot and its
+            // provenance here. The source body remains lazy until every
+            // presentation argument has converted successfully.
+            value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+            span: call_body_source_span(body, *span),
+        });
         let bound = match bind_container_arguments(
             binding_plan,
             positional,
             named_values,
+            body_candidate.as_ref(),
             span,
             diagnostics,
         ) {
@@ -8267,7 +8276,45 @@ impl Evaluator {
                 ));
                 return CallOutcome::Failed;
             }
-            None => Vec::new(),
+            None => match bound.body.as_ref() {
+                Some(argument) if matches!(&argument.value.value, IrValue::None) => Vec::new(),
+                Some(argument) => {
+                    let converted = match value_conversion::convert_target_with_origin(
+                        &argument.value,
+                        value_conversion::ConversionTarget::BlockContent,
+                        argument.span,
+                    ) {
+                        Ok(converted) => converted,
+                        Err(error) => {
+                            diagnostics.push(container_conversion_error(
+                                "body",
+                                argument.span,
+                                argument.parameter_span,
+                                error,
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    };
+                    match self.resolve_target_value(
+                        converted,
+                        argument.span,
+                        *span,
+                        diagnostics,
+                        context,
+                    ) {
+                        Ok(IrValue::Content(nodes)) => nodes,
+                        Ok(_) => {
+                            diagnostics.push(container_argument_error_at(
+                                "`.container` body must convert to Markdown content".to_string(),
+                                argument.span,
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                        Err(outcome) => return outcome,
+                    }
+                }
+                None => Vec::new(),
+            },
         };
 
         CallOutcome::Value(IrValue::Component(IrComponent::Container(
@@ -18265,6 +18312,7 @@ fn bind_container_arguments(
     plan: &BindingPlan,
     positional: Vec<ContainerArgument>,
     named: Vec<InvocationNamedArg>,
+    body: Option<&Candidate<InvocationValue>>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<BoundContainerArguments, CallOutcome> {
@@ -18275,7 +18323,7 @@ fn bind_container_arguments(
             .collect(),
         named,
     );
-    let bound = plan.bind(&candidates, None, *span).map_err(|error| {
+    let bound = plan.bind(&candidates, body, *span).map_err(|error| {
         let message = if let Some(name) = error.message.strip_prefix("unknown named argument ") {
             format!("Unknown named argument {name}")
         } else if error.message == "received too many positional arguments" {
@@ -18325,6 +18373,7 @@ fn bind_container_arguments(
     let font_variant = take(slots.next());
     let text_decoration = take(slots.next());
     let text_case = take(slots.next());
+    let body = take(slots.next());
     Ok(BoundContainerArguments {
         width,
         height,
@@ -18345,6 +18394,7 @@ fn bind_container_arguments(
         font_variant,
         text_decoration,
         text_case,
+        body,
     })
 }
 
@@ -19502,8 +19552,9 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("fontvariant").positional(false),
                 ParameterMetadata::optional("textdecoration").positional(false),
                 ParameterMetadata::optional("textcase").positional(false),
+                ParameterMetadata::optional("body").positional(false),
             ],
-            BodyPolicy::AllowSeparate,
+            BodyPolicy::BindFinal,
         ),
         "row" | "column" => (
             vec![

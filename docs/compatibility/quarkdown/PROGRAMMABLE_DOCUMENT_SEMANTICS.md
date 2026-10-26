@@ -269,7 +269,7 @@ backend-owned and does not add Typst constructs to the core IR.
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
 | `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
 | `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
-| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable one/two/four-value `borderwidth: Sizes`, named-only nullable closed content `alignment`, named-only nullable one/two/four-value `padding: Sizes` and `radius: Sizes`, named-only nullable closed relative `fontsize`, `fontweight`, `fontstyle`, `fontvariant`, and `textcase`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, lazy validation, additive full-column-span, explicit typed colors and per-side border widths, logical content alignment, per-side padding, per-corner radius, and scoped relative font size, bold weight, italic style, small-caps variant, and closed text-case transforms are supported |
+| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable one/two/four-value `borderwidth: Sizes`, named-only nullable closed content `alignment`, named-only nullable one/two/four-value `padding: Sizes` and `radius: Sizes`, named-only nullable closed relative `fontsize`, `fontweight`, `fontstyle`, `fontvariant`, and `textcase`, and optional final `body: MarkdownContent?` | bounded Container semantic node; indented or explicit rich/value body conversion, structured children, lazy indented-body validation, additive full-column-span, explicit typed colors and per-side border widths, logical content alignment, per-side padding, per-corner radius, and scoped relative font size, bold weight, italic style, small-caps variant, and closed text-case transforms are supported |
 | `fullspan` | no non-body arguments and one required Markdown block body | bounded Container semantic node with `full_column_span: true`; validation precedes lazy body evaluation |
 | `landscape` | no non-body arguments and one required Markdown block body | typed Landscape semantic node; 90° counter-clockwise content transformation |
 
@@ -328,8 +328,12 @@ Implemented in this slice:
 The direct `.container` consumer is implemented only for the bounded
 layout slice:
 
-- an empty or optional Markdown block body constructs a Container, unaligned
-  when `alignment` is omitted or `None`;
+- an empty, indented, or explicit optional final `body: MarkdownContent?`
+  constructs a Container, unaligned when `alignment` is omitted or `None`;
+- explicit String/Identifier bodies select block Markdown parsing, evaluated
+  Number/Boolean bodies become literal text paragraphs, None becomes empty
+  content, and existing rich Content remains structured; Range, collection,
+  dictionary, and component widening remains unclaimed;
 - positional and named `width`, `height`, and `fullwidth` arguments plus the
   named-only `fullspan` Boolean and nullable
   `background`/`foreground`/`border` colors, one/two/four-value `borderwidth`,
@@ -342,11 +346,11 @@ layout slice:
   `IrDocumentAlignment` conversion; border width, margin, padding, and radius are
   expanded to explicit sides/corners before entering IR; duplicate, unknown, and deferred-known
   parameters fail with a source-backed diagnostic;
-- argument binding, conversion, and validation complete before the body is
-  evaluated, so invalid sizing, color, border width, alignment, margin, padding,
-  radius, font size, font weight, font style, font variant, text decoration,
-  text case, or text alignment never executes a failing
-  body or publishes a partial component; and
+- structural binding always precedes argument evaluation, and presentation
+  conversion/validation completes before an indented body is evaluated, so an
+  invalid presentation option never executes a failing lazy block or publishes
+  a partial component; an explicit `body:` value follows ordinary eager
+  argument evaluation before target conversion; and
 - Typst lowering emits an outer `#pad` wrapper for explicit margin, then `#block`
   sizing, optional fill, and optional stroke in
   deterministic `width`, `height`, `fill`, `stroke`, `radius`, `inset` order, applies optional
@@ -379,11 +383,12 @@ Standalone `.fullspan` reuses that exact semantic and lowering boundary:
 Deferred from these slices:
 
 - direct `.container` `float`, `classname`, and border-style behavior;
-- general String → Markdown body conversion and inline Container insertion.
+- unevidenced structured-value conversions, captured-context parity for every
+  deferred String producer, and inline Container insertion.
 
 Deferred from this slice:
 
-- general DynamicValue String → Markdown body conversion;
+- complete cross-consumer/captured-context MarkdownContent conversion;
 - inline Stacked insertion (Stacked is block-only);
 - `.box`, `.figure`, and other layout families; and
 - pixel-identical reproduction of upstream HTML/CSS rendering.
@@ -503,7 +508,7 @@ implement or imply generalized inline components, `.text`, `.codespan`, or
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
-| `.container` | Optional width/height, `fullwidth`, named `fullspan`, and optional Markdown body | Typed Container sizing plus additive `full_column_span`; multi-column Typst output uses a parent-scoped full-width top-float and immediate flush, while single-column output stays in ordinary flow | Keep page-column count document-global and the span request component-local; no backend escape hatch | Partial bounded layout slice | Exact in-flow HTML/CSS placement, float/class/style options, and generalized body conversion |
+| `.container` | Optional width/height, `fullwidth`, named `fullspan`, and optional final MarkdownContent body | Typed Container sizing plus additive `full_column_span`; indented or explicit String/scalar/None/rich-content bodies use the shared target with nullable-None handling; multi-column Typst output uses a parent-scoped full-width top-float and immediate flush, while single-column output stays in ordinary flow | Keep page-column count document-global and the span request component-local; no backend escape hatch | Partial bounded layout slice | Exact in-flow HTML/CSS placement, float/class/style options, unevidenced structured-value conversion, and complete captured-context parity |
 | `.fullspan` | No non-body arguments and one required Markdown block body | Existing typed Container with `full_column_span: true`; block/lambda/inline validation precedes lazy body evaluation; callable and nested composition preserve provenance | Reuse the Container IR/lowering contract without new document state or backend syntax in core | Partial bounded block-body slice | Exact in-flow HTML/CSS placement and generalized String → Markdown conversion |
 | `.clip` | Required closed `circle` shape plus one Markdown block body | Origin-aware enum conversion and pre-body validation produce typed Clip children with preserved spans and composition; Typst emits a clipped 50%-radius block | Keep clipping component-local and backend-neutral; no document state or raw backend escape | Partial bounded circle slice | Additional shapes, exact CSS/responsive geometry, figure-caption special handling, generalized body conversion, and inline insertion |
 | `.fragment` | Slides-only optional closed behavior (`show` default, `hide`, `semihide`, `showhide`) plus one Markdown block body | Typed Fragment content preserves behavior, structured children, ordering, and provenance; Typst groups existing slide boundaries and emits the initial state plus every transition as static PDF pages with layout-preserving hidden states and 50%-transparent current text paint for semihide | Keep fragment state component-local and backend-neutral; consume existing document type and slide boundaries without adding presentation-global state or backend escape syntax | Partial bounded static-PDF slice | HTML/Reveal interaction, exact animation/CSS timing, renderer-complete opacity for non-text visual content, generalized body conversion, and inline insertion |

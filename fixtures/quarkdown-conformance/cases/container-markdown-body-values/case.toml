@@ -1,0 +1,5 @@
+id = "container-markdown-body-values"
+feature = "container-markdown-content-body"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.4-container-markdown-body"
+description = "Container final-body binding and shared rich/scalar block-content conversion"

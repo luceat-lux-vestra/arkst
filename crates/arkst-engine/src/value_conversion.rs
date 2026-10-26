@@ -923,14 +923,32 @@ fn convert_content_target(
         IrValue::InlineBody(body) if !block_target => {
             Ok(TargetValue::Value(IrValue::Content(body.content.clone())))
         }
-        IrValue::String(value) | IrValue::Identifier(value)
-            if argument.origin == ValueOrigin::Dynamic =>
-        {
+        IrValue::String(value) if block_target || argument.origin == ValueOrigin::Dynamic => {
             Ok(TargetValue::RawMarkdown {
                 target: raw_target,
                 text: value.clone(),
             })
         }
+        IrValue::Identifier(value) if argument.origin == ValueOrigin::Dynamic => {
+            Ok(TargetValue::RawMarkdown {
+                target: raw_target,
+                text: value.clone(),
+            })
+        }
+        // The block Markdown target renders scalar results as literal text;
+        // it does not feed their textual representation back through the
+        // Markdown parser. This keeps already-evaluated values typed while
+        // matching the target's observable paragraph materialization.
+        IrValue::Number(value) if block_target => {
+            Ok(literal_content_value(number_to_text(*value), span))
+        }
+        IrValue::Boolean(value) if block_target => {
+            Ok(literal_content_value(value.to_string(), span))
+        }
+        // A non-null MarkdownContent target observes None as the literal
+        // value name. Nullable consumers must intercept None before selecting
+        // this target; `.container body:{.none}` is one such boundary.
+        IrValue::None if block_target => Ok(literal_content_value("None".to_string(), span)),
         IrValue::String(value) if !block_target => Ok(TargetValue::Value(IrValue::Content(vec![
             IrNode::Paragraph {
                 content: vec![IrInline::Text {
@@ -948,6 +966,16 @@ fn convert_content_target(
             },
         }),
     }
+}
+
+fn literal_content_value(text: String, span: SourceSpan) -> TargetValue {
+    TargetValue::Value(IrValue::Content(vec![IrNode::Paragraph {
+        content: vec![IrInline::Text {
+            content: text,
+            span,
+        }],
+        span,
+    }]))
 }
 
 fn convert_structured_target(
@@ -3070,16 +3098,35 @@ mod tests {
                 text: "*text*".into(),
             })
         );
-        assert!(matches!(
+        assert_eq!(
             convert_target_with_origin(
-                &InvocationValue::static_value(IrValue::String("text".into())),
+                &InvocationValue::static_value(IrValue::String("**text**".into())),
                 ConversionTarget::BlockContent,
                 span(),
             ),
-            Err(ConversionError::UnsupportedValue {
-                target: ConversionTarget::BlockContent
+            Ok(TargetValue::RawMarkdown {
+                target: RawMarkdownTarget::Block,
+                text: "**text**".into(),
             })
-        ));
+        );
+        for (value, expected) in [
+            (IrValue::Number(2.0), "2"),
+            (IrValue::Boolean(true), "true"),
+        ] {
+            let converted = convert_target_with_origin(
+                &InvocationValue::static_value(value),
+                ConversionTarget::BlockContent,
+                span(),
+            )
+            .expect("scalar result adapts to literal block content");
+            assert!(matches!(
+                converted,
+                TargetValue::Value(IrValue::Content(nodes))
+                    if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }]
+                        if matches!(content.as_slice(), [IrInline::Text { content, .. }]
+                            if content == expected))
+            ));
+        }
         for value in [IrValue::Number(2.0), IrValue::Boolean(true)] {
             assert!(matches!(
                 convert_target_with_origin(
@@ -3173,10 +3220,23 @@ mod tests {
             })
         ));
 
+        let none = convert_target_with_origin(
+            &InvocationValue::static_value(IrValue::None),
+            ConversionTarget::BlockContent,
+            span(),
+        )
+        .expect("None adapts to literal non-null block content");
+        assert!(matches!(
+            none,
+            TargetValue::Value(IrValue::Content(nodes))
+                if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }]
+                    if matches!(content.as_slice(), [IrInline::Text { content, .. }]
+                        if content == "None"))
+        ));
+
         for target in [
             ConversionTarget::Number,
             ConversionTarget::InlineContent,
-            ConversionTarget::BlockContent,
             ConversionTarget::Node,
             ConversionTarget::Iterable,
             ConversionTarget::Dictionary,

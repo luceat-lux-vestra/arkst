@@ -125,7 +125,10 @@ dependency:
   normal/smallcaps font variant, closed six-value text decoration, and closed
   none/uppercase/lowercase/capitalize text case plus closed
   start/center/end/justify text alignment, plus named nullable one/two/four-value
-  outer margin exist.
+  outer margin exist. Its optional final MarkdownContent body now accepts an
+  indented block or explicit rich/value argument through the shared block
+  target: String is parsed as block Markdown, Number/Boolean materialize as
+  literal paragraphs, None is empty, and existing Content stays structured.
   Multi-column
   output uses a parent-scoped full-width Typst top-float and immediate flush;
   color, border, spacing, and corner output uses block fill, container-scoped
@@ -135,7 +138,8 @@ dependency:
   italic-style rules plus typed small-caps, text-decoration, text-case, and
   scoped text-alignment content boundaries.
   Exact upstream in-flow and HTML/CSS placement remain unclaimed. Float,
-  class, border style, and complete body conversion remain open.
+  class, border style, unevidenced structured-value conversion, and complete
+  captured-context parity remain open.
 - .fullspan is PARTIAL: a required Markdown block body produces the existing
   typed Container semantic with `full_column_span: true`, strict pre-evaluation
   validation, preserved provenance/composition, and the same bounded
@@ -185,7 +189,8 @@ producer and shared-index boundaries:
   `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, and
   `.speakernote`, plus the bounded `.keybinding` and `.loremipsum` content
   producer review. The remaining component-local `.container` subcontracts
-  (`float`, `classname`, `style`, and complete body conversion) are linked
+  (`float`, `classname`, `style`, and residual structured-value/captured-context
+  body conversion) are linked
   there without transferring document-wide state ownership. The standalone
   `.fullspan` producer has bounded semantic and Typst/PDF evidence under that
   same issue; exact upstream in-flow HTML/CSS placement remains unclaimed. The

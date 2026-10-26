@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Container Markdown-content body conversion (#665):** `.container` now binds
+  the public optional final `body: MarkdownContent?` parameter through the
+  shared block-content target. Explicit String values parse as rich Markdown,
+  Number and Boolean results materialize as literal paragraphs, existing rich
+  content remains structured, and nullable `None` produces an empty Container.
+  Unsupported structured widening and unevidenced captured-context cases remain
+  fail-closed.
+
 - **Quarkdown v2.6.0 verified-baseline promotion (#311):** After the bounded
   v2.6 release-delta checklist, clean-room black-box evidence, full repository
   conformance/regression CI, Linux/macOS/Windows pinned-Typst backend parity,
