@@ -213,7 +213,7 @@ follow-up owners.
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container layout               | `.container`, optional `width`, `height`, `fullwidth`, named `fullspan`, and optional final MarkdownContent body | Empty/indented/explicit rich or scalar body Container; origin-aware Size/Boolean and shared block-content conversion; deterministic Typst block sizing plus bounded multi-column breakout | Partial (bounded) |
 | Full-column block              | `.fullspan` with a required final MarkdownContent body | Existing typed Container with additive `full_column_span`; positional/named/indented binding, shared rich/scalar block conversion, structured children, and the bounded multi-column breakout | Partial (bounded) |
-| Circle clipping                | `.clip {circle}` with a required Markdown block body | Closed `circle` shape, typed Clip component, origin-aware conversion, structured children, and bounded Typst circle clipping | Partial (bounded) |
+| Circle clipping                | `.clip {circle}` with a required final MarkdownContent body | Closed `circle` shape, positional/named/indented body binding, shared rich/scalar block conversion, structured children, and bounded Typst circle clipping | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
 | Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; direct chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Partial: direct-chain semantic slice is evidenced; #164 implements the bounded whitespace/continuation placement in the parser/frontend, while broader chain semantics remain separate |
 | Line continuation (`\`)        | `\` at end of line               | Parsed                   | Parsed-only bounded parser/frontend support: separator probes before the first/subsequent arguments and `::` commit only on an accepted candidate, while a separate root suffix consumes exactly one trailing continuation; LF is pinned evidence, actual CRLF is separate local source-preservation evidence |
@@ -548,12 +548,16 @@ Quarkdown in-flow HTML/CSS placement remain unclaimed.
 
 The `.clip` producer is implemented as a strict block-only consumer with one
 required `clip` argument, accepted positionally or by name, and one required
-Markdown block body. The shape domain is closed to the documented `circle`
-value. Conversion is origin-aware: dynamic textual values may select the
-closed enum while static String values are not silently coerced.
+final `body: MarkdownContent`, accepted positionally, by name, or from an
+indented block. An explicit String selects block Markdown parsing; Number,
+Boolean, and None materialize as literal paragraphs for this non-null target;
+existing Content remains structured. The shape domain is closed to the
+documented `circle` value. Shape conversion is origin-aware: dynamic textual
+values may select the closed enum while static String values are not silently
+coerced.
 
 Argument binding, closed-enum conversion, and invocation-shape validation
-complete before the lazy body is evaluated. Successful calls preserve
+complete before a lazy indented body is evaluated. Successful calls preserve
 structured children, source-defined shadowing, callable/nested composition,
 and call/child provenance in a backend-neutral `IrComponent::Clip`. Typst
 lowering emits `#block(clip: true, radius: 50%)[...]`, with source-map and real
@@ -561,9 +565,11 @@ Typst 0.15.1 PDF evidence.
 
 This bounded contract does not claim exact Quarkdown HTML/CSS `clip-path`
 geometry, responsive parity, figure-caption special handling, additional
-shapes, generalized String-to-Markdown conversion, or inline component
-insertion. Evidence is in `crates/arkst-core/tests/quarkdown_clip.rs`, the Clip
-IR/wire and Typst lowering tests, and
+shapes, unevidenced structured-value widening, complete captured-context
+parity, or inline component insertion. Evidence is in
+`crates/arkst-core/tests/quarkdown_clip.rs`, the independent
+`clip-markdown-body-values` conformance case, the Clip IR/wire and Typst
+lowering tests, and
 `crates/arkst-typst-subprocess/tests/backend_integration.rs`.
 
 ### Bounded row/column/grid (Stacked) layout contract

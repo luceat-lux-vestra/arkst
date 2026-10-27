@@ -421,25 +421,30 @@ option and standalone `.fullspan` producer use the same bounded parent-scoped
 breakout and do not claim exact in-flow placement. None of these semantics is
 inferred from Landscape.
 
-### Clip component consumer slice (2026-10-21)
+### Clip component consumer slice (2026-10-27)
 
 `.clip` is implemented for the documented `circle` shape as a bounded typed
 component consumer:
 
 - the native block call requires one positional or named `clip` argument and
-  one Markdown block body;
+  one final `body: MarkdownContent`, accepted positionally, by name, or from an
+  indented block;
 - the origin-aware closed-enum adapter accepts dynamic textual `circle` while
   retaining typed identity and rejecting static String coercion;
-- argument shape and value conversion complete before lazy body evaluation;
+- explicit String values select block Markdown parsing, Number/Boolean/None
+  become literal paragraphs, and existing Content remains structured through
+  the shared non-null block target;
+- argument shape and value conversion complete before lazy indented-body
+  evaluation;
 - `IrComponent::Clip` preserves the typed shape, structured children,
   call/child provenance, source-defined shadowing, and callable/nested
   composition; and
 - pure Typst lowering emits `#block(clip: true, radius: 50%)[...]`, with
   source-map tests and real Typst 0.15.1 PDF evidence.
 
-Additional shapes, inline insertion, generalized String-to-Markdown body
-conversion, exact CSS `clip-path` geometry and responsive parity, and
-figure-caption special handling remain unclaimed.
+Additional shapes, inline insertion, unevidenced structured-value widening,
+complete captured-context parity, exact CSS `clip-path` geometry and responsive
+parity, and figure-caption special handling remain unclaimed.
 
 ### Whitespace inline consumer slice (2026-08-21)
 
@@ -513,7 +518,7 @@ implement or imply generalized inline components, `.text`, `.codespan`, or
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `.container` | Optional width/height, `fullwidth`, named `fullspan`, and optional final MarkdownContent body | Typed Container sizing plus additive `full_column_span`; indented or explicit String/scalar/None/rich-content bodies use the shared target with nullable-None handling; multi-column Typst output uses a parent-scoped full-width top-float and immediate flush, while single-column output stays in ordinary flow | Keep page-column count document-global and the span request component-local; no backend escape hatch | Partial bounded layout slice | Exact in-flow HTML/CSS placement, float/class/style options, unevidenced structured-value conversion, and complete captured-context parity |
 | `.fullspan` | One required final MarkdownContent body, positionally, by name, or indented | Existing typed Container with `full_column_span: true`; explicit String/scalar/None/rich-content values use the shared non-null block target, while block/lambda/inline validation preserves lazy indented-body evaluation and callable/nested provenance | Reuse the Container IR/lowering contract without new document state or backend syntax in core | Partial bounded MarkdownContent slice | Exact in-flow HTML/CSS placement, unevidenced structured-value widening, and complete captured-context parity |
-| `.clip` | Required closed `circle` shape plus one Markdown block body | Origin-aware enum conversion and pre-body validation produce typed Clip children with preserved spans and composition; Typst emits a clipped 50%-radius block | Keep clipping component-local and backend-neutral; no document state or raw backend escape | Partial bounded circle slice | Additional shapes, exact CSS/responsive geometry, figure-caption special handling, generalized body conversion, and inline insertion |
+| `.clip` | Required closed `circle` shape plus one final MarkdownContent body, positionally, by name, or indented | Origin-aware enum conversion plus shared explicit String/scalar/None/rich-content conversion produce typed Clip children with preserved spans and composition; Typst emits a clipped 50%-radius block | Keep clipping component-local and backend-neutral; no document state or raw backend escape | Partial bounded circle MarkdownContent slice | Additional shapes, exact CSS/responsive geometry, figure-caption special handling, unevidenced structured-value widening, complete captured-context parity, and inline insertion |
 | `.fragment` | Slides-only optional closed behavior (`show` default, `hide`, `semihide`, `showhide`) plus one Markdown block body | Typed Fragment content preserves behavior, structured children, ordering, and provenance; Typst groups existing slide boundaries and emits the initial state plus every transition as static PDF pages with layout-preserving hidden states and 50%-transparent current text paint for semihide | Keep fragment state component-local and backend-neutral; consume existing document type and slide boundaries without adding presentation-global state or backend escape syntax | Partial bounded static-PDF slice | HTML/Reveal interaction, exact animation/CSS timing, renderer-complete opacity for non-text visual content, generalized body conversion, and inline insertion |
 | `.whitespace` | Inline `Whitespace` node with optional `width: Size?` and `height: Size?`; positional order is width then height; no dimensions emit NBSP, while a supplied dimension creates a fixed-size empty rectangle | `IrInline::Whitespace` preserves the inline semantic, source span, surrounding order, typed Size conversion, zero for an omitted axis, and the existing standalone output bridge | Keep Whitespace inline and backend-neutral; reuse `InvocationValue`/`ValueOrigin` and materialize only through existing output boundaries | Implemented for the bounded argument, inline, block-output, provenance, and Typst slice | General inline node/value composition and other inline layout features |
 | `.br` | Argumentless inline `LineBreak` producer; no positional/named arguments or block/lambda body; `toPlainText()` omits the line break | Existing evaluator/native-call path materializes exactly one `IrInline::HardBreak` with the call span, preserves inline order and source-defined `br` precedence, validates before body evaluation, and reuses existing plaintext/Typst paths | Reuse `IrInline::HardBreak`; do not add `IrInline::Br`, `IrValue::LineBreak`, or a generic inline component | Implemented for the bounded v2.5.1 slice | `.text`, `.codespan`, `.float`, and generalized inline component/value conversion |

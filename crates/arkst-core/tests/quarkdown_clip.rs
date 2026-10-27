@@ -35,6 +35,25 @@ fn paragraph_text(node: &IrNode) -> &str {
     content
 }
 
+fn paragraph_inlines(component: &IrClipComponent) -> &[IrInline] {
+    let [IrNode::Paragraph { content, .. }] = component.children.as_slice() else {
+        panic!("expected one paragraph, got {:?}", component.children);
+    };
+    content
+}
+
+fn inline_text(inlines: &[IrInline]) -> String {
+    let mut text = String::new();
+    for inline in inlines {
+        match inline {
+            IrInline::Text { content, .. } => text.push_str(content),
+            IrInline::Strong { content, .. } => text.push_str(&inline_text(content)),
+            other => panic!("unexpected inline {other:?}"),
+        }
+    }
+    text
+}
+
 fn assert_one_failure(result: &arkst_core::CompileResult) {
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
     assert!(result.ir.nodes.is_empty(), "{result:?}");
@@ -67,12 +86,88 @@ fn clip_accepts_named_and_case_insensitive_circle() {
 }
 
 #[test]
+fn clip_accepts_positional_named_and_generated_rich_markdown_values() {
+    for (source, expected) in [
+        (
+            ".clip {circle} {Positional **Markdown** body.}\n",
+            "Positional Markdown body.",
+        ),
+        (
+            ".clip clip:{circle} body:{Named **Markdown** body.}\n",
+            "Named Markdown body.",
+        ),
+        (
+            ".clip {circle} body:{.string {\"Generated **Markdown** body.\"}}\n",
+            "Generated Markdown body.",
+        ),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(clip(&result));
+        assert_eq!(inline_text(inlines), expected);
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn clip_materializes_non_null_scalar_markdown_content_values() {
+    for (source, expected) in [
+        (".clip {circle} body:{.sum {8} {5}}\n", "13"),
+        (".clip {circle} body:{.iseven {4}}\n", "true"),
+        (".clip {circle} body:{.none}\n", "None"),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(paragraph_text(&clip(&result).children[0]), expected);
+    }
+}
+
+#[test]
+fn clip_preserves_variable_and_callable_rich_content_values() {
+    for source in [
+        ".var {clipbody} {Variable **Markdown** body.}\n\n.clip {circle} body:{.clipbody}\n",
+        ".function {makeclipbody}\n    Callable **Markdown** body.\n\n.clip {circle} body:{.makeclipbody}\n",
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(clip(&result));
+        assert!(inline_text(inlines).ends_with("Markdown body."));
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn clip_rejects_unverified_structured_body_conversion_with_provenance() {
+    let source = ".clip {circle} body:{.range {1} {3}}\n";
+    let result = compile_source(source);
+    assert_one_failure(&result);
+    let diagnostic = &result.diagnostics[0];
+    assert!(
+        diagnostic.message.contains("parameter `body`"),
+        "{result:?}"
+    );
+    let primary = diagnostic.primary.expect("body conversion primary span");
+    assert_eq!(&source[primary.start..primary.end], "body:{.range {1} {3}}");
+}
+
+#[test]
 fn clip_rejects_missing_duplicate_unknown_and_extra_bindings() {
     for source in [
         ".clip\n    A\n",
         ".clip {circle} clip:{circle}\n    A\n",
         ".clip shape:{circle}\n    A\n",
-        ".clip {circle} {circle}\n    A\n",
+        ".clip {circle} {Explicit body} extra:{value}\n",
+        ".clip {circle} {Explicit body}\n    Indented body\n",
         ".clip {circle}\n",
     ] {
         let result = compile_source(source);

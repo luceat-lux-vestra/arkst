@@ -4888,6 +4888,7 @@ impl Evaluator {
 
         if is_clip(name) {
             return self.evaluate_clip(
+                ordered_args,
                 positional_args,
                 named_args,
                 body,
@@ -4897,6 +4898,7 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -6029,6 +6031,7 @@ impl Evaluator {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_clip(
         &self,
+        ordered_args: Option<&[IrCallArgument]>,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
@@ -6038,53 +6041,49 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
     ) -> CallOutcome {
-        let positional_values = match self.evaluate_invocation_values(
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
             positional_args,
+            named_args,
             span,
             diagnostics,
             context,
             first_origin,
+            implicit_argument,
         ) {
-            Ok(values) => values,
+            Ok(candidates) => candidates,
             Err(outcome) => return outcome,
         };
-        let named_values =
-            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
-                Ok(values) => values,
-                Err(outcome) => return outcome,
-            };
-        let candidates = invocation_candidates(
-            positional_values
-                .into_iter()
-                .zip(positional_args)
-                .map(|(value, source)| (value, value_source_span(source, span)))
-                .collect(),
-            named_values,
-        );
-        let Some(binding_plan) = binding_plan else {
-            return CallOutcome::Failed;
-        };
-        let bound = match binding_plan.bind(&candidates, None, *span) {
+        let body_candidate = body.map(|body| Candidate::Positional {
+            // Binding needs only the body slot and provenance here. The
+            // indented source body remains lazy through shape conversion.
+            value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+            span: call_body_source_span(body, *span),
+        });
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
             Ok(bound) => bound,
             Err(error) => {
                 diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
                 return CallOutcome::Failed;
             }
         };
-        let parameter_span = bound
-            .parameters
-            .first()
-            .and_then(|parameter| parameter.name_span);
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter();
+        let shape_parameter_span = parameters.first().and_then(|parameter| parameter.name_span);
         let Some(BoundSlot::Explicit {
-            value,
-            span: argument_span,
-        }) = bound.slots.into_iter().next()
+            value: shape_value,
+            span: shape_span,
+        }) = slots.next()
         else {
             return CallOutcome::Failed;
         };
         let shape = match value_conversion::convert_domain_with_origin(
-            &value,
+            &shape_value,
             value_conversion::DomainTarget::ClosedEnum(
                 value_conversion::ClosedEnumTarget::ClipShape,
             ),
@@ -6095,9 +6094,9 @@ impl Evaluator {
                 diagnostics.push(conversion_failure_diagnostic_with_detail(
                     value_conversion::ConversionFailure::new(
                         error,
-                        Some(argument_span),
+                        Some(shape_span),
                         Some("clip"),
-                        parameter_span,
+                        shape_parameter_span,
                         *span,
                     ),
                     Some("`.clip` shape"),
@@ -6110,11 +6109,13 @@ impl Evaluator {
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
             diagnostics.push(clip_argument_error(
-                "`.clip` body is a Markdown block, not a lambda",
+                "`.clip` body is Markdown content, not a lambda",
                 diagnostic_span,
             ));
             return CallOutcome::Failed;
         }
+        let body_parameter_span = parameters.get(1).and_then(|parameter| parameter.name_span);
+        let body_slot = slots.next().unwrap_or(BoundSlot::Omitted);
         let children = match body {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
@@ -6123,15 +6124,61 @@ impl Evaluator {
                 }
             }
             Some(CallBody::Inline(_)) => {
-                diagnostics.push(clip_argument_error("`.clip` is block-only", *span));
-                return CallOutcome::Failed;
-            }
-            None => {
                 diagnostics.push(clip_argument_error(
-                    "`.clip` requires a Markdown block body",
+                    "`.clip` Markdown body must be block content",
                     *span,
                 ));
                 return CallOutcome::Failed;
+            }
+            None => {
+                let BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                } = body_slot
+                else {
+                    diagnostics.push(clip_argument_error(
+                        "`.clip` requires Markdown content",
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let converted = match value_conversion::convert_target_with_origin(
+                    &value,
+                    value_conversion::ConversionTarget::BlockContent,
+                    argument_span,
+                ) {
+                    Ok(converted) => converted,
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some("body"),
+                                body_parameter_span,
+                                *span,
+                            ),
+                            Some("`.clip` body"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                match self.resolve_target_value(
+                    converted,
+                    argument_span,
+                    *span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(IrValue::Content(nodes)) => nodes,
+                    Ok(_) => {
+                        diagnostics.push(clip_argument_error(
+                            "`.clip` body must convert to Markdown content",
+                            argument_span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    Err(outcome) => return outcome,
+                }
             }
         };
 
@@ -19544,8 +19591,11 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             BodyPolicy::BindFinal,
         ),
         "clip" => (
-            vec![ParameterMetadata::required("clip")],
-            BodyPolicy::AllowSeparate,
+            vec![
+                ParameterMetadata::required("clip"),
+                ParameterMetadata::required("body"),
+            ],
+            BodyPolicy::BindFinal,
         ),
         "box" => (
             // Structural binding keeps title and body optional so the established
@@ -22944,7 +22994,7 @@ fn clip_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec![
-            "`.clip` accepts one circle shape argument and one required Markdown block body."
+            "`.clip` accepts one circle shape argument and one required positional, named, or indented MarkdownContent body."
                 .to_string(),
         ],
     }
