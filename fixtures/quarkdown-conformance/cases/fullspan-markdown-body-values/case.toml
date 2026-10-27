@@ -1,0 +1,5 @@
+id = "fullspan-markdown-body-values"
+feature = "fullspan-markdown-content-body"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.4-fullspan-markdown-body"
+description = "FullSpan final-body binding and shared rich/non-null scalar block-content conversion"

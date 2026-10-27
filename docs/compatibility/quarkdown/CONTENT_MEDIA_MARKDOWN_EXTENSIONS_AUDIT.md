@@ -140,11 +140,15 @@ dependency:
   Exact upstream in-flow and HTML/CSS placement remain unclaimed. Float,
   class, border style, unevidenced structured-value conversion, and complete
   captured-context parity remain open.
-- .fullspan is PARTIAL: a required Markdown block body produces the existing
-  typed Container semantic with `full_column_span: true`, strict pre-evaluation
-  validation, preserved provenance/composition, and the same bounded
-  multi-column Typst/PDF output. Exact upstream in-flow HTML/CSS placement and
-  generalized String-to-Markdown conversion remain unclaimed.
+- .fullspan is PARTIAL: its required final MarkdownContent value binds
+  positionally, by name, or from an indented block and consumes the shared
+  non-null block target. String parses as rich Markdown, Number/Boolean/None
+  materialize as literal paragraphs, and existing Content stays structured in
+  the typed Container semantic with `full_column_span: true`. Strict
+  pre-evaluation shape validation, provenance/composition, and bounded
+  multi-column Typst/PDF output remain intact. Exact upstream in-flow HTML/CSS
+  placement, unevidenced structured-value widening, and complete
+  captured-context parity remain unclaimed.
 - .clip is PARTIAL: a positional or named closed `circle` shape plus a required
   Markdown block body produces a typed Clip component. Origin-aware conversion
   and validation precede lazy body evaluation; structured children, spans,
