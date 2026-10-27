@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Full-span Markdown-content body conversion (#667):** `.fullspan` now
+  binds its required final `body: MarkdownContent` parameter positionally, by
+  name, or through an indented block. Explicit String values parse as rich
+  Markdown, Number/Boolean/None results materialize as literal paragraphs, and
+  existing rich content stays structured through the existing typed Container
+  and Typst full-column-span path.
+
 - **Container Markdown-content body conversion (#665):** `.container` now binds
   the public optional final `body: MarkdownContent?` parameter through the
   shared block-content target. Explicit String values parse as rich Markdown,

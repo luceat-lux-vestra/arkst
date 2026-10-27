@@ -36,6 +36,25 @@ fn paragraph_text(node: &IrNode) -> &str {
     content
 }
 
+fn paragraph_inlines(component: &arkst_core::ir::IrContainerComponent) -> &[IrInline] {
+    let [IrNode::Paragraph { content, .. }] = component.children.as_slice() else {
+        panic!("expected one paragraph, got {:?}", component.children);
+    };
+    content
+}
+
+fn inline_text(inlines: &[IrInline]) -> String {
+    let mut text = String::new();
+    for inline in inlines {
+        match inline {
+            IrInline::Text { content, .. } => text.push_str(content),
+            IrInline::Strong { content, .. } => text.push_str(&inline_text(content)),
+            other => panic!("unexpected inline {other:?}"),
+        }
+    }
+    text
+}
+
 fn assert_one_failure(result: &arkst_core::CompileResult) {
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
     assert!(result.ir.nodes.is_empty(), "{result:?}");
@@ -59,16 +78,96 @@ fn fullspan_constructs_existing_container_with_required_structured_body() {
 }
 
 #[test]
-fn fullspan_requires_block_body_and_rejects_non_body_arguments() {
+fn fullspan_accepts_positional_named_and_generated_rich_markdown_values() {
+    for (source, expected) in [
+        (
+            ".fullspan {Positional **Markdown** body.}\n",
+            "Positional Markdown body.",
+        ),
+        (
+            ".fullspan body:{Named **Markdown** body.}\n",
+            "Named Markdown body.",
+        ),
+        (
+            ".fullspan body:{.string {\"Generated **Markdown** body.\"}}\n",
+            "Generated Markdown body.",
+        ),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(full_span(&result));
+        assert_eq!(inline_text(inlines), expected);
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn fullspan_materializes_non_null_scalar_markdown_content_values() {
+    for (source, expected) in [
+        (".fullspan body:{.sum {8} {5}}\n", "13"),
+        (".fullspan body:{.iseven {4}}\n", "true"),
+        (".fullspan body:{.none}\n", "None"),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(paragraph_text(&full_span(&result).children[0]), expected);
+    }
+}
+
+#[test]
+fn fullspan_preserves_variable_and_callable_rich_content_values() {
     for source in [
-        ".fullspan\n",
-        ".fullspan {foo}\n    A\n",
-        ".fullspan foo:{bar}\n    A\n",
-        ".fullspan {foo} bar:{baz}\n    A\n",
+        ".var {widebody} {Variable **Markdown** body.}\n\n.fullspan body:{.widebody}\n",
+        ".function {makewidebody}\n    Callable **Markdown** body.\n\n.fullspan body:{.makewidebody}\n",
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(full_span(&result));
+        assert!(inline_text(inlines).ends_with("Markdown body."));
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn fullspan_rejects_unverified_structured_conversion_with_body_provenance() {
+    let source = ".fullspan body:{.range {1} {3}}\n";
+    let result = compile_source(source);
+    assert_one_failure(&result);
+    let diagnostic = &result.diagnostics[0];
+    assert!(
+        diagnostic.message.contains("parameter `body`"),
+        "{result:?}"
+    );
+    let primary = diagnostic.primary.expect("body conversion primary span");
+    assert_eq!(&source[primary.start..primary.end], "body:{.range {1} {3}}");
+}
+
+#[test]
+fn fullspan_requires_body_and_rejects_collisions_and_unknown_arguments() {
+    for (source, expected) in [
+        (".fullspan\n", "missing required argument `body`"),
+        (".fullspan {foo}\n    A\n", "argument `body` more than once"),
+        (".fullspan foo:{bar}\n    A\n", "named argument `foo`"),
     ] {
         let result = compile_source(source);
         assert_one_failure(&result);
-        assert!(result.diagnostics[0].message.contains("fullspan"));
+        assert!(
+            result.diagnostics[0]
+                .message
+                .to_ascii_lowercase()
+                .contains(expected),
+            "source={source:?} result={result:?}"
+        );
     }
 }
 

@@ -212,7 +212,7 @@ follow-up owners.
 | Layout/document configuration | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.captionposition`, `.texmacro`, `.pageformat`, `.pagemargin`, `.footer`, page counters/format/reset, `.lastheading`, automatic page breaks, `.marker`, `.navigation`, `.tableofcontents`, `.slides` | Canonical #153 result: 13 conservative `PARTIAL` bounded slices (`.captionposition`, `.numbering`/`.nonumbering`, bounded size-only `.font`, `.paragraphstyle`, bounded `.pageformat`, bounded `.currentpage`/`.totalpages`, bounded `.formatpagenumber`/`.resetpagenumber`, automatic page-break setters, bounded typed `.slides` configuration state) and 7 `PARSED_ONLY` rows; interactive slide rendering and complete #153 output equivalence remain unclaimed | [#153 audit](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container layout               | `.container`, optional `width`, `height`, `fullwidth`, named `fullspan`, and optional final MarkdownContent body | Empty/indented/explicit rich or scalar body Container; origin-aware Size/Boolean and shared block-content conversion; deterministic Typst block sizing plus bounded multi-column breakout | Partial (bounded) |
-| Full-column block              | `.fullspan` with a required Markdown block body | Existing typed Container with additive `full_column_span`; strict block-only binding, structured children, and the bounded multi-column breakout | Partial (bounded) |
+| Full-column block              | `.fullspan` with a required final MarkdownContent body | Existing typed Container with additive `full_column_span`; positional/named/indented binding, shared rich/scalar block conversion, structured children, and the bounded multi-column breakout | Partial (bounded) |
 | Circle clipping                | `.clip {circle}` with a required Markdown block body | Closed `circle` shape, typed Clip component, origin-aware conversion, structured children, and bounded Typst circle clipping | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
 | Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; direct chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Partial: direct-chain semantic slice is evidenced; #164 implements the bounded whitespace/continuation placement in the parser/frontend, while broader chain semantics remain separate |
@@ -524,10 +524,12 @@ IR/lowering unit tests, and
 
 ### Bounded standalone `.fullspan` contract
 
-The standalone `.fullspan` producer is implemented as a strict block-only
-consumer with no non-body arguments and one required Markdown block body. It
-validates the invocation shape before lazy body evaluation, preserves
-source-defined shadowing, structured children, callable composition, and
+The standalone `.fullspan` producer binds one required final
+`body: MarkdownContent` positionally, by name, or from an indented block. An
+explicit String selects block Markdown parsing; Number, Boolean, and None
+materialize as literal paragraphs for this non-null target; existing Content
+remains structured. It validates invocation shape before lazy indented-body
+evaluation, preserves source-defined shadowing, callable composition, and
 call/child provenance, then materializes the existing Container component with
 `full_column_span: true`. It does not add an IR variant or document-state
 mutation.
@@ -536,8 +538,11 @@ The existing Container lowerer keeps `.fullspan` layout-inert for a
 single-column document and uses the same parent-scoped full-width top-float and
 immediate `place.flush()` contract when the selector-free page column count is
 greater than one. Exact Quarkdown in-flow HTML/CSS placement remains unclaimed.
-Evidence is in `crates/arkst-core/tests/quarkdown_fullspan.rs` and
-`crates/arkst-typst-subprocess/tests/backend_integration.rs`.
+Evidence is in `crates/arkst-core/tests/quarkdown_fullspan.rs`, the independent
+`fullspan-markdown-body-values` conformance case, and
+`crates/arkst-typst-subprocess/tests/backend_integration.rs`. Unevidenced
+structured-value widening, complete captured-context parity, and exact
+Quarkdown in-flow HTML/CSS placement remain unclaimed.
 
 ### Bounded `.clip {circle}` contract
 

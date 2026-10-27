@@ -4859,6 +4859,7 @@ impl Evaluator {
 
         if is_full_span(name) {
             return self.evaluate_full_span(
+                ordered_args,
                 positional_args,
                 named_args,
                 body,
@@ -4867,6 +4868,8 @@ impl Evaluator {
                 diagnostics,
                 context,
                 native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -5872,24 +5875,21 @@ impl Evaluator {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_full_span(
         &self,
-        _positional_args: &[IrValue],
-        _named_args: &[IrNamedArg],
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
         };
-        if binding_plan
-            .bind::<InvocationValue>(&[], None, *span)
-            .is_err()
-        {
-            return CallOutcome::Failed;
-        }
         if let Some(parameters) = lambda_parameters {
             let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
             diagnostics.push(full_span_argument_error(
@@ -5898,6 +5898,46 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
+        if matches!(body, Some(CallBody::Inline(_))) {
+            diagnostics.push(full_span_argument_error("`.fullspan` is block-only", *span));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = match body {
+            Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
+                // The separate body stays lazy. Binding uses only its slot and
+                // provenance until every invocation-shape check has passed.
+                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                span: call_body_source_span(CallBody::Block(nodes), *span),
+            }),
+            Some(CallBody::Inline(_)) => unreachable!("inline full-span bodies are rejected above"),
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let body_slot = bound.slots.into_iter().next().unwrap_or(BoundSlot::Omitted);
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
@@ -5906,16 +5946,56 @@ impl Evaluator {
                     outcome => return outcome,
                 }
             }
-            Some(CallBody::Inline(_)) => {
-                diagnostics.push(full_span_argument_error("`.fullspan` is block-only", *span));
-                return CallOutcome::Failed;
-            }
+            Some(CallBody::Inline(_)) => unreachable!("inline full-span bodies are rejected above"),
             None => {
-                diagnostics.push(full_span_argument_error(
-                    "`.fullspan` requires a Markdown block body",
+                let BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                } = body_slot
+                else {
+                    diagnostics.push(full_span_argument_error(
+                        "`.fullspan` requires Markdown content",
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let converted = match value_conversion::convert_target_with_origin(
+                    &value,
+                    value_conversion::ConversionTarget::BlockContent,
+                    argument_span,
+                ) {
+                    Ok(converted) => converted,
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some("body"),
+                                parameter_span,
+                                *span,
+                            ),
+                            Some("`.fullspan` body"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                match self.resolve_target_value(
+                    converted,
+                    argument_span,
                     *span,
-                ));
-                return CallOutcome::Failed;
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(IrValue::Content(nodes)) => nodes,
+                    Ok(_) => {
+                        diagnostics.push(full_span_argument_error(
+                            "`.fullspan` body must convert to Markdown content",
+                            argument_span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    Err(outcome) => return outcome,
+                }
             }
         };
 
@@ -19458,7 +19538,11 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             BodyPolicy::AllowSeparate,
         ),
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
-        "center" | "fullspan" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
+        "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
+        "fullspan" => (
+            vec![ParameterMetadata::required("body")],
+            BodyPolicy::BindFinal,
+        ),
         "clip" => (
             vec![ParameterMetadata::required("clip")],
             BodyPolicy::AllowSeparate,
@@ -22810,7 +22894,7 @@ fn full_span_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec![
-            "`.fullspan` accepts exactly one required Markdown block body and no arguments."
+            "`.fullspan` accepts one required positional, named, or indented MarkdownContent body."
                 .to_string(),
         ],
     }
