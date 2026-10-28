@@ -1,0 +1,128 @@
+{
+  "nodes": [
+    {
+      "Component": {
+        "component": {
+          "Landscape": {
+            "children": [
+              {
+                "Paragraph": {
+                  "content": [
+                    {
+                      "Text": {
+                        "content": "A ",
+                        "span": {
+                          "source_id": 1,
+                          "start": 17,
+                          "end": 19
+                        }
+                      }
+                    },
+                    {
+                      "Strong": {
+                        "content": [
+                          {
+                            "Text": {
+                              "content": "shared",
+                              "span": {
+                                "source_id": 1,
+                                "start": 21,
+                                "end": 27
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "source_id": 1,
+                          "start": 19,
+                          "end": 29
+                        }
+                      }
+                    },
+                    {
+                      "Text": {
+                        "content": " value",
+                        "span": {
+                          "source_id": 1,
+                          "start": 29,
+                          "end": 35
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "source_id": 1,
+                    "start": 17,
+                    "end": 35
+                  }
+                }
+              }
+            ],
+            "span": {
+              "source_id": 1,
+              "start": 0,
+              "end": 36
+            }
+          }
+        }
+      }
+    },
+    {
+      "Component": {
+        "component": {
+          "Landscape": {
+            "children": [
+              {
+                "Paragraph": {
+                  "content": [
+                    {
+                      "Text": {
+                        "content": "None",
+                        "span": {
+                          "source_id": 1,
+                          "start": 49,
+                          "end": 61
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "source_id": 1,
+                    "start": 49,
+                    "end": 61
+                  }
+                }
+              }
+            ],
+            "span": {
+              "source_id": 1,
+              "start": 38,
+              "end": 61
+            }
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}

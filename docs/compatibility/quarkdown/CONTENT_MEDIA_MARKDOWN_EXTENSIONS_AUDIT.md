@@ -149,6 +149,14 @@ dependency:
   multi-column Typst/PDF output remain intact. Exact upstream in-flow HTML/CSS
   placement, unevidenced structured-value widening, and complete
   captured-context parity remain unclaimed.
+- .landscape is PARTIAL: its required final MarkdownContent value binds
+  positionally, by name, or from an indented block through the shared non-null
+  block target. String parses as rich Markdown, Number/Boolean/None materialize
+  as literal paragraphs, and existing Content stays structured in the typed
+  Landscape semantic. Validation precedes lazy indented-body evaluation, while
+  existing serde, provenance, deterministic Typst rotation/reflow, and real PDF
+  evidence remain unchanged. Exact HTML/CSS behavior, unevidenced structured
+  widening, and complete captured-context parity remain unclaimed.
 - .clip is PARTIAL: a positional or named closed `circle` shape plus a required
   final MarkdownContent value produces a typed Clip component. The body binds
   positionally, by name, or from an indented block through the shared non-null
