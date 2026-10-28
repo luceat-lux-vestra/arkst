@@ -254,9 +254,11 @@ reuse the existing `Size` adapter. Color/style consumers remain deferred.
 The v2.5.1 `Layout.kt` contract is recorded here for future compatibility work.
 The reviewed block-body consumer slice is implemented. `.row`, `.column`, and
 `.grid` construct one typed Stacked semantic component after argument binding,
-conversion, and lazy body evaluation. `.center`, `.align`, and the bounded
-`.container` sizing slice construct the typed Container component after their
-argument validation and lazy Markdown block-body evaluation. Standalone
+conversion, and lazy body evaluation. `.center` binds one required final
+MarkdownContent value positionally, by name, or from an indented block;
+`.align` and the bounded `.container` sizing slice retain their reviewed body
+contracts. These calls construct the typed Container component after argument
+validation and lazy indented-body evaluation. Standalone
 `.fullspan` constructs the same Container family with its full-column-span flag
 set. `.landscape` constructs a typed Landscape component after binding one
 required final MarkdownContent value positionally, by name, or from an indented
@@ -268,7 +270,7 @@ to the core IR.
 | `row` | row layout, main-axis alignment, cross-axis alignment, optional gap, Markdown body | stacked semantic node |
 | `column` | column layout, main-axis alignment, cross-axis alignment, optional gap, Markdown body | stacked semantic node |
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
-| `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
+| `center` | full-width centered Container with one required final `body: MarkdownContent`, accepted positionally, by name, or as an indented block | bounded Container semantic node; explicit rich/scalar values use the shared non-null block target and validation precedes lazy indented-body evaluation |
 | `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
 | `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable one/two/four-value `borderwidth: Sizes`, named-only nullable closed content `alignment`, named-only nullable one/two/four-value `padding: Sizes` and `radius: Sizes`, named-only nullable closed relative `fontsize`, `fontweight`, `fontstyle`, `fontvariant`, and `textcase`, and optional final `body: MarkdownContent?` | bounded Container semantic node; indented or explicit rich/value body conversion, structured children, lazy indented-body validation, additive full-column-span, explicit typed colors and per-side border widths, logical content alignment, per-side padding, per-corner radius, and scoped relative font size, bold weight, italic style, small-caps variant, and closed text-case transforms are supported |
 | `fullspan` | one required final `body: MarkdownContent`, accepted positionally, by name, or as an indented block | bounded Container semantic node with `full_column_span: true`; explicit rich/scalar values use the shared non-null block target and validation precedes lazy indented-body evaluation |
@@ -306,9 +308,10 @@ Implemented in this slice:
 - `IrComponent::Container` carries optional `width`/`height`, `full_width`,
   optional logical alignment, structured `Vec<IrNode>` children, and the
   producing call span;
-- `.center` accepts exactly one required Markdown block body, evaluates it
-  lazily through the existing callable/body path, and rejects positional,
-  named, inline, and lambda-body forms;
+- `.center` accepts exactly one required final MarkdownContent body through
+  positional, named, or indented binding, validates binding before lazy
+  indented-body evaluation, and rejects missing, duplicate, unknown, inline,
+  lambda-body, and unsupported structured-value forms;
 - typed component values remain intact through callable results, nested
   composition, Stacked interoperation, and failure-atomic materialization; and
 - Typst lowering emits a full-width block with logical `center` alignment and
