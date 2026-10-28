@@ -1,0 +1,5 @@
+id = "center-markdown-body-values"
+feature = "center-markdown-content-body"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.4-center-markdown-body"
+description = "Center final-body binding and shared rich/non-null scalar block-content conversion"

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Center Markdown-content body conversion (#673):** `.center` now binds its
+  required final `body: MarkdownContent` parameter positionally, by name, or
+  through an indented block. Explicit String values parse as rich Markdown,
+  Number/Boolean/None results materialize as literal paragraphs, and existing
+  rich content stays structured through the existing typed centered Container
+  and Typst alignment path.
+
 - **Landscape Markdown-content body conversion (#671):** `.landscape` now
   binds its required final `body: MarkdownContent` parameter positionally, by
   name, or through an indented block. Explicit String values parse as rich

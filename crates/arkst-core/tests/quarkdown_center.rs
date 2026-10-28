@@ -1,5 +1,5 @@
 use arkst_core::evaluator::Evaluator;
-use arkst_core::ir::{IrComponent, IrContainerAlignment, IrNode, IrStackedLayout};
+use arkst_core::ir::{IrComponent, IrContainerAlignment, IrInline, IrNode, IrStackedLayout};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -30,10 +30,34 @@ fn paragraph_text(node: &IrNode) -> &str {
     let IrNode::Paragraph { content, .. } = node else {
         panic!("expected paragraph, got {node:?}");
     };
-    let [arkst_core::ir::IrInline::Text { content, .. }] = content.as_slice() else {
+    let [IrInline::Text { content, .. }] = content.as_slice() else {
         panic!("expected one text fragment, got {content:?}");
     };
     content
+}
+
+fn paragraph_inlines(component: &arkst_core::ir::IrContainerComponent) -> &[IrInline] {
+    let [IrNode::Paragraph { content, .. }] = component.children.as_slice() else {
+        panic!("expected one paragraph, got {:?}", component.children);
+    };
+    content
+}
+
+fn inline_text(inlines: &[IrInline]) -> String {
+    let mut text = String::new();
+    for inline in inlines {
+        match inline {
+            IrInline::Text { content, .. } => text.push_str(content),
+            IrInline::Strong { content, .. } => text.push_str(&inline_text(content)),
+            other => panic!("unexpected inline {other:?}"),
+        }
+    }
+    text
+}
+
+fn assert_one_failure(result: &arkst_core::CompileResult) {
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(result.ir.nodes.is_empty(), "{result:?}");
 }
 
 #[test]
@@ -52,24 +76,104 @@ fn center_constructs_typed_container() {
 }
 
 #[test]
-fn center_requires_block_body() {
-    let result = compile_source(".center\n");
-    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-    assert!(result.ir.nodes.is_empty());
+fn center_accepts_positional_named_and_generated_rich_markdown_values() {
+    for (source, expected) in [
+        (
+            ".center {Positional **Markdown** body.}\n",
+            "Positional Markdown body.",
+        ),
+        (
+            ".center body:{Named **Markdown** body.}\n",
+            "Named Markdown body.",
+        ),
+        (
+            ".center body:{.string {\"Generated **Markdown** body.\"}}\n",
+            "Generated Markdown body.",
+        ),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(center(&result));
+        assert_eq!(inline_text(inlines), expected);
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
 }
 
 #[test]
-fn center_rejects_positional_arguments() {
-    let result = compile_source(".center {foo}\n    A\n");
-    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-    assert!(result.ir.nodes.is_empty());
+fn center_materializes_non_null_scalar_markdown_content_values() {
+    for (source, expected) in [
+        (".center body:{.sum {8} {5}}\n", "13"),
+        (".center body:{.iseven {4}}\n", "true"),
+        (".center body:{.none}\n", "None"),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(paragraph_text(&center(&result).children[0]), expected);
+    }
 }
 
 #[test]
-fn center_rejects_named_arguments() {
-    let result = compile_source(".center foo:{bar}\n    A\n");
-    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-    assert!(result.ir.nodes.is_empty());
+fn center_preserves_variable_and_callable_rich_content_values() {
+    for source in [
+        ".var {centerbody} {Variable **Markdown** body.}\n\n.center body:{.centerbody}\n",
+        ".function {makecenterbody}\n    Callable **Markdown** body.\n\n.center body:{.makecenterbody}\n",
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(center(&result));
+        assert!(inline_text(inlines).ends_with("Markdown body."));
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn center_rejects_unverified_structured_conversion_with_body_provenance() {
+    let source = ".center body:{.range {1} {3}}\n";
+    let result = compile_source(source);
+    assert_one_failure(&result);
+    let diagnostic = &result.diagnostics[0];
+    assert!(
+        diagnostic.message.contains("parameter `body`"),
+        "{result:?}"
+    );
+    let primary = diagnostic.primary.expect("body conversion primary span");
+    assert_eq!(&source[primary.start..primary.end], "body:{.range {1} {3}}");
+}
+
+#[test]
+fn center_requires_body_and_rejects_collisions_and_unknown_arguments() {
+    for (source, expected) in [
+        (".center\n", "missing required argument `body`"),
+        (".center {foo}\n    A\n", "argument `body` more than once"),
+        (".center foo:{bar}\n    A\n", "named argument `foo`"),
+    ] {
+        let result = compile_source(source);
+        assert_one_failure(&result);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .to_ascii_lowercase()
+                .contains(expected),
+            "source={source:?} result={result:?}"
+        );
+    }
+}
+
+#[test]
+fn center_argument_validation_precedes_lazy_body_evaluation() {
+    let result = compile_source(".center {foo}\n    .grid columns:{0}\n        A\n");
+    assert_one_failure(&result);
+    assert!(!result.diagnostics[0].message.contains("Column count"));
 }
 
 #[test]

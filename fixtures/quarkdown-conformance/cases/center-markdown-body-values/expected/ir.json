@@ -1,0 +1,136 @@
+{
+  "nodes": [
+    {
+      "Component": {
+        "component": {
+          "Container": {
+            "width": null,
+            "height": null,
+            "full_width": true,
+            "alignment": "Center",
+            "children": [
+              {
+                "Paragraph": {
+                  "content": [
+                    {
+                      "Text": {
+                        "content": "A ",
+                        "span": {
+                          "source_id": 1,
+                          "start": 14,
+                          "end": 16
+                        }
+                      }
+                    },
+                    {
+                      "Strong": {
+                        "content": [
+                          {
+                            "Text": {
+                              "content": "shared",
+                              "span": {
+                                "source_id": 1,
+                                "start": 18,
+                                "end": 24
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "source_id": 1,
+                          "start": 16,
+                          "end": 26
+                        }
+                      }
+                    },
+                    {
+                      "Text": {
+                        "content": " value",
+                        "span": {
+                          "source_id": 1,
+                          "start": 26,
+                          "end": 32
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "source_id": 1,
+                    "start": 14,
+                    "end": 32
+                  }
+                }
+              }
+            ],
+            "span": {
+              "source_id": 1,
+              "start": 0,
+              "end": 33
+            }
+          }
+        }
+      }
+    },
+    {
+      "Component": {
+        "component": {
+          "Container": {
+            "width": null,
+            "height": null,
+            "full_width": true,
+            "alignment": "Center",
+            "children": [
+              {
+                "Paragraph": {
+                  "content": [
+                    {
+                      "Text": {
+                        "content": "None",
+                        "span": {
+                          "source_id": 1,
+                          "start": 43,
+                          "end": 55
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "source_id": 1,
+                    "start": 43,
+                    "end": 55
+                  }
+                }
+              }
+            ],
+            "span": {
+              "source_id": 1,
+              "start": 35,
+              "end": 55
+            }
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}

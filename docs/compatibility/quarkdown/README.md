@@ -213,6 +213,7 @@ follow-up owners.
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container layout               | `.container`, optional `width`, `height`, `fullwidth`, named `fullspan`, and optional final MarkdownContent body | Empty/indented/explicit rich or scalar body Container; origin-aware Size/Boolean and shared block-content conversion; deterministic Typst block sizing plus bounded multi-column breakout | Partial (bounded) |
 | Full-column block              | `.fullspan` with a required final MarkdownContent body | Existing typed Container with additive `full_column_span`; positional/named/indented binding, shared rich/scalar block conversion, structured children, and the bounded multi-column breakout | Partial (bounded) |
+| Centered block                 | `.center` with a required final MarkdownContent body | Existing typed full-width centered Container; positional/named/indented binding, shared rich/scalar block conversion, structured children, and deterministic Typst alignment | Partial (bounded) |
 | Landscape block                | `.landscape` with a required final MarkdownContent body | Existing typed Landscape component; positional/named/indented binding, shared rich/scalar block conversion, structured children, and deterministic Typst rotation/reflow | Partial (bounded) |
 | Circle clipping                | `.clip {circle}` with a required final MarkdownContent body | Closed `circle` shape, positional/named/indented body binding, shared rich/scalar block conversion, structured children, and bounded Typst circle clipping | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -544,6 +545,20 @@ Evidence is in `crates/arkst-core/tests/quarkdown_fullspan.rs`, the independent
 `crates/arkst-typst-subprocess/tests/backend_integration.rs`. Unevidenced
 structured-value widening, complete captured-context parity, and exact
 Quarkdown in-flow HTML/CSS placement remain unclaimed.
+
+### Bounded `.center` MarkdownContent contract
+
+The `.center` producer binds one required final `body: MarkdownContent`
+positionally, by name, or from an indented block. Explicit String values select
+block Markdown parsing; Number, Boolean, and None materialize as literal
+paragraphs; existing Content remains structured. Binding validation precedes
+lazy indented-body evaluation, and unsupported structured values fail closed
+with source provenance. The existing centered Container IR, serialization,
+source maps, and Typst alignment lowering remain unchanged. Evidence is in
+`crates/arkst-core/tests/quarkdown_center.rs`, the independent
+`center-markdown-body-values` conformance case, and existing Typst/PDF
+integration tests. Exact upstream HTML/CSS behavior, unevidenced structured
+conversion, and complete captured-context parity remain unclaimed.
 
 ### Bounded `.landscape` MarkdownContent contract
 

@@ -10,7 +10,7 @@ authored. The machine-readable status of every case is tracked in
 `.github/license-provenance-audit.toml`; only cases marked `INDEPENDENT` or
 `REMEDIATED` are cleared for release provenance.
 
-The corpus is intentionally bounded. Its 24 core cases provide independent
+The corpus is intentionally bounded. Its 25 core cases provide independent
 parser, evaluator, document-state, value, and IR evidence for the slices listed
 in the case metadata; many intentionally retain their original v2.5.1
 specification-source identity as historical provenance for unchanged behavior.
