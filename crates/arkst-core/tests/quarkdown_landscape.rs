@@ -38,6 +38,25 @@ fn paragraph_text(node: &IrNode) -> &str {
     content
 }
 
+fn paragraph_inlines(component: &IrLandscapeComponent) -> &[IrInline] {
+    let [IrNode::Paragraph { content, .. }] = component.children.as_slice() else {
+        panic!("expected one paragraph, got {:?}", component.children);
+    };
+    content
+}
+
+fn inline_text(inlines: &[IrInline]) -> String {
+    let mut text = String::new();
+    for inline in inlines {
+        match inline {
+            IrInline::Text { content, .. } => text.push_str(content),
+            IrInline::Strong { content, .. } => text.push_str(&inline_text(content)),
+            other => panic!("unexpected inline {other:?}"),
+        }
+    }
+    text
+}
+
 fn assert_one_failure(result: &arkst_core::CompileResult) {
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
     assert!(result.ir.nodes.is_empty(), "{result:?}");
@@ -65,16 +84,99 @@ fn landscape_constructs_typed_component_and_preserves_structured_children() {
 }
 
 #[test]
-fn landscape_requires_body_and_rejects_all_non_body_arguments() {
+fn landscape_accepts_positional_named_and_generated_rich_markdown_values() {
+    for (source, expected) in [
+        (
+            ".landscape {Positional **Markdown** body.}\n",
+            "Positional Markdown body.",
+        ),
+        (
+            ".landscape body:{Named **Markdown** body.}\n",
+            "Named Markdown body.",
+        ),
+        (
+            ".landscape body:{.string {\"Generated **Markdown** body.\"}}\n",
+            "Generated Markdown body.",
+        ),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(landscape(&result));
+        assert_eq!(inline_text(inlines), expected);
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn landscape_materializes_non_null_scalar_markdown_content_values() {
+    for (source, expected) in [
+        (".landscape body:{.sum {8} {5}}\n", "13"),
+        (".landscape body:{.iseven {4}}\n", "true"),
+        (".landscape body:{.none}\n", "None"),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(paragraph_text(&landscape(&result).children[0]), expected);
+    }
+}
+
+#[test]
+fn landscape_preserves_variable_and_callable_rich_content_values() {
     for source in [
-        ".landscape\n",
-        ".landscape {foo}\n    A\n",
-        ".landscape foo:{bar}\n    A\n",
-        ".landscape {foo} bar:{baz}\n    A\n",
+        ".var {widebody} {Variable **Markdown** body.}\n\n.landscape body:{.widebody}\n",
+        ".function {makewidebody}\n    Callable **Markdown** body.\n\n.landscape body:{.makewidebody}\n",
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(landscape(&result));
+        assert!(inline_text(inlines).ends_with("Markdown body."));
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn landscape_rejects_unverified_structured_conversion_with_body_provenance() {
+    let source = ".landscape body:{.range {1} {3}}\n";
+    let result = compile_source(source);
+    assert_one_failure(&result);
+    let diagnostic = &result.diagnostics[0];
+    assert!(
+        diagnostic.message.contains("parameter `body`"),
+        "{result:?}"
+    );
+    let primary = diagnostic.primary.expect("body conversion primary span");
+    assert_eq!(&source[primary.start..primary.end], "body:{.range {1} {3}}");
+}
+
+#[test]
+fn landscape_requires_body_and_rejects_collisions_and_unknown_arguments() {
+    for (source, expected) in [
+        (".landscape\n", "missing required argument `body`"),
+        (
+            ".landscape {foo}\n    A\n",
+            "argument `body` more than once",
+        ),
+        (".landscape foo:{bar}\n    A\n", "named argument `foo`"),
     ] {
         let result = compile_source(source);
         assert_one_failure(&result);
-        assert!(result.diagnostics[0].message.contains("landscape"));
+        assert!(
+            result.diagnostics[0]
+                .message
+                .to_ascii_lowercase()
+                .contains(expected),
+            "source={source:?} result={result:?}"
+        );
     }
 }
 

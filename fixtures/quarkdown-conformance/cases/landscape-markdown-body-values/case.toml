@@ -1,0 +1,5 @@
+id = "landscape-markdown-body-values"
+feature = "landscape-markdown-content-body"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.4-landscape-markdown-body"
+description = "Landscape final-body binding and shared rich/non-null scalar block-content conversion"

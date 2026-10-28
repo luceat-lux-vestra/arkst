@@ -258,9 +258,10 @@ conversion, and lazy body evaluation. `.center`, `.align`, and the bounded
 `.container` sizing slice construct the typed Container component after their
 argument validation and lazy Markdown block-body evaluation. Standalone
 `.fullspan` constructs the same Container family with its full-column-span flag
-set. `.landscape` constructs a typed Landscape component after validating its
-no-argument, required Markdown block-body contract. Typst lowering remains
-backend-owned and does not add Typst constructs to the core IR.
+set. `.landscape` constructs a typed Landscape component after binding one
+required final MarkdownContent value positionally, by name, or from an indented
+block. Typst lowering remains backend-owned and does not add Typst constructs
+to the core IR.
 
 | Function | v2.5.1 observable inputs | Validation/result |
 |---|---|---|
@@ -271,7 +272,7 @@ backend-owned and does not add Typst constructs to the core IR.
 | `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
 | `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable one/two/four-value `borderwidth: Sizes`, named-only nullable closed content `alignment`, named-only nullable one/two/four-value `padding: Sizes` and `radius: Sizes`, named-only nullable closed relative `fontsize`, `fontweight`, `fontstyle`, `fontvariant`, and `textcase`, and optional final `body: MarkdownContent?` | bounded Container semantic node; indented or explicit rich/value body conversion, structured children, lazy indented-body validation, additive full-column-span, explicit typed colors and per-side border widths, logical content alignment, per-side padding, per-corner radius, and scoped relative font size, bold weight, italic style, small-caps variant, and closed text-case transforms are supported |
 | `fullspan` | one required final `body: MarkdownContent`, accepted positionally, by name, or as an indented block | bounded Container semantic node with `full_column_span: true`; explicit rich/scalar values use the shared non-null block target and validation precedes lazy indented-body evaluation |
-| `landscape` | no non-body arguments and one required Markdown block body | typed Landscape semantic node; 90° counter-clockwise content transformation |
+| `landscape` | one required final `body: MarkdownContent`, accepted positionally, by name, or as an indented block | typed Landscape semantic node; explicit rich/scalar values use the shared non-null block target, validation precedes lazy indented-body evaluation, and the content transformation is 90° counter-clockwise |
 
 The remaining future surface includes broader style/layout properties and
 component families; the direct `.container` consumer remains limited to this
@@ -399,12 +400,16 @@ Deferred from this slice:
 The component remains backend-neutral in value context and may pass through
 variables and callable results before the typed block output boundary.
 
-### Landscape component consumer slice (2026-08-21)
+### Landscape component consumer slice (updated 2026-10-28)
 
 `.landscape` is implemented as a bounded typed component consumer:
 
-- the native call accepts no positional or named arguments and requires one
-  Markdown block body; validation completes before lazy body evaluation;
+- the native call binds one required final MarkdownContent body positionally,
+  by name, or from an indented block through the shared non-null target; String
+  parses as rich Markdown, Number/Boolean/None materialize as literal
+  paragraphs, and existing Content stays structured;
+- binding validation completes before lazy indented-body evaluation, while
+  unevidenced structured values remain fail-closed with source provenance;
 - lambda bodies and inline native calls fail closed with source-backed
   diagnostics, while source-defined `landscape` functions retain precedence;
 - `IrComponent::Landscape` preserves ordered `Vec<IrNode>` children, nested
