@@ -150,11 +150,15 @@ dependency:
   placement, unevidenced structured-value widening, and complete
   captured-context parity remain unclaimed.
 - .clip is PARTIAL: a positional or named closed `circle` shape plus a required
-  Markdown block body produces a typed Clip component. Origin-aware conversion
-  and validation precede lazy body evaluation; structured children, spans,
-  composition, wire serde, deterministic Typst lowering, and real PDF output
-  are evidenced. Exact CSS/responsive geometry and figure-caption special
-  handling remain unclaimed.
+  final MarkdownContent value produces a typed Clip component. The body binds
+  positionally, by name, or from an indented block through the shared non-null
+  block target: String parses as rich Markdown, Number/Boolean/None materialize
+  as literal paragraphs, and existing Content stays structured. Origin-aware
+  shape conversion and validation precede lazy indented-body evaluation;
+  spans, composition, wire serde, deterministic Typst lowering, and real PDF
+  output remain evidenced. Exact CSS/responsive geometry, unevidenced
+  structured-value widening, complete captured-context parity, and
+  figure-caption special handling remain unclaimed.
 - .text is PARTIAL: rich inline content, URL wrapping, all seven relative-size
   values, all four text-case values, both font variants, both script positions,
   weight/style, all six decoration values, and origin-aware RGBA color have
@@ -198,9 +202,10 @@ producer and shared-index boundaries:
   there without transferring document-wide state ownership. The standalone
   `.fullspan` producer has bounded semantic and Typst/PDF evidence under that
   same issue; exact upstream in-flow HTML/CSS placement remains unclaimed. The
-  bounded `.clip {circle}` producer also has typed semantic, provenance,
-  deterministic Typst, and real PDF evidence; exact CSS/responsive geometry
-  and figure-caption special handling remain residuals.
+  bounded `.clip {circle}` producer also consumes the shared evidenced
+  MarkdownContent target and has typed semantic, provenance, deterministic
+  Typst, and real PDF evidence; exact CSS/responsive geometry and
+  figure-caption special handling remain residuals.
 - [#185](https://github.com/luceat-lux-vestra/arkst/issues/185) owns inline
   and display math, `.math`, code presentation/captions, `.codespan`, and
   explicit `.pagebreak`/`<<<` breaks. It consumes #181 shared caption,

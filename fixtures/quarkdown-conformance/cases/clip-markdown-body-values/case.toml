@@ -1,0 +1,5 @@
+id = "clip-markdown-body-values"
+feature = "clip-markdown-content-body"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.4-clip-markdown-body"
+description = "Clip final-body binding and shared rich/non-null scalar block-content conversion"
