@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.7 Boolean conjunction/disjunction (#678):** `.and` and `.or`
+  now use the existing source-ordered shared binder and origin-aware Boolean
+  conversion, preserve eager evaluation of both arguments, return typed Boolean
+  values, and compose with named, chained, conditional, and source-defined
+  function paths.
+
 - **Align Markdown-content body conversion (#675):** `.align` now binds its
   required final `body: MarkdownContent` parameter positionally, by name, or
   through an indented block after the required closed alignment argument.
