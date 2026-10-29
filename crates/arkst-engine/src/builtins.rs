@@ -110,6 +110,8 @@ pub(crate) enum BuiltinKind {
     IsGreater,
     Equals,
     Not,
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -533,6 +535,22 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindRaw,
     ),
+    builtin_spec(
+        "and",
+        BuiltinKind::And,
+        &["a", "b"],
+        2,
+        true,
+        BuiltinBodyPolicy::BindRaw,
+    ),
+    builtin_spec(
+        "or",
+        BuiltinKind::Or,
+        &["a", "b"],
+        2,
+        true,
+        BuiltinBodyPolicy::BindRaw,
+    ),
 ];
 
 #[cfg(test)]
@@ -704,6 +722,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::IsLower | BuiltinKind::IsGreater => evaluate_ordering(builtin, arguments),
         BuiltinKind::Equals => evaluate_equals(builtin, arguments),
         BuiltinKind::Not => evaluate_not(builtin, arguments),
+        BuiltinKind::And | BuiltinKind::Or => evaluate_boolean_binary(builtin, arguments),
     };
     result.map_err(|mut error| {
         if let Some(conversion) = error.conversion.as_mut() {
@@ -775,6 +794,31 @@ fn evaluate_not(
         .remove(0)
         .ok_or_else(|| error("`.not` requires exactly one boolean argument".to_string()))?;
     Ok(IrValue::Boolean(!boolean_argument(&value, "value")?))
+}
+
+fn evaluate_boolean_binary(
+    builtin: &BuiltinSpec,
+    mut arguments: BoundArguments,
+) -> Result<IrValue, BuiltinError> {
+    let left = arguments.remove(0).ok_or_else(|| {
+        error(format!(
+            "`.{}` requires a first boolean argument",
+            builtin.name
+        ))
+    })?;
+    let right = arguments.remove(0).ok_or_else(|| {
+        error(format!(
+            "`.{}` requires a second boolean argument",
+            builtin.name
+        ))
+    })?;
+    let left = boolean_argument(&left, "a")?;
+    let right = boolean_argument(&right, "b")?;
+    Ok(IrValue::Boolean(if builtin.kind == BuiltinKind::And {
+        left && right
+    } else {
+        left || right
+    }))
 }
 
 fn evaluate_string(
@@ -3829,7 +3873,7 @@ mod tests {
 
     #[test]
     fn logical_surface_is_registered_and_evaluates_typed_results() {
-        for name in ["islower", "isgreater", "equals", "not"] {
+        for name in ["islower", "isgreater", "equals", "not", "and", "or"] {
             assert_eq!(lookup(name).map(|builtin| builtin.name), Some(name));
         }
 
@@ -3863,6 +3907,26 @@ mod tests {
                 .expect("boolean negation should evaluate"),
             IrValue::Boolean(false)
         );
+        for (name, left, right, expected) in [
+            ("and", true, true, true),
+            ("and", true, false, false),
+            ("and", false, true, false),
+            ("or", false, false, false),
+            ("or", false, true, true),
+            ("or", true, false, true),
+        ] {
+            assert_eq!(
+                evaluate(
+                    name,
+                    &[IrValue::Boolean(left), IrValue::Boolean(right)],
+                    &[],
+                    false,
+                )
+                .expect("binary boolean operation should evaluate"),
+                IrValue::Boolean(expected),
+                "{name}({left}, {right})",
+            );
+        }
     }
 
     #[test]
@@ -3927,5 +3991,15 @@ mod tests {
         .is_err());
         assert!(evaluate("equals", &[number(1.0)], &[], false).is_err());
         assert!(evaluate("equals", &[number(1.0), number(1.0)], &[], true).is_err());
+        assert!(evaluate("and", &[IrValue::Boolean(true), number(1.0)], &[], false).is_err());
+        assert!(evaluate("or", &[number(1.0), IrValue::Boolean(false)], &[], false).is_err());
+        assert!(evaluate("and", &[IrValue::Boolean(true)], &[], false).is_err());
+        assert!(evaluate(
+            "or",
+            &[IrValue::Boolean(false), IrValue::Boolean(true)],
+            &[],
+            true,
+        )
+        .is_err());
     }
 }
