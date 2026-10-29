@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.7 typed empty factories (#680):** `.emptycollection` and
+  `.emptydictionary` now return distinct existing typed empty values, reject
+  every explicit argument and block body, and compose through variables,
+  iteration, collection access, dictionary lookup, equality, and
+  source-defined function precedence.
+
 - **Quarkdown v2.7 Boolean conjunction/disjunction (#678):** `.and` and `.or`
   now use the existing source-ordered shared binder and origin-aware Boolean
   conversion, preserve eager evaluation of both arguments, return typed Boolean
