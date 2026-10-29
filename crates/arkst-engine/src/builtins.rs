@@ -15,7 +15,9 @@ use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
-use arkst_ir::{IrInline, IrKeybindingPart, IrNode, IrTextDecoration, IrTextScript, IrValue};
+use arkst_ir::{
+    IrDictionary, IrInline, IrKeybindingPart, IrNode, IrTextDecoration, IrTextScript, IrValue,
+};
 #[cfg(test)]
 use arkst_source::SourceId;
 use arkst_source::SourceSpan;
@@ -112,6 +114,8 @@ pub(crate) enum BuiltinKind {
     Not,
     And,
     Or,
+    EmptyCollection,
+    EmptyDictionary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -551,6 +555,22 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindRaw,
     ),
+    builtin_spec(
+        "emptycollection",
+        BuiltinKind::EmptyCollection,
+        &[],
+        0,
+        false,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "emptydictionary",
+        BuiltinKind::EmptyDictionary,
+        &[],
+        0,
+        false,
+        BuiltinBodyPolicy::Reject,
+    ),
 ];
 
 #[cfg(test)]
@@ -723,6 +743,11 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::Equals => evaluate_equals(builtin, arguments),
         BuiltinKind::Not => evaluate_not(builtin, arguments),
         BuiltinKind::And | BuiltinKind::Or => evaluate_boolean_binary(builtin, arguments),
+        BuiltinKind::EmptyCollection => Ok(IrValue::Collection(Vec::new())),
+        BuiltinKind::EmptyDictionary => Ok(IrValue::Dictionary(IrDictionary {
+            entries: Vec::new(),
+            span: call_span,
+        })),
     };
     result.map_err(|mut error| {
         if let Some(conversion) = error.conversion.as_mut() {
@@ -4001,5 +4026,23 @@ mod tests {
             true,
         )
         .is_err());
+    }
+
+    #[test]
+    fn empty_factories_are_registered_typed_and_body_rejecting() {
+        assert_eq!(
+            evaluate("emptycollection", &[], &[], false).expect("empty collection should evaluate"),
+            IrValue::Collection(Vec::new())
+        );
+        assert!(matches!(
+            evaluate("emptydictionary", &[], &[], false),
+            Ok(IrValue::Dictionary(IrDictionary { entries, .. })) if entries.is_empty()
+        ));
+
+        for name in ["emptycollection", "emptydictionary"] {
+            assert_eq!(lookup(name).map(|builtin| builtin.name), Some(name));
+            assert!(evaluate(name, &[IrValue::String("extra".into())], &[], false).is_err());
+            assert!(evaluate(name, &[], &[], true).is_err());
+        }
     }
 }
