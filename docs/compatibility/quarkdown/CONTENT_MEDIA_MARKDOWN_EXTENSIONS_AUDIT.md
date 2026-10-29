@@ -140,6 +140,15 @@ dependency:
   Exact upstream in-flow and HTML/CSS placement remain unclaimed. Float,
   class, border style, unevidenced structured-value conversion, and complete
   captured-context parity remain open.
+- .align is PARTIAL: after its required closed alignment value, its required
+  final MarkdownContent value binds positionally, by name, or from an indented
+  block through the shared non-null block target. String parses as rich
+  Markdown, Number/Boolean/None materialize as literal paragraphs, and existing
+  Content stays structured in the typed full-width aligned Container semantic.
+  Binding and alignment conversion precede lazy indented-body evaluation, while
+  existing serde, provenance, deterministic Typst alignment, and real PDF
+  evidence remain unchanged. Exact HTML/CSS behavior, unevidenced structured
+  widening, and complete captured-context parity remain unclaimed.
 - .center is PARTIAL: its required final MarkdownContent value binds
   positionally, by name, or from an indented block through the shared non-null
   block target. String parses as rich Markdown, Number/Boolean/None materialize

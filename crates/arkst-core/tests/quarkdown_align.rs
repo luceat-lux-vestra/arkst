@@ -1,5 +1,7 @@
 use arkst_core::evaluator::Evaluator;
-use arkst_core::ir::{IrComponent, IrContainerAlignment, IrNode, IrParameter, IrStackedLayout};
+use arkst_core::ir::{
+    IrComponent, IrContainerAlignment, IrInline, IrNode, IrParameter, IrStackedLayout,
+};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -30,10 +32,34 @@ fn paragraph_text(node: &IrNode) -> &str {
     let IrNode::Paragraph { content, .. } = node else {
         panic!("expected paragraph, got {node:?}");
     };
-    let [arkst_core::ir::IrInline::Text { content, .. }] = content.as_slice() else {
+    let [IrInline::Text { content, .. }] = content.as_slice() else {
         panic!("expected one text fragment, got {content:?}");
     };
     content
+}
+
+fn paragraph_inlines(component: &arkst_core::ir::IrContainerComponent) -> &[IrInline] {
+    let [IrNode::Paragraph { content, .. }] = component.children.as_slice() else {
+        panic!("expected one paragraph, got {:?}", component.children);
+    };
+    content
+}
+
+fn inline_text(inlines: &[IrInline]) -> String {
+    let mut text = String::new();
+    for inline in inlines {
+        match inline {
+            IrInline::Text { content, .. } => text.push_str(content),
+            IrInline::Strong { content, .. } => text.push_str(&inline_text(content)),
+            other => panic!("unexpected inline {other:?}"),
+        }
+    }
+    text
+}
+
+fn assert_one_failure(result: &arkst_core::CompileResult) {
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(result.ir.nodes.is_empty(), "{result:?}");
 }
 
 #[test]
@@ -57,6 +83,93 @@ fn align_accepts_named_alignment() {
     let result = compile_source(".align alignment:{end}\n    A\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(align(&result).alignment, Some(IrContainerAlignment::End));
+}
+
+#[test]
+fn align_accepts_positional_named_and_generated_rich_markdown_values() {
+    for (source, expected_alignment, expected_text) in [
+        (
+            ".align {start} {Positional **Markdown** body.}\n",
+            IrContainerAlignment::Start,
+            "Positional Markdown body.",
+        ),
+        (
+            ".align alignment:{end} body:{Named **Markdown** body.}\n",
+            IrContainerAlignment::End,
+            "Named Markdown body.",
+        ),
+        (
+            ".align {center} body:{.string {\"Generated **Markdown** body.\"}}\n",
+            IrContainerAlignment::Center,
+            "Generated Markdown body.",
+        ),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let component = align(&result);
+        assert_eq!(component.alignment, Some(expected_alignment));
+        let inlines = paragraph_inlines(component);
+        assert_eq!(inline_text(inlines), expected_text);
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn align_materializes_non_null_scalar_markdown_content_values() {
+    for (source, expected) in [
+        (".align {start} body:{.sum {8} {5}}\n", "13"),
+        (".align {center} body:{.iseven {4}}\n", "true"),
+        (".align {end} body:{.none}\n", "None"),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(paragraph_text(&align(&result).children[0]), expected);
+    }
+}
+
+#[test]
+fn align_preserves_variable_and_callable_rich_content_values() {
+    for source in [
+        ".var {alignbody} {Variable **Markdown** body.}\n\n.align {start} body:{.alignbody}\n",
+        ".function {makealignbody}\n    Callable **Markdown** body.\n\n.align {end} body:{.makealignbody}\n",
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let inlines = paragraph_inlines(align(&result));
+        assert!(inline_text(inlines).ends_with("Markdown body."));
+        assert!(
+            inlines
+                .iter()
+                .any(|inline| matches!(inline, IrInline::Strong { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn align_rejects_unverified_structured_conversion_with_body_provenance() {
+    let source = ".align {center} body:{.range {1} {3}}\n";
+    let result = compile_source(source);
+    assert_one_failure(&result);
+    let diagnostic = &result.diagnostics[0];
+    assert!(
+        diagnostic.message.contains("parameter `body`"),
+        "{result:?}"
+    );
+    let primary = diagnostic.primary.expect("body conversion primary span");
+    assert_eq!(&source[primary.start..primary.end], "body:{.range {1} {3}}");
+}
+
+#[test]
+fn align_body_binding_validation_precedes_lazy_body_evaluation() {
+    let result = compile_source(".align {center} body:{foo}\n    .grid columns:{0}\n        A\n");
+    assert_one_failure(&result);
+    assert!(!result.diagnostics[0].message.contains("Column count"));
 }
 
 #[test]

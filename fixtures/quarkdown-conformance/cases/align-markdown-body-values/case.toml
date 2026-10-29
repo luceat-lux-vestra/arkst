@@ -1,0 +1,5 @@
+id = "align-markdown-body-values"
+feature = "align-markdown-content-body"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-align-markdown-body"
+description = "Align final-body binding and shared rich/non-null scalar block-content conversion"

@@ -208,6 +208,11 @@ status = "INDEPENDENT"
 basis = "Created for #673 from the public v2.6.4 center signature and independently observed official-binary behavior; the wording, values, and composition are Arkst-authored and do not copy upstream tests or examples."
 
 [[fixture]]
+id = "align-markdown-body-values"
+status = "INDEPENDENT"
+basis = "Created for #675 from the public v2.7.0 align signature and independently observed official-binary behavior; the wording, values, and composition are Arkst-authored and do not copy upstream tests or examples."
+
+[[fixture]]
 id = "captionposition-document-state"
 status = "REMEDIATED"
 basis = "Created in source-exposed #146; current multi-call state witness was reviewed as Arkst-authored evidence and no exact upstream fixture/test input is identified in repository provenance."
