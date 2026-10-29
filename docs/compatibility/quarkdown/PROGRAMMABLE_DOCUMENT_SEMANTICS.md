@@ -256,9 +256,10 @@ The reviewed block-body consumer slice is implemented. `.row`, `.column`, and
 `.grid` construct one typed Stacked semantic component after argument binding,
 conversion, and lazy body evaluation. `.center` binds one required final
 MarkdownContent value positionally, by name, or from an indented block;
-`.align` and the bounded `.container` sizing slice retain their reviewed body
-contracts. These calls construct the typed Container component after argument
-validation and lazy indented-body evaluation. Standalone
+`.align` binds its required final MarkdownContent value through the same forms
+after its required alignment argument; the bounded `.container` sizing slice
+retains its reviewed body contract. These calls construct the typed Container
+component after argument validation and lazy indented-body evaluation. Standalone
 `.fullspan` constructs the same Container family with its full-column-span flag
 set. `.landscape` constructs a typed Landscape component after binding one
 required final MarkdownContent value positionally, by name, or from an indented
@@ -271,7 +272,7 @@ to the core IR.
 | `column` | column layout, main-axis alignment, cross-axis alignment, optional gap, Markdown body | stacked semantic node |
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
 | `center` | full-width centered Container with one required final `body: MarkdownContent`, accepted positionally, by name, or as an indented block | bounded Container semantic node; explicit rich/scalar values use the shared non-null block target and validation precedes lazy indented-body evaluation |
-| `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
+| `align` | full-width Container, one required `alignment` positional or named argument, and one required final `body: MarkdownContent` accepted positionally, by name, or as an indented block | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware, explicit rich/scalar values use the shared non-null block target, and validation precedes lazy indented-body evaluation |
 | `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, named-only `fullspan: Boolean`, nullable `background`/`foreground`/`border` colors, named-only nullable one/two/four-value `borderwidth: Sizes`, named-only nullable closed content `alignment`, named-only nullable one/two/four-value `padding: Sizes` and `radius: Sizes`, named-only nullable closed relative `fontsize`, `fontweight`, `fontstyle`, `fontvariant`, and `textcase`, and optional final `body: MarkdownContent?` | bounded Container semantic node; indented or explicit rich/value body conversion, structured children, lazy indented-body validation, additive full-column-span, explicit typed colors and per-side border widths, logical content alignment, per-side padding, per-corner radius, and scoped relative font size, bold weight, italic style, small-caps variant, and closed text-case transforms are supported |
 | `fullspan` | one required final `body: MarkdownContent`, accepted positionally, by name, or as an indented block | bounded Container semantic node with `full_column_span: true`; explicit rich/scalar values use the shared non-null block target and validation precedes lazy indented-body evaluation |
 | `landscape` | one required final `body: MarkdownContent`, accepted positionally, by name, or as an indented block | typed Landscape semantic node; explicit rich/scalar values use the shared non-null block target, validation precedes lazy indented-body evaluation, and the content transformation is 90° counter-clockwise |
@@ -324,8 +325,10 @@ Implemented in this slice:
   case-insensitive dynamic names, and no static String coercion;
 - exactly one `alignment` argument is accepted positionally or by name, with
   duplicate, unknown, missing, and excess bindings rejected;
-- alignment binding/conversion completes before the required lazy Markdown
-  block body is evaluated, and failures publish no partial Container; and
+- one required final MarkdownContent body binds positionally, by name, or from
+  an indented block through the shared non-null block target;
+- alignment/body binding and alignment conversion complete before a lazy
+  indented body is evaluated, and failures publish no partial Container; and
 - nested, Stacked, callable, and source-provenance composition remains typed;
   native inline `.align` is block-only and fails closed.
 

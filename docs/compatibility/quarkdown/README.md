@@ -214,6 +214,7 @@ follow-up owners.
 | Container layout               | `.container`, optional `width`, `height`, `fullwidth`, named `fullspan`, and optional final MarkdownContent body | Empty/indented/explicit rich or scalar body Container; origin-aware Size/Boolean and shared block-content conversion; deterministic Typst block sizing plus bounded multi-column breakout | Partial (bounded) |
 | Full-column block              | `.fullspan` with a required final MarkdownContent body | Existing typed Container with additive `full_column_span`; positional/named/indented binding, shared rich/scalar block conversion, structured children, and the bounded multi-column breakout | Partial (bounded) |
 | Centered block                 | `.center` with a required final MarkdownContent body | Existing typed full-width centered Container; positional/named/indented binding, shared rich/scalar block conversion, structured children, and deterministic Typst alignment | Partial (bounded) |
+| Aligned block                  | `.align` with required alignment and final MarkdownContent body | Existing typed full-width aligned Container; closed origin-aware alignment plus positional/named/indented body binding, shared rich/scalar block conversion, and deterministic Typst alignment | Partial (bounded) |
 | Landscape block                | `.landscape` with a required final MarkdownContent body | Existing typed Landscape component; positional/named/indented binding, shared rich/scalar block conversion, structured children, and deterministic Typst rotation/reflow | Partial (bounded) |
 | Circle clipping                | `.clip {circle}` with a required final MarkdownContent body | Closed `circle` shape, positional/named/indented body binding, shared rich/scalar block conversion, structured children, and bounded Typst circle clipping | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -557,6 +558,21 @@ with source provenance. The existing centered Container IR, serialization,
 source maps, and Typst alignment lowering remain unchanged. Evidence is in
 `crates/arkst-core/tests/quarkdown_center.rs`, the independent
 `center-markdown-body-values` conformance case, and existing Typst/PDF
+integration tests. Exact upstream HTML/CSS behavior, unevidenced structured
+conversion, and complete captured-context parity remain unclaimed.
+
+### Bounded `.align` MarkdownContent contract
+
+The `.align` producer binds one required closed `alignment` value and one
+required final `body: MarkdownContent` positionally, by name, or from an
+indented block. Explicit String values select block Markdown parsing; Number,
+Boolean, and None materialize as literal paragraphs; existing Content remains
+structured. Binding and alignment conversion precede lazy indented-body
+evaluation, and unsupported structured values fail closed with source
+provenance. The existing aligned Container IR, serialization, source maps, and
+Typst alignment lowering remain unchanged. Evidence is in
+`crates/arkst-core/tests/quarkdown_align.rs`, the independent
+`align-markdown-body-values` conformance case, and existing Typst/PDF
 integration tests. Exact upstream HTML/CSS behavior, unevidenced structured
 conversion, and complete captured-context parity remain unclaimed.
 

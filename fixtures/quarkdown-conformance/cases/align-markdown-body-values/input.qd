@@ -1,0 +1,3 @@
+.align {start} body:{A **shared** value}
+
+.align {end} body:{.none}

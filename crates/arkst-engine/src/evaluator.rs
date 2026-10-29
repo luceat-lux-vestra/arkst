@@ -354,13 +354,6 @@ struct BoundStackedArguments {
 }
 
 #[derive(Clone)]
-struct AlignArgument {
-    value: InvocationValue,
-    span: SourceSpan,
-    parameter_span: Option<SourceSpan>,
-}
-
-#[derive(Clone)]
 struct ContainerArgument {
     value: InvocationValue,
     span: SourceSpan,
@@ -4834,6 +4827,7 @@ impl Evaluator {
 
         if is_align(name) {
             return self.evaluate_align(
+                ordered_args,
                 positional_args,
                 named_args,
                 body,
@@ -4843,6 +4837,7 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -8068,6 +8063,7 @@ impl Evaluator {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_align(
         &self,
+        ordered_args: Option<&[IrCallArgument]>,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
@@ -8077,45 +8073,54 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
     ) -> CallOutcome {
-        let positional_values = match self.evaluate_invocation_values(
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
             positional_args,
+            named_args,
             span,
             diagnostics,
             context,
             first_origin,
+            implicit_argument,
         ) {
-            Ok(values) => values,
+            Ok(candidates) => candidates,
             Err(outcome) => return outcome,
         };
-        let named_values =
-            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
-                Ok(values) => values,
-                Err(outcome) => return outcome,
-            };
-        let positional = positional_values
-            .into_iter()
-            .zip(positional_args.iter())
-            .map(|(value, source)| AlignArgument {
-                value,
-                span: value_source_span(source, span),
-                parameter_span: None,
-            })
-            .collect();
-        let Some(binding_plan) = binding_plan else {
+        let body_candidate = body.map(|body| Candidate::Positional {
+            // Binding needs only the body slot and provenance here. The
+            // indented source body remains lazy through alignment conversion.
+            value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+            span: call_body_source_span(body, *span),
+        });
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter();
+        let alignment_parameter_span = parameters.first().and_then(|parameter| parameter.name_span);
+        let Some(BoundSlot::Explicit {
+            value: alignment_value,
+            span: alignment_span,
+        }) = slots.next()
+        else {
             return CallOutcome::Failed;
         };
-        let alignment =
-            match bind_align_argument(binding_plan, positional, named_values, span, diagnostics) {
-                Ok(argument) => argument,
-                Err(outcome) => return outcome,
-            };
-        let alignment = match convert_align_alignment(&alignment.value) {
+        let alignment = match convert_align_alignment(&alignment_value) {
             Ok(value) => value,
             Err(error) => {
                 diagnostics.push(align_conversion_error(
-                    alignment.span,
-                    alignment.parameter_span,
+                    alignment_span,
+                    alignment_parameter_span,
+                    *span,
                     error,
                 ));
                 return CallOutcome::Failed;
@@ -8130,6 +8135,8 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
+        let body_parameter_span = parameters.get(1).and_then(|parameter| parameter.name_span);
+        let body_slot = slots.next().unwrap_or(BoundSlot::Omitted);
         let children = match body {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
@@ -8142,11 +8149,54 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
             None => {
-                diagnostics.push(align_argument_error(
-                    "`.align` requires a Markdown block body",
+                let BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                } = body_slot
+                else {
+                    diagnostics.push(align_argument_error(
+                        "`.align` requires Markdown content",
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let converted = match value_conversion::convert_target_with_origin(
+                    &value,
+                    value_conversion::ConversionTarget::BlockContent,
+                    argument_span,
+                ) {
+                    Ok(converted) => converted,
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some("body"),
+                                body_parameter_span,
+                                *span,
+                            ),
+                            Some("`.align` body"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                match self.resolve_target_value(
+                    converted,
+                    argument_span,
                     *span,
-                ));
-                return CallOutcome::Failed;
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(IrValue::Content(nodes)) => nodes,
+                    Ok(_) => {
+                        diagnostics.push(align_argument_error(
+                            "`.align` body must convert to Markdown content",
+                            argument_span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    Err(outcome) => return outcome,
+                }
             }
         };
 
@@ -18801,55 +18851,6 @@ fn container_argument_error_at(message: String, span: SourceSpan) -> Diagnostic 
     }
 }
 
-fn bind_align_argument(
-    plan: &BindingPlan,
-    positional: Vec<AlignArgument>,
-    named: Vec<InvocationNamedArg>,
-    span: &SourceSpan,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Result<AlignArgument, CallOutcome> {
-    let candidates = invocation_candidates(
-        positional
-            .into_iter()
-            .map(|argument| (argument.value, argument.span))
-            .collect(),
-        named,
-    );
-    let bound = plan.bind(&candidates, None, *span).map_err(|error| {
-        let message = if let Some(name) = error.message.strip_prefix("unknown named argument ") {
-            format!("Unknown named argument {name}")
-        } else if error.message == "received too many positional arguments" {
-            "`.align` accepts exactly one `alignment` argument".to_string()
-        } else if error.message.starts_with("missing required argument") {
-            "`.align` requires the `alignment` argument".to_string()
-        } else if let Some(parameter) = error
-            .message
-            .strip_prefix("parameter ")
-            .and_then(|message| message.strip_suffix(" collides with an already bound argument"))
-        {
-            format!("Argument {parameter} was bound more than once")
-        } else {
-            error.message.clone()
-        };
-        let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
-        diagnostic.message = message;
-        diagnostics.push(diagnostic);
-        CallOutcome::Failed
-    })?;
-    let parameter_span = bound
-        .parameters
-        .first()
-        .and_then(|parameter| parameter.name_span);
-    match bound.slots.into_iter().next() {
-        Some(BoundSlot::Explicit { value, span }) => Ok(AlignArgument {
-            value,
-            span,
-            parameter_span,
-        }),
-        _ => Err(CallOutcome::Failed),
-    }
-}
-
 fn convert_align_alignment(
     argument: &InvocationValue,
 ) -> Result<IrContainerAlignment, value_conversion::ConversionError> {
@@ -19832,8 +19833,11 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             BodyPolicy::Reject,
         ),
         "align" => (
-            vec![ParameterMetadata::required("alignment")],
-            BodyPolicy::AllowSeparate,
+            vec![
+                ParameterMetadata::required("alignment"),
+                ParameterMetadata::required("body"),
+            ],
+            BodyPolicy::BindFinal,
         ),
         "container" => (
             vec![
@@ -23061,7 +23065,7 @@ fn align_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec![
-            "`.align` accepts one required alignment argument and one Markdown block body."
+            "`.align` accepts one required alignment argument and one required positional, named, or indented MarkdownContent body."
                 .to_string(),
         ],
     }
@@ -23070,6 +23074,7 @@ fn align_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
 fn align_conversion_error(
     span: SourceSpan,
     parameter_span: Option<SourceSpan>,
+    call_span: SourceSpan,
     error: value_conversion::ConversionError,
 ) -> Diagnostic {
     conversion_failure_diagnostic(
@@ -23078,7 +23083,7 @@ fn align_conversion_error(
             Some(span),
             Some("alignment"),
             parameter_span,
-            span,
+            call_span,
         ),
         Some("`.align`"),
     )
@@ -29889,7 +29894,7 @@ mod tests {
                 parameter_span,
                 candidate_span,
             )],
-            None,
+            Some(CallBody::Block(&[])),
             None,
             &call_span,
             &mut diagnostics,
@@ -29935,7 +29940,7 @@ mod tests {
                 parameter_span,
                 candidate_span,
             )],
-            None,
+            Some(CallBody::Block(&[])),
             None,
             &call_span,
             &mut diagnostics,
