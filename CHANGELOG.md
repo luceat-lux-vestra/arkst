@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.7 indexed iterable mapping (#683):** `.withindices` now
+  materializes any supported finite iterable as an ordered typed Dictionary
+  whose one-based Number keys map to the original typed values. It supports
+  positional, named, chained, and final list-body binding while preserving
+  source-defined function precedence and existing materialization limits.
+
 - **Quarkdown v2.7 typed empty factories (#680):** `.emptycollection` and
   `.emptydictionary` now return distinct existing typed empty values, reject
   every explicit argument and block body, and compose through variables,

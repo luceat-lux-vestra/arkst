@@ -5180,6 +5180,8 @@ impl Evaluator {
                 name,
                 &evaluated_positional,
                 &evaluated_named,
+                body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -13132,7 +13134,7 @@ impl Evaluator {
         CallOutcome::Value(IrValue::Content(result))
     }
 
-    /// Evaluates the bounded Collection access operations through the same
+    /// Evaluates bounded Collection and Iterable operations through the same
     /// ordered semantic element adaptation used by `.foreach`.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_collection_access(
@@ -13140,6 +13142,8 @@ impl Evaluator {
         name: &str,
         positional_args: &[InvocationValue],
         named_args: &[InvocationNamedArg],
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -13147,13 +13151,26 @@ impl Evaluator {
     ) -> CallOutcome {
         match name {
             "size" | "first" | "second" | "third" | "last" | "sumall" | "average" | "distinct"
-            | "reversed" | "groupvalues" => {
-                let named_parameter = if name == "size" { "of" } else { "from" };
+            | "reversed" | "groupvalues" | "withindices" => {
+                let body_candidate = if name == "withindices" {
+                    let body_span = body.map(|body| call_body_source_span(body, *span));
+                    match source_backed_body_candidate(
+                        body_span,
+                        raw_body,
+                        "`.withindices` iterable body",
+                        diagnostics,
+                    ) {
+                        Ok(candidate) => candidate,
+                        Err(outcome) => return outcome,
+                    }
+                } else {
+                    None
+                };
                 let value = match collection_access_operand(
                     name,
-                    named_parameter,
                     positional_args,
                     named_args,
+                    body_candidate.as_ref(),
                     binding_plan,
                     span,
                     diagnostics,
@@ -13192,6 +13209,32 @@ impl Evaluator {
                         CallOutcome::Value(IrValue::Collection(reversed))
                     }
                     "groupvalues" => group_collection_values(elements, *span, diagnostics),
+                    "withindices" => {
+                        if let Err(outcome) =
+                            exact_collection_length(elements.len(), span, diagnostics)
+                        {
+                            return outcome;
+                        }
+                        let mut entries = Vec::new();
+                        if let Err(error) = entries.try_reserve_exact(elements.len()) {
+                            diagnostics.push(iteration_error(
+                                format!("`.withindices` dictionary cannot be allocated: {error}"),
+                                *span,
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                        entries.extend(elements.into_iter().enumerate().map(|(index, value)| {
+                            IrPair {
+                                first: Box::new(IrValue::Number((index + 1) as f64)),
+                                second: Box::new(value),
+                                span: *span,
+                            }
+                        }));
+                        CallOutcome::Value(IrValue::Dictionary(IrDictionary {
+                            entries,
+                            span: *span,
+                        }))
+                    }
                     _ => unreachable!("collection access operation was prevalidated"),
                 }
             }
@@ -17927,6 +17970,7 @@ const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "groupvalues",
     "prepended",
     "appended",
+    "withindices",
 ];
 const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] = &["map", "filter", "sorted"];
 const LIBRARY_INSPECTION_NATIVE_NAMES: &[&str] =
@@ -20034,6 +20078,10 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             vec![ParameterMetadata::required("from")],
             BodyPolicy::Reject,
         ),
+        "withindices" => (
+            vec![ParameterMetadata::required("from")],
+            BodyPolicy::BindFinal,
+        ),
         "prepended" | "appended" => (
             vec![
                 ParameterMetadata::required("to"),
@@ -20145,9 +20193,9 @@ fn optionality_operands(
 
 fn collection_access_operand(
     name: &str,
-    _named_parameter: &str,
     positional_args: &[InvocationValue],
     named_args: &[InvocationNamedArg],
+    body: Option<&Candidate<InvocationValue>>,
     binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
@@ -20160,7 +20208,7 @@ fn collection_access_operand(
         named_args.to_vec(),
     );
     let bound = binding_plan
-        .bind(&candidates, None, *span)
+        .bind(&candidates, body, *span)
         .map_err(|error| {
             let message = if let Some(argument_name) =
                 error.message.strip_prefix("unknown named argument ")
@@ -26093,6 +26141,95 @@ mod tests {
             CallOutcome::Value(IrValue::String(value)) if value == "a"
         ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn withindices_preserves_order_typed_values_and_materialization_limits() {
+        let operation_span = span(0, 40);
+        let evaluator = Evaluator::new();
+        let input = IrValue::Collection(vec![
+            IrValue::String("duplicate".to_string()),
+            IrValue::String("duplicate".to_string()),
+            IrValue::Boolean(true),
+        ]);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = collection_call(
+            &evaluator,
+            "withindices",
+            &[input],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let CallOutcome::Value(IrValue::Dictionary(dictionary)) = outcome else {
+            panic!("expected indexed dictionary")
+        };
+        assert_eq!(dictionary.span, operation_span);
+        assert_eq!(dictionary.entries.len(), 3);
+        for (offset, entry) in dictionary.entries.iter().enumerate() {
+            assert_eq!(*entry.first, IrValue::Number((offset + 1) as f64));
+            assert_eq!(entry.span, operation_span);
+        }
+        assert_eq!(
+            *dictionary.entries[0].second,
+            IrValue::String("duplicate".to_string())
+        );
+        assert_eq!(
+            *dictionary.entries[1].second,
+            IrValue::String("duplicate".to_string())
+        );
+        assert_eq!(*dictionary.entries[2].second, IrValue::Boolean(true));
+
+        let dictionary_input = IrValue::Dictionary(IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::String("key".to_string())),
+                second: Box::new(IrValue::Number(7.0)),
+                span: span(10, 20),
+            }],
+            span: span(10, 20),
+        });
+        let dictionary_outcome = collection_call(
+            &evaluator,
+            "withindices",
+            &[dictionary_input],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            dictionary_outcome,
+            CallOutcome::Value(IrValue::Dictionary(IrDictionary { entries, .. }))
+                if entries.len() == 1
+                    && matches!(*entries[0].first, IrValue::Number(1.0))
+                    && matches!(*entries[0].second, IrValue::Pair(_))
+        ));
+
+        let limited = Evaluator::with_limits(EvaluationLimits {
+            max_materialized_elements: 1,
+            max_evaluation_depth: 256,
+        });
+        let mut limited_diagnostics = Vec::new();
+        let mut limited_context = EvaluationContext::new();
+        let limited_outcome = collection_call(
+            &limited,
+            "withindices",
+            &[IrValue::Collection(vec![
+                IrValue::Number(1.0),
+                IrValue::Number(2.0),
+            ])],
+            &[],
+            &operation_span,
+            &mut limited_diagnostics,
+            &mut limited_context,
+        );
+        assert!(matches!(limited_outcome, CallOutcome::Failed));
+        assert_eq!(limited_diagnostics.len(), 1);
+        assert_eq!(limited_diagnostics[0].code, "E3005");
+        assert_eq!(limited_diagnostics[0].primary, Some(operation_span));
     }
 
     #[test]

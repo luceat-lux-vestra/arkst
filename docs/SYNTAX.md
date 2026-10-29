@@ -431,7 +431,7 @@ evidenced operations. The retained `.map` and `.filter` calls are Arkst
 extensions, not upstream v2.5.1 functions, and are excluded from compatibility
 coverage counts.
 
-### Collection operations (Quarkdown v2.5.1 evidenced slice)
+### Collection operations (evidenced Quarkdown v2.5.1 and v2.7.0 slices)
 
 All operations consume the same typed iterable sequence as `.foreach`, so
 `Collection`, `Pair`, ordered `Dictionary` entries, finite `Range`, and a
@@ -445,6 +445,7 @@ supported Markdown list have identical element semantics:
 .values::sumall
 .values::average
 .values::groupvalues
+.values::withindices
 ```
 
 `.second` and `.third` are one-based accessors and return `None` when the
@@ -456,7 +457,13 @@ source iterable unchanged. `.groupvalues` returns a Collection of Collections in
 first-seen group order, preserving order inside each group. `.sumall` applies
 the upstream `asDouble()` conversion to every element; invalid conversions
 contribute zero, and `.average` divides by the full input count (empty input
-therefore produces `NaN`). These results remain typed until an output boundary.
+therefore produces `NaN`). Quarkdown v2.7.0 `.withindices` returns an ordered
+typed Dictionary whose one-based Number keys map to the original typed values;
+it also accepts a final indented Markdown list body. The operation preserves
+input order and duplicates, produces an empty Dictionary for empty input, and
+uses the existing materialization limit. These results remain typed until an
+output boundary. The v2.7.0 `.contains` and `.split` operations remain deferred
+to the structured String-conversion decision in #682.
 
 ### Dictionary lookup (Quarkdown v2.5.1 evidenced slice)
 
