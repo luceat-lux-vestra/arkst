@@ -1,0 +1,222 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "route: ",
+              "span": {
+                "source_id": 1,
+                "start": 56,
+                "end": 63
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "Cedar",
+              "span": {
+                "source_id": 1,
+                "start": 75,
+                "end": 99
+              }
+            }
+          },
+          {
+            "Strong": {
+              "content": [
+                {
+                  "Text": {
+                    "content": "→",
+                    "span": {
+                      "source_id": 1,
+                      "start": 93,
+                      "end": 96
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 91,
+                "end": 98
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "Harbor",
+              "span": {
+                "source_id": 1,
+                "start": 75,
+                "end": 99
+              }
+            }
+          },
+          {
+            "Strong": {
+              "content": [
+                {
+                  "Text": {
+                    "content": "→",
+                    "span": {
+                      "source_id": 1,
+                      "start": 93,
+                      "end": 96
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 91,
+                "end": 98
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "Summit",
+              "span": {
+                "source_id": 1,
+                "start": 75,
+                "end": 99
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 56,
+          "end": 99
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "labels: ",
+              "span": {
+                "source_id": 1,
+                "start": 101,
+                "end": 109
+              }
+            }
+          },
+          {
+            "Strong": {
+              "content": [
+                {
+                  "Text": {
+                    "content": "1",
+                    "span": {
+                      "source_id": 1,
+                      "start": 159,
+                      "end": 165
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 157,
+                "end": 167
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "/",
+              "span": {
+                "source_id": 1,
+                "start": 141,
+                "end": 142
+              }
+            }
+          },
+          {
+            "Strong": {
+              "content": [
+                {
+                  "Text": {
+                    "content": "2",
+                    "span": {
+                      "source_id": 1,
+                      "start": 159,
+                      "end": 165
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 157,
+                "end": 167
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "/",
+              "span": {
+                "source_id": 1,
+                "start": 141,
+                "end": 142
+              }
+            }
+          },
+          {
+            "Strong": {
+              "content": [
+                {
+                  "Text": {
+                    "content": "3",
+                    "span": {
+                      "source_id": 1,
+                      "start": 159,
+                      "end": 165
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 157,
+                "end": 167
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 101,
+          "end": 168
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}

@@ -337,6 +337,13 @@ enum CallBody<'a> {
     Inline(&'a [IrInline]),
 }
 
+#[derive(Clone, Copy)]
+struct ChainFinalCall<'a> {
+    lambda_parameters: Option<&'a [IrParameter]>,
+    body: Option<CallBody<'a>>,
+    raw_body: Option<&'a IrRawBody>,
+}
+
 enum IterationBody<'a> {
     Block(&'a [IrNode]),
     Inline(IrCallable),
@@ -823,6 +830,38 @@ fn value_into_content_nodes(
             Err(outcome) => Err(outcome),
         },
     }
+}
+
+/// Concatenates one `.join` iteration output without flattening its internal
+/// block structure. Only the two adjacent paragraph boundaries are fused;
+/// every interior node and inline child keeps its original representation and
+/// source provenance.
+fn append_join_content(target: &mut Vec<IrNode>, mut content: Vec<IrNode>) {
+    if target.is_empty() {
+        target.extend(content);
+        return;
+    }
+    if content.is_empty() {
+        return;
+    }
+    let merge_paragraphs = matches!(target.last(), Some(IrNode::Paragraph { .. }))
+        && matches!(content.first(), Some(IrNode::Paragraph { .. }));
+    if !merge_paragraphs {
+        target.extend(content);
+        return;
+    }
+    let first_content = match content.first_mut() {
+        Some(IrNode::Paragraph { content, .. }) => std::mem::take(content),
+        _ => return,
+    };
+    if let Some(IrNode::Paragraph {
+        content: target_content,
+        ..
+    }) = target.last_mut()
+    {
+        target_content.extend(first_content);
+    }
+    target.extend(content.into_iter().skip(1));
 }
 
 fn pair_into_content_nodes(
@@ -3564,12 +3603,14 @@ impl Evaluator {
             IrNode::ChainedFunctionCall {
                 head,
                 chain,
+                lambda_parameters,
                 body,
                 raw_body,
                 span,
             } => match self.evaluate_block_chain(
                 head,
                 chain,
+                lambda_parameters.as_deref(),
                 body,
                 raw_body.as_ref(),
                 span,
@@ -4210,6 +4251,7 @@ impl Evaluator {
         &self,
         head: &IrCallSegment,
         chain: &[IrCallSegment],
+        lambda_parameters: Option<&[IrParameter]>,
         body: &Option<Vec<IrNode>>,
         raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
@@ -4219,8 +4261,11 @@ impl Evaluator {
         match self.evaluate_chain_value(
             head,
             chain,
-            body.as_deref().map(CallBody::Block),
-            raw_body,
+            ChainFinalCall {
+                lambda_parameters,
+                body: body.as_deref().map(CallBody::Block),
+                raw_body,
+            },
             diagnostics,
             context,
         ) {
@@ -4250,8 +4295,11 @@ impl Evaluator {
         match self.evaluate_chain_value(
             head,
             chain,
-            body.as_deref().map(CallBody::Inline),
-            None,
+            ChainFinalCall {
+                lambda_parameters: None,
+                body: body.as_deref().map(CallBody::Inline),
+                raw_body: None,
+            },
             diagnostics,
             context,
         ) {
@@ -4760,6 +4808,22 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
+            );
+        }
+
+        if is_flow_join(name) && context.get_function(name).is_none() {
+            return self.evaluate_flow_join(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -14268,6 +14332,149 @@ impl Evaluator {
         }
     }
 
+    /// Evaluates Quarkdown v2.7's structured Flow `.join` over the shared
+    /// finite iterable and callable boundaries. Ordinary arguments are
+    /// evaluated in source order before target conversion; the optional block
+    /// body remains lazy and is invoked once per element.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_flow_join(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = body.map(|body| Candidate::Positional {
+            value: InvocationValue::static_value(IrValue::None),
+            span: call_body_source_span(body, *span),
+        });
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let Some(BoundSlot::Explicit {
+            value: iterable, ..
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let (separator, separator_span) = match slots.next() {
+            Some(BoundSlot::Explicit { value, span }) => (value.value, span),
+            Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => {
+                (IrValue::String(", ".to_string()), *span)
+            }
+        };
+        let callback_slot = slots.next();
+
+        let elements = match self.coerce_iterable(iterable, span, diagnostics, context) {
+            Ok(elements) => elements,
+            Err(outcome) => return outcome,
+        };
+
+        let before_separator = diagnostics.len();
+        let separator =
+            self.materialize_inline_value(Some(separator), &separator_span, diagnostics);
+        if diagnostics.len() != before_separator {
+            return CallOutcome::Failed;
+        }
+
+        let callback = match body {
+            Some(CallBody::Block(nodes)) => {
+                Some(self.make_callable(lambda_parameters, nodes, *span, context))
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(iteration_error(
+                    "`.join` requires a block or first-class lambda callback".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => match callback_slot {
+                Some(BoundSlot::Explicit { value, span }) => match value.value {
+                    IrValue::Callable(callable) => Some(callable),
+                    value => {
+                        diagnostics.push(iteration_error(
+                            "`.join` body must be a one-element callable".to_string(),
+                            value_source_span(&value, &span),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                },
+                Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => None,
+            },
+        };
+
+        let mut joined = Vec::new();
+        for (index, element) in elements.into_iter().enumerate() {
+            if index != 0 {
+                append_join_content(
+                    &mut joined,
+                    vec![IrNode::Paragraph {
+                        content: separator.clone(),
+                        span: separator_span,
+                    }],
+                );
+            }
+            let value = match callback.as_ref() {
+                Some(callback) => match self.invoke_callable(
+                    callback,
+                    vec![element],
+                    IterationOptions {
+                        span: *span,
+                        allow_destructuring: true,
+                    },
+                    diagnostics,
+                    context,
+                ) {
+                    CallOutcome::Value(value) if value_contains_explicit_error(&value) => {
+                        return CallOutcome::Failed;
+                    }
+                    CallOutcome::Value(value) => value,
+                    CallOutcome::NoValue => {
+                        diagnostics.push(no_value_required(callback.span));
+                        return CallOutcome::Failed;
+                    }
+                    CallOutcome::Failed => return CallOutcome::Failed,
+                    CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                },
+                None => element,
+            };
+            let content = match value_into_content_nodes(value, *span, diagnostics) {
+                Ok(content) => content,
+                Err(outcome) => return outcome,
+            };
+            append_join_content(&mut joined, content);
+        }
+        CallOutcome::Value(IrValue::Content(joined))
+    }
+
     /// Evaluates the bounded callback-based optionality functions from the
     /// v2.5.1 Optionality module. The value is resolved before a callback is
     /// invoked. `.ifpresent` skips its callback for semantic `None`, while
@@ -16443,14 +16650,18 @@ impl Evaluator {
             IrNode::ChainedFunctionCall {
                 head,
                 chain,
+                lambda_parameters,
                 body,
                 raw_body,
                 ..
             } => self.evaluate_chain_value(
                 head,
                 chain,
-                body.as_deref().map(CallBody::Block),
-                raw_body.as_ref(),
+                ChainFinalCall {
+                    lambda_parameters: lambda_parameters.as_deref(),
+                    body: body.as_deref().map(CallBody::Block),
+                    raw_body: raw_body.as_ref(),
+                },
                 diagnostics,
                 context,
             ),
@@ -16473,8 +16684,7 @@ impl Evaluator {
         &self,
         head: &IrCallSegment,
         chain: &[IrCallSegment],
-        body: Option<CallBody<'_>>,
-        raw_body: Option<&IrRawBody>,
+        final_call: ChainFinalCall<'_>,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
@@ -16551,15 +16761,16 @@ impl Evaluator {
                     },
                 ));
             }
-            let final_body = (index + 1 == chain.len()).then_some(body).flatten();
+            let is_final = index + 1 == chain.len();
+            let final_body = is_final.then_some(final_call.body).flatten();
             let outcome = self.chain_outcome(
                 self.evaluate_call_value_with_first_origin(
                     &source_segment.name,
                     &positional_args,
                     &source_segment.named_args,
                     final_body,
-                    (index + 1 == chain.len()).then_some(raw_body).flatten(),
-                    None,
+                    is_final.then_some(final_call.raw_body).flatten(),
+                    is_final.then_some(final_call.lambda_parameters).flatten(),
                     &source_segment.span,
                     diagnostics,
                     context,
@@ -17435,6 +17646,7 @@ impl Evaluator {
                 if let [IrNode::ChainedFunctionCall {
                     head,
                     chain,
+                    lambda_parameters,
                     body,
                     raw_body,
                     ..
@@ -17443,8 +17655,11 @@ impl Evaluator {
                     return value_context_outcome(self.evaluate_chain_value(
                         head,
                         chain,
-                        body.as_deref().map(CallBody::Block),
-                        raw_body.as_ref(),
+                        ChainFinalCall {
+                            lambda_parameters: lambda_parameters.as_deref(),
+                            body: body.as_deref().map(CallBody::Block),
+                            raw_body: raw_body.as_ref(),
+                        },
                         diagnostics,
                         context,
                     ));
@@ -17980,6 +18195,7 @@ pub(crate) enum NativeDispatchOwner {
     DictionaryLookup,
     CollectionAccess,
     CollectionTransform,
+    FlowJoin,
     LibraryInspection,
     Logger,
     Environment,
@@ -18070,6 +18286,7 @@ const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
 ];
 const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] =
     &["map", "filter", "sorted", "findfirst", "findall"];
+const FLOW_JOIN_NATIVE_NAMES: &[&str] = &["join"];
 const LIBRARY_INSPECTION_NATIVE_NAMES: &[&str] =
     &["libexists", "functionexists", "libraries", "libfunctions"];
 const LOGGER_NATIVE_NAMES: &[&str] = &["log", "debug", "error"];
@@ -18224,6 +18441,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::CollectionTransform,
         names: COLLECTION_TRANSFORM_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::FlowJoin,
+        names: FLOW_JOIN_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::LibraryInspection,
@@ -19387,6 +19608,7 @@ fn dictionary_inline_value(inlines: Vec<IrInline>, span: SourceSpan) -> IrValue 
         }] => IrValue::Content(vec![IrNode::ChainedFunctionCall {
             head: head.clone(),
             chain: chain.clone(),
+            lambda_parameters: None,
             body: body.as_ref().map(|body| {
                 vec![IrNode::Paragraph {
                     content: body.clone(),
@@ -19735,6 +19957,10 @@ fn is_collection_access(name: &str) -> bool {
 
 fn is_collection_transform(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::CollectionTransform)
+}
+
+fn is_flow_join(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::FlowJoin)
 }
 
 fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'static>>, BodyPolicy)> {
@@ -20159,6 +20385,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             vec![
                 ParameterMetadata::required("from"),
                 ParameterMetadata::required("condition"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "join" => (
+            vec![
+                ParameterMetadata::required("iterable"),
+                ParameterMetadata::defaulted("separator"),
+                ParameterMetadata::optional("body"),
             ],
             BodyPolicy::BindFinal,
         ),
@@ -24693,6 +24927,7 @@ mod tests {
         IrNode::ChainedFunctionCall {
             head,
             chain,
+            lambda_parameters: None,
             body: None,
             raw_body: None,
             span,
@@ -24713,6 +24948,7 @@ mod tests {
         IrNode::ChainedFunctionCall {
             head,
             chain,
+            lambda_parameters: None,
             body: Some(body),
             raw_body: None,
             span,
@@ -25396,6 +25632,32 @@ mod tests {
         assert!(matches!(invalid, CallOutcome::Failed));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert!(diagnostics[0].message.contains("Boolean"));
+    }
+
+    #[test]
+    fn join_content_fuses_only_adjacent_paragraph_boundaries() {
+        let mut joined = vec![text_paragraph("first"), text_paragraph("tail")];
+        append_join_content(&mut joined, vec![text_paragraph("|")]);
+        append_join_content(
+            &mut joined,
+            vec![text_paragraph("second"), text_paragraph("last")],
+        );
+        assert_eq!(joined.len(), 3);
+        assert_paragraph_text(&joined[0..1], "first");
+        let IrNode::Paragraph { content, .. } = &joined[1] else {
+            panic!("expected joined boundary paragraph")
+        };
+        assert_eq!(
+            content
+                .iter()
+                .filter_map(|inline| match inline {
+                    IrInline::Text { content, .. } => Some(content.as_str()),
+                    _ => None,
+                })
+                .collect::<String>(),
+            "tail|second"
+        );
+        assert_paragraph_text(&joined[2..3], "last");
     }
 
     #[test]
@@ -28325,6 +28587,7 @@ mod tests {
                 ordered_args: None,
                 span: span(8, 13),
             }],
+            lambda_parameters: None,
             body: None,
             raw_body: None,
             span: whole,

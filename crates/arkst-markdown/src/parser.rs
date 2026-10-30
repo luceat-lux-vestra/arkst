@@ -805,6 +805,7 @@ fn normalize_block(
     match block {
         Block::DirectiveCall {
             name,
+            chain,
             body: Some(body),
             span,
             ..
@@ -841,7 +842,10 @@ fn normalize_block(
                 }
             }
             *body = kept;
-            if has_lambda_body_semantics(name) {
+            let body_owner = chain
+                .last()
+                .map_or(name.as_str(), |segment| segment.name.as_str());
+            if has_lambda_body_semantics(body_owner) {
                 contextualize_lambda_body(block, accepted_lines, source, diagnostics);
             }
             let mut result = vec![block.clone()];
@@ -897,6 +901,7 @@ fn has_lambda_body_semantics(name: &str) -> bool {
             | "sorted"
             | "findfirst"
             | "findall"
+            | "join"
     )
 }
 
@@ -1839,11 +1844,13 @@ impl CallArgumentContext {
     }
 
     fn is_callback(self, call_name: &str, positional_index: usize) -> bool {
-        let callback_index = match self {
-            Self::Direct => 1,
-            Self::Chained => 0,
+        let callback_index = match (call_name, self) {
+            ("join", Self::Direct) => 2,
+            ("join", Self::Chained) => 1,
+            (_, Self::Direct) => 1,
+            (_, Self::Chained) => 0,
         };
-        positional_index == callback_index && matches!(call_name, "findfirst" | "findall")
+        positional_index == callback_index && matches!(call_name, "findfirst" | "findall" | "join")
     }
 }
 
@@ -2201,7 +2208,8 @@ fn convert_named_arg(
         && call_name.is_some_and(|name| matches!(name, "map" | "filter" | "sorted")))
         || (arg.name == "where" && call_name == Some("extend"))
         || (arg.name == "condition"
-            && call_name.is_some_and(|name| matches!(name, "findfirst" | "findall")));
+            && call_name.is_some_and(|name| matches!(name, "findfirst" | "findall")))
+        || (arg.name == "body" && call_name == Some("join"));
     NamedArg {
         name: arg.name.clone(),
         name_span: offset_span(arg.name_span, offset).unwrap_or(ByteSpan::new(0, 0)),
@@ -4483,6 +4491,73 @@ mod tests {
             panic!("expected block findall lambda")
         };
         assert_eq!(header.parameters[0].name, "value");
+        assert!(!body.is_empty());
+    }
+
+    #[test]
+    fn join_callbacks_use_their_direct_chained_named_and_block_positions() {
+        let direct = parse_with_diagnostics(".join {1..2} {|} {value: **.value**}\n");
+        assert!(direct.diagnostics.is_empty(), "{direct:?}");
+        let Block::DirectiveCall { arguments, .. } = &direct.document.nodes[0] else {
+            panic!("expected direct join directive")
+        };
+        assert!(matches!(
+            positional_args(arguments).get(2),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "value" && !body.is_empty()
+        ));
+
+        let chained = parse_with_diagnostics(".range {1} {2}::join {|} {value: **.value**}\n");
+        assert!(chained.diagnostics.is_empty(), "{chained:?}");
+        let Block::DirectiveCall { chain, .. } = &chained.document.nodes[0] else {
+            panic!("expected chained join directive")
+        };
+        assert!(matches!(
+            positional_args(&chain[0].arguments).get(1),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "value" && !body.is_empty()
+        ));
+
+        let named = parse_with_diagnostics(".range {1} {2}::join body:{value: **.value**}\n");
+        assert!(named.diagnostics.is_empty(), "{named:?}");
+        let Block::DirectiveCall { chain, .. } = &named.document.nodes[0] else {
+            panic!("expected named chained join directive")
+        };
+        assert!(matches!(
+            named_args(&chain[0].arguments).first().map(|argument| &argument.value),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "value" && !body.is_empty()
+        ));
+
+        let block = parse_with_diagnostics(
+            ".range {1} {2}::join separator:{|}\n    key value:\n    .key=.value\n",
+        );
+        assert!(block.diagnostics.is_empty(), "{block:?}");
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &block.document.nodes[0]
+        else {
+            panic!("expected block join lambda")
+        };
+        assert_eq!(
+            header
+                .parameters
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            ["key", "value"]
+        );
         assert!(!body.is_empty());
     }
 

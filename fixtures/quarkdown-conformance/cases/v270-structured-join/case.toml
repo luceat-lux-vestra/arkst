@@ -1,0 +1,5 @@
+id = "v270-structured-join"
+feature = "structured-join"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-structured-join"
+description = "Ordered iterable joining with rich separators and callback content"
