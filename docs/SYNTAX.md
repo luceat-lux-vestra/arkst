@@ -431,6 +431,30 @@ evidenced operations. The retained `.map` and `.filter` calls are Arkst
 extensions, not upstream v2.5.1 functions, and are excluded from compatibility
 coverage counts.
 
+Quarkdown v2.7 `.join` is a structured content consumer over the same finite
+typed iterable path. It accepts a default or explicit inline-content separator
+and an optional one-element callback in positional, named, first-class, or
+indented form:
+
+```text
+.range {1} {3}::join separator:{/}
+.range {1} {3}::join separator:{|} body:{number: **.number**}
+.var {directions}
+    .dictionary
+        - east: 1
+        - west: 2
+.directions::join separator:{;}
+    key value:
+    **.key**=.value
+```
+
+The result remains structured content: rich separator and callback nodes are
+not flattened to text, and multi-paragraph callback output retains its interior
+blocks while only adjacent output paragraph boundaries are joined. Ordinary
+arguments are eager and source ordered; the callback is lazy per element.
+Empty input skips the callback, singleton input omits the separator, and
+conversion/callback failures publish no partial join result.
+
 ### Collection operations (evidenced Quarkdown v2.5.1 and v2.7.0 slices)
 
 All operations consume the same typed iterable sequence as `.foreach`, so

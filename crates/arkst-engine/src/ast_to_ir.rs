@@ -244,6 +244,9 @@ fn block_to_ir(
                             call_segment_to_ir(segment, source_id, diagnostics, source_mode)
                         })
                         .collect::<Option<Vec<_>>>()?,
+                    lambda_parameters: lambda_header
+                        .as_ref()
+                        .map(|header| lambda_parameters_to_ir(header, source_id)),
                     body: ir_body,
                     raw_body: raw_body.as_ref().map(raw_body_to_ir),
                     span: byte_to_source_span(span, source_id),
@@ -900,6 +903,7 @@ fn content_value_to_ir(
                     .iter()
                     .map(|segment| call_segment_to_ir(segment, source_id, diagnostics, source_mode))
                     .collect::<Option<Vec<_>>>()?,
+                lambda_parameters: None,
                 body: ir_body,
                 raw_body: None,
                 span: byte_to_source_span(span, source_id),
@@ -969,6 +973,7 @@ fn inline_lambda_body_to_ir(
                             call_segment_to_ir(segment, source_id, diagnostics, source_mode)
                         })
                         .collect::<Option<Vec<_>>>()?,
+                    lambda_parameters: None,
                     body,
                     raw_body: None,
                     span: byte_to_source_span(span, source_id),
@@ -1204,6 +1209,38 @@ mod tests {
         assert_eq!(&source[head.span.start..head.span.end], ".a {x}");
         assert_eq!(&source[chain[0].span.start..chain[0].span.end], "b {y}");
         assert_eq!(&source[span.start..span.end], ".a {x}::b {y}");
+    }
+
+    #[test]
+    fn chained_contextual_lambda_parameters_survive_ast_to_ir() {
+        let source = ".range {1} {2}::join separator:{|}\n    key value:\n    .key=.value\n";
+        let document = arkst_markdown::parse_qd(source);
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            Mode::Quarkdown,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let [IrNode::ChainedFunctionCall {
+            lambda_parameters: Some(parameters),
+            body: Some(body),
+            ..
+        }] = ir.nodes.as_slice()
+        else {
+            panic!("expected chained contextual lambda metadata: {ir:?}")
+        };
+        assert_eq!(
+            parameters
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            ["key", "value"]
+        );
+        assert!(parameters.iter().all(|parameter| {
+            &source[parameter.name_span.start..parameter.name_span.end] == parameter.name.as_str()
+        }));
+        assert!(!body.is_empty());
     }
 
     #[test]

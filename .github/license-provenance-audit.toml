@@ -291,3 +291,8 @@ basis = "#90 records a bounded Arkst scalar-string implementation and fixture wi
 id = "theme-document-state"
 status = "REMEDIATED"
 basis = "Created in source-exposed #142; current mixed-case synthetic theme/layout names and replacement sequence were re-reviewed and no exact upstream fixture/test input is identified."
+
+[[fixture]]
+id = "v270-structured-join"
+status = "INDEPENDENT"
+basis = "Created for #687 from the public v2.7.0 join signature and independently authored official-binary probes; the waypoint labels, values, and composition are Arkst-authored and do not copy upstream tests, fixtures, or documentation examples."

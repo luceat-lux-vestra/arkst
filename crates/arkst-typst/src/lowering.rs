@@ -4669,6 +4669,7 @@ mod tests {
                     ordered_args: None,
                     span: SourceSpan::new(source_id, 8, 13),
                 }],
+                lambda_parameters: None,
                 body: None,
                 raw_body: None,
                 span: whole,

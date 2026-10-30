@@ -2034,6 +2034,8 @@ enum WireNode {
     ChainedFunctionCall {
         head: WireCallSegment,
         chain: Vec<WireCallSegment>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lambda_parameters: Option<Vec<IrParameter>>,
         body: Option<Vec<WireNode>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         raw_body: Option<WireRawBody>,
@@ -2571,6 +2573,7 @@ fn node_to_wire(node: &IrNode, sources: &SourceTable) -> Result<WireNode, String
         IrNode::ChainedFunctionCall {
             head,
             chain,
+            lambda_parameters,
             body,
             raw_body,
             span,
@@ -2580,6 +2583,7 @@ fn node_to_wire(node: &IrNode, sources: &SourceTable) -> Result<WireNode, String
                 .iter()
                 .map(|segment| call_segment_to_wire(segment, sources))
                 .collect::<Result<_, _>>()?,
+            lambda_parameters: lambda_parameters.clone(),
             body: body
                 .as_deref()
                 .map(|body| wire_nodes(body, sources))
@@ -3185,6 +3189,7 @@ fn wire_node_to_ir(node: WireNode, sources: Option<&[SourceText]>) -> Result<IrN
         WireNode::ChainedFunctionCall {
             head,
             chain,
+            lambda_parameters,
             body,
             raw_body,
             span,
@@ -3194,6 +3199,7 @@ fn wire_node_to_ir(node: WireNode, sources: Option<&[SourceText]>) -> Result<IrN
                 .into_iter()
                 .map(|segment| call_segment_from_wire(segment, sources))
                 .collect::<Result<_, _>>()?,
+            lambda_parameters,
             body: body
                 .map(|body| nodes_from_wire(body, sources))
                 .transpose()?,
@@ -3759,6 +3765,10 @@ pub enum IrNode {
     ChainedFunctionCall {
         head: IrCallSegment,
         chain: Vec<IrCallSegment>,
+        /// Source-backed explicit lambda parameters for the final chained
+        /// call's contextual block body.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lambda_parameters: Option<Vec<IrParameter>>,
         body: Option<Vec<IrNode>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         raw_body: Option<IrRawBody>,
@@ -4267,15 +4277,15 @@ pub enum IrValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
+        IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrContainerMargin, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment,
         IrDocumentAuthor, IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType,
         IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrLandscapeComponent,
         IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrNumberingFormat, IrNumberingLayer,
-        IrNumberingState, IrNumberingToken, IrPair, IrParagraphStyleInfo, IrRange, IrRawBody,
-        IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTextDecoration, IrValue,
-        NativeTarget, SourceTable, TargetSpecificContent,
+        IrNumberingState, IrNumberingToken, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
+        IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTextDecoration,
+        IrValue, NativeTarget, SourceTable, TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -4318,6 +4328,49 @@ mod tests {
 
         let decoded =
             serde_json::from_str::<IrDocument>(&encoded).expect("IrDocument deserializes");
+        assert_eq!(decoded, document);
+    }
+
+    #[test]
+    fn chained_call_lambda_parameters_roundtrip_with_source_provenance() {
+        let source_id = SourceId(72);
+        let call_span = SourceSpan::new(source_id, 0, 40);
+        let document = IrDocument {
+            nodes: vec![IrNode::ChainedFunctionCall {
+                head: IrCallSegment {
+                    name: "values".to_string(),
+                    name_span: SourceSpan::new(source_id, 0, 7),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    span: SourceSpan::new(source_id, 0, 7),
+                },
+                chain: vec![IrCallSegment {
+                    name: "join".to_string(),
+                    name_span: SourceSpan::new(source_id, 9, 13),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    span: SourceSpan::new(source_id, 9, 13),
+                }],
+                lambda_parameters: Some(vec![IrParameter {
+                    name: "value".to_string(),
+                    name_span: SourceSpan::new(source_id, 18, 23),
+                    span: SourceSpan::new(source_id, 18, 24),
+                    optional: false,
+                }]),
+                body: Some(vec![IrNode::Paragraph {
+                    content: Vec::new(),
+                    span: SourceSpan::new(source_id, 29, 40),
+                }]),
+                raw_body: None,
+                span: call_span,
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let encoded = serde_json::to_string(&document).expect("IrDocument serializes");
+        let decoded: IrDocument = serde_json::from_str(&encoded).expect("IrDocument deserializes");
         assert_eq!(decoded, document);
     }
 

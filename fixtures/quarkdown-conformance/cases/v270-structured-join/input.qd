@@ -1,0 +1,8 @@
+.var {waypoints}
+    - Cedar
+    - Harbor
+    - Summit
+
+route: .waypoints::join separator:{**→**}
+
+labels: .range {1} {3}::join separator:{/} body:{index: **.index**}
