@@ -446,6 +446,8 @@ supported Markdown list have identical element semantics:
 .values::average
 .values::groupvalues
 .values::withindices
+.values::findfirst {value: .isgreater {.value} than:{5}}
+.values::findall condition:{value: .isgreater {.value} than:{5}}
 ```
 
 `.second` and `.third` are one-based accessors and return `None` when the
@@ -462,8 +464,16 @@ typed Dictionary whose one-based Number keys map to the original typed values;
 it also accepts a final indented Markdown list body. The operation preserves
 input order and duplicates, produces an empty Dictionary for empty input, and
 uses the existing materialization limit. These results remain typed until an
-output boundary. The v2.7.0 `.contains` and `.split` operations remain deferred
-to the structured String-conversion decision in #682.
+output boundary. Quarkdown v2.7.0 `.findfirst` returns the first original
+element whose one-argument condition returns Boolean `true`, stops evaluating
+immediately, and returns `None` when no element matches. `.findall` evaluates
+the required conditions and returns every original matching element in input
+order, including duplicates, or an empty Collection. Both accept explicit or
+implicit first-class, contextual inline, chained, named `condition:`, and
+indented block callback forms, require Boolean results, and retain the shared
+finite-iterable limits and callback failure behavior. The v2.7.0 `.contains`
+and `.split` operations remain deferred to the structured String-conversion
+decision in #682.
 
 ### Dictionary lookup (Quarkdown v2.5.1 evidenced slice)
 

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.7 typed predicate search (#685):** `.findfirst` and `.findall`
+  now apply existing one-argument Boolean callables to supported finite typed
+  iterables. They preserve original element types, order, and duplicates;
+  `.findfirst` stops at the first match or returns `None`, while `.findall`
+  returns every match and preserves existing limits, failure propagation, and
+  source-defined function precedence.
+
 - **Quarkdown v2.7 indexed iterable mapping (#683):** `.withindices` now
   materializes any supported finite iterable as an ordered typed Dictionary
   whose one-based Number keys map to the original typed values. It supports

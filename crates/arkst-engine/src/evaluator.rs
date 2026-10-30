@@ -4729,6 +4729,25 @@ impl Evaluator {
             );
         }
 
+        // The v2.7 search callbacks are target-sensitive in the frontend, so
+        // preserve source-defined bindings before native callback dispatch.
+        if matches!(name, "findfirst" | "findall") {
+            if let Some(binding) = context.get_function(name).cloned() {
+                return self.evaluate_function_binding(
+                    &binding,
+                    ordered_args,
+                    positional_args,
+                    named_args,
+                    body,
+                    raw_body,
+                    span,
+                    diagnostics,
+                    context,
+                    implicit_argument,
+                );
+            }
+        }
+
         if is_collection_transform(name) {
             return self.evaluate_collection_transform(
                 name,
@@ -14101,7 +14120,7 @@ impl Evaluator {
         )
     }
 
-    /// Evaluates `.map`, `.filter`, and `.sorted` through the same typed
+    /// Evaluates collection transforms and searches through the same typed
     /// iterable and callable machinery used by `.foreach`.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_collection_transform(
@@ -14225,6 +14244,16 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 };
                 self.filter_callable_values(&elements, callable, *span, diagnostics, context)
+            }
+            "findfirst" | "findall" => {
+                let Some(callable) = callable.as_ref() else {
+                    diagnostics.push(iteration_error(
+                        format!("`.{name}` requires a condition lambda"),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                self.find_callable_values(name, &elements, callable, *span, diagnostics, context)
             }
             "sorted" => {
                 self.sort_iterable_values(elements, callable.as_ref(), *span, diagnostics, context)
@@ -14795,6 +14824,73 @@ impl Evaluator {
             }
         }
         CallOutcome::Value(IrValue::Collection(results))
+    }
+
+    fn find_callable_values(
+        &self,
+        name: &str,
+        elements: &[IrValue],
+        callable: &IrCallable,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        if let Err(outcome) =
+            self.check_materialized_elements_len(elements.len(), span, diagnostics)
+        {
+            return outcome;
+        }
+        let mut matches = Vec::new();
+        if name == "findall" {
+            if let Err(error) = matches.try_reserve_exact(elements.len()) {
+                diagnostics.push(iteration_error(
+                    format!("findall result collection cannot be allocated: {error}"),
+                    span,
+                ));
+                return CallOutcome::Failed;
+            }
+        }
+        for element in elements {
+            let predicate = match self.invoke_callable(
+                callable,
+                vec![element.clone()],
+                IterationOptions {
+                    span,
+                    allow_destructuring: false,
+                },
+                diagnostics,
+                context,
+            ) {
+                CallOutcome::Value(value) if value_contains_explicit_error(&value) => {
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Value(value) => value,
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(callable.span));
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+            };
+            let Some(found) = scalar_boolean_value(&predicate) else {
+                diagnostics.push(iteration_error(
+                    format!("`.{name}` condition must return Boolean"),
+                    value_source_span(&predicate, &callable.span),
+                ));
+                return CallOutcome::Failed;
+            };
+            if found {
+                if name == "findfirst" {
+                    return CallOutcome::Value(element.clone());
+                }
+                matches.push(element.clone());
+            }
+        }
+        if name == "findfirst" {
+            CallOutcome::Value(IrValue::None)
+        } else {
+            CallOutcome::Value(IrValue::Collection(matches))
+        }
     }
 
     fn sort_iterable_values(
@@ -17972,7 +18068,8 @@ const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "appended",
     "withindices",
 ];
-const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] = &["map", "filter", "sorted"];
+const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] =
+    &["map", "filter", "sorted", "findfirst", "findall"];
 const LIBRARY_INSPECTION_NATIVE_NAMES: &[&str] =
     &["libexists", "functionexists", "libraries", "libfunctions"];
 const LOGGER_NATIVE_NAMES: &[&str] = &["log", "debug", "error"];
@@ -20055,6 +20152,13 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             vec![
                 ParameterMetadata::required("from"),
                 ParameterMetadata::optional("callback").with_aliases(CALLBACK_ALIASES),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "findfirst" | "findall" => (
+            vec![
+                ParameterMetadata::required("from"),
+                ParameterMetadata::required("condition"),
             ],
             BodyPolicy::BindFinal,
         ),
@@ -25144,6 +25248,154 @@ mod tests {
                     IrValue::Number(3.0),
                 ]
         ));
+    }
+
+    #[test]
+    fn find_predicates_preserve_typed_values_and_short_circuit() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let greater_than_one = transform_callable(
+            None,
+            vec![IrNode::FunctionCall {
+                name: "isgreater".to_string(),
+                positional_args: vec![call_value("1", Vec::new()), IrValue::Number(1.0)],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(10, 20),
+            }],
+        );
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let first = evaluator.evaluate_call_value(
+            "findfirst",
+            &[IrValue::Collection(vec![
+                IrValue::Number(2.0),
+                IrValue::Collection(Vec::new()),
+            ])],
+            &[named_arg("condition", greater_than_one.clone())],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(first, CallOutcome::Value(IrValue::Number(2.0)));
+
+        let all = evaluator.evaluate_call_value(
+            "findall",
+            &[IrValue::Range(IrRange {
+                start: Some(0),
+                end: Some(3),
+                span: span(1, 5),
+            })],
+            &[named_arg("condition", greater_than_one)],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            all,
+            CallOutcome::Value(IrValue::Collection(vec![
+                IrValue::Number(2.0),
+                IrValue::Number(3.0),
+            ]))
+        );
+
+        let no_match = evaluator.evaluate_call_value(
+            "findfirst",
+            &[IrValue::Collection(Vec::new())],
+            &[named_arg(
+                "condition",
+                transform_callable(None, vec![var_ref("missing")]),
+            )],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(no_match, CallOutcome::Value(IrValue::None));
+    }
+
+    #[test]
+    fn findall_keeps_original_dictionary_pairs_and_rejects_non_boolean_conditions() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let dictionary = dictionary_value(&[
+            ("a", IrValue::Number(1.0)),
+            ("b", IrValue::Number(2.0)),
+            ("c", IrValue::Number(3.0)),
+        ]);
+        let pair_value = call_value("second", vec![call_value("1", Vec::new())]);
+        let condition = transform_callable(
+            None,
+            vec![IrNode::FunctionCall {
+                name: "isgreater".to_string(),
+                positional_args: vec![pair_value, IrValue::Number(1.0)],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(10, 20),
+            }],
+        );
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let found = evaluator.evaluate_call_value(
+            "findall",
+            std::slice::from_ref(&dictionary),
+            &[named_arg("condition", condition)],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let CallOutcome::Value(IrValue::Collection(values)) = found else {
+            panic!("expected matching dictionary pairs")
+        };
+        assert_eq!(values.len(), 2);
+        assert!(matches!(
+            &values[0],
+            IrValue::Pair(pair) if *pair.first == IrValue::String("b".to_string())
+        ));
+        assert!(matches!(
+            &values[1],
+            IrValue::Pair(pair) if *pair.first == IrValue::String("c".to_string())
+        ));
+
+        diagnostics.clear();
+        let invalid = evaluator.evaluate_call_value(
+            "findall",
+            &[IrValue::Pair(IrPair {
+                first: Box::new(IrValue::Number(1.0)),
+                second: Box::new(IrValue::Number(2.0)),
+                span: span(1, 5),
+            })],
+            &[named_arg(
+                "condition",
+                transform_callable(None, vec![var_ref("1")]),
+            )],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(invalid, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("Boolean"));
     }
 
     #[test]

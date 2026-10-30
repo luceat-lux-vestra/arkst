@@ -887,7 +887,16 @@ fn normalize_children(
 fn has_lambda_body_semantics(name: &str) -> bool {
     matches!(
         name,
-        "function" | "extend" | "let" | "foreach" | "repeat" | "map" | "filter" | "sorted"
+        "function"
+            | "extend"
+            | "let"
+            | "foreach"
+            | "repeat"
+            | "map"
+            | "filter"
+            | "sorted"
+            | "findfirst"
+            | "findall"
     )
 }
 
@@ -1355,7 +1364,7 @@ fn directive_block(
             base,
             call_base,
             diagnostics,
-            is_contextual_inline_body_position,
+            CallArgumentContext::Direct,
         ),
         chain: call
             .chain
@@ -1796,7 +1805,7 @@ fn convert_inline(
                     base,
                     0,
                     diagnostics,
-                    is_contextual_inline_body_position,
+                    CallArgumentContext::Direct,
                 ),
                 chain: call
                     .chain
@@ -1814,12 +1823,28 @@ fn convert_inline(
     }
 }
 
-fn is_contextual_inline_body_position(call_name: &str, positional_index: usize) -> bool {
-    positional_index == 1 && matches!(call_name, "foreach" | "repeat")
+#[derive(Debug, Clone, Copy)]
+enum CallArgumentContext {
+    Direct,
+    Chained,
 }
 
-fn is_chained_contextual_inline_body_position(call_name: &str, positional_index: usize) -> bool {
-    positional_index == 0 && matches!(call_name, "foreach" | "repeat")
+impl CallArgumentContext {
+    fn is_inline_body(self, call_name: &str, positional_index: usize) -> bool {
+        let callback_index = match self {
+            Self::Direct => 1,
+            Self::Chained => 0,
+        };
+        positional_index == callback_index && matches!(call_name, "foreach" | "repeat")
+    }
+
+    fn is_callback(self, call_name: &str, positional_index: usize) -> bool {
+        let callback_index = match self {
+            Self::Direct => 1,
+            Self::Chained => 0,
+        };
+        positional_index == callback_index && matches!(call_name, "findfirst" | "findall")
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2109,7 +2134,7 @@ fn convert_call_segment(
             base,
             call_base,
             diagnostics,
-            is_chained_contextual_inline_body_position,
+            CallArgumentContext::Chained,
         ),
         span: offset_span(segment.span, base.checked_add(call_base).unwrap_or(base))
             .unwrap_or(ByteSpan::new(0, 0)),
@@ -2123,7 +2148,7 @@ fn convert_call_arguments(
     base: usize,
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
-    positional_body: fn(&str, usize) -> bool,
+    context: CallArgumentContext,
 ) -> Vec<CallArgument> {
     let offset = base.checked_add(call_base).unwrap_or(base);
     let mut positional_index = 0;
@@ -2133,7 +2158,8 @@ fn convert_call_arguments(
             arkst_quarkdown::CallArgument::Positional(arg) => {
                 let index = positional_index;
                 positional_index += 1;
-                let contextual_inline_body = positional_body(call_name, index);
+                let contextual_inline_body = context.is_inline_body(call_name, index);
+                let callback_lambda = context.is_callback(call_name, index);
                 CallArgument::Positional {
                     value: convert_arg_with_mode(
                         arg,
@@ -2142,7 +2168,7 @@ fn convert_call_arguments(
                         call_base,
                         diagnostics,
                         ArgConversionMode {
-                            allow_unmarked_lambda: contextual_inline_body,
+                            allow_unmarked_lambda: contextual_inline_body || callback_lambda,
                             contextual_inline_body,
                             target_owns_opaque_markers: call_name == "code" && index == 4,
                         },
@@ -2173,7 +2199,9 @@ fn convert_named_arg(
     let offset = base.checked_add(call_base).unwrap_or(base);
     let callback_lambda = (arg.name == "by"
         && call_name.is_some_and(|name| matches!(name, "map" | "filter" | "sorted")))
-        || (arg.name == "where" && call_name == Some("extend"));
+        || (arg.name == "where" && call_name == Some("extend"))
+        || (arg.name == "condition"
+            && call_name.is_some_and(|name| matches!(name, "findfirst" | "findall")));
     NamedArg {
         name: arg.name.clone(),
         name_span: offset_span(arg.name_span, offset).unwrap_or(ByteSpan::new(0, 0)),
@@ -4391,6 +4419,71 @@ mod tests {
                 ..
             }) if header.parameters[0].name == "value" && !body.is_empty()
         ));
+    }
+
+    #[test]
+    fn find_conditions_use_contextual_one_argument_lambdas() {
+        let direct =
+            parse_with_diagnostics(".findfirst {1..3} {value: .isgreater {.value} than:{1}}\n");
+        assert!(direct.diagnostics.is_empty(), "{direct:?}");
+        let Block::DirectiveCall { arguments, .. } = &direct.document.nodes[0] else {
+            panic!("expected direct findfirst directive")
+        };
+        assert!(matches!(
+            positional_args(arguments).get(1),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "value" && !body.is_empty()
+        ));
+
+        let named = parse_with_diagnostics(
+            ".findall {1..3} condition:{value: .isgreater {.value} than:{1}}\n",
+        );
+        assert!(named.diagnostics.is_empty(), "{named:?}");
+        let Block::DirectiveCall { arguments, .. } = &named.document.nodes[0] else {
+            panic!("expected named findall directive")
+        };
+        assert!(matches!(
+            named_args(arguments).first().map(|argument| &argument.value),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "value" && !body.is_empty()
+        ));
+
+        let chained = parse_with_diagnostics(
+            ".range from:{1} to:{3}::findfirst {value: .isgreater {.value} than:{1}}\n",
+        );
+        assert!(chained.diagnostics.is_empty(), "{chained:?}");
+        let Block::DirectiveCall { chain, .. } = &chained.document.nodes[0] else {
+            panic!("expected chained findfirst directive")
+        };
+        assert!(matches!(
+            positional_args(&chain[0].arguments).first(),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "value" && !body.is_empty()
+        ));
+
+        let block = parse_with_diagnostics(
+            ".findall {1..3}\n    value:\n    .isgreater {.value} than:{1}\n",
+        );
+        assert!(block.diagnostics.is_empty(), "{block:?}");
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &block.document.nodes[0]
+        else {
+            panic!("expected block findall lambda")
+        };
+        assert_eq!(header.parameters[0].name, "value");
+        assert!(!body.is_empty());
     }
 
     #[test]
