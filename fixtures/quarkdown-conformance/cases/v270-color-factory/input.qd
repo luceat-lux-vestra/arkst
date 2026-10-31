@@ -1,0 +1,7 @@
+.var {accent} {.color red:{12} green:{34} blue:{56}}
+.text {opaque accent} color:{.accent}
+
+.var {faded}
+    .accent::color
+        0.25
+.text {faded accent} color:{.faded}

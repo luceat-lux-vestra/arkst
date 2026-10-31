@@ -16,7 +16,8 @@ use crate::value_conversion::InvocationNamedArg;
 use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
 use arkst_ir::{
-    IrDictionary, IrInline, IrKeybindingPart, IrNode, IrTextDecoration, IrTextScript, IrValue,
+    IrColor, IrDictionary, IrInline, IrKeybindingPart, IrNode, IrTextDecoration, IrTextScript,
+    IrValue,
 };
 #[cfg(test)]
 use arkst_source::SourceId;
@@ -114,6 +115,7 @@ pub(crate) enum BuiltinKind {
     Not,
     And,
     Or,
+    Color,
     EmptyCollection,
     EmptyDictionary,
 }
@@ -555,6 +557,15 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         true,
         BuiltinBodyPolicy::BindRaw,
     ),
+    builtin_spec_with_defaults(
+        "color",
+        BuiltinKind::Color,
+        &["base", "red", "green", "blue", "alpha"],
+        &[0, 1, 2, 3, 4],
+        5,
+        true,
+        BuiltinBodyPolicy::BindRaw,
+    ),
     builtin_spec(
         "emptycollection",
         BuiltinKind::EmptyCollection,
@@ -743,6 +754,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::Equals => evaluate_equals(builtin, arguments),
         BuiltinKind::Not => evaluate_not(builtin, arguments),
         BuiltinKind::And | BuiltinKind::Or => evaluate_boolean_binary(builtin, arguments),
+        BuiltinKind::Color => evaluate_color(arguments),
         BuiltinKind::EmptyCollection => Ok(IrValue::Collection(Vec::new())),
         BuiltinKind::EmptyDictionary => Ok(IrValue::Dictionary(IrDictionary {
             entries: Vec::new(),
@@ -762,6 +774,68 @@ pub(crate) fn evaluate_bound(
                 parameter_index.and_then(|index| parameter_spans.get(index).copied().flatten());
         }
         error
+    })
+}
+
+fn evaluate_color(mut arguments: BoundArguments) -> Result<IrValue, BuiltinError> {
+    let base = arguments
+        .remove(0)
+        .map(|value| {
+            value_conversion::convert_color_with_origin(&value).map_err(|cause| {
+                conversion_error("`.color` `base` must be a Color".to_string(), "base", cause)
+            })
+        })
+        .transpose()?
+        .unwrap_or(IrColor {
+            red: 0,
+            green: 0,
+            blue: 0,
+            alpha: 1.0,
+        });
+
+    let red = color_channel(arguments.remove(0), "red", base.red)?;
+    let green = color_channel(arguments.remove(0), "green", base.green)?;
+    let blue = color_channel(arguments.remove(0), "blue", base.blue)?;
+    let alpha = arguments
+        .remove(0)
+        .map(|value| numeric_argument(&value, "alpha").map(f64::from))
+        .transpose()?
+        .unwrap_or(base.alpha);
+    if !(0.0..=1.0).contains(&alpha) {
+        return Err(conversion_error(
+            "`.color` `alpha` must be between 0 and 1".to_string(),
+            "alpha",
+            value_conversion::ConversionError::InvalidText {
+                target: value_conversion::ConversionTarget::Number,
+            },
+        ));
+    }
+
+    Ok(IrValue::Color(IrColor {
+        red,
+        green,
+        blue,
+        alpha,
+    }))
+}
+
+fn color_channel(
+    argument: Option<InvocationValue>,
+    parameter: &str,
+    default: u8,
+) -> Result<u8, BuiltinError> {
+    let Some(argument) = argument else {
+        return Ok(default);
+    };
+    let value = integer_argument(&argument, parameter)?;
+    u8::try_from(value).map_err(|_| {
+        conversion_error(
+            format!("`.color` `{parameter}` must be between 0 and 255"),
+            parameter,
+            value_conversion::ConversionError::InvalidText {
+                target: value_conversion::ConversionTarget::Integer,
+            },
+        )
     })
 }
 
@@ -2335,7 +2409,8 @@ mod tests {
     };
     use crate::value_conversion::InvocationValue;
     use arkst_ir::{
-        IrCallable, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrSize, IrSizeUnit, IrValue,
+        IrCallable, IrColor, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrSize, IrSizeUnit,
+        IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -4026,6 +4101,66 @@ mod tests {
             true,
         )
         .is_err());
+    }
+
+    #[test]
+    fn color_factory_is_registered_typed_derived_and_range_checked() {
+        let spec = lookup("color").expect("color builtin");
+        assert_eq!(
+            spec.signature.parameter_names,
+            &["base", "red", "green", "blue", "alpha"]
+        );
+        assert_eq!(spec.signature.defaulted_parameters, &[0, 1, 2, 3, 4]);
+        assert_eq!(spec.signature.max_positional, 5);
+        assert_eq!(spec.body_policy, BuiltinBodyPolicy::BindRaw);
+
+        assert_eq!(
+            evaluate("color", &[], &[], false).expect("default color"),
+            IrValue::Color(IrColor {
+                red: 0,
+                green: 0,
+                blue: 0,
+                alpha: 1.0,
+            })
+        );
+
+        let base = IrColor {
+            red: 10,
+            green: 20,
+            blue: 30,
+            alpha: 0.75,
+        };
+        assert_eq!(
+            evaluate(
+                "color",
+                &[IrValue::Color(base)],
+                &[
+                    named_arg("red", number(99.0)),
+                    named_arg("alpha", number(0.4)),
+                ],
+                false,
+            )
+            .expect("derived color"),
+            IrValue::Color(IrColor {
+                red: 99,
+                green: 20,
+                blue: 30,
+                alpha: f64::from(0.4_f32),
+            })
+        );
+
+        for (name, value) in [
+            ("red", number(-1.0)),
+            ("green", number(256.0)),
+            ("blue", number(1.5)),
+            ("alpha", number(f64::NAN)),
+            ("alpha", number(1.01)),
+        ] {
+            assert!(
+                evaluate("color", &[], &[named_arg(name, value)], false).is_err(),
+                "invalid {name} must fail"
+            );
+        }
     }
 
     #[test]

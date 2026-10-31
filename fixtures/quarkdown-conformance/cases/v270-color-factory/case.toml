@@ -1,0 +1,5 @@
+id = "v270-color-factory"
+feature = "typed-color-factory"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-color-factory"
+description = "Typed color construction, base derivation, and final-body alpha binding"
