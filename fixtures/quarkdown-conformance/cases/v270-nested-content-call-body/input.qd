@@ -1,0 +1,5 @@
+.text {.uppercase
+    aurora}
+.var {shade} {blue}
+.text {night} color:{.shade::color
+    0.375}

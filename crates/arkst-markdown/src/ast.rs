@@ -155,6 +155,9 @@ pub enum Inline {
         arguments: Vec<CallArgument>,
         chain: Vec<CallSegment>,
         body: Option<Vec<Inline>>,
+        /// Exact source-backed final body retained when this inline call is
+        /// the complete value of a content argument.
+        raw_body: Option<RawBody>,
         span: ByteSpan,
     },
     Link {

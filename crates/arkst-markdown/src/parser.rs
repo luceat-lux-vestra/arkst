@@ -639,6 +639,7 @@ pub fn parse_inline_with_mode(source: &str, mode: Mode) -> ParseOutput {
     }
 
     let span = ByteSpan::new(0, source.len());
+    let source_text = SourceText::new(source.to_owned());
     let trigger = source.as_bytes()[0];
     let parser = parser_with_content_range(mode, MarkdownProfile::Gfm, Some((span, trigger)));
     let mut reader = BasicReader::new(source);
@@ -685,6 +686,7 @@ pub fn parse_inline_with_mode(source: &str, mode: Mode) -> ParseOutput {
         paragraph,
         source,
         0,
+        &source_text,
         &mut diagnostics,
         InlineConversionContext::ContentArgument,
     );
@@ -1090,6 +1092,7 @@ fn convert_block(
                 node,
                 source,
                 base,
+                source_text,
                 diagnostics,
                 InlineConversionContext::Document,
             ),
@@ -1102,6 +1105,7 @@ fn convert_block(
                 node,
                 source,
                 base,
+                source_text,
                 diagnostics,
                 InlineConversionContext::Document,
             ),
@@ -1156,7 +1160,15 @@ fn convert_block(
                 Some(Block::UnorderedList { items, span })
             }
         }
-        KindData::Table(_) => Some(convert_table(arena, node, source, base, span, diagnostics)),
+        KindData::Table(_) => Some(convert_table(
+            arena,
+            node,
+            source,
+            base,
+            source_text,
+            span,
+            diagnostics,
+        )),
         KindData::CodeBlock(code) => {
             let raw = source.get(span.start.saturating_sub(base)..span.end.saturating_sub(base))?;
             let info = code_info(code, source)
@@ -1246,6 +1258,7 @@ fn convert_table(
     node: NodeRef,
     source: &str,
     base: usize,
+    source_text: &SourceText,
     span: ByteSpan,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Block {
@@ -1254,16 +1267,14 @@ fn convert_table(
     for child in arena[node].children(arena) {
         match arena[child].kind_data() {
             KindData::TableHeader(_) => {
-                header = arena[child]
-                    .children(arena)
-                    .find_map(|row| convert_table_row(arena, row, source, base, diagnostics));
+                header = arena[child].children(arena).find_map(|row| {
+                    convert_table_row(arena, row, source, base, source_text, diagnostics)
+                });
             }
             KindData::TableBody(_) => {
-                rows.extend(
-                    arena[child]
-                        .children(arena)
-                        .filter_map(|row| convert_table_row(arena, row, source, base, diagnostics)),
-                );
+                rows.extend(arena[child].children(arena).filter_map(|row| {
+                    convert_table_row(arena, row, source, base, source_text, diagnostics)
+                }));
             }
             _ => diagnostics.push(ParserDiagnostic {
                 code: "E3011",
@@ -1287,6 +1298,7 @@ fn convert_table_row(
     node: NodeRef,
     source: &str,
     base: usize,
+    source_text: &SourceText,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Option<TableRow> {
     if !matches!(arena[node].kind_data(), KindData::TableRow(_)) {
@@ -1302,6 +1314,7 @@ fn convert_table_row(
                     cell,
                     source,
                     base,
+                    source_text,
                     diagnostics,
                     InlineConversionContext::Document,
                 ),
@@ -1328,6 +1341,12 @@ struct ConversionState<'a> {
     source_text: &'a SourceText,
 }
 
+#[derive(Clone, Copy)]
+struct SourceBacking<'a> {
+    source: &'a str,
+    text: &'a SourceText,
+}
+
 fn directive_block(
     call: QuarkdownCall,
     arena: &Arena,
@@ -1348,6 +1367,10 @@ fn directive_block(
         .unwrap_or(ByteSpan::new(0, 0));
     let span_base = base.checked_add(call_base).unwrap_or(base);
     let call_name = call.name.clone();
+    let source_backing = SourceBacking {
+        source,
+        text: source_text,
+    };
     let raw_body = raw_body_for(span, body_line_ranges);
     let body_nodes = convert_children_blocks(
         arena,
@@ -1365,7 +1388,7 @@ fn directive_block(
         arguments: convert_call_arguments(
             &call.arguments,
             &call_name,
-            source,
+            source_backing,
             base,
             call_base,
             diagnostics,
@@ -1374,7 +1397,9 @@ fn directive_block(
         chain: call
             .chain
             .iter()
-            .map(|segment| convert_call_segment(segment, source, base, call_base, diagnostics))
+            .map(|segment| {
+                convert_call_segment(segment, source_backing, base, call_base, diagnostics)
+            })
             .collect(),
         body: (!body_nodes.is_empty()).then_some(body_nodes),
         raw_body,
@@ -1433,6 +1458,7 @@ fn convert_inlines(
     node: NodeRef,
     source: &str,
     base: usize,
+    source_text: &SourceText,
     diagnostics: &mut Vec<ParserDiagnostic>,
     context: InlineConversionContext,
 ) -> Vec<Inline> {
@@ -1447,7 +1473,15 @@ fn convert_inlines(
             previous = Some(child);
             continue;
         }
-        if let Some(inline) = convert_inline(arena, child, source, base, diagnostics, context) {
+        if let Some(inline) = convert_inline(
+            arena,
+            child,
+            source,
+            base,
+            source_text,
+            diagnostics,
+            context,
+        ) {
             // Rushdown represents the line break between adjacent code spans
             // as a zero-width text node plus a soft-break qualifier. It has no
             // semantic text and belongs to neither code span.
@@ -1688,6 +1722,7 @@ fn convert_inline(
     node: NodeRef,
     source: &str,
     base: usize,
+    source_text: &SourceText,
     diagnostics: &mut Vec<ParserDiagnostic>,
     context: InlineConversionContext,
 ) -> Option<Inline> {
@@ -1717,11 +1752,11 @@ fn convert_inline(
             })
         }
         KindData::Emphasis(_) => Some(Inline::Emphasis {
-            content: convert_inlines(arena, node, source, base, diagnostics, context),
+            content: convert_inlines(arena, node, source, base, source_text, diagnostics, context),
             span,
         }),
         KindData::Strong(_) => Some(Inline::Strong {
-            content: convert_inlines(arena, node, source, base, diagnostics, context),
+            content: convert_inlines(arena, node, source, base, source_text, diagnostics, context),
             span,
         }),
         KindData::CodeSpan(code) => Some(Inline::Code {
@@ -1730,7 +1765,8 @@ fn convert_inline(
         }),
         KindData::Link(link) => Some(Inline::Link {
             content: {
-                let content = convert_inlines(arena, node, source, base, diagnostics, context);
+                let content =
+                    convert_inlines(arena, node, source, base, source_text, diagnostics, context);
                 if matches!(link.link_kind(), rushdown::ast::LinkKind::Auto(_)) {
                     auto_link_content(link, source, base).unwrap_or(content)
                 } else {
@@ -1744,7 +1780,7 @@ fn convert_inline(
             span,
         }),
         KindData::Image(image) => Some(Inline::Image {
-            content: convert_inlines(arena, node, source, base, diagnostics, context),
+            content: convert_inlines(arena, node, source, base, source_text, diagnostics, context),
             destination: checked_value(image.destination(), source)?.to_string(),
             title: image.title_str(source).map(|title| title.into_owned()),
             span,
@@ -1756,7 +1792,7 @@ fn convert_inline(
             span,
         }),
         KindData::Strikethrough(_) => Some(Inline::Strikethrough {
-            content: convert_inlines(arena, node, source, base, diagnostics, context),
+            content: convert_inlines(arena, node, source, base, source_text, diagnostics, context),
             span,
         }),
         KindData::Extension(_) if matches_extension_kind!(arena, node, QuarkdownInline) => {
@@ -1799,6 +1835,10 @@ fn convert_inline(
                 }
             };
             let call_name = call.name.clone();
+            let source_backing = SourceBacking {
+                source,
+                text: source_text,
+            };
             Some(Inline::DirectiveCall {
                 name: call.name,
                 name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
@@ -1806,7 +1846,7 @@ fn convert_inline(
                 arguments: convert_call_arguments(
                     &call.arguments,
                     &call_name,
-                    source,
+                    source_backing,
                     base,
                     0,
                     diagnostics,
@@ -1815,9 +1855,12 @@ fn convert_inline(
                 chain: call
                     .chain
                     .iter()
-                    .map(|segment| convert_call_segment(segment, source, base, 0, diagnostics))
+                    .map(|segment| {
+                        convert_call_segment(segment, source_backing, base, 0, diagnostics)
+                    })
                     .collect(),
                 body: None,
+                raw_body: None,
                 span,
             })
         }
@@ -1863,12 +1906,16 @@ struct ArgConversionMode {
 
 fn convert_arg_with_mode(
     arg: &Arg,
-    source: &str,
+    source: SourceBacking<'_>,
     base: usize,
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
     mode: ArgConversionMode,
 ) -> Value {
+    let SourceBacking {
+        source,
+        text: source_text,
+    } = source;
     match &arg.content {
         ArgContent::Scalar(value) => convert_value(value, arg.span, base, call_base, diagnostics),
         ArgContent::Content(content) => {
@@ -1912,6 +1959,7 @@ fn convert_arg_with_mode(
                         source,
                         span,
                         base,
+                        source_text,
                         diagnostics,
                         mode.target_owns_opaque_markers,
                     );
@@ -1919,6 +1967,7 @@ fn convert_arg_with_mode(
                         source,
                         lambda.body,
                         base,
+                        source_text,
                         diagnostics,
                         mode.target_owns_opaque_markers,
                     );
@@ -1941,6 +1990,7 @@ fn convert_arg_with_mode(
                     source,
                     span,
                     base,
+                    source_text,
                     diagnostics,
                     mode.target_owns_opaque_markers,
                 )),
@@ -1954,6 +2004,7 @@ fn convert_arg_with_mode(
                         source,
                         span,
                         base,
+                        source_text,
                         diagnostics,
                         mode.target_owns_opaque_markers,
                     ))
@@ -1967,6 +2018,7 @@ fn parse_original_content(
     source: &str,
     span: ByteSpan,
     base: usize,
+    source_text: &SourceText,
     diagnostics: &mut Vec<ParserDiagnostic>,
     target_owns_opaque_markers: bool,
 ) -> Vec<Inline> {
@@ -1975,7 +2027,8 @@ fn parse_original_content(
     };
     let trigger = source.as_bytes().get(span.start).copied();
     if let Some(trigger) = trigger {
-        if let Some(inlines) = parse_source_backed_content(source, span, base, trigger, diagnostics)
+        if let Some(inlines) =
+            parse_source_backed_content(source, span, base, source_text, trigger, diagnostics)
         {
             return inlines;
         }
@@ -1997,6 +2050,7 @@ fn parse_source_backed_content(
     source: &str,
     span: ByteSpan,
     base: usize,
+    source_text: &SourceText,
     trigger: u8,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Option<Vec<Inline>> {
@@ -2029,13 +2083,203 @@ fn parse_source_backed_content(
         paragraph,
         source,
         base,
+        source_text,
         diagnostics,
         InlineConversionContext::ContentArgument,
     );
+    let inlines = attach_nested_indented_call_body(inlines, source, source_text, span, base);
     if content_has_legacy_opaque_angle_text(source, span, &inlines) {
         return None;
     }
     Some(inlines)
+}
+
+/// Attaches a source-backed final indented body to a nested call that occupies
+/// the first logical line of a multiline content argument.
+///
+/// The outer content range is the container for this lifecycle: its opening
+/// delimiter is not part of `span`, so indentation remains relative to the
+/// nested call rather than to the call's physical source column. Ambiguous
+/// prefixes, unrelated first-line content, and any non-body continuation keep
+/// the existing inline sequence unchanged.
+fn attach_nested_indented_call_body(
+    mut inlines: Vec<Inline>,
+    source: &str,
+    source_text: &SourceText,
+    span: ByteSpan,
+    base: usize,
+) -> Vec<Inline> {
+    let Some(content_span) = offset_span(span, base) else {
+        return inlines;
+    };
+    let Some(Inline::DirectiveCall {
+        body: None,
+        raw_body: None,
+        span: call_span,
+        ..
+    }) = inlines.first()
+    else {
+        return inlines;
+    };
+    if call_span.start != content_span.start {
+        return inlines;
+    }
+    let Some(separator) = inlines.get(1) else {
+        return inlines;
+    };
+    if !matches!(
+        separator,
+        Inline::HardBreak { .. } | Inline::SoftBreak { .. }
+    ) {
+        return inlines;
+    }
+
+    let separator_span = ByteSpan::new(inline_start(separator), inline_end(separator));
+    let Some(local_call_span) = remove_span_offset(*call_span, base, source) else {
+        return inlines;
+    };
+    let Some(local_separator_span) = remove_span_offset(separator_span, base, source) else {
+        return inlines;
+    };
+    if local_call_span.end != local_separator_span.start || local_separator_span.end >= span.end {
+        return inlines;
+    }
+
+    let body_range = ByteSpan::new(local_separator_span.end, span.end);
+    let Some(prefixes) = nested_body_prefixes(source, body_range, local_call_span.start) else {
+        return inlines;
+    };
+    let Some(body) = trim_nested_body_prefixes(&inlines[2..], &prefixes, source, base) else {
+        return inlines;
+    };
+    if body.is_empty() {
+        return inlines;
+    }
+    let Some(raw_body_span) = offset_span(body_range, base) else {
+        return inlines;
+    };
+
+    let Some(Inline::DirectiveCall {
+        body: call_body,
+        raw_body,
+        span: call_span,
+        ..
+    }) = inlines.first_mut()
+    else {
+        return inlines;
+    };
+    *call_body = Some(body);
+    *raw_body = Some(RawBody {
+        source: source_text.clone(),
+        span: raw_body_span,
+    });
+    call_span.end = content_span.end;
+    inlines.truncate(1);
+    inlines
+}
+
+fn remove_span_offset(span: ByteSpan, base: usize, source: &str) -> Option<ByteSpan> {
+    checked_local_span(
+        ByteSpan::new(span.start.checked_sub(base)?, span.end.checked_sub(base)?),
+        source,
+    )
+}
+
+/// Returns the exact source prefixes removed by the same common-indentation
+/// rule used for block bodies. Every non-blank suffix line must independently
+/// satisfy the Quarkdown two-space-or-tab body predicate.
+fn nested_body_prefixes(source: &str, body: ByteSpan, call_start: usize) -> Option<Vec<ByteSpan>> {
+    let mut line_start = body.start;
+    let mut lines = Vec::new();
+    let mut common_indent = None;
+
+    while line_start < body.end {
+        let line_end = source
+            .get(line_start..body.end)?
+            .find('\n')
+            .map_or(body.end, |offset| line_start + offset + 1);
+        let line = source.get(line_start..line_end)?;
+        let horizontal_indent = line
+            .as_bytes()
+            .iter()
+            .take_while(|byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        if is_blank(line.as_bytes()) {
+            lines.push((line_start, horizontal_indent, true));
+        } else {
+            let segment = Segment::new(line_start, line_end);
+            let indent = body_line_prefix(line.as_bytes(), source, segment, call_start)?;
+            common_indent =
+                Some(common_indent.map_or(indent, |current: usize| current.min(indent)));
+            lines.push((line_start, indent, false));
+        }
+        line_start = line_end;
+    }
+
+    let common_indent = common_indent?;
+    Some(
+        lines
+            .into_iter()
+            .map(|(start, indent, blank)| {
+                ByteSpan::new(start, start + if blank { indent } else { common_indent })
+            })
+            .filter(|span| span.start < span.end)
+            .collect(),
+    )
+}
+
+fn trim_nested_body_prefixes(
+    inlines: &[Inline],
+    prefixes: &[ByteSpan],
+    source: &str,
+    base: usize,
+) -> Option<Vec<Inline>> {
+    let mut trimmed = Vec::with_capacity(inlines.len());
+    for inline in inlines {
+        let Inline::Text { span, .. } = inline else {
+            let local = remove_span_offset(
+                ByteSpan::new(inline_start(inline), inline_end(inline)),
+                base,
+                source,
+            )?;
+            if prefixes
+                .iter()
+                .any(|prefix| local.start < prefix.end && prefix.start < local.end)
+            {
+                return None;
+            }
+            trimmed.push(inline.clone());
+            continue;
+        };
+
+        let local = remove_span_offset(*span, base, source)?;
+        let overlapping: Vec<_> = prefixes
+            .iter()
+            .filter(|prefix| local.start < prefix.end && prefix.start < local.end)
+            .collect();
+        if overlapping.is_empty() {
+            trimmed.push(inline.clone());
+            continue;
+        }
+        let [prefix] = overlapping.as_slice() else {
+            return None;
+        };
+        if prefix.start > local.start {
+            return None;
+        }
+        let start = local.start.max(prefix.end);
+        if start >= local.end {
+            continue;
+        }
+        let content = normalize_text_content(source.get(start..local.end)?);
+        if !content.is_empty() {
+            trimmed.push(Inline::Text {
+                content,
+                span: offset_span(ByteSpan::new(start, local.end), base)?,
+            });
+        }
+    }
+    Some(trimmed)
 }
 
 fn contains_raw_html(arena: &Arena, node: NodeRef) -> bool {
@@ -2122,7 +2366,7 @@ fn content_has_legacy_opaque_angle_text(source: &str, span: ByteSpan, inlines: &
 
 fn convert_call_segment(
     segment: &arkst_quarkdown::CallSegment,
-    source: &str,
+    source: SourceBacking<'_>,
     base: usize,
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
@@ -2151,7 +2395,7 @@ fn convert_call_segment(
 fn convert_call_arguments(
     arguments: &[arkst_quarkdown::CallArgument],
     call_name: &str,
-    source: &str,
+    source: SourceBacking<'_>,
     base: usize,
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
@@ -2197,7 +2441,7 @@ fn convert_call_arguments(
 
 fn convert_named_arg(
     arg: &arkst_quarkdown::NamedArg,
-    source: &str,
+    source: SourceBacking<'_>,
     base: usize,
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,

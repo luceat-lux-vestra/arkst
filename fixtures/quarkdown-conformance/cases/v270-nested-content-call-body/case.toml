@@ -1,0 +1,5 @@
+id = "v270-nested-content-call-body"
+feature = "nested-indented-content-call-body"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-nested-content-call-body"
+description = "Scalar and chained typed calls retain a final indented body inside a content argument"

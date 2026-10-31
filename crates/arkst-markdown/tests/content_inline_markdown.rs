@@ -287,6 +287,140 @@ fn content_arguments_preserve_inline_and_tight_nested_calls() {
 }
 
 #[test]
+fn nested_calls_retain_indented_final_bodies_inside_content_arguments() {
+    let source = ".outer {.inner {red}\n    0.5}";
+    let content = content_for(source);
+    let [Inline::DirectiveCall {
+        name,
+        body: Some(body),
+        raw_body: Some(raw_body),
+        span,
+        ..
+    }] = content.as_slice()
+    else {
+        panic!("expected one nested call with a body, got {content:#?}");
+    };
+    assert_eq!(name, "inner");
+    assert_eq!(source_slice(source, *span), ".inner {red}\n    0.5");
+    assert_eq!(raw_body.source.slice(raw_body.span), Some("    0.5"));
+    let body_text: String = body
+        .iter()
+        .map(|inline| match inline {
+            Inline::Text { content, .. } => content.as_str(),
+            inline => panic!("expected source-backed body text, got {inline:#?}"),
+        })
+        .collect();
+    assert_eq!(body_text, "0.5");
+    let body_span = ByteSpan::new(
+        inline_span(&body[0]).start,
+        inline_span(body.last().expect("non-empty body")).end,
+    );
+    assert_eq!(source_slice(source, body_span), "0.5");
+    assert_inline_spans(source, &content);
+}
+
+#[test]
+fn nested_call_bodies_keep_existing_inline_markdown_nodes() {
+    let source = ".outer {.inner\n    **bold** and `code`}";
+    let content = content_for(source);
+    let [Inline::DirectiveCall {
+        body: Some(body),
+        raw_body: Some(raw_body),
+        ..
+    }] = content.as_slice()
+    else {
+        panic!("expected one nested call with rich body, got {content:#?}");
+    };
+    assert!(matches!(
+        body.as_slice(),
+        [
+            Inline::Strong { .. },
+            Inline::Text { content, .. },
+            Inline::Code { .. }
+        ] if content == " and "
+    ));
+    assert_eq!(
+        raw_body.source.slice(raw_body.span),
+        Some("    **bold** and `code`")
+    );
+    assert_inline_spans(source, &content);
+}
+
+#[test]
+fn nested_chained_call_bodies_preserve_utf8_crlf_and_common_indentation() {
+    let source = ".outer {.base::inner\r\n\t한글\r\n\t  둘}";
+    let content = content_for(source);
+    let [Inline::DirectiveCall {
+        chain,
+        body: Some(body),
+        span,
+        ..
+    }] = content.as_slice()
+    else {
+        panic!("expected one nested chained call with a body, got {content:#?}");
+    };
+    assert_eq!(chain.len(), 1);
+    assert_eq!(chain[0].name, "inner");
+    assert_eq!(
+        source_slice(source, *span),
+        ".base::inner\r\n\t한글\r\n\t  둘"
+    );
+    let text: String = body
+        .iter()
+        .filter_map(|inline| match inline {
+            Inline::Text { content, .. } => Some(content.as_str()),
+            Inline::SoftBreak { .. } => None,
+            inline => panic!("unexpected nested body inline {inline:#?}"),
+        })
+        .collect();
+    assert_eq!(text, "한글  둘");
+    assert!(body.iter().any(|inline| matches!(
+        inline,
+        Inline::SoftBreak { span } if source_slice(source, *span) == "\r\n"
+    )));
+    assert_inline_spans(source, &content);
+}
+
+#[test]
+fn ambiguous_nested_call_indentation_remains_adjacent_content() {
+    for source in [
+        ".outer {.inner\n body}",
+        ".outer {.inner\n    body\ntail}",
+        ".outer {prefix .inner\n    body}",
+    ] {
+        let content = content_for(source);
+        assert!(
+            content
+                .iter()
+                .any(|inline| matches!(inline, Inline::DirectiveCall { body: None, .. })),
+            "{source:?}: {content:#?}"
+        );
+        assert!(
+            content.len() > 1,
+            "{source:?}: adjacent content was swallowed"
+        );
+        assert_inline_spans(source, &content);
+    }
+}
+
+fn inline_span(inline: &Inline) -> ByteSpan {
+    match inline {
+        Inline::Text { span, .. }
+        | Inline::Emphasis { span, .. }
+        | Inline::Strong { span, .. }
+        | Inline::DirectiveCall { span, .. }
+        | Inline::Link { span, .. }
+        | Inline::Image { span, .. }
+        | Inline::Code { span, .. }
+        | Inline::RawHtml { span, .. }
+        | Inline::Strikethrough { span, .. }
+        | Inline::Unsupported { span, .. }
+        | Inline::HardBreak { span }
+        | Inline::SoftBreak { span } => *span,
+    }
+}
+
+#[test]
 fn markdown_structure_and_tight_calls_can_coexist() {
     let source = ".outer {**before {.inner {x}} after**}";
     let content = content_for(source);
