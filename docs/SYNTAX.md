@@ -403,6 +403,31 @@ components remain outside this slice. A rich block result that cannot be
 represented in an inline context is rejected with a source-backed diagnostic
 rather than flattened or dropped.
 
+### Typed color construction (Quarkdown v2.7.0)
+
+`.color` constructs the existing typed Color value. With no arguments it
+returns opaque black. An explicit base supplies every omitted channel, while
+`red`, `green`, `blue`, and `alpha` replace only their matching channels:
+
+```text
+.color red:{12} green:{34} blue:{56}
+.var {accent} {#4290F5}
+.accent::color alpha:{0.25}
+.var {faded}
+    .accent::color
+        0.25
+```
+
+All five direct parameters may bind positionally or by name; a chained call
+receives `base` implicitly, and an indented body binds the final `alpha` slot.
+RGB components require integers in `0..=255`; alpha uses the existing numeric
+boundary in `0.0..=1.0`. Invalid conversion, range, duplicate, or arity shapes
+fail atomically with source-backed diagnostics. The factory returns
+`IrValue::Color(IrColor)` and adds no renderer-specific representation. The
+shown block-value body form is supported; attaching an indented nested-call
+body from inside a multiline content argument remains tracked by #690 and is
+not silently flattened or claimed by this slice.
+
 ### First-class callable values and collection transforms
 
 The evaluator supports a typed first-class callable value. The explicit

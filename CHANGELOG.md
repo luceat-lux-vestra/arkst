@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.7 typed color factory (#689):** `.color` now constructs the
+  existing backend-neutral Color value from opaque-black defaults or a typed
+  base, with checked RGB/alpha overrides, positional/named/chained and block
+  final-body binding, atomic failures, and source-defined function precedence.
+  Existing Color consumers receive the result without a new IR or Typst path;
+  the broader nested-content body form remains tracked by #690.
+
 - **Quarkdown v2.7 typed predicate search (#685):** `.findfirst` and `.findall`
   now apply existing one-argument Boolean callables to supported finite typed
   iterables. They preserve original element types, order, and duplicates;

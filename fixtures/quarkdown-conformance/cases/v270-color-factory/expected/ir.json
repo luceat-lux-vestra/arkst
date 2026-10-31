@@ -1,0 +1,121 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "TextColor": {
+              "color": {
+                "red": 12,
+                "green": 34,
+                "blue": 56,
+                "alpha": 1.0
+              },
+              "content": [
+                {
+                  "Text": {
+                    "content": "opaque",
+                    "span": {
+                      "source_id": 1,
+                      "start": 60,
+                      "end": 66
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "content": " accent",
+                    "span": {
+                      "source_id": 1,
+                      "start": 66,
+                      "end": 73
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 53,
+                "end": 90
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 60,
+          "end": 73
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "TextColor": {
+              "color": {
+                "red": 12,
+                "green": 34,
+                "blue": 56,
+                "alpha": 0.25
+              },
+              "content": [
+                {
+                  "Text": {
+                    "content": "faded",
+                    "span": {
+                      "source_id": 1,
+                      "start": 144,
+                      "end": 149
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "content": " accent",
+                    "span": {
+                      "source_id": 1,
+                      "start": 149,
+                      "end": 156
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 137,
+                "end": 172
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 144,
+          "end": 156
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}
