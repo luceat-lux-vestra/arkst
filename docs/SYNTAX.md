@@ -178,6 +178,14 @@ Call syntax has the following properties:
 - Braced arguments may span physical lines, including nested braces. Their
   indentation is preserved as source content and is not a fixed-width syntax
   rule.
+- When a nested call occupies the complete first logical line of a multiline
+  content argument, a following suffix whose non-blank lines all satisfy the
+  ordinary two-space-or-tab body predicate becomes that call's final indented
+  body. The frontend removes only the common body indentation and retains the
+  exact source-backed raw range for value conversion. Direct and chained calls
+  use the same rule. A prefix before the call, an under-indented line, or any
+  non-body continuation leaves the suffix as adjacent content; the parser does
+  not guess across an ambiguous boundary.
 - Arkst's bounded #164 grammar/frontend slice transactionally probes the
   optional separator before the first and subsequent arguments and before
   `::`; a separate root-level suffix accepts exactly one trailing continuation
@@ -424,9 +432,10 @@ RGB components require integers in `0..=255`; alpha uses the existing numeric
 boundary in `0.0..=1.0`. Invalid conversion, range, duplicate, or arity shapes
 fail atomically with source-backed diagnostics. The factory returns
 `IrValue::Color(IrColor)` and adds no renderer-specific representation. The
-shown block-value body form is supported; attaching an indented nested-call
-body from inside a multiline content argument remains tracked by #690 and is
-not silently flattened or claimed by this slice.
+shown block-value body form and the equivalent nested-call form inside a
+multiline content argument are supported through the same source-backed final
+body binding. This includes direct and chained typed Color production without
+introducing a renderer-specific representation.
 
 ### First-class callable values and collection transforms
 

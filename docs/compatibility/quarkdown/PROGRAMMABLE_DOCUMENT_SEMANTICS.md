@@ -253,9 +253,14 @@ unmodified channels, RGB overrides require integers in `0..=255`, and alpha
 uses the existing floating-number boundary in `0.0..=1.0`. Its result is the
 existing `IrValue::Color(IrColor)` and composes with existing Color consumers;
 no new IR or backend representation is introduced. Other color/style consumers
-remain deferred. Nested indented call bodies inside multiline content arguments
-remain the separate frontend/value-context gap #690; the supported final-body
-path is source-backed block-value evaluation.
+remain deferred. #690 closes the shared frontend/value-context boundary for an
+eligible nested call that occupies the first logical line of a multiline
+content argument: the Markdown AST retains both parsed inline body nodes and
+the exact source-backed raw body, AST-to-IR carries both into the ordinary call
+representation, and the existing binder performs final-parameter conversion.
+Direct, chained, scalar, typed Color, and source-defined functions share that
+path. Under-indented, mixed, or prefixed ambiguous continuations remain
+adjacent content rather than being reclassified.
 
 ### Layout classification
 

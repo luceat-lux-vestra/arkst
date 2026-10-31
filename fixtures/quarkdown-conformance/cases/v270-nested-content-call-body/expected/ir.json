@@ -1,0 +1,84 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "AURORA",
+              "span": {
+                "source_id": 1,
+                "start": 6,
+                "end": 29
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 6,
+          "end": 29
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "TextColor": {
+              "color": {
+                "red": 0,
+                "green": 0,
+                "blue": 255,
+                "alpha": 0.375
+              },
+              "content": [
+                {
+                  "Text": {
+                    "content": "night",
+                    "span": {
+                      "source_id": 1,
+                      "start": 56,
+                      "end": 63
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 50,
+                "end": 95
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 56,
+          "end": 63
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}

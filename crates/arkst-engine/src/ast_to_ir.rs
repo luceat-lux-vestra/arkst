@@ -704,6 +704,7 @@ fn inline_to_ir(
             arguments,
             chain,
             body,
+            raw_body: _,
             span,
         } => {
             let (ir_positional, ir_named, ordered_args) =
@@ -867,6 +868,7 @@ fn content_value_to_ir(
         arguments,
         chain,
         body,
+        raw_body,
         span,
     }] = inlines
     {
@@ -886,7 +888,7 @@ fn content_value_to_ir(
                 ordered_args: Some(ordered_args),
                 lambda_parameters: None,
                 body: ir_body,
-                raw_body: None,
+                raw_body: raw_body.as_ref().map(raw_body_to_ir),
                 span: byte_to_source_span(span, source_id),
             }])
         } else {
@@ -905,7 +907,7 @@ fn content_value_to_ir(
                     .collect::<Option<Vec<_>>>()?,
                 lambda_parameters: None,
                 body: ir_body,
-                raw_body: None,
+                raw_body: raw_body.as_ref().map(raw_body_to_ir),
                 span: byte_to_source_span(span, source_id),
             }])
         }
@@ -936,6 +938,7 @@ fn inline_lambda_body_to_ir(
             arguments,
             chain,
             body,
+            raw_body: _,
             span,
         }] => {
             let (positional_args, named_args, ordered_args) =
@@ -1209,6 +1212,61 @@ mod tests {
         assert_eq!(&source[head.span.start..head.span.end], ".a {x}");
         assert_eq!(&source[chain[0].span.start..chain[0].span.end], "b {y}");
         assert_eq!(&source[span.start..span.end], ".a {x}::b {y}");
+    }
+
+    #[test]
+    fn nested_indented_content_call_body_survives_ast_to_ir() {
+        let source = "---\ntitle: Nested\n---\n\n.outer {.base::inner {red}\n    0.5}";
+        let document = arkst_markdown::parse_qd(source);
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            Mode::Quarkdown,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let [IrNode::FunctionCall {
+            positional_args, ..
+        }] = ir.nodes.as_slice()
+        else {
+            panic!("expected outer call, got {:?}", ir.nodes)
+        };
+        let [arkst_ir::IrValue::Content(content)] = positional_args.as_slice() else {
+            panic!("expected one content argument, got {positional_args:?}")
+        };
+        let [IrNode::ChainedFunctionCall {
+            head,
+            chain,
+            body: Some(body),
+            raw_body: Some(raw_body),
+            span,
+            ..
+        }] = content.as_slice()
+        else {
+            panic!("expected nested chained call with a body, got {content:?}")
+        };
+        assert_eq!(head.name, "base");
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].name, "inner");
+        assert_eq!(&source[span.start..span.end], ".base::inner {red}\n    0.5");
+        assert_eq!(raw_body.source.slice(raw_body.span), Some("    0.5"));
+        let [IrNode::Paragraph { content, .. }] = body.as_slice() else {
+            panic!("expected one inline body paragraph, got {body:?}")
+        };
+        assert!(content
+            .iter()
+            .all(|inline| matches!(inline, IrInline::Text { .. })));
+        assert_eq!(
+            content
+                .iter()
+                .filter_map(|inline| match inline {
+                    IrInline::Text { content, .. } => Some(content.as_str()),
+                    _ => None,
+                })
+                .collect::<String>(),
+            "0.5"
+        );
     }
 
     #[test]
