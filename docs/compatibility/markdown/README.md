@@ -45,22 +45,22 @@ silently flattening the syntax into another Markdown node.
 | Feature | Rushdown parses? | Arkst frontend AST? | IR? | Typst lowering? | PDF E2E? | Status / gap |
 |---|---:|---:|---:|---:|---:|---|
 | Paragraphs | Yes | Yes | Yes | Yes | Yes | Representative fixture coverage. |
-| ATX headings | Yes | Yes | Yes | Yes | Yes | Heading level preserved. |
-| Setext headings | Yes | Yes | Yes | Yes | Yes | Heading level preserved; delimiter kind is not currently carried. |
+| ATX headings | Yes | Yes | Yes | Yes | Yes | Heading level preserved, including an empty bare marker as a separate heading in the exact v2.6.3 regression case. |
+| Setext headings | Yes | Yes | Yes | Yes | Yes | Heading level and every line of multiline content are preserved; delimiter kind is not currently carried. |
 | Thematic breaks | Yes | Yes | Yes | Yes | Yes | Lowered to a Typst line. |
 | Blockquotes | Yes | Yes | Yes | Yes | Yes | Nested blockquotes are recursive. |
 | Unordered lists | Yes | Yes | Yes | Yes | Yes | Nested and mixed list content is retained. |
-| Ordered lists | Yes | Yes | Yes | Yes | Yes | Start ordinal is retained. |
+| Ordered lists | Yes | Yes | Yes | Yes | Yes | Start ordinal is retained, including starts above nine in the exact v2.6.3 regression case. |
 | GFM task lists | Yes | Yes | Yes | Yes | Yes | Active/completed task state is retained. |
 | Fenced code blocks | Yes | Yes | Yes | Yes | Yes | Body and first-token language are lowered; full info string is retained in AST/IR. The independent v2.6.2 regression fixture preserves an empty fence and selected real-Typst PDF non-failure. |
 | Indented code blocks | Yes | Yes | Yes | Yes | Yes | Lowered as code block without a language. The v2.6.2 regression evidence confirms that a four-space-only line immediately after content stays blank rather than fabricating an empty block. |
 | GFM tables | Yes | Yes | Yes | Yes | Yes | Alignment and nested inline structure are retained. |
-| Plain text | Yes | Yes | Yes | Yes | Yes | Original source spans are retained. |
-| Emphasis | Yes | Yes | Yes | Yes | Yes | Nested inline structure is retained. |
+| Plain text | Yes | Yes | Yes | Yes | Yes | Original source spans are retained; a tabs-only line separates adjacent paragraphs in the exact v2.6.3 regression case. |
+| Emphasis | Yes | Yes | Yes | Yes | Yes | Nested inline structure is retained, including outer emphasis continuing after nested strong content closes. |
 | Strong | Yes | Yes | Yes | Yes | Yes | Nested inline structure is retained. |
 | Strikethrough | Yes | Yes | Yes | Yes | Yes | GFM extension; covered by existing and baseline tests. |
 | Inline code | Yes | Yes | Yes | Yes | Yes | Opaque code-span content is preserved. |
-| Links | Yes | Yes | Yes | Yes | Yes | Label, destination, title metadata, and source span are retained; Typst emits clickable links. |
+| Links | Yes | Yes | Yes | Yes | Yes | Label, destination, title metadata, and source span are retained, including four nested levels of balanced destination parentheses; Typst emits clickable links. |
 | Images | Yes | Yes | Yes | Yes | Yes | Inline and reference images retain nested alt content, logical destination, title, and source span. Project-relative local images resolve from the source entry directory through the explicit Typst source context; absolute paths and URI schemes are rejected with E8001, and no network fetching is performed. The current differential run has no image-related known mismatch. |
 | Soft line breaks | Yes | Yes | Yes | Yes | Yes | Preserved as an IR break and lowered as a Typst newline; UTF-8 + CRLF is covered end-to-end. |
 | Hard line breaks | Yes | Yes | Yes | Yes | Yes | Backslash/two-space delimiter and UTF-8 + CRLF span remain source-backed; lowered as Typst hard break and PDF-tested. |

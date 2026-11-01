@@ -4039,6 +4039,65 @@ fn integration_v262_empty_code_regressions_compile_to_valid_pdf() {
 }
 
 #[test]
+fn integration_v263_commonmark_regressions_compile_to_valid_pdf() {
+    let source = include_str!(
+        "../../../fixtures/quarkdown-conformance/cases/v263-commonmark-regressions/input.qd"
+    );
+    let project = VirtualProjectBuilder::new()
+        .entry("v263-commonmark-regressions.qd")
+        .expect("valid entry path")
+        .add_source("v263-commonmark-regressions.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "v2.6.3 regression fixture diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(matches!(
+        result.ir.nodes.get(1),
+        Some(IrNode::OrderedList { start: 17, items, .. }) if items.len() == 2
+    ));
+    assert!(matches!(
+        result.ir.nodes.get(3),
+        Some(IrNode::Heading { level: 3, content, .. }) if content.is_empty()
+    ));
+    assert!(result.ir.nodes.iter().any(|node| matches!(
+        node,
+        IrNode::Paragraph { content, .. }
+            if matches!(
+                content.as_slice(),
+                [IrInline::Link { destination, .. }]
+                    if destination == "https://example.test/a(b(c(d)))"
+            )
+    )));
+    assert!(matches!(
+        result.ir.nodes.last(),
+        Some(IrNode::Heading { level: 1, content, .. })
+            if content.iter().any(|inline| matches!(inline, IrInline::SoftBreak { .. }))
+    ));
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("#emph[*Atlas core* trailing veil]"));
+    assert!(typst_code.contains("#link(\"https://example.test/a(b(c(d)))\")"));
+
+    with_typst("v263-commonmark-regressions", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "v263-commonmark-regressions.qd".to_string(),
+            })
+            .expect("v2.6.3 CommonMark regressions must compile through real Typst");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_markdown_utf8_crlf_breaks_lower_and_compile_to_pdf() {
     use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
