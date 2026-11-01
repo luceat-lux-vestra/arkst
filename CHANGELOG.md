@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.6.3 CommonMark regression evidence (#701):** an
+  independently authored exact-version case now preserves nested emphasis,
+  ordered-list starts above nine, bare ATX headings, tabs-only paragraph
+  separation, four-level nested link destinations, and multiline setext content.
+  Focused frontend assertions and a selected Typst v0.15.1 PDF test close this
+  six-case evidence gap without changing compiler behavior; decorative `#!`
+  heading semantics remain separately blocked on architecture decision #700.
+
 - **Quarkdown v2.6.2 empty-code regression evidence (#697):** an
   independently authored exact-version case now proves that a trailing
   four-space-only line stays blank while an empty fenced block retains its

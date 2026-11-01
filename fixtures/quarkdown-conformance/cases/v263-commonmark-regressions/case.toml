@@ -1,0 +1,5 @@
+id = "v263-commonmark-regressions"
+feature = "markdown-commonmark-regressions"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.3-commonmark-regressions"
+description = "Six CommonMark regression boundaries retain their nested inline and block structures"
