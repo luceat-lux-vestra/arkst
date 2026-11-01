@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.7 dictionary-variable iterable evidence (#693):** an
+  independently authored exact-version conformance case now verifies that an
+  ordered Dictionary stored in a variable remains typed through `.size`,
+  `.foreach`, `.join`, and `.withindices`. This closes the release-note
+  regression evidence gap without changing compiler semantics or the v2.6.0
+  verified baseline.
+
 - **Nested content-call bodies (#690):** a call that occupies the first line of
   a multiline content argument now retains its final indented body through the
   Markdown AST, source-backed raw-body boundary, IR, and evaluation. Direct,

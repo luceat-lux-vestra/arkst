@@ -306,3 +306,8 @@ basis = "Created for #689 from the public v2.7.0 color signature and independent
 id = "v270-nested-content-call-body"
 status = "INDEPENDENT"
 basis = "Created for #690 from public nested-call and indented-body syntax plus independently authored official v2.7.0 binary probes; the labels, values, and composition are Arkst-authored and do not copy upstream tests, fixtures, or documentation examples."
+
+[[fixture]]
+id = "v270-dictionary-variable-iterables"
+status = "INDEPENDENT"
+basis = "Created for #693 from the public v2.7.0 dictionary-variable regression note and independently authored official-binary probes; the compass labels, values, and consumer composition are Arkst-authored and do not copy upstream tests, fixtures, or documentation examples."

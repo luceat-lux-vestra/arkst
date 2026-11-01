@@ -1,0 +1,250 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "size=",
+              "span": {
+                "source_id": 1,
+                "start": 81,
+                "end": 86
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "2",
+              "span": {
+                "source_id": 1,
+                "start": 86,
+                "end": 100
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 81,
+          "end": 100
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "east",
+              "span": {
+                "source_id": 1,
+                "start": 140,
+                "end": 144
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "=",
+              "span": {
+                "source_id": 1,
+                "start": 144,
+                "end": 145
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "dawn",
+              "span": {
+                "source_id": 1,
+                "start": 47,
+                "end": 51
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 140,
+          "end": 151
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "west",
+              "span": {
+                "source_id": 1,
+                "start": 140,
+                "end": 144
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "=",
+              "span": {
+                "source_id": 1,
+                "start": 144,
+                "end": 145
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "dusk",
+              "span": {
+                "source_id": 1,
+                "start": 68,
+                "end": 72
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 140,
+          "end": 151
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "east",
+              "span": {
+                "source_id": 1,
+                "start": 201,
+                "end": 205
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "=",
+              "span": {
+                "source_id": 1,
+                "start": 205,
+                "end": 206
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "dawn",
+              "span": {
+                "source_id": 1,
+                "start": 47,
+                "end": 51
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "|",
+              "span": {
+                "source_id": 1,
+                "start": 179,
+                "end": 180
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "west",
+              "span": {
+                "source_id": 1,
+                "start": 201,
+                "end": 205
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "=",
+              "span": {
+                "source_id": 1,
+                "start": 205,
+                "end": 206
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "dusk",
+              "span": {
+                "source_id": 1,
+                "start": 68,
+                "end": 72
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 201,
+          "end": 212
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "indexed-size=",
+              "span": {
+                "source_id": 1,
+                "start": 221,
+                "end": 234
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "2",
+              "span": {
+                "source_id": 1,
+                "start": 234,
+                "end": 261
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 221,
+          "end": 261
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}

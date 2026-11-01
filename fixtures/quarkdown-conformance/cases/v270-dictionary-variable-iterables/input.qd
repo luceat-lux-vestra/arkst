@@ -1,0 +1,16 @@
+.var {records}
+    .dictionary
+        - east: dawn
+        - west: dusk
+
+.text {size=.records::size}
+
+.records::foreach
+    key value:
+    .key=.value
+
+.records::join separator:{|}
+    key value:
+    .key=.value
+
+.text {indexed-size=.records::withindices::size}
