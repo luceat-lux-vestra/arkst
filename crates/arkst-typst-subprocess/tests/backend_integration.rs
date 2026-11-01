@@ -908,7 +908,7 @@ fn integration_pageformat_columns_lowers_to_valid_typst_and_pdf() {
 #[test]
 fn integration_pageformat_standard_size_lowers_to_valid_typst_and_pdf() {
     let source =
-        ".doctype {paged}\n.pageformat size:{a4} orientation:{landscape}\nStandard size output\n";
+        ".doctype {paged}\n.pageformat {a4} orientation:{landscape}\nStandard size output\n";
     let project = VirtualProjectBuilder::new()
         .entry("pageformat-standard-size.qd")
         .expect("valid entry path")

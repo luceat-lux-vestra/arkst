@@ -1,0 +1,72 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Positional A4 page evidence",
+              "span": {
+                "source_id": 1,
+                "start": 59,
+                "end": 86
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 86,
+                "end": 87
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 59,
+          "end": 87
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Paged",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      },
+      "page_size": {
+        "format": "A4",
+        "orientation": "Landscape",
+        "document_type": "Paged"
+      },
+      "page_format": {
+        "layers": [
+          {
+            "size": {
+              "format": "A4",
+              "orientation": "Landscape",
+              "document_type": "Paged"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

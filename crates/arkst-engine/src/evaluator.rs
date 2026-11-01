@@ -4484,10 +4484,47 @@ impl Evaluator {
             && raw_body.is_none()
             && lambda_parameters.is_none()
             && implicit_argument.is_none()
-            && positional_args.is_empty()
-            && bounded_pageformat_shape(named_args)
+            && bounded_pageformat_shape(!positional_args.is_empty(), named_args)
         {
-            return self.evaluate_page_format_builtin(named_args, span, diagnostics, context);
+            let parameters = pageformat_binding_parameters();
+            let binding_plan = match self.preflight_binding(
+                &parameters,
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                BodyPolicy::Reject,
+                *span,
+                "E3003",
+                Some(name),
+                None,
+                false,
+                diagnostics,
+            ) {
+                Ok(plan) => plan,
+                Err(()) => return CallOutcome::Failed,
+            };
+            let candidates = match self.evaluate_invocation_candidates(
+                ordered_args,
+                positional_args,
+                named_args,
+                span,
+                diagnostics,
+                context,
+                None,
+                None,
+            ) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+            let bound = match binding_plan.bind(&candidates, None, *span) {
+                Ok(bound) => bound,
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                    return CallOutcome::Failed;
+                }
+            };
+            return self.evaluate_page_format_builtin(bound, span, diagnostics, context);
         }
 
         let native_binding_plan = match self.preflight_native_binding(
@@ -9546,17 +9583,11 @@ impl Evaluator {
 
     fn evaluate_page_format_builtin(
         &self,
-        named_args: &[IrNamedArg],
+        bound: invocation_binder::BoundInvocation<InvocationValue>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        let evaluated_named =
-            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
-                Ok(values) => values,
-                Err(outcome) => return outcome,
-            };
-
         let mut page_side = None;
         let mut page_range = None;
         let mut alignment = None;
@@ -9573,13 +9604,15 @@ impl Evaluator {
         let mut border_color = None;
         let mut background = None;
 
-        for argument in evaluated_named {
-            let candidate_span = argument.arg.span;
-            let parameter = argument.arg.name.clone();
-            let value = InvocationValue {
-                value: argument.arg.value,
-                origin: argument.origin,
+        for (slot, parameter) in bound.slots.into_iter().zip(bound.parameters) {
+            let BoundSlot::Explicit {
+                value,
+                span: candidate_span,
+            } = slot
+            else {
+                continue;
             };
+            let parameter = parameter.name;
             match parameter.as_str() {
                 "side" => {
                     if !matches!(&value.value, IrValue::None) {
@@ -18675,14 +18708,34 @@ fn bind_whitespace_arguments(
     })
 }
 
-fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
+fn pageformat_binding_parameters() -> Vec<ParameterMetadata<'static>> {
+    vec![
+        ParameterMetadata::optional("size"),
+        ParameterMetadata::optional("side").positional(false),
+        ParameterMetadata::optional("pages").positional(false),
+        ParameterMetadata::optional("orientation").positional(false),
+        ParameterMetadata::optional("width").positional(false),
+        ParameterMetadata::optional("height").positional(false),
+        ParameterMetadata::optional("margin").positional(false),
+        ParameterMetadata::optional("bordertop").positional(false),
+        ParameterMetadata::optional("borderright").positional(false),
+        ParameterMetadata::optional("borderbottom").positional(false),
+        ParameterMetadata::optional("borderleft").positional(false),
+        ParameterMetadata::optional("bordercolor").positional(false),
+        ParameterMetadata::optional("background").positional(false),
+        ParameterMetadata::optional("columns").positional(false),
+        ParameterMetadata::optional("alignment").positional(false),
+    ]
+}
+
+fn bounded_pageformat_shape(positional_size: bool, named_args: &[IrNamedArg]) -> bool {
     let mut side = false;
     let mut pages = false;
     let mut width = false;
     let mut height = false;
     let mut alignment = false;
     let mut columns = false;
-    let mut page_size = false;
+    let mut named_page_size = false;
     let mut orientation = false;
     let mut margin = false;
     let mut decorations = BTreeSet::new();
@@ -18718,7 +18771,7 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
             "height" => &mut height,
             "alignment" => &mut alignment,
             "columns" => &mut columns,
-            "size" => &mut page_size,
+            "size" => &mut named_page_size,
             "orientation" => &mut orientation,
             "margin" => &mut margin,
             _ => return false,
@@ -18731,6 +18784,8 @@ fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
         }
         *seen = true;
     }
+
+    let page_size = positional_size || named_page_size;
 
     let base_payload_supported = if !decorations.is_empty() {
         !width && !height && !alignment && !columns && !page_size && !orientation && !margin
