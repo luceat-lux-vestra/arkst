@@ -3986,6 +3986,59 @@ fn integration_commonmark_gfm_baseline_fixture_compiles_to_valid_pdf() {
 }
 
 #[test]
+fn integration_v262_empty_code_regressions_compile_to_valid_pdf() {
+    let source = include_str!(
+        "../../../fixtures/quarkdown-conformance/cases/v262-empty-code-regressions/input.qd"
+    );
+    let project = VirtualProjectBuilder::new()
+        .entry("v262-empty-code-regressions.qd")
+        .expect("valid entry path")
+        .add_source("v262-empty-code-regressions.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "v2.6.2 regression fixture diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(matches!(
+        result.ir.nodes.as_slice(),
+        [
+            IrNode::Paragraph { .. },
+            IrNode::Paragraph { .. },
+            IrNode::CodeBlock {
+                language: Some(language),
+                info: Some(info),
+                source,
+                ..
+            },
+            IrNode::Paragraph { .. },
+        ] if language == "text" && info == "text" && source.is_empty()
+    ));
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("```text\n\n```"),
+        "empty fenced block must survive lowering: {typst_code:?}"
+    );
+
+    with_typst("v262-empty-code-regressions", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "v262-empty-code-regressions.qd".to_string(),
+            })
+            .expect("empty fenced code must compile through real Typst");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_markdown_utf8_crlf_breaks_lower_and_compile_to_pdf() {
     use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 

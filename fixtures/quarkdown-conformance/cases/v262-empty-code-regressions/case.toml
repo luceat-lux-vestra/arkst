@@ -1,0 +1,5 @@
+id = "v262-empty-code-regressions"
+feature = "markdown-empty-code-regressions"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.2-empty-code-regressions"
+description = "A trailing four-space-only line stays blank while an empty fenced block remains semantic code content"

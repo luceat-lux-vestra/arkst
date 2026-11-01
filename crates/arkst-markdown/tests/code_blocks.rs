@@ -84,6 +84,42 @@ fn empty_and_unclosed_fenced_nodes_keep_original_opening_spans() {
 }
 
 #[test]
+fn v262_trailing_whitespace_stays_blank_and_empty_fence_keeps_crlf_span() {
+    let source = "Alpha α\r\n    \r\nOmega\r\n\r\n```text\r\n```\r\n";
+    let document = parse_md(source);
+
+    let [Block::Paragraph {
+        span: alpha_span, ..
+    }, Block::Paragraph {
+        span: omega_span, ..
+    }, Block::CodeBlock {
+        language,
+        info,
+        source: body,
+        span: code_span,
+    }] = document.nodes.as_slice()
+    else {
+        panic!(
+            "four-space-only line must not fabricate a code block: {:?}",
+            document.nodes
+        );
+    };
+
+    assert_eq!(
+        source.get(alpha_span.start..alpha_span.end),
+        Some("Alpha α")
+    );
+    assert_eq!(source.get(omega_span.start..omega_span.end), Some("Omega"));
+    assert_eq!(language.as_deref(), Some("text"));
+    assert_eq!(info.as_deref(), Some("text"));
+    assert!(body.is_empty());
+    assert_eq!(
+        source.get(code_span.start..code_span.end),
+        Some("```text\r\n```\r\n")
+    );
+}
+
+#[test]
 fn blockquote_empty_fences_do_not_absorb_sibling_source() {
     let source = "> ```\nfoo\n```\n";
     let document = parse_md(source);

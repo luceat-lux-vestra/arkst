@@ -8,6 +8,8 @@
 *.md text diff=markdown
 # This fixture intentionally retains CRLF for parser line-ending coverage.
 fixtures/markdown/real/12-line-endings-crlf.md -text whitespace=cr-at-eol
+# This regression fixture intentionally retains a four-space-only line.
+fixtures/quarkdown-conformance/cases/v262-empty-code-regressions/input.qd whitespace=-blank-at-eol
 
 # Typst
 *.typ text
