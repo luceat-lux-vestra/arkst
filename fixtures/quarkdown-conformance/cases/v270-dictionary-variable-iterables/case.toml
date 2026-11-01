@@ -1,0 +1,5 @@
+id = "v270-dictionary-variable-iterables"
+feature = "dictionary-variable-iterable-regression"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-dictionary-variable-iterables"
+description = "An ordered Dictionary stored in a variable remains typed across representative Iterable consumers"
