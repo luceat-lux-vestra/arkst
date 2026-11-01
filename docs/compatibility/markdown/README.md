@@ -52,8 +52,8 @@ silently flattening the syntax into another Markdown node.
 | Unordered lists | Yes | Yes | Yes | Yes | Yes | Nested and mixed list content is retained. |
 | Ordered lists | Yes | Yes | Yes | Yes | Yes | Start ordinal is retained. |
 | GFM task lists | Yes | Yes | Yes | Yes | Yes | Active/completed task state is retained. |
-| Fenced code blocks | Yes | Yes | Yes | Yes | Yes | Body and first-token language are lowered; full info string is retained in AST/IR. |
-| Indented code blocks | Yes | Yes | Yes | Yes | Yes | Lowered as code block without a language. |
+| Fenced code blocks | Yes | Yes | Yes | Yes | Yes | Body and first-token language are lowered; full info string is retained in AST/IR. The independent v2.6.2 regression fixture preserves an empty fence and selected real-Typst PDF non-failure. |
+| Indented code blocks | Yes | Yes | Yes | Yes | Yes | Lowered as code block without a language. The v2.6.2 regression evidence confirms that a four-space-only line immediately after content stays blank rather than fabricating an empty block. |
 | GFM tables | Yes | Yes | Yes | Yes | Yes | Alignment and nested inline structure are retained. |
 | Plain text | Yes | Yes | Yes | Yes | Yes | Original source spans are retained. |
 | Emphasis | Yes | Yes | Yes | Yes | Yes | Nested inline structure is retained. |

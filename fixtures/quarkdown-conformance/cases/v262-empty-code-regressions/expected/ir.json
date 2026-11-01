@@ -1,0 +1,130 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Alpha α",
+              "span": {
+                "source_id": 1,
+                "start": 18,
+                "end": 26
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": " witness",
+              "span": {
+                "source_id": 1,
+                "start": 26,
+                "end": 34
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 18,
+          "end": 34
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Omega",
+              "span": {
+                "source_id": 1,
+                "start": 40,
+                "end": 45
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": " witness",
+              "span": {
+                "source_id": 1,
+                "start": 45,
+                "end": 53
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 40,
+          "end": 53
+        }
+      }
+    },
+    {
+      "CodeBlock": {
+        "language": "text",
+        "info": "text",
+        "source": "",
+        "span": {
+          "source_id": 1,
+          "start": 55,
+          "end": 67
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Closing witness",
+              "span": {
+                "source_id": 1,
+                "start": 68,
+                "end": 83
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 83,
+                "end": 84
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 68,
+          "end": 84
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Paged",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}

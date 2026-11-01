@@ -316,3 +316,8 @@ basis = "Created for #693 from the public v2.7.0 dictionary-variable regression 
 id = "v264-pageformat-positional-size"
 status = "INDEPENDENT"
 basis = "Created for #695 from the public v2.6.4 positional page-size regression note and independently authored official-binary probes; the prose, selected orientation, and composition are Arkst-authored and do not copy upstream tests, fixtures, or documentation examples."
+
+[[fixture]]
+id = "v262-empty-code-regressions"
+status = "INDEPENDENT"
+basis = "Created for #697 from the public v2.6.2 trailing-whitespace and empty-code regression notes plus independently authored official-binary probes; the Greek-letter prose, block language, and composition are Arkst-authored and do not copy upstream tests, fixtures, or documentation examples."

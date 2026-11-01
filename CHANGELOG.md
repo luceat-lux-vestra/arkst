@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.6.2 empty-code regression evidence (#697):** an
+  independently authored exact-version case now proves that a trailing
+  four-space-only line stays blank while an empty fenced block retains its
+  source-backed semantic node and surrounding paragraphs. Focused UTF-8/CRLF
+  frontend coverage and a selected Typst v0.15.1 PDF test close the evidence
+  gap without changing compiler behavior or the v2.6.0 verified baseline.
+
 - **Quarkdown v2.6.4 positional page size (#695):** `.pageformat {A4}` now
   binds the restored first `size` slot through the shared source-ordered
   binder, existing closed page-size conversion, ordered document state, and
