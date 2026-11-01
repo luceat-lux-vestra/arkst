@@ -311,3 +311,8 @@ basis = "Created for #690 from public nested-call and indented-body syntax plus 
 id = "v270-dictionary-variable-iterables"
 status = "INDEPENDENT"
 basis = "Created for #693 from the public v2.7.0 dictionary-variable regression note and independently authored official-binary probes; the compass labels, values, and consumer composition are Arkst-authored and do not copy upstream tests, fixtures, or documentation examples."
+
+[[fixture]]
+id = "v264-pageformat-positional-size"
+status = "INDEPENDENT"
+basis = "Created for #695 from the public v2.6.4 positional page-size regression note and independently authored official-binary probes; the prose, selected orientation, and composition are Arkst-authored and do not copy upstream tests, fixtures, or documentation examples."

@@ -1,0 +1,5 @@
+id = "v264-pageformat-positional-size"
+feature = "pageformat-positional-standard-size"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.4-pageformat-positional-size"
+description = "A positional A4 page size binds through typed landscape page-format state"

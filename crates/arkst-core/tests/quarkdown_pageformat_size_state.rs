@@ -76,6 +76,84 @@ fn named_standard_size_with_orientation_is_supported() {
 }
 
 #[test]
+fn positional_standard_size_matches_named_and_composes_orientation() {
+    let positional = compile_source(".doctype {paged}\n.pageformat {A4}\n");
+    let named = compile_source(".doctype {paged}\n.pageformat size:{A4}\n");
+
+    assert!(positional.diagnostics.is_empty(), "{positional:?}");
+    assert!(named.diagnostics.is_empty(), "{named:?}");
+    assert_eq!(
+        positional.ir.metadata.document_state.page_size,
+        Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: None,
+            document_type: IrDocumentType::Paged,
+        })
+    );
+    assert_eq!(
+        positional.ir.metadata.document_state.page_size,
+        named.ir.metadata.document_state.page_size
+    );
+    assert_eq!(
+        positional.ir.metadata.document_state.page_format,
+        named.ir.metadata.document_state.page_format
+    );
+    assert!(positional.ir.nodes.is_empty());
+
+    let oriented = compile_source(".doctype {paged}\n.pageformat {A4} orientation:{landscape}\n");
+    assert!(oriented.diagnostics.is_empty(), "{oriented:?}");
+    assert_eq!(
+        oriented.ir.metadata.document_state.page_size,
+        Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::A4,
+            orientation: Some(IrPageOrientation::Landscape),
+            document_type: IrDocumentType::Paged,
+        })
+    );
+}
+
+#[test]
+fn positional_and_named_size_collision_fails_before_candidate_evaluation() {
+    let result = compile_source(
+        ".autopagebreak maxdepth:{3}\n.function {mutatingSize}\n    .autopagebreak maxdepth:{1}\n    letter\n\n.pageformat {A4} size:{.mutatingSize}\n",
+    );
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(
+        result.diagnostics[0]
+            .message
+            .contains("received argument `size` more than once"),
+        "{result:?}"
+    );
+    assert_eq!(
+        result.ir.metadata.document_state.auto_page_break_max_depth,
+        Some(3),
+        "the colliding candidate must not execute"
+    );
+    assert_eq!(result.ir.metadata.document_state.page_size, None);
+}
+
+#[test]
+fn invalid_positional_size_is_source_backed_and_preserves_committed_state() {
+    let source = ".pageformat size:{letter}\n.pageformat {not-a-paper}\n";
+    let result = compile_source(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    let primary = result.diagnostics[0]
+        .primary
+        .expect("invalid positional size span");
+    assert_eq!(&source[primary.start..primary.end], "{not-a-paper}");
+    assert_eq!(
+        result.ir.metadata.document_state.page_size,
+        Some(IrPageSizeSelection {
+            format: IrPageSizeFormat::Letter,
+            orientation: None,
+            document_type: IrDocumentType::Plain,
+        })
+    );
+}
+
+#[test]
 fn explicit_orientation_is_typed_and_document_type_basis_is_captured() {
     let result =
         compile_source(".doctype {paged}\n.pageformat size:{a4} orientation:{LANDSCAPE}\n");
@@ -143,8 +221,6 @@ fn invalid_size_or_orientation_preserves_the_last_committed_selection() {
 #[test]
 fn unsupported_pageformat_shapes_do_not_claim_standard_size_state() {
     for unsupported in [
-        ".pageformat {letter}\n",
-        ".pageformat {a4} orientation:{landscape}\n",
         ".pageformat {1..2}\n",
         ".pageformat {letter} columns:{2}\n",
         ".pageformat size:{.none} width:{8in}\n",
@@ -207,7 +283,7 @@ fn failed_size_conversion_rolls_back_nested_document_state_writes() {
 #[test]
 fn source_defined_pageformat_shadows_the_bounded_standard_size_builtin() {
     let result = compile_source(
-        ".function {pageformat}\n    size:\n    SHADOW-PAGEFORMAT-SIZE\n\n.pageformat size:{a4}\n",
+        ".function {pageformat}\n    size:\n    SHADOW-PAGEFORMAT-SIZE\n\n.pageformat {a4}\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(result.ir.metadata.document_state.page_size, None);

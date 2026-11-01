@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.6.4 positional page size (#695):** `.pageformat {A4}` now
+  binds the restored first `size` slot through the shared source-ordered
+  binder, existing closed page-size conversion, ordered document state, and
+  existing Typst/PDF dimensions. Positional/named collisions fail before
+  candidate evaluation, while invalid values retain source-backed diagnostics
+  and atomic state rollback.
+
 - **Quarkdown v2.7 dictionary-variable iterable evidence (#693):** an
   independently authored exact-version conformance case now verifies that an
   ordered Dictionary stored in a variable remains typed through `.size`,
