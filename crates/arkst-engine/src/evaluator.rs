@@ -3494,10 +3494,12 @@ impl Evaluator {
                     ))
                 }
                 IrNode::Heading {
+                    kind,
                     level,
                     content,
                     span,
                 } => out.push(IrNode::Heading {
+                    kind: *kind,
                     level: *level,
                     content: self.evaluate_evidenced_inline_error_owner_content(
                         content,
@@ -3622,10 +3624,12 @@ impl Evaluator {
                 CallOutcome::Unresolved => Vec::new(),
             },
             IrNode::Heading {
+                kind,
                 level,
                 content,
                 span,
             } => vec![IrNode::Heading {
+                kind: *kind,
                 level: *level,
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
@@ -30158,6 +30162,7 @@ mod tests {
     fn var_block_variable() {
         let body = vec![
             IrNode::Heading {
+                kind: arkst_ir::IrHeadingKind::Standard,
                 level: 1,
                 content: vec![text_inline("Title")],
                 span: span(0, 1),

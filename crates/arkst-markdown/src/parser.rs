@@ -9,7 +9,7 @@ use rushdown::ast::{
 };
 use rushdown::parser::{
     gfm, BlockParser, Context, GfmOptions, InlineParser, NoParserOptions, Options, Parser,
-    ParserExtension, State, PRIORITY_CODE_SPAN, PRIORITY_FENCED_CODE_BLOCK,
+    ParserExtension, State, PRIORITY_ATX_HEADING, PRIORITY_CODE_SPAN, PRIORITY_FENCED_CODE_BLOCK,
 };
 use rushdown::text::{BasicReader, BlockReader, Lines, Reader, Segment};
 use rushdown::util::{indent_position, is_blank};
@@ -18,8 +18,8 @@ use rushdown::{
 };
 
 use crate::ast::{
-    Block, CallArgument, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg,
-    RangeValue, RawBody, TableCell, TableRow, TaskStatus, Value,
+    Block, CallArgument, CallSegment, Document, FrontMatter, HeadingKind, Inline, ListItem,
+    NamedArg, RangeValue, RawBody, TableCell, TableRow, TaskStatus, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +100,139 @@ impl PrettyPrint for QuarkdownBlock {
 impl From<QuarkdownBlock> for KindData {
     fn from(value: QuarkdownBlock) -> Self {
         KindData::Extension(Box::new(value))
+    }
+}
+
+#[derive(Debug)]
+struct DecorativeHeadingBlock {
+    level: u8,
+}
+
+impl NodeKind for DecorativeHeadingBlock {
+    fn typ(&self) -> NodeType {
+        NodeType::LeafBlock
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "DecorativeHeadingBlock"
+    }
+}
+
+impl PrettyPrint for DecorativeHeadingBlock {
+    fn pretty_print(&self, output: &mut dyn Write, _source: &str, level: usize) -> fmt::Result {
+        writeln!(
+            output,
+            "{}DecorativeHeadingBlock({})",
+            "  ".repeat(level),
+            self.level
+        )
+    }
+}
+
+impl From<DecorativeHeadingBlock> for KindData {
+    fn from(value: DecorativeHeadingBlock) -> Self {
+        KindData::Extension(Box::new(value))
+    }
+}
+
+#[derive(Debug)]
+struct DecorativeHeadingBlockParser;
+
+impl BlockParser for DecorativeHeadingBlockParser {
+    fn trigger(&self) -> &[u8] {
+        b"#"
+    }
+
+    fn open(
+        &self,
+        arena: &mut Arena,
+        _parent_ref: NodeRef,
+        reader: &mut BasicReader,
+        ctx: &mut Context,
+    ) -> Option<(NodeRef, State)> {
+        let (line, segment) = reader.peek_line_bytes()?;
+        let marker_start = ctx.block_offset()?;
+        let level = line
+            .get(marker_start..)?
+            .iter()
+            .take_while(|byte| **byte == b'#')
+            .count();
+        if !(1..=6).contains(&level) || line.get(marker_start + level) != Some(&b'!') {
+            return None;
+        }
+
+        let marker_end = marker_start + level + 1;
+        let without_lf = line.strip_suffix(b"\n").unwrap_or(&line);
+        let content_end = without_lf.strip_suffix(b"\r").unwrap_or(without_lf).len();
+        if marker_end < content_end
+            && !line
+                .get(marker_end)
+                .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+        {
+            return None;
+        }
+
+        let content_start = line
+            .get(marker_end..content_end)?
+            .iter()
+            .position(|byte| !matches!(byte, b' ' | b'\t'))
+            .map_or(content_end, |offset| marker_end + offset);
+        let mut content_stop = content_end;
+        while content_stop > content_start
+            && line
+                .get(content_stop - 1)
+                .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+        {
+            content_stop -= 1;
+        }
+        let mut closing_start = content_stop;
+        while closing_start > content_start && line.get(closing_start - 1) == Some(&b'#') {
+            closing_start -= 1;
+        }
+        if closing_start < content_stop
+            && (closing_start == content_start
+                || line
+                    .get(closing_start - 1)
+                    .is_some_and(|byte| matches!(byte, b' ' | b'\t')))
+        {
+            content_stop = closing_start;
+            while content_stop > content_start
+                && line
+                    .get(content_stop - 1)
+                    .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+            {
+                content_stop -= 1;
+            }
+        }
+        let node_ref = arena.new_node(DecorativeHeadingBlock { level: level as u8 });
+        if content_start < content_stop {
+            let absolute_start = segment
+                .start()
+                .checked_add(content_start)?
+                .checked_sub(segment.padding())?;
+            let absolute_end = segment
+                .start()
+                .checked_add(content_stop)?
+                .checked_sub(segment.padding())?;
+            as_type_data_mut!(arena, node_ref, Block)
+                .append_source_line(Segment::new(absolute_start, absolute_end));
+        }
+        reader.advance_to_eol();
+        Some((node_ref, State::NO_CHILDREN))
+    }
+
+    fn cont(
+        &self,
+        _arena: &mut Arena,
+        _node_ref: NodeRef,
+        _reader: &mut BasicReader,
+        _ctx: &mut Context,
+    ) -> Option<State> {
+        None
+    }
+
+    fn can_interrupt_paragraph(&self) -> bool {
+        true
     }
 }
 
@@ -529,6 +662,11 @@ impl ParserExtension for FrontendParserExtension {
         }
 
         if self.mode == Mode::Quarkdown {
+            parser.add_block_parser(
+                || -> Box<dyn BlockParser> { Box::new(DecorativeHeadingBlockParser) },
+                NoParserOptions,
+                PRIORITY_ATX_HEADING + 1,
+            );
             parser.add_block_parser(
                 || -> Box<dyn BlockParser> { Box::new(QuarkdownBlockParser) },
                 NoParserOptions,
@@ -1099,6 +1237,7 @@ fn convert_block(
             span,
         }),
         KindData::Heading(heading) => Some(Block::Heading {
+            kind: HeadingKind::Standard,
             level: heading.level() as usize,
             content: convert_inlines(
                 arena,
@@ -1111,6 +1250,23 @@ fn convert_block(
             ),
             span,
         }),
+        KindData::Extension(_) if matches_extension_kind!(arena, node, DecorativeHeadingBlock) => {
+            let heading = as_extension_data!(arena, node, DecorativeHeadingBlock);
+            Some(Block::Heading {
+                kind: HeadingKind::Decorative,
+                level: heading.level as usize,
+                content: convert_inlines(
+                    arena,
+                    node,
+                    source,
+                    base,
+                    source_text,
+                    diagnostics,
+                    InlineConversionContext::Document,
+                ),
+                span,
+            })
+        }
         KindData::ThematicBreak(_) => Some(Block::ThematicBreak { span }),
         KindData::Blockquote(_) => Some(Block::Blockquote {
             content: convert_children_blocks(

@@ -1,4 +1,6 @@
-use arkst_ir::{IrDocument, IrDocumentState, IrDocumentType, IrInline, IrMetadata, IrNode};
+use arkst_ir::{
+    IrDocument, IrDocumentState, IrDocumentType, IrHeadingKind, IrInline, IrMetadata, IrNode,
+};
 use arkst_source::{SourceId, SourceSpan};
 use arkst_typst::lowering::lower_to_typst_code;
 
@@ -7,7 +9,12 @@ fn span() -> SourceSpan {
 }
 
 fn heading(level: usize, label: &str) -> IrNode {
+    heading_with_kind(IrHeadingKind::Standard, level, label)
+}
+
+fn heading_with_kind(kind: IrHeadingKind, level: usize, label: &str) -> IrNode {
     IrNode::Heading {
+        kind,
         level,
         content: vec![IrInline::Text {
             content: label.to_string(),
@@ -15,6 +22,23 @@ fn heading(level: usize, label: &str) -> IrNode {
         }],
         span: span(),
     }
+}
+
+#[test]
+fn decorative_headings_keep_the_same_automatic_page_boundary_contract() {
+    let code = lower_to_typst_code(&document(
+        IrDocumentType::Slides,
+        None,
+        vec![
+            heading(1, "Standard"),
+            heading_with_kind(IrHeadingKind::Decorative, 2, "Decorative"),
+        ],
+    ));
+    assert_eq!(break_count(&code), 2, "{code}");
+    assert!(
+        code.contains("#heading(depth: 2, numbering: none, outlined: false)[Decorative]"),
+        "{code}"
+    );
 }
 
 fn document(

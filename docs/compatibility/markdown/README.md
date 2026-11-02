@@ -45,7 +45,7 @@ silently flattening the syntax into another Markdown node.
 | Feature | Rushdown parses? | Arkst frontend AST? | IR? | Typst lowering? | PDF E2E? | Status / gap |
 |---|---:|---:|---:|---:|---:|---|
 | Paragraphs | Yes | Yes | Yes | Yes | Yes | Representative fixture coverage. |
-| ATX headings | Yes | Yes | Yes | Yes | Yes | Heading level preserved, including an empty bare marker as a separate heading in the exact v2.6.3 regression case. |
+| ATX headings | Yes | Yes | Yes | Yes | Yes | Heading level preserved, including an empty bare marker as a separate heading in the exact v2.6.3 regression case. Quarkdown mode additionally recognizes decorative `#!` markers through an Arkst frontend extension and retains their numbering/outline exclusion semantics. |
 | Setext headings | Yes | Yes | Yes | Yes | Yes | Heading level and every line of multiline content are preserved; delimiter kind is not currently carried. |
 | Thematic breaks | Yes | Yes | Yes | Yes | Yes | Lowered to a Typst line. |
 | Blockquotes | Yes | Yes | Yes | Yes | Yes | Nested blockquotes are recursive. |
