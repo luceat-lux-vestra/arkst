@@ -1,4 +1,100 @@
-use arkst_markdown::{parse_qd, Block, Inline};
+use arkst_markdown::{parse_md, parse_qd, Block, HeadingKind, Inline};
+
+fn decorative_heading(block: &Block) -> (usize, &[Inline], arkst_source::ByteSpan) {
+    let Block::Heading {
+        kind: HeadingKind::Decorative,
+        level,
+        content,
+        span,
+    } = block
+    else {
+        panic!("expected decorative heading, got {block:?}");
+    };
+    (*level, content, *span)
+}
+
+#[test]
+fn decorative_heading_interrupts_paragraph_and_retains_identity_and_provenance() {
+    let source = "Before witness\n##! Decorative *한글*\nAfter witness\n";
+    let document = parse_qd(source);
+
+    let [Block::Paragraph { .. }, heading, Block::Paragraph { .. }] = document.nodes.as_slice()
+    else {
+        panic!(
+            "decorative heading must interrupt the paragraph: {:?}",
+            document.nodes
+        );
+    };
+    let (level, content, span) = decorative_heading(heading);
+    assert_eq!(level, 2);
+    assert!(matches!(
+        content,
+        [Inline::Text { content, .. }, Inline::Emphasis { .. }] if content == "Decorative "
+    ));
+    assert_eq!(
+        source.get(span.start..span.end),
+        Some("##! Decorative *한글*")
+    );
+
+    let markdown = parse_md(source);
+    assert!(markdown.nodes.iter().all(|block| !matches!(
+        block,
+        Block::Heading {
+            kind: HeadingKind::Decorative,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn decorative_heading_matches_the_closed_marker_and_container_boundaries() {
+    let source = "#! Zero\n\n #! One\n\n  #! Two\n\n   #! Three\n\n    #! Four\n\n> #! Quote\n\n- #! List\n\n#!NoSpace\n\n#######! Too deep\n\n#!\r\n\n##! UTF-8 제목\r\n";
+    let document = parse_qd(source);
+
+    for (index, level) in [(0, 1), (1, 1), (2, 1), (3, 1)] {
+        assert_eq!(decorative_heading(&document.nodes[index]).0, level);
+    }
+    assert!(matches!(document.nodes[4], Block::CodeBlock { .. }));
+    let Block::Blockquote { content, .. } = &document.nodes[5] else {
+        panic!("expected blockquote: {:?}", document.nodes);
+    };
+    assert_eq!(decorative_heading(&content[0]).0, 1);
+    let Block::UnorderedList { items, .. } = &document.nodes[6] else {
+        panic!("expected list: {:?}", document.nodes);
+    };
+    assert_eq!(decorative_heading(&items[0].content[0]).0, 1);
+    assert!(matches!(document.nodes[7], Block::Paragraph { .. }));
+    assert!(matches!(document.nodes[8], Block::Paragraph { .. }));
+    let (empty_level, empty, _) = decorative_heading(&document.nodes[9]);
+    assert_eq!(empty_level, 1);
+    assert!(empty.is_empty());
+    let (utf8_level, utf8, _) = decorative_heading(&document.nodes[10]);
+    assert_eq!(utf8_level, 2);
+    assert!(utf8
+        .iter()
+        .any(|inline| matches!(inline, Inline::Text { content, .. } if content.contains("제목"))));
+}
+
+#[test]
+fn decorative_heading_uses_atx_closing_marker_semantics() {
+    let source = "#! Heading #\n\n##! Heading ###\n\n#! #\n\n#! Heading###\n";
+    let document = parse_qd(source);
+    assert_eq!(document.nodes.len(), 4, "{:?}", document.nodes);
+
+    for (index, level) in [(0, 1), (1, 2)] {
+        let (actual_level, content, _) = decorative_heading(&document.nodes[index]);
+        assert_eq!(actual_level, level);
+        assert!(matches!(
+            content,
+            [Inline::Text { content, .. }] if content == "Heading"
+        ));
+    }
+    assert!(decorative_heading(&document.nodes[2]).1.is_empty());
+    assert!(matches!(
+        decorative_heading(&document.nodes[3]).1,
+        [Inline::Text { content, .. }] if content == "Heading###"
+    ));
+}
 
 #[test]
 fn nested_emphasis_and_deep_link_destination_retain_inline_structure() {
@@ -52,6 +148,7 @@ fn ordered_bare_heading_and_tabs_only_boundaries_remain_separate_blocks() {
         level: 3,
         content: empty,
         span: bare_span,
+        ..
     }, Block::Paragraph { .. }, Block::Paragraph {
         content: first_tab, ..
     }, Block::Paragraph {
@@ -85,6 +182,7 @@ fn multiline_setext_heading_keeps_every_line_and_source_break() {
         level: 1,
         content,
         span,
+        ..
     }] = document.nodes.as_slice()
     else {
         panic!(

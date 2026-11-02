@@ -1,0 +1,5 @@
+id = "v263-decorative-heading"
+feature = "decorative-heading"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.6.3-decorative-heading"
+description = "Decorative headings interrupt paragraphs while retaining level, numbering exclusion, and outline exclusion semantics"

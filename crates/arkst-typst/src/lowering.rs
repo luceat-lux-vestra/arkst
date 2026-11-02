@@ -8,11 +8,11 @@ use arkst_ir::{
     IrColor, IrComponent, IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent,
     IrContainerMargin, IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDocument,
     IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior,
-    IrFragmentComponent, IrInline, IrKeybindingPart, IrLandscapeComponent, IrMainAxisAlignment,
-    IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit, IrSpeakerNoteComponent,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
-    IrTextCase, IrTextDecoration, IrTextScript, IrTextSize, IrTextStyle, IrTextVariant,
-    IrTextWeight, IrTodoComponent, IrValue,
+    IrFragmentComponent, IrHeadingKind, IrInline, IrKeybindingPart, IrLandscapeComponent,
+    IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
+    IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration, IrTextScript, IrTextSize, IrTextStyle,
+    IrTextVariant, IrTextWeight, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -384,16 +384,28 @@ impl LoweringContext {
     fn lower_node(&mut self, node: &IrNode) {
         match node {
             IrNode::Heading {
+                kind,
                 level,
                 content,
                 span,
             } => {
-                let prefix = "=".repeat(*level);
                 let before = self.output.len();
-                self.push_str(&prefix);
-                self.push(' ');
-                self.lower_inlines(content);
-                self.push('\n');
+                match kind {
+                    IrHeadingKind::Standard => {
+                        let prefix = "=".repeat(*level);
+                        self.push_str(&prefix);
+                        self.push(' ');
+                        self.lower_inlines(content);
+                        self.push('\n');
+                    }
+                    IrHeadingKind::Decorative => {
+                        self.push_str("#heading(depth: ");
+                        self.push_str(&level.to_string());
+                        self.push_str(", numbering: none, outlined: false)[");
+                        self.lower_inlines(content);
+                        self.push_str("]\n");
+                    }
+                }
                 if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
@@ -2281,10 +2293,11 @@ mod tests {
         IrCallSegment, IrClipComponent, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
         IrContainerBorderWidths, IrContainerComponent, IrContainerMargin, IrContainerPadding,
         IrContainerRadius, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment,
-        IrExplicitErrorComponent, IrInline, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
-        IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
-        IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase,
-        IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
+        IrExplicitErrorComponent, IrHeadingKind, IrInline, IrLandscapeComponent, IrListItem,
+        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+        IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
+        IrTextWeight, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2469,6 +2482,7 @@ mod tests {
         let doc = IrDocument {
             nodes: vec![
                 IrNode::Heading {
+                    kind: IrHeadingKind::Standard,
                     level: 1,
                     content: vec![text("Hello")],
                     span: empty_span(),
@@ -3768,11 +3782,13 @@ mod tests {
         let doc = IrDocument {
             nodes: vec![
                 IrNode::Heading {
+                    kind: IrHeadingKind::Standard,
                     level: 2,
                     content: vec![text("Section")],
                     span: empty_span(),
                 },
                 IrNode::Heading {
+                    kind: IrHeadingKind::Standard,
                     level: 3,
                     content: vec![text("Subsection")],
                     span: empty_span(),
@@ -3782,6 +3798,24 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "== Section\n\n=== Subsection\n\n");
+    }
+
+    #[test]
+    fn decorative_heading_disables_numbering_and_outline_without_losing_level() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::Heading {
+                kind: IrHeadingKind::Decorative,
+                level: 2,
+                content: vec![text("Decorative")],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(
+            code,
+            "#heading(depth: 2, numbering: none, outlined: false)[Decorative]\n\n"
+        );
     }
 
     #[test]

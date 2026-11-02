@@ -326,3 +326,8 @@ basis = "Created for #697 from the public v2.6.2 trailing-whitespace and empty-c
 id = "v263-commonmark-regressions"
 status = "INDEPENDENT"
 basis = "Created for #701 from six public v2.6.3 CommonMark regression categories plus independently authored official-binary probes; the atlas/portal prose, list ordinals, destination depth, and composition are Arkst-authored and do not copy upstream tests, fixtures, or documentation examples."
+
+[[fixture]]
+id = "v263-decorative-heading"
+status = "INDEPENDENT"
+basis = "Created for #700 from the public v2.6.3 decorative-heading interruption contract and current heading, table-of-contents, and numbering documentation plus independently authored official-binary probes; the witness prose, UTF-8 content, and composition are Arkst-authored and do not copy upstream tests, fixtures, HTML templates, or CSS."

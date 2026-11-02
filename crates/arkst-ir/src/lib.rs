@@ -1967,6 +1967,8 @@ struct WireRawBody {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum WireNode {
     Heading {
+        #[serde(default, skip_serializing_if = "IrHeadingKind::is_standard")]
+        kind: IrHeadingKind,
         level: usize,
         content: Vec<WireInline>,
         span: SourceSpan,
@@ -2469,10 +2471,12 @@ fn raw_body_to_wire(raw_body: &IrRawBody, sources: &SourceTable) -> Result<WireR
 fn node_to_wire(node: &IrNode, sources: &SourceTable) -> Result<WireNode, String> {
     Ok(match node {
         IrNode::Heading {
+            kind,
             level,
             content,
             span,
         } => WireNode::Heading {
+            kind: *kind,
             level: *level,
             content: wire_inlines(content, sources)?,
             span: *span,
@@ -3092,10 +3096,12 @@ fn values_from_wire(
 fn wire_node_to_ir(node: WireNode, sources: Option<&[SourceText]>) -> Result<IrNode, String> {
     Ok(match node {
         WireNode::Heading {
+            kind,
             level,
             content,
             span,
         } => IrNode::Heading {
+            kind,
             level,
             content: inlines_from_wire(content, sources)?,
             span,
@@ -3655,6 +3661,23 @@ pub struct IrCodeCallout {
     pub description: String,
 }
 
+/// Backend-neutral heading behavior retained after frontend normalization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum IrHeadingKind {
+    /// A regular heading that participates in configured numbering and indexing.
+    #[default]
+    Standard,
+    /// A heading excluded from numbering and document indexes while retaining
+    /// its level and page-boundary behavior.
+    Decorative,
+}
+
+impl IrHeadingKind {
+    fn is_standard(&self) -> bool {
+        matches!(self, Self::Standard)
+    }
+}
+
 /// A backend-neutral block-level IR node.
 ///
 /// Depending on the pipeline stage, a node may contain evaluated semantic
@@ -3667,6 +3690,9 @@ pub enum IrNode {
     /// A heading with structured inline content, progressively normalized by
     /// semantic evaluation.
     Heading {
+        /// Closed heading behavior; omitted legacy wire values are standard.
+        #[serde(default, skip_serializing_if = "IrHeadingKind::is_standard")]
+        kind: IrHeadingKind,
         level: usize,
         content: Vec<IrInline>,
         span: SourceSpan,

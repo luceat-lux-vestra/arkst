@@ -103,10 +103,15 @@ fn block_to_ir(
 ) -> Option<IrNode> {
     match block {
         Block::Heading {
+            kind,
             level,
             content,
             span,
         } => Some(IrNode::Heading {
+            kind: match kind {
+                arkst_markdown::ast::HeadingKind::Standard => arkst_ir::IrHeadingKind::Standard,
+                arkst_markdown::ast::HeadingKind::Decorative => arkst_ir::IrHeadingKind::Decorative,
+            },
             level: *level,
             content: inlines_to_ir(content, source_id, diagnostics, source_mode, function_body),
             span: byte_to_source_span(span, source_id),
@@ -1156,6 +1161,7 @@ mod tests {
     fn convert_heading() {
         let doc = Document {
             nodes: vec![Block::Heading {
+                kind: arkst_markdown::ast::HeadingKind::Standard,
                 level: 1,
                 content: vec![Inline::Text {
                     content: "Title".into(),
@@ -1170,10 +1176,12 @@ mod tests {
         assert_eq!(ir.nodes.len(), 1);
         match &ir.nodes[0] {
             IrNode::Heading {
+                kind,
                 level,
                 content,
                 span,
             } => {
+                assert_eq!(*kind, arkst_ir::IrHeadingKind::Standard);
                 assert_eq!(*level, 1);
                 assert_eq!(content.len(), 1);
                 assert_eq!(span.source_id, SourceId(42));

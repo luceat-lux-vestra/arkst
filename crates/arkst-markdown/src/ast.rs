@@ -26,9 +26,23 @@ pub struct RawBody {
     pub span: ByteSpan,
 }
 
+/// The closed semantic kind of a Markdown heading.
+///
+/// Quarkdown decorative headings retain their heading level and interruption
+/// behavior while opting out of numbering and document indexing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HeadingKind {
+    /// A normal Markdown heading that participates in numbering and indexing.
+    #[default]
+    Standard,
+    /// A Quarkdown `#!` heading excluded from numbering and indexing.
+    Decorative,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     Heading {
+        kind: HeadingKind,
         level: usize,
         content: Vec<Inline>,
         span: ByteSpan,

@@ -1,0 +1,131 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Before",
+              "span": {
+                "source_id": 1,
+                "start": 18,
+                "end": 24
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": " witness",
+              "span": {
+                "source_id": 1,
+                "start": 24,
+                "end": 32
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 18,
+          "end": 32
+        }
+      }
+    },
+    {
+      "Heading": {
+        "kind": "Decorative",
+        "level": 2,
+        "content": [
+          {
+            "Text": {
+              "content": "Decorative ",
+              "span": {
+                "source_id": 1,
+                "start": 37,
+                "end": 48
+              }
+            }
+          },
+          {
+            "Emphasis": {
+              "content": [
+                {
+                  "Text": {
+                    "content": "한글",
+                    "span": {
+                      "source_id": 1,
+                      "start": 49,
+                      "end": 55
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "source_id": 1,
+                "start": 48,
+                "end": 55
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 33,
+          "end": 56
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "After",
+              "span": {
+                "source_id": 1,
+                "start": 57,
+                "end": 62
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": " witness",
+              "span": {
+                "source_id": 1,
+                "start": 62,
+                "end": 70
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 57,
+          "end": 70
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}
