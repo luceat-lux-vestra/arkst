@@ -1,0 +1,5 @@
+id = "v270-tablebyrows-dynamic-rows"
+feature = "tablebyrows-dynamic-rows"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-tablebyrows"
+description = "Generated iterable rows, optional headers, and ragged table shape"

@@ -1,0 +1,11 @@
+.var {rows}
+    .repeat {2}
+        index:
+        - - Orbit .index
+          - Value .index
+
+.var {headers}
+    - Name
+    - Ordinal
+
+.tablebyrows headers:{.headers} rows:{.rows}

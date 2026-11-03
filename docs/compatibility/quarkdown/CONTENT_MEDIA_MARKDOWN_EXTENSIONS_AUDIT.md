@@ -24,8 +24,8 @@ owned status counts are:
 | 'SUPPORTED_END_TO_END' | 13 |
 | 'SUPPORTED_SEMANTICS' | 3 |
 | 'PARSED_ONLY' | 1 |
-| 'PARTIAL' | 25 |
-| 'UNSUPPORTED' | 26 |
+| 'PARTIAL' | 27 |
+| 'UNSUPPORTED' | 24 |
 | 'DEFERRED' | 2 |
 | 'BLOCKED' | 1 |
 | 'UNKNOWN' | 0 |
