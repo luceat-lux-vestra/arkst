@@ -1,0 +1,7 @@
+.tablesort {2} order:{ascending}
+    | Signal | Priority |
+    |--------|----------|
+    | Solstice | orbit10 |
+    | Zenith | orbit2 |
+    | Aurora | **orbit2** |
+    | Baseline | orbit1 |
