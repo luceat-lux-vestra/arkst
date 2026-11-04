@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown table sorting (#708):** `.tablesort` now preserves headers and
+  rich source-backed cells while stably ordering body rows by a one-based
+  plain-text key. The bounded v2.7.0 contract covers case-sensitive ASCII
+  natural ascending/descending order, empty ragged keys, structured table
+  discovery, source-defined precedence, and materialization limits; unproven
+  non-ASCII comparator behavior fails closed with E8001.
+
 - **Quarkdown table column extraction (#706):** `.tablecolumn` and
   `.tablecolumns` now consume evaluated Markdown or `.tablebyrows` tables,
   exclude headers, project body cells to ordered String collections, and pad

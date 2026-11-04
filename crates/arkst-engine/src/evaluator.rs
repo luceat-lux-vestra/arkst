@@ -958,6 +958,12 @@ enum TableSearchFailure {
     Allocation(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableSortOrder {
+    Ascending,
+    Descending,
+}
+
 fn first_table(
     nodes: &[IrNode],
     limit: usize,
@@ -1045,6 +1051,21 @@ fn table_cell_value(cell: &IrTableCell) -> Result<IrValue, String> {
         .ok_or_else(|| {
             "Table column cells must have supported evaluated plain-text content".to_string()
         })
+}
+
+fn table_sort_order(value: &InvocationValue) -> Option<TableSortOrder> {
+    if value.origin != ValueOrigin::Dynamic {
+        return None;
+    }
+    let name = match &value.value {
+        IrValue::String(name) | IrValue::Identifier(name) => name,
+        _ => return None,
+    };
+    match name.as_str() {
+        name if name.eq_ignore_ascii_case("ascending") => Some(TableSortOrder::Ascending),
+        name if name.eq_ignore_ascii_case("descending") => Some(TableSortOrder::Descending),
+        _ => None,
+    }
 }
 
 fn table_row_from_elements(
@@ -5065,6 +5086,22 @@ impl Evaluator {
         if is_table_column_extraction(name) {
             return self.evaluate_table_column_extraction(
                 name,
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
+            );
+        }
+
+        if is_table_sort(name) {
+            return self.evaluate_table_sort(
                 ordered_args,
                 positional_args,
                 named_args,
@@ -14644,6 +14681,256 @@ impl Evaluator {
         CallOutcome::Value(IrValue::Collection(columns))
     }
 
+    /// Returns a new table whose body rows are stably ordered by one
+    /// independently evidenced plain-text cell key. The header and original
+    /// rich cell content remain structured and source-backed.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_table_sort(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(table_sort_error(
+                "E3001",
+                "`.tablesort` table content is not a lambda".to_string(),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if matches!(body, Some(CallBody::Inline(_))) {
+            diagnostics.push(table_sort_error(
+                "E3001",
+                "`.tablesort` requires block table content".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = match body {
+            Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
+                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                span: call_body_source_span(CallBody::Block(nodes), *span),
+            }),
+            Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let Some(BoundSlot::Explicit {
+            value: column_value,
+            span: column_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let column = match value_conversion::convert_integer_with_origin(&column_value) {
+            Ok(column) => column,
+            Err(_) => {
+                diagnostics.push(table_sort_error(
+                    "E3001",
+                    "`.tablesort` column must be a finite integer".to_string(),
+                    column_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let order = match slots.next() {
+            Some(BoundSlot::Explicit {
+                value,
+                span: order_span,
+            }) => match table_sort_order(&value) {
+                Some(order) => order,
+                None => {
+                    diagnostics.push(table_sort_error(
+                        "E3001",
+                        "`.tablesort` order must be `ascending` or `descending`".to_string(),
+                        order_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => TableSortOrder::Ascending,
+        };
+        let Some(BoundSlot::Explicit {
+            value: bound_table_value,
+            span: table_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let table_value = match body {
+            Some(CallBody::Block(nodes)) => {
+                let diagnostic_count = diagnostics.len();
+                let evaluated = self.evaluate_nodes(nodes, diagnostics, context);
+                if diagnostics.len() != diagnostic_count {
+                    return CallOutcome::Failed;
+                }
+                InvocationValue::static_value(IrValue::Content(evaluated))
+            }
+            Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
+            None => bound_table_value,
+        };
+        let IrValue::Content(nodes) = &table_value.value else {
+            diagnostics.push(table_sort_error(
+                "E3001",
+                "`.tablesort` requires evaluated Markdown table content".to_string(),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let (header, rows) = match first_table(nodes, self.limits.max_materialized_elements) {
+            Ok(Some(table)) => table,
+            Ok(None) => {
+                diagnostics.push(table_sort_error(
+                    "E3001",
+                    "A table is not provided and cannot be found".to_string(),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(TableSearchFailure::Limit(requested)) => {
+                diagnostics.push(materialized_elements_limit_error(
+                    requested,
+                    self.limits.max_materialized_elements,
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(TableSearchFailure::Allocation(error)) => {
+                diagnostics.push(table_sort_error(
+                    "E3001",
+                    format!("Table traversal cannot be allocated: {error}"),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let width = table_effective_width(header, rows);
+        let Some(zero_based) = column
+            .checked_sub(1)
+            .and_then(|value| usize::try_from(value).ok())
+        else {
+            diagnostics.push(table_sort_index_error(column, width, column_span));
+            return CallOutcome::Failed;
+        };
+        if zero_based >= width {
+            diagnostics.push(table_sort_index_error(column, width, column_span));
+            return CallOutcome::Failed;
+        }
+
+        let materialized = rows.iter().try_fold(header.cells.len(), |count, row| {
+            count.checked_add(row.cells.len())
+        });
+        let Some(materialized) = materialized else {
+            diagnostics.push(materialized_elements_limit_error(
+                u64::MAX,
+                self.limits.max_materialized_elements,
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        if let Err(outcome) =
+            self.check_materialized_elements(materialized as u64, table_span, diagnostics)
+        {
+            return outcome;
+        }
+
+        let mut keyed_rows = Vec::new();
+        if let Err(error) = keyed_rows.try_reserve_exact(rows.len()) {
+            diagnostics.push(table_sort_error(
+                "E3001",
+                format!("`.tablesort` row keys cannot be allocated: {error}"),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for (index, row) in rows.iter().enumerate() {
+            let key = match row.cells.get(zero_based) {
+                Some(cell) => match builtins::table_cell_plain_text(&cell.content) {
+                    Some(key) => key,
+                    None => {
+                        diagnostics.push(table_sort_error(
+                            "E3001",
+                            "Table sort cells must have supported evaluated plain-text content"
+                                .to_string(),
+                            cell.span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                },
+                None => String::new(),
+            };
+            if !key.is_ascii() {
+                let key_span = row.cells.get(zero_based).map_or(row.span, |cell| cell.span);
+                diagnostics.push(table_sort_error(
+                    "E8001",
+                    format!(
+                        "`.tablesort` exact natural ordering is currently bounded to ASCII keys; `{key}` is non-ASCII"
+                    ),
+                    key_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            keyed_rows.push((key, index));
+        }
+        keyed_rows.sort_by(|(left, _), (right, _)| {
+            let ordering = compare_quarkdown_ascii_alphanumeric_case_sensitive(left, right);
+            match order {
+                TableSortOrder::Ascending => ordering,
+                TableSortOrder::Descending => ordering.reverse(),
+            }
+        });
+
+        let mut sorted_rows = Vec::new();
+        if let Err(error) = sorted_rows.try_reserve_exact(rows.len()) {
+            diagnostics.push(table_sort_error(
+                "E3001",
+                format!("`.tablesort` rows cannot be allocated: {error}"),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        sorted_rows.extend(keyed_rows.into_iter().map(|(_, index)| rows[index].clone()));
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Table {
+            header: header.clone(),
+            rows: sorted_rows,
+            span: *span,
+        }]))
+    }
+
     /// Generates one backend-neutral table from optional headers and dynamic
     /// iterable rows. The selected block body remains lazy until structural
     /// binding and explicit-header conversion have succeeded.
@@ -18855,6 +19142,7 @@ pub(crate) enum NativeDispatchOwner {
     DictionaryLookup,
     TableByRows,
     TableColumnExtraction,
+    TableSort,
     CollectionAccess,
     CollectionTransform,
     FlowJoin,
@@ -18932,6 +19220,7 @@ const DICTIONARY_NATIVE_NAMES: &[&str] = &["dictionary"];
 const DICTIONARY_LOOKUP_NATIVE_NAMES: &[&str] = &["get"];
 const TABLE_BY_ROWS_NATIVE_NAMES: &[&str] = &["tablebyrows"];
 const TABLE_COLUMN_EXTRACTION_NATIVE_NAMES: &[&str] = &["tablecolumn", "tablecolumns"];
+const TABLE_SORT_NATIVE_NAMES: &[&str] = &["tablesort"];
 const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "size",
     "first",
@@ -19105,6 +19394,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::TableColumnExtraction,
         names: TABLE_COLUMN_EXTRACTION_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::TableSort,
+        names: TABLE_SORT_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::CollectionAccess,
@@ -20653,6 +20946,10 @@ fn is_table_column_extraction(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::TableColumnExtraction)
 }
 
+fn is_table_sort(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::TableSort)
+}
+
 fn is_collection_access(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::CollectionAccess)
 }
@@ -20968,6 +21265,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "tablecolumns" => (
             vec![ParameterMetadata::required("of")],
+            BodyPolicy::BindFinal,
+        ),
+        "tablesort" => (
+            vec![
+                ParameterMetadata::required("column"),
+                ParameterMetadata::defaulted("order"),
+                ParameterMetadata::required("table"),
+            ],
             BodyPolicy::BindFinal,
         ),
         "font" => (
@@ -22197,6 +22502,21 @@ enum ListFilesOrder {
 /// deliberately ASCII-only so Unicode-version/case-mapping drift
 /// cannot be mistaken for exact JVM compatibility.
 fn compare_quarkdown_ascii_alphanumeric(left: &str, right: &str) -> Ordering {
+    compare_quarkdown_ascii_alphanumeric_with_case(left, right, true)
+}
+
+/// Table cells are compared without the filename-only lowercase selector used
+/// by `.listfiles`. The shared numeric-window and leading-zero behavior stays
+/// identical while ASCII letter case remains observable.
+fn compare_quarkdown_ascii_alphanumeric_case_sensitive(left: &str, right: &str) -> Ordering {
+    compare_quarkdown_ascii_alphanumeric_with_case(left, right, false)
+}
+
+fn compare_quarkdown_ascii_alphanumeric_with_case(
+    left: &str,
+    right: &str,
+    fold_ascii_case: bool,
+) -> Ordering {
     debug_assert!(left.is_ascii() && right.is_ascii());
     let left = left.as_bytes();
     let right = right.as_bytes();
@@ -22217,11 +22537,13 @@ fn compare_quarkdown_ascii_alphanumeric(left: &str, right: &str) -> Ordering {
                 .then_with(|| {
                     left[left_significant..left_end].cmp(&right[right_significant..right_end])
                 })
-        } else {
+        } else if fold_ascii_case {
             compare_ascii_case_folded_windows(
                 &left[left_index..left_end],
                 &right[right_index..right_end],
             )
+        } else {
+            left[left_index..left_end].cmp(&right[right_index..right_end])
         };
         if ordering != Ordering::Equal {
             return ordering;
@@ -24139,6 +24461,28 @@ fn table_column_error(name: &str, message: String, span: SourceSpan) -> Diagnost
 fn table_column_index_error(column: i32, width: usize, span: SourceSpan) -> Diagnostic {
     table_column_error(
         "tablecolumn",
+        format!("Column index {column} must be between 1 and {width}"),
+        span,
+    )
+}
+
+fn table_sort_error(code: &str, message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: code.to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.tablesort` requires a one-based column, optional ascending/descending order, and evaluated Markdown table content."
+                .to_string(),
+        ],
+    }
+}
+
+fn table_sort_index_error(column: i32, width: usize, span: SourceSpan) -> Diagnostic {
+    table_sort_error(
+        "E3001",
         format!("Column index {column} must be between 1 and {width}"),
         span,
     )

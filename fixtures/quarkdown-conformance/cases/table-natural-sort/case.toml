@@ -1,0 +1,5 @@
+id = "table-natural-sort"
+feature = "table-natural-sort"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-table-natural-sort"
+description = "Stable case-sensitive ASCII natural ordering of source-backed table rows"

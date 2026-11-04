@@ -24,8 +24,8 @@ owned status counts are:
 | 'SUPPORTED_END_TO_END' | 13 |
 | 'SUPPORTED_SEMANTICS' | 3 |
 | 'PARSED_ONLY' | 1 |
-| 'PARTIAL' | 29 |
-| 'UNSUPPORTED' | 22 |
+| 'PARTIAL' | 30 |
+| 'UNSUPPORTED' | 21 |
 | 'DEFERRED' | 2 |
 | 'BLOCKED' | 1 |
 | 'UNKNOWN' | 0 |
@@ -113,9 +113,12 @@ dependency:
   generated .tablebyrows, and the six table traversal/computation
   functions. They do not share a single unverified “table supported” claim.
   The bounded `.tablecolumn`/`.tablecolumns` extraction slice now consumes the
-  existing evaluated table IR and returns plain String collections; table
-  production beyond `.tablebyrows`, sort/filter/compute, captions/references,
-  and renderer equivalence remain separate open contracts.
+  existing evaluated table IR and returns plain String collections. The
+  bounded `.tablesort` slice preserves the existing table IR and rich cells
+  while stably ordering ASCII natural keys; exact Unicode comparator parity,
+  table production beyond `.tablebyrows`, filter/compute,
+  captions/references, and renderer equivalence remain separate open
+  contracts.
 - .row, .column, .grid, .align, .center, .landscape, .fullspan, .clip, and .whitespace are
   local component consumers. The bounded row/column/grid/center/alignment/
   landscape/fullspan/circle-clip/whitespace rows have semantic and output evidence; the
