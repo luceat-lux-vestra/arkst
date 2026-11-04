@@ -1853,6 +1853,18 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
     Some(())
 }
 
+/// Projects already-evaluated table-cell inline content through the same
+/// bounded plain-text contract used by `.plaintext` and equality fallback.
+///
+/// Table computation consumes visible cell values, not their presentation
+/// wrappers. Keeping this adapter here prevents a second, subtly different
+/// inline-to-text implementation from growing in the evaluator.
+pub(crate) fn table_cell_plain_text(inlines: &[IrInline]) -> Option<String> {
+    let mut output = String::new();
+    plain_text_from_inlines(inlines, &mut output)?;
+    Some(output)
+}
+
 fn evaluate_otherwise(
     _builtin: &BuiltinSpec,
     mut arguments: BoundArguments,

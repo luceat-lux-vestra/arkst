@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown table column extraction (#706):** `.tablecolumn` and
+  `.tablecolumns` now consume evaluated Markdown or `.tablebyrows` tables,
+  exclude headers, project body cells to ordered String collections, and pad
+  ragged rows with empty values. One-based index checks, source-defined
+  precedence, structured diagnostics, and the shared materialization limit
+  preserve deterministic atomic failure without adding a second table IR.
+
 - **Quarkdown v2.7 dynamic table rows (#704):** `.tablebyrows` now consumes
   optional iterable headers and required dynamic iterable rows through the
   shared source-ordered binder and iterable adapter, producing the existing
