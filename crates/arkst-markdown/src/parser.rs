@@ -2043,6 +2043,9 @@ impl CallArgumentContext {
     }
 
     fn is_callback(self, call_name: &str, positional_index: usize) -> bool {
+        if call_name == "tablefilter" {
+            return matches!(self, Self::Direct) && positional_index == 1;
+        }
         let callback_index = match (call_name, self) {
             ("join", Self::Direct) => 2,
             ("join", Self::Chained) => 1,
@@ -2609,6 +2612,7 @@ fn convert_named_arg(
         || (arg.name == "where" && call_name == Some("extend"))
         || (arg.name == "condition"
             && call_name.is_some_and(|name| matches!(name, "findfirst" | "findall")))
+        || (arg.name == "filter" && call_name == Some("tablefilter"))
         || (arg.name == "body" && call_name == Some("join"));
     NamedArg {
         name: arg.name.clone(),
@@ -4892,6 +4896,52 @@ mod tests {
         };
         assert_eq!(header.parameters[0].name, "value");
         assert!(!body.is_empty());
+    }
+
+    #[test]
+    fn tablefilter_predicate_uses_only_its_direct_or_named_callback_slot() {
+        let direct =
+            parse_with_diagnostics(".tablefilter {2} {cell: .cell::isnotempty} {not-a-table}\n");
+        assert!(direct.diagnostics.is_empty(), "{direct:?}");
+        let Block::DirectiveCall { arguments, .. } = &direct.document.nodes[0] else {
+            panic!("expected direct tablefilter directive")
+        };
+        assert!(matches!(
+            positional_args(arguments).get(1),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "cell" && !body.is_empty()
+        ));
+        assert!(matches!(
+            positional_args(arguments).get(2),
+            Some(value) if !matches!(value, Value::Lambda { .. })
+        ));
+
+        let named = parse_with_diagnostics(
+            ".tablefilter column:{2} filter:{cell: .cell::isnotempty} table:{not-a-table}\n",
+        );
+        assert!(named.diagnostics.is_empty(), "{named:?}");
+        let Block::DirectiveCall { arguments, .. } = &named.document.nodes[0] else {
+            panic!("expected named tablefilter directive")
+        };
+        let named = named_args(arguments);
+        assert!(matches!(
+            named.iter().find(|argument| argument.name == "filter").map(|argument| &argument.value),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "cell" && !body.is_empty()
+        ));
+        assert!(matches!(
+            named
+                .iter()
+                .find(|argument| argument.name == "table")
+                .map(|argument| &argument.value),
+            Some(value) if !matches!(value, Value::Lambda { .. })
+        ));
     }
 
     #[test]

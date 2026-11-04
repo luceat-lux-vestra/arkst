@@ -5116,6 +5116,22 @@ impl Evaluator {
             );
         }
 
+        if is_table_filter(name) {
+            return self.evaluate_table_filter(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
+            );
+        }
+
         if is_table_by_rows(name) {
             return self.evaluate_table_by_rows(
                 ordered_args,
@@ -14931,6 +14947,266 @@ impl Evaluator {
         }]))
     }
 
+    /// Returns a new table containing only body rows whose independently
+    /// evaluated plain-text cell value satisfies a one-argument Boolean
+    /// predicate. The header and retained rich cells remain source-backed.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_table_filter(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(table_filter_error(
+                "E3001",
+                "`.tablefilter` table content is not a lambda".to_string(),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if matches!(body, Some(CallBody::Inline(_))) {
+            diagnostics.push(table_filter_error(
+                "E3001",
+                "`.tablefilter` requires block table content".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = match body {
+            Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
+                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                span: call_body_source_span(CallBody::Block(nodes), *span),
+            }),
+            Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let Some(BoundSlot::Explicit {
+            value: column_value,
+            span: column_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let column = match value_conversion::convert_integer_with_origin(&column_value) {
+            Ok(column) => column,
+            Err(_) => {
+                diagnostics.push(table_filter_error(
+                    "E3001",
+                    "`.tablefilter` column must be a finite integer".to_string(),
+                    column_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some(BoundSlot::Explicit {
+            value: predicate_value,
+            span: predicate_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let IrValue::Callable(predicate) = predicate_value.value else {
+            diagnostics.push(table_filter_error(
+                "E3001",
+                "`.tablefilter` filter must be a one-argument callable".to_string(),
+                predicate_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        if !validate_iteration_lambda(
+            predicate.parameters.as_deref(),
+            "tablefilter",
+            false,
+            &predicate_span,
+            diagnostics,
+        ) {
+            return CallOutcome::Failed;
+        }
+        let Some(BoundSlot::Explicit {
+            value: bound_table_value,
+            span: table_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let table_value = match body {
+            Some(CallBody::Block(nodes)) => {
+                let diagnostic_count = diagnostics.len();
+                let evaluated = self.evaluate_nodes(nodes, diagnostics, context);
+                if diagnostics.len() != diagnostic_count {
+                    return CallOutcome::Failed;
+                }
+                InvocationValue::static_value(IrValue::Content(evaluated))
+            }
+            Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
+            None => bound_table_value,
+        };
+        let IrValue::Content(nodes) = &table_value.value else {
+            diagnostics.push(table_filter_error(
+                "E3001",
+                "`.tablefilter` requires evaluated Markdown table content".to_string(),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let (header, rows) = match first_table(nodes, self.limits.max_materialized_elements) {
+            Ok(Some(table)) => table,
+            Ok(None) => {
+                diagnostics.push(table_filter_error(
+                    "E3001",
+                    "A table is not provided and cannot be found".to_string(),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(TableSearchFailure::Limit(requested)) => {
+                diagnostics.push(materialized_elements_limit_error(
+                    requested,
+                    self.limits.max_materialized_elements,
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(TableSearchFailure::Allocation(error)) => {
+                diagnostics.push(table_filter_error(
+                    "E3001",
+                    format!("Table traversal cannot be allocated: {error}"),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let width = table_effective_width(header, rows);
+        let Some(zero_based) = column
+            .checked_sub(1)
+            .and_then(|value| usize::try_from(value).ok())
+        else {
+            diagnostics.push(table_filter_index_error(column, width, column_span));
+            return CallOutcome::Failed;
+        };
+        if zero_based >= width {
+            diagnostics.push(table_filter_index_error(column, width, column_span));
+            return CallOutcome::Failed;
+        }
+
+        let materialized = rows.iter().try_fold(header.cells.len(), |count, row| {
+            count.checked_add(row.cells.len())
+        });
+        let Some(materialized) = materialized else {
+            diagnostics.push(materialized_elements_limit_error(
+                u64::MAX,
+                self.limits.max_materialized_elements,
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        if let Err(outcome) =
+            self.check_materialized_elements(materialized as u64, table_span, diagnostics)
+        {
+            return outcome;
+        }
+
+        let mut retained_rows = Vec::new();
+        if let Err(error) = retained_rows.try_reserve_exact(rows.len()) {
+            diagnostics.push(table_filter_error(
+                "E3001",
+                format!("`.tablefilter` retained rows cannot be allocated: {error}"),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for row in rows {
+            let cell_value = match row.cells.get(zero_based) {
+                Some(cell) => match table_cell_value(cell) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        diagnostics.push(table_filter_error(
+                            "E3001",
+                            "Table filter cells must have supported evaluated plain-text content"
+                                .to_string(),
+                            cell.span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                },
+                None => IrValue::String(String::new()),
+            };
+            let predicate_result = match self.invoke_callable(
+                &predicate,
+                vec![cell_value],
+                IterationOptions {
+                    span: row.span,
+                    allow_destructuring: false,
+                },
+                diagnostics,
+                context,
+            ) {
+                CallOutcome::Value(value) if value_contains_explicit_error(&value) => {
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Value(value) => value,
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(predicate.span));
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+            };
+            let Some(keep) = scalar_boolean_value(&predicate_result) else {
+                diagnostics.push(table_filter_error(
+                    "E3001",
+                    "`.tablefilter` filter must return Boolean".to_string(),
+                    value_source_span(&predicate_result, &predicate.span),
+                ));
+                return CallOutcome::Failed;
+            };
+            if keep {
+                retained_rows.push(row.clone());
+            }
+        }
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Table {
+            header: header.clone(),
+            rows: retained_rows,
+            span: *span,
+        }]))
+    }
+
     /// Generates one backend-neutral table from optional headers and dynamic
     /// iterable rows. The selected block body remains lazy until structural
     /// binding and explicit-header conversion have succeeded.
@@ -19143,6 +19419,7 @@ pub(crate) enum NativeDispatchOwner {
     TableByRows,
     TableColumnExtraction,
     TableSort,
+    TableFilter,
     CollectionAccess,
     CollectionTransform,
     FlowJoin,
@@ -19221,6 +19498,7 @@ const DICTIONARY_LOOKUP_NATIVE_NAMES: &[&str] = &["get"];
 const TABLE_BY_ROWS_NATIVE_NAMES: &[&str] = &["tablebyrows"];
 const TABLE_COLUMN_EXTRACTION_NATIVE_NAMES: &[&str] = &["tablecolumn", "tablecolumns"];
 const TABLE_SORT_NATIVE_NAMES: &[&str] = &["tablesort"];
+const TABLE_FILTER_NATIVE_NAMES: &[&str] = &["tablefilter"];
 const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "size",
     "first",
@@ -19398,6 +19676,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::TableSort,
         names: TABLE_SORT_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::TableFilter,
+        names: TABLE_FILTER_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::CollectionAccess,
@@ -20950,6 +21232,10 @@ fn is_table_sort(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::TableSort)
 }
 
+fn is_table_filter(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::TableFilter)
+}
+
 fn is_collection_access(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::CollectionAccess)
 }
@@ -21271,6 +21557,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             vec![
                 ParameterMetadata::required("column"),
                 ParameterMetadata::defaulted("order"),
+                ParameterMetadata::required("table"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "tablefilter" => (
+            vec![
+                ParameterMetadata::required("column"),
+                ParameterMetadata::required("filter"),
                 ParameterMetadata::required("table"),
             ],
             BodyPolicy::BindFinal,
@@ -24482,6 +24776,28 @@ fn table_sort_error(code: &str, message: String, span: SourceSpan) -> Diagnostic
 
 fn table_sort_index_error(column: i32, width: usize, span: SourceSpan) -> Diagnostic {
     table_sort_error(
+        "E3001",
+        format!("Column index {column} must be between 1 and {width}"),
+        span,
+    )
+}
+
+fn table_filter_error(code: &str, message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: code.to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.tablefilter` requires a one-based column, one-argument Boolean filter, and evaluated Markdown table content."
+                .to_string(),
+        ],
+    }
+}
+
+fn table_filter_index_error(column: i32, width: usize, span: SourceSpan) -> Diagnostic {
+    table_filter_error(
         "E3001",
         format!("Column index {column} must be between 1 and {width}"),
         span,
