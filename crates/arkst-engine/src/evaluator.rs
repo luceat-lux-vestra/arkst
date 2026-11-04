@@ -414,6 +414,11 @@ struct IterationOptions {
     allow_destructuring: bool,
 }
 
+struct EvidencedIterableElement {
+    value: IrValue,
+    span: SourceSpan,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum SortKey {
     Number(f64),
@@ -948,6 +953,55 @@ fn table_text_cell(content: &str, span: SourceSpan) -> IrTableCell {
     }
 }
 
+fn table_row_from_elements(
+    elements: Vec<EvidencedIterableElement>,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<IrTableRow, CallOutcome> {
+    let mut cells = Vec::new();
+    if let Err(error) = cells.try_reserve_exact(elements.len()) {
+        diagnostics.push(table_by_rows_error(
+            format!("`.tablebyrows` cells cannot be allocated: {error}"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    for element in elements {
+        let content = value_into_table_cell(element.value, element.span, diagnostics)?;
+        cells.push(IrTableCell {
+            content,
+            alignment: IrTableAlignment::None,
+            span: element.span,
+        });
+    }
+    Ok(IrTableRow { cells, span })
+}
+
+/// `.repeat` preserves each block result as source-backed content. A row
+/// written as one nested Markdown list therefore retains one outer list-item
+/// wrapper after the outer rows iterable has been materialized. Remove only
+/// that parser-evidenced wrapper; arbitrary singleton Collections remain
+/// ordinary one-cell rows and are not flattened.
+fn unwrap_source_backed_table_row(value: IrValue) -> IrValue {
+    let IrValue::Content(nodes) = &value else {
+        return value;
+    };
+    let items = match nodes.as_slice() {
+        [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => items,
+        _ => return value,
+    };
+    let [item] = items.as_slice() else {
+        return value;
+    };
+    if !matches!(
+        item.nodes.as_slice(),
+        [IrNode::UnorderedList { .. }] | [IrNode::OrderedList { .. }]
+    ) {
+        return value;
+    }
+    IrValue::Content(item.nodes.clone())
+}
+
 fn value_into_table_cell(
     value: IrValue,
     span: SourceSpan,
@@ -958,8 +1012,7 @@ fn value_into_table_cell(
             [IrNode::Paragraph { content, .. }] => Ok(content.clone()),
             _ => {
                 diagnostics.push(iteration_error(
-                    "Dictionary values must be scalar or exactly one paragraph when rendered as a table cell"
-                        .to_string(),
+                    "Table cells must be scalar or exactly one paragraph".to_string(),
                     span,
                 ));
                 Err(CallOutcome::Failed)
@@ -971,8 +1024,7 @@ fn value_into_table_cell(
                 [IrNode::Paragraph { content, .. }] => Ok(content.clone()),
                 _ => {
                     diagnostics.push(iteration_error(
-                        "A multi-value Collection cannot be rendered as one Dictionary table cell"
-                            .to_string(),
+                        "A multi-value Collection cannot be rendered as one table cell".to_string(),
                         span,
                     ));
                     Err(CallOutcome::Failed)
@@ -981,7 +1033,7 @@ fn value_into_table_cell(
         }
         IrValue::Pair(_) | IrValue::Dictionary(_) | IrValue::Range(_) => {
             diagnostics.push(iteration_error(
-                "Nested Pair, Dictionary, or Range values cannot be rendered as one Dictionary table cell"
+                "Nested Pair, Dictionary, or Range values cannot be rendered as one table cell"
                     .to_string(),
                 span,
             ));
@@ -4913,6 +4965,22 @@ impl Evaluator {
                 diagnostics,
                 context,
                 implicit_argument,
+            );
+        }
+
+        if is_table_by_rows(name) {
+            return self.evaluate_table_by_rows(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -14221,6 +14289,174 @@ impl Evaluator {
         )
     }
 
+    /// Generates one backend-neutral table from optional headers and dynamic
+    /// iterable rows. The selected block body remains lazy until structural
+    /// binding and explicit-header conversion have succeeded.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_table_by_rows(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(table_by_rows_error(
+                "`.tablebyrows` rows body is a Markdown list, not a lambda".to_string(),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if matches!(body, Some(CallBody::Inline(_))) {
+            diagnostics.push(table_by_rows_error(
+                "`.tablebyrows` requires block rows content".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = match body {
+            Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
+                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                span: call_body_source_span(CallBody::Block(nodes), *span),
+            }),
+            Some(CallBody::Inline(_)) => unreachable!("inline table rows were rejected above"),
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let headers_slot = slots.next().unwrap_or(BoundSlot::Defaulted);
+        let rows_slot = slots.next().unwrap_or(BoundSlot::Omitted);
+
+        let header_elements = match headers_slot {
+            BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } => {
+                match self.coerce_evidenced_iterable(value, &argument_span, diagnostics, context) {
+                    Ok(elements) => elements,
+                    Err(outcome) => return outcome,
+                }
+            }
+            BoundSlot::Omitted | BoundSlot::Defaulted => Vec::new(),
+        };
+        let header = match table_row_from_elements(header_elements, *span, diagnostics) {
+            Ok(header) => header,
+            Err(outcome) => return outcome,
+        };
+
+        let row_elements = match body {
+            Some(CallBody::Block(nodes)) => {
+                let body_span = call_body_source_span(CallBody::Block(nodes), *span);
+                match self.coerce_evidenced_iterable(
+                    InvocationValue::static_value(IrValue::Content(nodes.to_vec())),
+                    &body_span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(elements) => elements,
+                    Err(outcome) => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => unreachable!("inline table rows were rejected above"),
+            None => {
+                let BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                } = rows_slot
+                else {
+                    return CallOutcome::Failed;
+                };
+                match self.coerce_evidenced_iterable(value, &argument_span, diagnostics, context) {
+                    Ok(elements) => elements,
+                    Err(outcome) => return outcome,
+                }
+            }
+        };
+
+        let mut materialized = header.cells.len() as u64;
+        if let Err(outcome) = self.check_materialized_elements(materialized, *span, diagnostics) {
+            return outcome;
+        }
+        let mut rows = Vec::new();
+        if let Err(error) = rows.try_reserve_exact(row_elements.len()) {
+            diagnostics.push(table_by_rows_error(
+                format!("`.tablebyrows` rows cannot be allocated: {error}"),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for row in row_elements {
+            let row_span = row.span;
+            let cells = match self.coerce_evidenced_iterable(
+                InvocationValue::static_value(unwrap_source_backed_table_row(row.value)),
+                &row_span,
+                diagnostics,
+                context,
+            ) {
+                Ok(elements) => elements,
+                Err(outcome) => return outcome,
+            };
+            materialized = match materialized.checked_add(cells.len() as u64) {
+                Some(materialized) => materialized,
+                None => {
+                    diagnostics.push(materialized_elements_limit_error(
+                        u64::MAX,
+                        self.limits.max_materialized_elements,
+                        row_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            };
+            if let Err(outcome) =
+                self.check_materialized_elements(materialized, row_span, diagnostics)
+            {
+                return outcome;
+            }
+            let row = match table_row_from_elements(cells, row_span, diagnostics) {
+                Ok(row) => row,
+                Err(outcome) => return outcome,
+            };
+            rows.push(row);
+        }
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Table {
+            header,
+            rows,
+            span: *span,
+        }]))
+    }
+
     /// Evaluates collection transforms and searches through the same typed
     /// iterable and callable machinery used by `.foreach`.
     #[allow(clippy::too_many_arguments)]
@@ -15377,6 +15613,38 @@ impl Evaluator {
                 Err(CallOutcome::Failed)
             }
         }
+    }
+
+    fn coerce_evidenced_iterable(
+        &self,
+        value: InvocationValue,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<EvidencedIterableElement>, CallOutcome> {
+        let element_spans = iterable_element_spans(&value.value, *span);
+        let values = self.coerce_iterable(value, span, diagnostics, context)?;
+        let use_captured_spans = element_spans.len() == values.len();
+        let mut elements = Vec::new();
+        if let Err(error) = elements.try_reserve_exact(values.len()) {
+            diagnostics.push(table_by_rows_error(
+                format!("`.tablebyrows` iterable evidence cannot be allocated: {error}"),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for (index, value) in values.into_iter().enumerate() {
+            let element_span = if use_captured_spans {
+                element_spans[index]
+            } else {
+                semantic_value_span(&value, *span)
+            };
+            elements.push(EvidencedIterableElement {
+                value,
+                span: element_span,
+            });
+        }
+        Ok(elements)
     }
 
     fn list_item_value(
@@ -18230,6 +18498,7 @@ pub(crate) enum NativeDispatchOwner {
     Pair,
     Dictionary,
     DictionaryLookup,
+    TableByRows,
     CollectionAccess,
     CollectionTransform,
     FlowJoin,
@@ -18305,6 +18574,7 @@ const RANGE_NATIVE_NAMES: &[&str] = &["range"];
 const PAIR_NATIVE_NAMES: &[&str] = &["pair"];
 const DICTIONARY_NATIVE_NAMES: &[&str] = &["dictionary"];
 const DICTIONARY_LOOKUP_NATIVE_NAMES: &[&str] = &["get"];
+const TABLE_BY_ROWS_NATIVE_NAMES: &[&str] = &["tablebyrows"];
 const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "size",
     "first",
@@ -18470,6 +18740,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::DictionaryLookup,
         names: DICTIONARY_LOOKUP_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::TableByRows,
+        names: TABLE_BY_ROWS_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::CollectionAccess,
@@ -20010,6 +20284,10 @@ fn is_dictionary_lookup(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::DictionaryLookup)
 }
 
+fn is_table_by_rows(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::TableByRows)
+}
+
 fn is_collection_access(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::CollectionAccess)
 }
@@ -20308,6 +20586,13 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::defaulted("hgap"),
             ],
             BodyPolicy::AllowSeparate,
+        ),
+        "tablebyrows" => (
+            vec![
+                ParameterMetadata::defaulted("headers"),
+                ParameterMetadata::required("rows"),
+            ],
+            BodyPolicy::BindFinal,
         ),
         "font" => (
             vec![
@@ -23392,6 +23677,37 @@ fn value_source_span(value: &IrValue, fallback: &SourceSpan) -> SourceSpan {
     }
 }
 
+fn semantic_value_span(value: &IrValue, fallback: SourceSpan) -> SourceSpan {
+    match value {
+        IrValue::Content(nodes) => nodes.first().map_or(fallback, ir_node_source_span),
+        _ => value_source_span(value, &fallback),
+    }
+}
+
+fn iterable_element_spans(value: &IrValue, fallback: SourceSpan) -> Vec<SourceSpan> {
+    match value {
+        IrValue::Content(nodes) => match nodes.as_slice() {
+            [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => {
+                items.iter().map(|item| item.span).collect()
+            }
+            _ => Vec::new(),
+        },
+        IrValue::Collection(values) => values
+            .iter()
+            .map(|value| semantic_value_span(value, fallback))
+            .collect(),
+        IrValue::Pair(pair) => vec![
+            semantic_value_span(&pair.first, pair.span),
+            semantic_value_span(&pair.second, pair.span),
+        ],
+        IrValue::Dictionary(dictionary) => {
+            dictionary.entries.iter().map(|entry| entry.span).collect()
+        }
+        IrValue::Range(_) => Vec::new(),
+        _ => Vec::new(),
+    }
+}
+
 fn no_value_required(span: SourceSpan) -> Diagnostic {
     chain_evaluation_error(
         "Call produced no value where a value is required for semantic composition".to_string(),
@@ -23412,6 +23728,20 @@ fn iteration_error_at(message: String, span: SourceSpan) -> Diagnostic {
         secondary: Vec::new(),
         hints: vec![
             "Iteration values remain typed; unsupported or invalid iteration is not fabricated as text."
+                .to_string(),
+        ],
+    }
+}
+
+fn table_by_rows_error(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.tablebyrows` requires optional iterable headers and iterable rows whose values are themselves iterable."
                 .to_string(),
         ],
     }

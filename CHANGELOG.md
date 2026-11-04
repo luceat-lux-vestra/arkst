@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.7 dynamic table rows (#704):** `.tablebyrows` now consumes
+  optional iterable headers and required dynamic iterable rows through the
+  shared source-ordered binder and iterable adapter, producing the existing
+  backend-neutral table IR. Literal, variable-held, `.repeat`-generated,
+  ragged, and empty rows preserve source evidence and existing Typst padding;
+  malformed rows fail atomically under the shared materialization limit.
+
 - **Quarkdown v2.6.3 decorative headings (#700):** `#!` through `######!`
   now interrupt paragraphs at the Rushdown extension boundary, retain a closed
   backend-neutral decorative heading kind, and lower through Typst with local
