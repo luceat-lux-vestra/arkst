@@ -1,0 +1,13 @@
+.var {catalog}
+    | Moon | Radius |
+    |------|--------|
+    | Io   | 1821.6 |
+    | Rhea | 763.8  |
+
+.var {radii}
+    .tablecolumn {2} of:{.catalog}
+
+.var {columns}
+    .tablecolumns of:{.catalog}
+
+first-radius=.radii::first column-count=.columns::size first-name=.columns::first::first

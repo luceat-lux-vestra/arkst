@@ -1,0 +1,5 @@
+id = "table-column-extraction"
+feature = "table-column-extraction"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-table-column-extraction"
+description = "One-based body-column extraction and nested all-column collections"

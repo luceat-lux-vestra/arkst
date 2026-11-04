@@ -953,6 +953,100 @@ fn table_text_cell(content: &str, span: SourceSpan) -> IrTableCell {
     }
 }
 
+enum TableSearchFailure {
+    Limit(u64),
+    Allocation(String),
+}
+
+fn first_table(
+    nodes: &[IrNode],
+    limit: usize,
+) -> Result<Option<(&IrTableRow, &[IrTableRow])>, TableSearchFailure> {
+    let mut pending = Vec::new();
+    pending
+        .try_reserve_exact(nodes.len())
+        .map_err(|error| TableSearchFailure::Allocation(error.to_string()))?;
+    pending.extend(nodes.iter().rev());
+    let mut scheduled = nodes.len() as u64;
+    if scheduled > limit as u64 {
+        return Err(TableSearchFailure::Limit(scheduled));
+    }
+
+    while let Some(node) = pending.pop() {
+        let children = match node {
+            IrNode::Table { header, rows, .. } => {
+                return Ok(Some((header, rows.as_slice())));
+            }
+            IrNode::Blockquote { content, .. } => Some(content.as_slice()),
+            IrNode::Component { component } => component_children(component),
+            IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+                let child_count = items
+                    .iter()
+                    .try_fold(0usize, |count, item| count.checked_add(item.nodes.len()));
+                let Some(child_count) = child_count else {
+                    return Err(TableSearchFailure::Limit(u64::MAX));
+                };
+                scheduled = scheduled
+                    .checked_add(child_count as u64)
+                    .ok_or(TableSearchFailure::Limit(u64::MAX))?;
+                if scheduled > limit as u64 {
+                    return Err(TableSearchFailure::Limit(scheduled));
+                }
+                pending
+                    .try_reserve(child_count)
+                    .map_err(|error| TableSearchFailure::Allocation(error.to_string()))?;
+                for item in items.iter().rev() {
+                    pending.extend(item.nodes.iter().rev());
+                }
+                continue;
+            }
+            _ => None,
+        };
+        let Some(children) = children else {
+            continue;
+        };
+        scheduled = scheduled
+            .checked_add(children.len() as u64)
+            .ok_or(TableSearchFailure::Limit(u64::MAX))?;
+        if scheduled > limit as u64 {
+            return Err(TableSearchFailure::Limit(scheduled));
+        }
+        pending
+            .try_reserve(children.len())
+            .map_err(|error| TableSearchFailure::Allocation(error.to_string()))?;
+        pending.extend(children.iter().rev());
+    }
+    Ok(None)
+}
+
+fn component_children(component: &IrComponent) -> Option<&[IrNode]> {
+    match component {
+        IrComponent::Stacked(component) => Some(&component.children),
+        IrComponent::Container(component) => Some(&component.children),
+        IrComponent::Landscape(component) => Some(&component.children),
+        IrComponent::Clip(component) => Some(&component.children),
+        IrComponent::Box(component) => Some(&component.children),
+        IrComponent::Collapse(component) => Some(&component.children),
+        IrComponent::Todo(component) => Some(&component.children),
+        IrComponent::SpeakerNote(component) => Some(&component.children),
+        IrComponent::Fragment(component) => Some(&component.children),
+        IrComponent::ExplicitError(_) => None,
+    }
+}
+
+fn table_effective_width(header: &IrTableRow, rows: &[IrTableRow]) -> usize {
+    rows.iter()
+        .fold(header.cells.len(), |width, row| width.max(row.cells.len()))
+}
+
+fn table_cell_value(cell: &IrTableCell) -> Result<IrValue, String> {
+    builtins::table_cell_plain_text(&cell.content)
+        .map(IrValue::String)
+        .ok_or_else(|| {
+            "Table column cells must have supported evaluated plain-text content".to_string()
+        })
+}
+
 fn table_row_from_elements(
     elements: Vec<EvidencedIterableElement>,
     span: SourceSpan,
@@ -4965,6 +5059,23 @@ impl Evaluator {
                 diagnostics,
                 context,
                 implicit_argument,
+            );
+        }
+
+        if is_table_column_extraction(name) {
+            return self.evaluate_table_column_extraction(
+                name,
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -14289,6 +14400,250 @@ impl Evaluator {
         )
     }
 
+    /// Extracts one or every body column from the first evaluated table value.
+    /// Headers describe the shape but are not returned as column values.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_table_column_extraction(
+        &self,
+        name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(table_column_error(
+                name,
+                format!("`.{name}` table content is not a lambda"),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if matches!(body, Some(CallBody::Inline(_))) {
+            diagnostics.push(table_column_error(
+                name,
+                format!("`.{name}` requires block table content"),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        // Explicit arguments run in source order. A separately represented
+        // block body is evaluated only after structural binding succeeds.
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = match body {
+            Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
+                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                span: call_body_source_span(CallBody::Block(nodes), *span),
+            }),
+            Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let column = if name == "tablecolumn" {
+            let Some(BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            }) = slots.next()
+            else {
+                return CallOutcome::Failed;
+            };
+            let column = match value_conversion::convert_integer_with_origin(&value) {
+                Ok(column) => column,
+                Err(_) => {
+                    diagnostics.push(table_column_error(
+                        name,
+                        "`.tablecolumn` column must be a finite integer".to_string(),
+                        argument_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            };
+            Some((column, argument_span))
+        } else {
+            None
+        };
+        let Some(BoundSlot::Explicit {
+            value: bound_table_value,
+            span: table_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let table_value = match body {
+            Some(CallBody::Block(nodes)) => {
+                let diagnostic_count = diagnostics.len();
+                let evaluated = self.evaluate_nodes(nodes, diagnostics, context);
+                if diagnostics.len() != diagnostic_count {
+                    return CallOutcome::Failed;
+                }
+                InvocationValue::static_value(IrValue::Content(evaluated))
+            }
+            Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
+            None => bound_table_value,
+        };
+        let IrValue::Content(nodes) = &table_value.value else {
+            diagnostics.push(table_column_error(
+                name,
+                format!("`.{name}` requires evaluated Markdown table content"),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let (header, rows) = match first_table(nodes, self.limits.max_materialized_elements) {
+            Ok(Some(table)) => table,
+            Ok(None) => {
+                diagnostics.push(table_column_error(
+                    name,
+                    "A table is not provided and cannot be found".to_string(),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(TableSearchFailure::Limit(requested)) => {
+                diagnostics.push(materialized_elements_limit_error(
+                    requested,
+                    self.limits.max_materialized_elements,
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(TableSearchFailure::Allocation(error)) => {
+                diagnostics.push(table_column_error(
+                    name,
+                    format!("Table traversal cannot be allocated: {error}"),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let width = table_effective_width(header, rows);
+
+        if let Some((column, column_span)) = column {
+            let Some(zero_based) = column
+                .checked_sub(1)
+                .and_then(|value| usize::try_from(value).ok())
+            else {
+                diagnostics.push(table_column_index_error(column, width, column_span));
+                return CallOutcome::Failed;
+            };
+            if zero_based >= width {
+                diagnostics.push(table_column_index_error(column, width, column_span));
+                return CallOutcome::Failed;
+            }
+            if let Err(outcome) =
+                self.check_materialized_elements_len(rows.len(), table_span, diagnostics)
+            {
+                return outcome;
+            }
+            let mut values = Vec::new();
+            if let Err(error) = values.try_reserve_exact(rows.len()) {
+                diagnostics.push(table_column_error(
+                    name,
+                    format!("`.tablecolumn` values cannot be allocated: {error}"),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            for row in rows {
+                let value = match row.cells.get(zero_based) {
+                    Some(cell) => match table_cell_value(cell) {
+                        Ok(value) => value,
+                        Err(message) => {
+                            diagnostics.push(table_column_error(name, message, cell.span));
+                            return CallOutcome::Failed;
+                        }
+                    },
+                    None => IrValue::String(String::new()),
+                };
+                values.push(value);
+            }
+            return CallOutcome::Value(IrValue::Collection(values));
+        }
+
+        let requested = match width.checked_mul(rows.len()) {
+            Some(requested) => requested,
+            None => {
+                diagnostics.push(materialized_elements_limit_error(
+                    u64::MAX,
+                    self.limits.max_materialized_elements,
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        if let Err(outcome) =
+            self.check_materialized_elements(requested as u64, table_span, diagnostics)
+        {
+            return outcome;
+        }
+        let mut columns = Vec::new();
+        if let Err(error) = columns.try_reserve_exact(width) {
+            diagnostics.push(table_column_error(
+                name,
+                format!("`.tablecolumns` columns cannot be allocated: {error}"),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for column in 0..width {
+            let mut values = Vec::new();
+            if let Err(error) = values.try_reserve_exact(rows.len()) {
+                diagnostics.push(table_column_error(
+                    name,
+                    format!("`.tablecolumns` values cannot be allocated: {error}"),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            for row in rows {
+                let value = match row.cells.get(column) {
+                    Some(cell) => match table_cell_value(cell) {
+                        Ok(value) => value,
+                        Err(message) => {
+                            diagnostics.push(table_column_error(name, message, cell.span));
+                            return CallOutcome::Failed;
+                        }
+                    },
+                    None => IrValue::String(String::new()),
+                };
+                values.push(value);
+            }
+            columns.push(IrValue::Collection(values));
+        }
+        CallOutcome::Value(IrValue::Collection(columns))
+    }
+
     /// Generates one backend-neutral table from optional headers and dynamic
     /// iterable rows. The selected block body remains lazy until structural
     /// binding and explicit-header conversion have succeeded.
@@ -18499,6 +18854,7 @@ pub(crate) enum NativeDispatchOwner {
     Dictionary,
     DictionaryLookup,
     TableByRows,
+    TableColumnExtraction,
     CollectionAccess,
     CollectionTransform,
     FlowJoin,
@@ -18575,6 +18931,7 @@ const PAIR_NATIVE_NAMES: &[&str] = &["pair"];
 const DICTIONARY_NATIVE_NAMES: &[&str] = &["dictionary"];
 const DICTIONARY_LOOKUP_NATIVE_NAMES: &[&str] = &["get"];
 const TABLE_BY_ROWS_NATIVE_NAMES: &[&str] = &["tablebyrows"];
+const TABLE_COLUMN_EXTRACTION_NATIVE_NAMES: &[&str] = &["tablecolumn", "tablecolumns"];
 const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "size",
     "first",
@@ -18744,6 +19101,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::TableByRows,
         names: TABLE_BY_ROWS_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::TableColumnExtraction,
+        names: TABLE_COLUMN_EXTRACTION_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::CollectionAccess,
@@ -20288,6 +20649,10 @@ fn is_table_by_rows(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::TableByRows)
 }
 
+fn is_table_column_extraction(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::TableColumnExtraction)
+}
+
 fn is_collection_access(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::CollectionAccess)
 }
@@ -20592,6 +20957,17 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::defaulted("headers"),
                 ParameterMetadata::required("rows"),
             ],
+            BodyPolicy::BindFinal,
+        ),
+        "tablecolumn" => (
+            vec![
+                ParameterMetadata::required("column"),
+                ParameterMetadata::required("of"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "tablecolumns" => (
+            vec![ParameterMetadata::required("of")],
             BodyPolicy::BindFinal,
         ),
         "font" => (
@@ -23745,6 +24121,27 @@ fn table_by_rows_error(message: String, span: SourceSpan) -> Diagnostic {
                 .to_string(),
         ],
     }
+}
+
+fn table_column_error(name: &str, message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![format!(
+            "`.{name}` requires evaluated Markdown table content and returns body-cell values without headers."
+        )],
+    }
+}
+
+fn table_column_index_error(column: i32, width: usize, span: SourceSpan) -> Diagnostic {
+    table_column_error(
+        "tablecolumn",
+        format!("Column index {column} must be between 1 and {width}"),
+        span,
+    )
 }
 
 fn materialized_elements_limit_error(requested: u64, limit: usize, span: SourceSpan) -> Diagnostic {
