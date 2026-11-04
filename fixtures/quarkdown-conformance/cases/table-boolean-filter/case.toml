@@ -1,0 +1,5 @@
+id = "table-boolean-filter"
+feature = "table-boolean-filter"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.7.0-table-boolean-filter"
+description = "Stable Boolean cell-predicate filtering with rich source-backed rows"

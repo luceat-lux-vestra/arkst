@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown table filtering (#710):** `.tablefilter` now invokes a shared
+  one-argument Boolean callable once per body row over an evaluated plain-text
+  cell value, preserving the header, retained-row order, original rich cells,
+  and source spans. Markdown, generated, variable-held, nested, ragged, and
+  empty-result tables reuse the existing table IR, callable savepoints,
+  structured diagnostics, depth checks, and materialization limits.
+
 - **Quarkdown table sorting (#708):** `.tablesort` now preserves headers and
   rich source-backed cells while stably ordering body rows by a one-based
   plain-text key. The bounded v2.7.0 contract covers case-sensitive ASCII

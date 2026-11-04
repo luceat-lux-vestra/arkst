@@ -1,0 +1,7 @@
+.tablefilter {2} {level: .isgreater {.level} than:{7}}
+    | Signal | Level |
+    |--------|-------|
+    | Ember | 3 |
+    | Halo | **12** |
+    | Ion | 8 |
+    | Juno | 2 |

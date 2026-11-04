@@ -24,8 +24,8 @@ owned status counts are:
 | 'SUPPORTED_END_TO_END' | 13 |
 | 'SUPPORTED_SEMANTICS' | 3 |
 | 'PARSED_ONLY' | 1 |
-| 'PARTIAL' | 30 |
-| 'UNSUPPORTED' | 21 |
+| 'PARTIAL' | 31 |
+| 'UNSUPPORTED' | 20 |
 | 'DEFERRED' | 2 |
 | 'BLOCKED' | 1 |
 | 'UNKNOWN' | 0 |
@@ -115,8 +115,10 @@ dependency:
   The bounded `.tablecolumn`/`.tablecolumns` extraction slice now consumes the
   existing evaluated table IR and returns plain String collections. The
   bounded `.tablesort` slice preserves the existing table IR and rich cells
-  while stably ordering ASCII natural keys; exact Unicode comparator parity,
-  table production beyond `.tablebyrows`, filter/compute,
+  while stably ordering ASCII natural keys. The bounded `.tablefilter` slice
+  applies the shared one-argument Boolean callable path to selected plain-text
+  cells while retaining the original rich rows. Exact Unicode comparator
+  parity, table production beyond `.tablebyrows`, compute,
   captions/references, and renderer equivalence remain separate open
   contracts.
 - .row, .column, .grid, .align, .center, .landscape, .fullspan, .clip, and .whitespace are

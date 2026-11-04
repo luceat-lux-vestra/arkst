@@ -1,0 +1,194 @@
+{
+  "nodes": [
+    {
+      "Table": {
+        "header": {
+          "cells": [
+            {
+              "content": [
+                {
+                  "Text": {
+                    "content": "Signal",
+                    "span": {
+                      "source_id": 1,
+                      "start": 61,
+                      "end": 67
+                    }
+                  }
+                }
+              ],
+              "alignment": "None",
+              "span": {
+                "source_id": 1,
+                "start": 59,
+                "end": 67
+              }
+            },
+            {
+              "content": [
+                {
+                  "Text": {
+                    "content": "Level",
+                    "span": {
+                      "source_id": 1,
+                      "start": 70,
+                      "end": 75
+                    }
+                  }
+                }
+              ],
+              "alignment": "None",
+              "span": {
+                "source_id": 1,
+                "start": 68,
+                "end": 75
+              }
+            }
+          ],
+          "span": {
+            "source_id": 1,
+            "start": 59,
+            "end": 75
+          }
+        },
+        "rows": [
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "Text": {
+                      "content": "Halo",
+                      "span": {
+                        "source_id": 1,
+                        "start": 125,
+                        "end": 129
+                      }
+                    }
+                  }
+                ],
+                "alignment": "None",
+                "span": {
+                  "source_id": 1,
+                  "start": 123,
+                  "end": 129
+                }
+              },
+              {
+                "content": [
+                  {
+                    "Strong": {
+                      "content": [
+                        {
+                          "Text": {
+                            "content": "12",
+                            "span": {
+                              "source_id": 1,
+                              "start": 134,
+                              "end": 136
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "source_id": 1,
+                        "start": 132,
+                        "end": 136
+                      }
+                    }
+                  }
+                ],
+                "alignment": "None",
+                "span": {
+                  "source_id": 1,
+                  "start": 130,
+                  "end": 138
+                }
+              }
+            ],
+            "span": {
+              "source_id": 1,
+              "start": 123,
+              "end": 138
+            }
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "Text": {
+                      "content": "Ion",
+                      "span": {
+                        "source_id": 1,
+                        "start": 147,
+                        "end": 150
+                      }
+                    }
+                  }
+                ],
+                "alignment": "None",
+                "span": {
+                  "source_id": 1,
+                  "start": 145,
+                  "end": 150
+                }
+              },
+              {
+                "content": [
+                  {
+                    "Text": {
+                      "content": "8",
+                      "span": {
+                        "source_id": 1,
+                        "start": 153,
+                        "end": 154
+                      }
+                    }
+                  }
+                ],
+                "alignment": "None",
+                "span": {
+                  "source_id": 1,
+                  "start": 151,
+                  "end": 154
+                }
+              }
+            ],
+            "span": {
+              "source_id": 1,
+              "start": 145,
+              "end": 154
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 0,
+          "end": 171
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}
