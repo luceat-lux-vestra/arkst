@@ -232,3 +232,5 @@ jobs:
           do
             run_probe "$name"
           done
+
+# evidence-trigger: second branch push after workflow registration
