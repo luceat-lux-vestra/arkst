@@ -3,11 +3,7 @@ use arkst_core::{
     compile, CompileOptions, EvaluationLimits, VirtualProject, VirtualProjectBuilder,
 };
 
-fn project(
-    entry: &str,
-    sources: &[(&str, &str)],
-    assets: &[(&str, &[u8])],
-) -> VirtualProject {
+fn project(entry: &str, sources: &[(&str, &str)], assets: &[(&str, &[u8])]) -> VirtualProject {
     let mut builder = VirtualProjectBuilder::new()
         .entry(entry)
         .expect("valid entry path");

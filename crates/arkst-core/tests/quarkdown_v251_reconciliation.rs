@@ -144,7 +144,7 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     assert!(PROJECT_DATA_RESEARCH.contains("ASCII-bounded `sortby:name`"));
     assert!(PROJECT_DATA_RESEARCH.contains("Non-ASCII `sortby:name` also fails closed"));
 
-    assert!(COMPAT_README.contains("bounded #189 slices"));
+    assert!(COMPAT_README.contains("bounded #189 resource slices"));
     assert!(COMPAT_README.contains("ASCII `sortby:name`"));
     assert!(!COMPAT_README
         .contains("`.listfiles`, `.filename`) and `.llmstxt` are tracked as deferred"));

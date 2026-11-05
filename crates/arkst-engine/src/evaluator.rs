@@ -13263,10 +13263,7 @@ impl Evaluator {
             Err(error) => {
                 diagnostics.push(resource_diagnostic(
                     "E3001",
-                    format!(
-                        "`.csv` could not parse `{}`: {error}",
-                        arguments.reference
-                    ),
+                    format!("`.csv` could not parse `{}`: {error}", arguments.reference),
                     *span,
                     "Use the bounded UTF-8 CSV syntax evidenced by the project resource parser.",
                 ));
@@ -23384,14 +23381,16 @@ fn csv_arguments(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<CsvArguments, ()> {
     let candidates = raw_invocation_candidates(positional_args, named_args, *span);
-    let bound = binding_plan.bind(&candidates, None, *span).map_err(|error| {
-        diagnostics.push(resource_diagnostic(
-            "E3003",
-            error.message,
-            error.primary,
-            "Pass one logical CSV path and only the documented mode/caption/ref options.",
-        ));
-    })?;
+    let bound = binding_plan
+        .bind(&candidates, None, *span)
+        .map_err(|error| {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                error.message,
+                error.primary,
+                "Pass one logical CSV path and only the documented mode/caption/ref options.",
+            ));
+        })?;
     let mut slots = bound.slots.into_iter();
 
     let Some(BoundSlot::Explicit {
