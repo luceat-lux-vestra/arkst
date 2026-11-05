@@ -1,0 +1,243 @@
+name: Evidence 712 tablecompute v2.7.0
+
+on:
+  push:
+    branches:
+      - evidence/712-tablecompute-v270
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download and verify official Quarkdown v2.7.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/quarkdown-linux-x64-v2.7.0.zip"
+          url="https://github.com/iamgio/quarkdown/releases/download/v2.7.0/quarkdown-linux-x64.zip"
+          sha="5ff4e78e391abd073e62030da816faef265d681d3b8ccfd05768cc9c586f7e85"
+          curl --fail --location --retry 3 --output "$archive" "$url"
+          printf '%s  %s\n' "$sha" "$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/quarkdown-v270"
+          unzip -q "$archive" -d "$RUNNER_TEMP/quarkdown-v270"
+          qd="$(find "$RUNNER_TEMP/quarkdown-v270" -type f -path '*/bin/quarkdown' -print -quit)"
+          test -n "$qd"
+          chmod +x "$qd"
+          echo "QD=$qd" >> "$GITHUB_ENV"
+          "$qd" --version || true
+          "$qd" c --help | head -80
+
+      - name: Run independent black-box tablecompute probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/tablecompute-probes"
+          mkdir -p "$root"
+
+          write_probe() {
+            local name="$1"
+            mkdir -p "$root/$name"
+            cat > "$root/$name/input.qd"
+          }
+
+          write_probe standard <<'QD'
+          .tablecompute {2} {values: .values::sumall}
+              | Signal | Amount | Note |
+              |--------|--------|------|
+              | Alder | 4 | east |
+              | Birch | 9 | west |
+              | Cedar | 6 | north |
+          QD
+
+          write_probe header_only <<'QD'
+          .tablecompute {2} {values: .values::size}
+              | Signal | Amount |
+              |--------|--------|
+          QD
+
+          write_probe ragged_join <<'QD'
+          .tablecompute {3} {values: .values::join separator:{~}}
+              | Signal | Code | Note |
+              |--------|------|------|
+              | Dune | d | first |
+              | Echo | e |
+              | Flint | f | |
+          QD
+
+          write_probe rich_input <<'QD'
+          .tablecompute {2} {values: .values::sumall}
+              | Signal | Amount |
+              |--------|--------|
+              | Grove | **5** |
+              | Harbor | 7 |
+          QD
+
+          write_probe generated_headerless <<'QD'
+          .tablecompute {2} {values: .values::sumall}
+              .tablebyrows
+                  - - Iris
+                    - 3
+                  - - Juniper
+                    - 12
+          QD
+
+          write_probe nested_table <<'QD'
+          .tablecompute {2} {values: .values::size}
+              > | Signal | Amount |
+              > |--------|--------|
+              > | Kestrel | 3 |
+              > | Larch | 9 |
+          QD
+
+          write_probe composed_filter <<'QD'
+          .tablecompute {2} {values: .values::sumall}
+              .tablefilter {2} {amount: .isgreater {.amount} than:{5}}
+                  | Signal | Amount |
+                  |--------|--------|
+                  | Moss | 3 |
+                  | Nova | 7 |
+                  | Opal | 9 |
+          QD
+
+          write_probe result_string <<'QD'
+          .tablecompute {1} {values: .values::join separator:{+}}
+              | Signal |
+              |--------|
+              | Pine |
+              | Quartz |
+          QD
+
+          write_probe result_rich <<'QD'
+          .tablecompute {2} {values: **count=.values::size**}
+              | Signal | Amount |
+              |--------|--------|
+              | Reed | 2 |
+              | Stone | 8 |
+          QD
+
+          write_probe result_collection <<'QD'
+          .tablecompute {2} {values: .emptycollection}
+              | Signal | Amount |
+              |--------|--------|
+              | Tide | 2 |
+          QD
+
+          write_probe no_value <<'QD'
+          .tablecompute {2} {values: .var {local} {x}}
+              | Signal | Amount |
+              |--------|--------|
+              | Umber | 2 |
+          QD
+
+          write_probe invalid_index <<'QD'
+          .tablecompute {3} {values: .values::size}
+              | Signal | Amount |
+              |--------|--------|
+              | Vale | 2 |
+          QD
+
+          write_probe callback_error <<'QD'
+          .tablecompute {2} {values: .error {probe-boom}}
+              | Signal | Amount |
+              |--------|--------|
+              | Willow | 2 |
+          QD
+
+          write_probe empty_generated <<'QD'
+          .tablecompute {1} {values: .values::size}
+              .tablebyrows rows:{.emptycollection}
+          QD
+
+          extract_tables() {
+            local html="$1"
+            python3 - "$html" <<'PY'
+          import re
+          import sys
+          from html.parser import HTMLParser
+
+          class Parser(HTMLParser):
+              def __init__(self):
+                  super().__init__(convert_charrefs=True)
+                  self.depth = 0
+                  self.tables = []
+                  self.table = None
+                  self.row = None
+                  self.cell = None
+              def handle_starttag(self, tag, attrs):
+                  if tag == "table":
+                      self.depth += 1
+                      if self.depth == 1:
+                          self.table = []
+                  elif self.depth == 1 and tag == "tr":
+                      self.row = []
+                  elif self.depth == 1 and tag in ("td", "th"):
+                      self.cell = []
+              def handle_data(self, data):
+                  if self.depth == 1 and self.cell is not None:
+                      self.cell.append(data)
+              def handle_endtag(self, tag):
+                  if self.depth == 1 and tag in ("td", "th") and self.cell is not None:
+                      value = re.sub(r"\s+", " ", "".join(self.cell)).strip()
+                      self.row.append(value)
+                      self.cell = None
+                  elif self.depth == 1 and tag == "tr" and self.row is not None:
+                      if self.row:
+                          self.table.append(self.row)
+                      self.row = None
+                  elif tag == "table":
+                      if self.depth == 1 and self.table is not None:
+                          self.tables.append(self.table)
+                          self.table = None
+                      self.depth -= 1
+
+          p = Parser()
+          with open(sys.argv[1], encoding="utf-8") as f:
+              p.feed(f.read())
+          for ti, table in enumerate(p.tables):
+              print(f"TABLE[{ti}]")
+              for ri, row in enumerate(table):
+                  print(f"ROW[{ri}]=" + " || ".join(row))
+          PY
+          }
+
+          run_probe() {
+            local name="$1"
+            local dir="$root/$name"
+            echo "::group::PROBE $name"
+            set +e
+            (
+              cd "$dir"
+              "$QD" --log-level error c input.qd --clean
+            ) >"$dir/stdout.log" 2>"$dir/stderr.log"
+            rc=$?
+            set -e
+            echo "RESULT name=$name rc=$rc"
+            if [ -s "$dir/stdout.log" ]; then
+              echo "STDOUT:"
+              sed -n '1,80p' "$dir/stdout.log"
+            fi
+            if [ -s "$dir/stderr.log" ]; then
+              echo "STDERR:"
+              sed -n '1,120p' "$dir/stderr.log"
+            fi
+            if [ "$rc" -eq 0 ]; then
+              html="$(find "$dir/output" -type f -name '*.html' -print 2>/dev/null | sort | head -1)"
+              if [ -n "$html" ]; then
+                echo "HTML=$html"
+                extract_tables "$html"
+              else
+                echo "NO_HTML_OUTPUT"
+                find "$dir" -maxdepth 4 -type f -print | sort
+              fi
+            fi
+            echo "::endgroup::"
+          }
+
+          for name in             standard header_only ragged_join rich_input generated_headerless             nested_table composed_filter result_string result_rich result_collection             no_value invalid_index callback_error empty_generated
+          do
+            run_probe "$name"
+          done
