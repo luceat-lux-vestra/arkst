@@ -244,3 +244,5 @@ jobs:
             run_probe "$name" ""
           done
           run_probe nested_relative "nested/input.qd"
+
+# evidence-trigger: second branch push after workflow registration
