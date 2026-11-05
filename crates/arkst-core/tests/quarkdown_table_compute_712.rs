@@ -123,6 +123,61 @@ fn tablecompute_accepts_generated_nested_and_composed_tables() {
 }
 
 #[test]
+fn tablecompute_matches_evidenced_result_text_and_ragged_input_projections() {
+    for (source, expected) in [
+        (
+            ".tablecompute {2} {values: .values::isempty}\n    | Signal | Amount |\n    |--------|--------|\n    | Torch | 2 |\n",
+            "false",
+        ),
+        (
+            ".tablecompute {2} {values: .range {2} {4}}\n    | Signal | Amount |\n    |--------|--------|\n    | Union | 2 |\n",
+            "2..4",
+        ),
+        (
+            ".tablecompute {2} {values: .none}\n    | Signal | Amount |\n    |--------|--------|\n    | Vector | 2 |\n",
+            "None",
+        ),
+        (
+            ".tablecompute {2} {values: .emptycollection}\n    | Signal | Amount |\n    |--------|--------|\n    | Tide | 2 |\n",
+            "[]",
+        ),
+        (
+            ".tablecompute {2} {values: .var {local} {x}}\n    | Signal | Amount |\n    |--------|--------|\n    | Umber | 2 |\n",
+            "kotlin.Unit",
+        ),
+    ] {
+        let result = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+        let (_, rows) = only_table(&result);
+        assert_eq!(
+            row_text(rows.last().expect("computed row"))[1],
+            expected,
+            "{source:?}"
+        );
+    }
+
+    let ragged = compile_source(
+        ".tablecompute {3} {values: .values::getat {2}::isempty}\n    | Signal | Code | Note |\n    |--------|------|------|\n    | Delta | d | present |\n    | Epsilon | e |\n    | Zeta | z | tail |\n",
+    );
+    assert!(ragged.diagnostics.is_empty(), "{ragged:?}");
+    let (_, rows) = only_table(&ragged);
+    assert_eq!(row_text(rows.last().expect("computed row")), ["", "", "true"]);
+}
+
+#[test]
+fn tablecompute_fails_closed_for_unstable_content_backed_result_coercions() {
+    for source in [
+        ".tablecompute {1} {values: .values::join separator:{+}}\n    | Signal |\n    |--------|\n    | Pine |\n    | Quartz |\n",
+        ".tablecompute {2} {values: **count=.values::size**}\n    | Signal | Amount |\n    |--------|--------|\n    | Reed | 2 |\n    | Stone | 8 |\n",
+    ] {
+        let result = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+        assert_eq!(result.diagnostics[0].code, "E8001", "{source:?}: {result:?}");
+        assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+    }
+}
+
+#[test]
 fn tablecompute_rejects_invalid_calls_and_callback_failures_atomically() {
     for source in [
         ".tablecompute\n",
@@ -131,7 +186,6 @@ fn tablecompute_rejects_invalid_calls_and_callback_failures_atomically() {
         ".tablecompute {1.5} {@lambda 1}\n    | A |\n    |---|\n    | x |\n",
         ".tablecompute {1} {not-callable} {not-a-table}\n",
         ".tablecompute {1} {left right: 1}\n    | A |\n    |---|\n    | x |\n",
-        ".tablecompute {1} {@lambda .var {local} {x}}\n    | A |\n    |---|\n    | x |\n",
         ".tablecompute {1} {values: .error {boom}}\n    | A |\n    |---|\n    | x |\n",
         ".tablecompute {1} {values: .unknown {.values}}\n    | A |\n    |---|\n    | x |\n",
         ".tablecompute {1} {@lambda 1} table:{not-a-table}\n",

@@ -1053,6 +1053,36 @@ fn table_cell_value(cell: &IrTableCell) -> Result<IrValue, String> {
         })
 }
 
+/// Projects only callback result categories with stable, independently
+/// observed v2.7.0 table-computation text. Content-backed JVM object identity
+/// strings and other unproven dynamic values deliberately fail closed.
+fn table_compute_result_text(value: &IrValue) -> Option<String> {
+    match value {
+        IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
+        IrValue::Number(number) => Some(scalar_number_to_text(*number)),
+        IrValue::Boolean(boolean) => Some(boolean.to_string()),
+        IrValue::Unit => Some("kotlin.Unit".to_string()),
+        IrValue::None => Some("None".to_string()),
+        IrValue::Range(IrRange {
+            start: Some(start),
+            end: Some(end),
+            ..
+        }) => Some(format!("{start}..{end}")),
+        IrValue::Collection(values) if values.is_empty() => Some("[]".to_string()),
+        IrValue::Size(_)
+        | IrValue::Color(_)
+        | IrValue::Enum(_)
+        | IrValue::Range(_)
+        | IrValue::Collection(_)
+        | IrValue::Pair(_)
+        | IrValue::Dictionary(_)
+        | IrValue::Content(_)
+        | IrValue::Component(_)
+        | IrValue::Callable(_)
+        | IrValue::InlineBody(_) => None,
+    }
+}
+
 fn table_sort_order(value: &InvocationValue) -> Option<TableSortOrder> {
     if value.origin != ValueOrigin::Dynamic {
         return None;
@@ -15434,7 +15464,7 @@ impl Evaluator {
             column_values.push(value);
         }
 
-        let computed_result = match self.invoke_callable(
+        let (computed_text, computed_span) = match self.invoke_callable(
             &compute,
             vec![IrValue::Collection(column_values)],
             IterationOptions {
@@ -15447,20 +15477,30 @@ impl Evaluator {
             CallOutcome::Value(value) if value_contains_explicit_error(&value) => {
                 return CallOutcome::Failed;
             }
-            CallOutcome::Value(value) => value,
-            CallOutcome::NoValue => {
-                diagnostics.push(no_value_required(compute.span));
-                return CallOutcome::Failed;
+            CallOutcome::Value(value) => {
+                let result_span = value_source_span(&value, &compute.span);
+                let Some(text) = table_compute_result_text(&value) else {
+                    diagnostics.push(table_compute_error(
+                        "E8001",
+                        "`.tablecompute` callback result has no independently evidenced deterministic text projection"
+                            .to_string(),
+                        result_span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                (text, result_span)
             }
+            // Official v2.7.0 black-box evidence observes an otherwise
+            // outputless callback as the same textual Kotlin Unit projection
+            // used by an explicit Unit value in this table-computation slot.
+            CallOutcome::NoValue => ("kotlin.Unit".to_string(), compute.span),
             CallOutcome::Failed => return CallOutcome::Failed,
             CallOutcome::Unresolved => return CallOutcome::Unresolved,
         };
-        let computed_span = value_source_span(&computed_result, &compute.span);
-        let computed_content =
-            match value_into_table_cell(computed_result, computed_span, diagnostics) {
-                Ok(content) => content,
-                Err(outcome) => return outcome,
-            };
+        let computed_content = vec![IrInline::Text {
+            content: computed_text,
+            span: computed_span,
+        }];
 
         let existing_cells = rows.iter().try_fold(header.cells.len(), |count, row| {
             count.checked_add(row.cells.len())
