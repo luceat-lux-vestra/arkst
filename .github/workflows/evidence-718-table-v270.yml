@@ -125,6 +125,30 @@ jobs:
           .table {.parts}
           QD
 
+          mkprobe repeat_multi_column
+          cat > "$root/repeat_multi_column/input.qd" <<'QD'
+          .table
+              .repeat {2}
+                  n:
+                  | A.n | B.n |
+                  |-----|-----|
+                  | X.n | Y.n |
+          QD
+
+          mkprobe uneven_generated
+          cat > "$root/uneven_generated/input.qd" <<'QD'
+          .table
+              .repeat {2}
+                  n:
+                  .tablebyrows headers:{
+                      - H.n
+                  } rows:{
+                      .repeat {.n}
+                          r:
+                          - V.n:.r
+                  }
+          QD
+
           mkprobe empty_collection
           cat > "$root/empty_collection/input.qd" <<'QD'
           .table {.emptycollection}
@@ -228,7 +252,7 @@ jobs:
             echo "::endgroup::"
           }
 
-          for name in documented_repeat explicit_body named_subtables variable_collection rich_cells uneven_rows multi_column_subtable empty_collection scalar_rejected source_defined column_extract
+          for name in documented_repeat explicit_body named_subtables variable_collection rich_cells uneven_rows multi_column_subtable repeat_multi_column uneven_generated empty_collection scalar_rejected source_defined column_extract
           do
             run_probe "$name"
           done
