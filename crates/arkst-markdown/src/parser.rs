@@ -2043,7 +2043,7 @@ impl CallArgumentContext {
     }
 
     fn is_callback(self, call_name: &str, positional_index: usize) -> bool {
-        if call_name == "tablefilter" {
+        if matches!(call_name, "tablefilter" | "tablecompute") {
             return matches!(self, Self::Direct) && positional_index == 1;
         }
         let callback_index = match (call_name, self) {
@@ -2613,6 +2613,7 @@ fn convert_named_arg(
         || (arg.name == "condition"
             && call_name.is_some_and(|name| matches!(name, "findfirst" | "findall")))
         || (arg.name == "filter" && call_name == Some("tablefilter"))
+        || (arg.name == "compute" && call_name == Some("tablecompute"))
         || (arg.name == "body" && call_name == Some("join"));
     NamedArg {
         name: arg.name.clone(),
@@ -4934,6 +4935,52 @@ mod tests {
                 body,
                 ..
             }) if header.parameters[0].name == "cell" && !body.is_empty()
+        ));
+        assert!(matches!(
+            named
+                .iter()
+                .find(|argument| argument.name == "table")
+                .map(|argument| &argument.value),
+            Some(value) if !matches!(value, Value::Lambda { .. })
+        ));
+    }
+
+    #[test]
+    fn tablecompute_callback_uses_only_its_direct_or_named_compute_slot() {
+        let direct =
+            parse_with_diagnostics(".tablecompute {2} {cells: .cells::size} {not-a-table}\n");
+        assert!(direct.diagnostics.is_empty(), "{direct:?}");
+        let Block::DirectiveCall { arguments, .. } = &direct.document.nodes[0] else {
+            panic!("expected direct tablecompute directive")
+        };
+        assert!(matches!(
+            positional_args(arguments).get(1),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "cells" && !body.is_empty()
+        ));
+        assert!(matches!(
+            positional_args(arguments).get(2),
+            Some(value) if !matches!(value, Value::Lambda { .. })
+        ));
+
+        let named = parse_with_diagnostics(
+            ".tablecompute column:{2} compute:{cells: .cells::size} table:{not-a-table}\n",
+        );
+        assert!(named.diagnostics.is_empty(), "{named:?}");
+        let Block::DirectiveCall { arguments, .. } = &named.document.nodes[0] else {
+            panic!("expected named tablecompute directive")
+        };
+        let named = named_args(arguments);
+        assert!(matches!(
+            named.iter().find(|argument| argument.name == "compute").map(|argument| &argument.value),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "cells" && !body.is_empty()
         ));
         assert!(matches!(
             named

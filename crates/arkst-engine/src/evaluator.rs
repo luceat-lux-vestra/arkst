@@ -1053,6 +1053,36 @@ fn table_cell_value(cell: &IrTableCell) -> Result<IrValue, String> {
         })
 }
 
+/// Projects only callback result categories with stable, independently
+/// observed v2.7.0 table-computation text. Content-backed JVM object identity
+/// strings and other unproven dynamic values deliberately fail closed.
+fn table_compute_result_text(value: &IrValue) -> Option<String> {
+    match value {
+        IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
+        IrValue::Number(number) => Some(scalar_number_to_text(*number)),
+        IrValue::Boolean(boolean) => Some(boolean.to_string()),
+        IrValue::Unit => Some("kotlin.Unit".to_string()),
+        IrValue::None => Some("None".to_string()),
+        IrValue::Range(IrRange {
+            start: Some(start),
+            end: Some(end),
+            ..
+        }) => Some(format!("{start}..{end}")),
+        IrValue::Collection(values) if values.is_empty() => Some("[]".to_string()),
+        IrValue::Size(_)
+        | IrValue::Color(_)
+        | IrValue::Enum(_)
+        | IrValue::Range(_)
+        | IrValue::Collection(_)
+        | IrValue::Pair(_)
+        | IrValue::Dictionary(_)
+        | IrValue::Content(_)
+        | IrValue::Component(_)
+        | IrValue::Callable(_)
+        | IrValue::InlineBody(_) => None,
+    }
+}
+
 fn table_sort_order(value: &InvocationValue) -> Option<TableSortOrder> {
     if value.origin != ValueOrigin::Dynamic {
         return None;
@@ -5118,6 +5148,22 @@ impl Evaluator {
 
         if is_table_filter(name) {
             return self.evaluate_table_filter(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
+            );
+        }
+
+        if is_table_compute(name) {
+            return self.evaluate_table_compute(
                 ordered_args,
                 positional_args,
                 named_args,
@@ -15207,6 +15253,340 @@ impl Evaluator {
         }]))
     }
 
+    /// Computes one source-ordered body column through a one-argument callable
+    /// and appends the result in a new final row. Existing header/body cells
+    /// remain source-backed; generated cells use the call/result provenance.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_table_compute(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(table_compute_error(
+                "E3001",
+                "`.tablecompute` table content is not a lambda".to_string(),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if matches!(body, Some(CallBody::Inline(_))) {
+            diagnostics.push(table_compute_error(
+                "E3001",
+                "`.tablecompute` requires block table content".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body_candidate = match body {
+            Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
+                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                span: call_body_source_span(CallBody::Block(nodes), *span),
+            }),
+            Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let Some(BoundSlot::Explicit {
+            value: column_value,
+            span: column_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let column = match value_conversion::convert_integer_with_origin(&column_value) {
+            Ok(column) => column,
+            Err(_) => {
+                diagnostics.push(table_compute_error(
+                    "E3001",
+                    "`.tablecompute` column must be a finite integer".to_string(),
+                    column_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some(BoundSlot::Explicit {
+            value: compute_value,
+            span: compute_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let IrValue::Callable(compute) = compute_value.value else {
+            diagnostics.push(table_compute_error(
+                "E3001",
+                "`.tablecompute` compute must be a one-argument callable".to_string(),
+                compute_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        if !validate_iteration_lambda(
+            compute.parameters.as_deref(),
+            "tablecompute",
+            false,
+            &compute_span,
+            diagnostics,
+        ) {
+            return CallOutcome::Failed;
+        }
+        let Some(BoundSlot::Explicit {
+            value: bound_table_value,
+            span: table_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let table_value = match body {
+            Some(CallBody::Block(nodes)) => {
+                let diagnostic_count = diagnostics.len();
+                let evaluated = self.evaluate_nodes(nodes, diagnostics, context);
+                if diagnostics.len() != diagnostic_count {
+                    return CallOutcome::Failed;
+                }
+                InvocationValue::static_value(IrValue::Content(evaluated))
+            }
+            Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
+            None => bound_table_value,
+        };
+        let IrValue::Content(nodes) = &table_value.value else {
+            diagnostics.push(table_compute_error(
+                "E3001",
+                "`.tablecompute` requires evaluated Markdown table content".to_string(),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let (header, rows) = match first_table(nodes, self.limits.max_materialized_elements) {
+            Ok(Some(table)) => table,
+            Ok(None) => {
+                diagnostics.push(table_compute_error(
+                    "E3001",
+                    "A table is not provided and cannot be found".to_string(),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(TableSearchFailure::Limit(requested)) => {
+                diagnostics.push(materialized_elements_limit_error(
+                    requested,
+                    self.limits.max_materialized_elements,
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(TableSearchFailure::Allocation(error)) => {
+                diagnostics.push(table_compute_error(
+                    "E3001",
+                    format!("Table traversal cannot be allocated: {error}"),
+                    table_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let width = table_effective_width(header, rows);
+        let Some(zero_based) = column
+            .checked_sub(1)
+            .and_then(|value| usize::try_from(value).ok())
+        else {
+            diagnostics.push(table_compute_index_error(column, width, column_span));
+            return CallOutcome::Failed;
+        };
+        if zero_based >= width {
+            diagnostics.push(table_compute_index_error(column, width, column_span));
+            return CallOutcome::Failed;
+        }
+
+        if let Err(outcome) =
+            self.check_materialized_elements_len(rows.len(), table_span, diagnostics)
+        {
+            return outcome;
+        }
+        let mut column_values = Vec::new();
+        if let Err(error) = column_values.try_reserve_exact(rows.len()) {
+            diagnostics.push(table_compute_error(
+                "E3001",
+                format!("`.tablecompute` column values cannot be allocated: {error}"),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for row in rows {
+            let value = match row.cells.get(zero_based) {
+                Some(cell) => match table_cell_value(cell) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        diagnostics.push(table_compute_error(
+                            "E3001",
+                            "Table compute cells must have supported evaluated plain-text content"
+                                .to_string(),
+                            cell.span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                },
+                None => IrValue::String(String::new()),
+            };
+            column_values.push(value);
+        }
+
+        let (computed_text, computed_span) = match self.invoke_callable(
+            &compute,
+            vec![IrValue::Collection(column_values)],
+            IterationOptions {
+                span: *span,
+                allow_destructuring: false,
+            },
+            diagnostics,
+            context,
+        ) {
+            CallOutcome::Value(value) if value_contains_explicit_error(&value) => {
+                return CallOutcome::Failed;
+            }
+            CallOutcome::Value(value) => {
+                let result_span = value_source_span(&value, &compute.span);
+                let Some(text) = table_compute_result_text(&value) else {
+                    diagnostics.push(table_compute_error(
+                        "E8001",
+                        "`.tablecompute` callback result has no independently evidenced deterministic text projection"
+                            .to_string(),
+                        result_span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                (text, result_span)
+            }
+            // Official v2.7.0 black-box evidence observes an otherwise
+            // outputless callback as the same textual Kotlin Unit projection
+            // used by an explicit Unit value in this table-computation slot.
+            CallOutcome::NoValue => ("kotlin.Unit".to_string(), compute.span),
+            CallOutcome::Failed => return CallOutcome::Failed,
+            CallOutcome::Unresolved => return CallOutcome::Unresolved,
+        };
+        let computed_content = vec![IrInline::Text {
+            content: computed_text,
+            span: computed_span,
+        }];
+
+        let existing_cells = rows.iter().try_fold(header.cells.len(), |count, row| {
+            count.checked_add(row.cells.len())
+        });
+        let Some(existing_cells) = existing_cells else {
+            diagnostics.push(materialized_elements_limit_error(
+                u64::MAX,
+                self.limits.max_materialized_elements,
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let Some(output_cells) = existing_cells.checked_add(width) else {
+            diagnostics.push(materialized_elements_limit_error(
+                u64::MAX,
+                self.limits.max_materialized_elements,
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        if let Err(outcome) =
+            self.check_materialized_elements(output_cells as u64, table_span, diagnostics)
+        {
+            return outcome;
+        }
+
+        let mut computed_content = Some(computed_content);
+        let mut result_cells = Vec::new();
+        if let Err(error) = result_cells.try_reserve_exact(width) {
+            diagnostics.push(table_compute_error(
+                "E3001",
+                format!("`.tablecompute` result row cannot be allocated: {error}"),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for index in 0..width {
+            if index == zero_based {
+                result_cells.push(IrTableCell {
+                    content: computed_content
+                        .take()
+                        .expect("computed table cell is inserted exactly once"),
+                    alignment: IrTableAlignment::None,
+                    span: computed_span,
+                });
+            } else {
+                result_cells.push(IrTableCell {
+                    content: vec![IrInline::Text {
+                        content: String::new(),
+                        span: *span,
+                    }],
+                    alignment: IrTableAlignment::None,
+                    span: *span,
+                });
+            }
+        }
+
+        let Some(output_row_count) = rows.len().checked_add(1) else {
+            diagnostics.push(table_compute_error(
+                "E3001",
+                "`.tablecompute` row count overflowed".to_string(),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        };
+        let mut computed_rows = Vec::new();
+        if let Err(error) = computed_rows.try_reserve_exact(output_row_count) {
+            diagnostics.push(table_compute_error(
+                "E3001",
+                format!("`.tablecompute` rows cannot be allocated: {error}"),
+                table_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        computed_rows.extend(rows.iter().cloned());
+        computed_rows.push(IrTableRow {
+            cells: result_cells,
+            span: *span,
+        });
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Table {
+            header: header.clone(),
+            rows: computed_rows,
+            span: *span,
+        }]))
+    }
+
     /// Generates one backend-neutral table from optional headers and dynamic
     /// iterable rows. The selected block body remains lazy until structural
     /// binding and explicit-header conversion have succeeded.
@@ -19420,6 +19800,7 @@ pub(crate) enum NativeDispatchOwner {
     TableColumnExtraction,
     TableSort,
     TableFilter,
+    TableCompute,
     CollectionAccess,
     CollectionTransform,
     FlowJoin,
@@ -19499,6 +19880,7 @@ const TABLE_BY_ROWS_NATIVE_NAMES: &[&str] = &["tablebyrows"];
 const TABLE_COLUMN_EXTRACTION_NATIVE_NAMES: &[&str] = &["tablecolumn", "tablecolumns"];
 const TABLE_SORT_NATIVE_NAMES: &[&str] = &["tablesort"];
 const TABLE_FILTER_NATIVE_NAMES: &[&str] = &["tablefilter"];
+const TABLE_COMPUTE_NATIVE_NAMES: &[&str] = &["tablecompute"];
 const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "size",
     "first",
@@ -19680,6 +20062,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::TableFilter,
         names: TABLE_FILTER_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::TableCompute,
+        names: TABLE_COMPUTE_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::CollectionAccess,
@@ -21236,6 +21622,10 @@ fn is_table_filter(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::TableFilter)
 }
 
+fn is_table_compute(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::TableCompute)
+}
+
 fn is_collection_access(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::CollectionAccess)
 }
@@ -21565,6 +21955,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             vec![
                 ParameterMetadata::required("column"),
                 ParameterMetadata::required("filter"),
+                ParameterMetadata::required("table"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "tablecompute" => (
+            vec![
+                ParameterMetadata::required("column"),
+                ParameterMetadata::required("compute"),
                 ParameterMetadata::required("table"),
             ],
             BodyPolicy::BindFinal,
@@ -24798,6 +25196,28 @@ fn table_filter_error(code: &str, message: String, span: SourceSpan) -> Diagnost
 
 fn table_filter_index_error(column: i32, width: usize, span: SourceSpan) -> Diagnostic {
     table_filter_error(
+        "E3001",
+        format!("Column index {column} must be between 1 and {width}"),
+        span,
+    )
+}
+
+fn table_compute_error(code: &str, message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: code.to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.tablecompute` requires a one-based column, one-argument compute callable, and evaluated Markdown table content."
+                .to_string(),
+        ],
+    }
+}
+
+fn table_compute_index_error(column: i32, width: usize, span: SourceSpan) -> Diagnostic {
+    table_compute_error(
         "E3001",
         format!("Column index {column} must be between 1 and {width}"),
         span,
