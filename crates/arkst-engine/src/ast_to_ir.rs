@@ -54,13 +54,27 @@ pub fn ast_to_ir_with_diagnostics_for_mode(
         .filter_map(|b| block_to_ir(b, source_id, &mut diagnostics, source_mode, false))
         .collect();
 
-    // Start with project metadata as defaults
+    (
+        IrDocument {
+            nodes,
+            metadata: document_metadata(doc, project_metadata),
+        },
+        diagnostics,
+    )
+}
+
+/// Build the durable document metadata independently from executable block
+/// lowering. The direct-AST evaluator reuses this exact metadata boundary
+/// while walking top-level syntax in source order.
+pub(crate) fn document_metadata(
+    doc: &Document,
+    project_metadata: &DocumentMetadataDefaults,
+) -> IrMetadata {
     let mut title = project_metadata.title.clone();
     let mut author = project_metadata.author.clone();
     let mut date = project_metadata.date.clone();
     let mut raw = project_metadata.fields.clone();
 
-    // Override with front matter if present
     if let Some(ref fm) = doc.front_matter {
         for (key, val) in &fm.fields {
             match key.as_str() {
@@ -68,7 +82,6 @@ pub fn ast_to_ir_with_diagnostics_for_mode(
                 "author" => author = Some(val.clone()),
                 "date" => date = Some(val.clone()),
                 _ => {
-                    // Remove existing custom field with same key
                     raw.retain(|(k, _)| k != key);
                     raw.push((key.clone(), val.clone()));
                 }
@@ -76,22 +89,128 @@ pub fn ast_to_ir_with_diagnostics_for_mode(
         }
     }
 
-    // Sort raw metadata by key for deterministic ordering
     raw.sort_by(|a, b| a.0.cmp(&b.0));
 
-    (
-        IrDocument {
-            nodes,
-            metadata: IrMetadata {
-                title,
-                author,
-                date,
-                raw,
-                document_state: Default::default(),
-            },
-        },
+    IrMetadata {
+        title,
+        author,
+        date,
+        raw,
+        document_state: Default::default(),
+    }
+}
+
+/// Transitional declaration payload consumed directly by the evaluator.
+///
+/// The declaration itself is no longer required to become an
+/// `IrNode::FunctionDeclaration` on the normal compile path. Its body remains
+/// lowered to the existing IR body representation until direct callable-body
+/// AST evaluation lands in a later #719 slice.
+pub(crate) struct LoweredFunctionDeclaration {
+    pub(crate) name: arkst_ir::IrValue,
+    pub(crate) parameters: Vec<IrParameter>,
+    pub(crate) body: Vec<IrNode>,
+    pub(crate) span: SourceSpan,
+}
+
+pub(crate) enum TopLevelFunctionDeclarationLowering {
+    NotFunctionDeclaration,
+    Invalid,
+    Declaration(LoweredFunctionDeclaration),
+}
+
+/// Recognize and lower only a top-level frontend `.function` declaration
+/// without constructing the executable IR node that historically carried it
+/// to the evaluator.
+pub(crate) fn lower_top_level_function_declaration(
+    block: &Block,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> TopLevelFunctionDeclarationLowering {
+    let Block::DirectiveCall {
+        name,
+        arguments,
+        chain,
+        body,
+        lambda_header,
+        span,
+        ..
+    } = block
+    else {
+        return TopLevelFunctionDeclarationLowering::NotFunctionDeclaration;
+    };
+    if name != "function" {
+        return TopLevelFunctionDeclarationLowering::NotFunctionDeclaration;
+    }
+
+    match lower_function_declaration(
+        arguments,
+        chain,
+        body.as_deref(),
+        lambda_header.as_ref(),
+        span,
+        source_id,
         diagnostics,
-    )
+        source_mode,
+    ) {
+        Some(declaration) => TopLevelFunctionDeclarationLowering::Declaration(declaration),
+        None => TopLevelFunctionDeclarationLowering::Invalid,
+    }
+}
+
+/// Lower one non-selected top-level frontend block through the established IR
+/// bridge. The hybrid evaluator calls this only after excluding the direct
+/// `.function` declaration path.
+pub(crate) fn lower_top_level_block(
+    block: &Block,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> Option<IrNode> {
+    block_to_ir(block, source_id, diagnostics, source_mode, false)
+}
+
+fn lower_function_declaration(
+    arguments: &[CallArgument],
+    chain: &[CallSegment],
+    body: Option<&[Block]>,
+    lambda_header: Option<&arkst_markdown::ast::LambdaHeader>,
+    span: &ByteSpan,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> Option<LoweredFunctionDeclaration> {
+    let (ir_positional, ir_named, _) =
+        call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
+    let ir_body = body
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|block| {
+                    block_to_ir(block, source_id, diagnostics, source_mode, true)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if ir_positional.len() != 1 || !ir_named.is_empty() || !chain.is_empty() {
+        diagnostics.push(invalid_function_declaration(
+            "`.function` requires exactly one positional name argument, no named arguments, and no chain",
+            span,
+            source_id,
+        ));
+        return None;
+    }
+
+    Some(LoweredFunctionDeclaration {
+        name: ir_positional.into_iter().next()?,
+        parameters: lambda_header
+            .map(|header| lambda_parameters_to_ir(header, source_id))
+            .unwrap_or_default(),
+        body: ir_body,
+        span: byte_to_source_span(span, source_id),
+    })
 }
 
 fn block_to_ir(
@@ -191,6 +310,25 @@ fn block_to_ir(
             lambda_header,
             span,
         } => {
+            if name == "function" {
+                let declaration = lower_function_declaration(
+                    arguments,
+                    chain,
+                    body.as_deref(),
+                    lambda_header.as_ref(),
+                    span,
+                    source_id,
+                    diagnostics,
+                    source_mode,
+                )?;
+                return Some(IrNode::FunctionDeclaration {
+                    name: declaration.name,
+                    parameters: declaration.parameters,
+                    body: declaration.body,
+                    span: declaration.span,
+                });
+            }
+
             let (ir_positional, ir_named, ordered_args) =
                 call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
             let ir_body = body.as_ref().map(|blocks| {
@@ -199,27 +337,6 @@ fn block_to_ir(
                     .filter_map(|b| block_to_ir(b, source_id, diagnostics, source_mode, true))
                     .collect::<Vec<_>>()
             });
-            if name == "function" {
-                if ir_positional.len() != 1 || !ir_named.is_empty() || !chain.is_empty() {
-                    diagnostics.push(invalid_function_declaration(
-                        "`.function` requires exactly one positional name argument, no named arguments, and no chain",
-                        span,
-                        source_id,
-                    ));
-                    return None;
-                }
-                let declaration_name = ir_positional.first().cloned()?;
-                let parameters = lambda_header
-                    .as_ref()
-                    .map(|header| lambda_parameters_to_ir(header, source_id))
-                    .unwrap_or_default();
-                return Some(IrNode::FunctionDeclaration {
-                    name: declaration_name,
-                    parameters,
-                    body: ir_body.unwrap_or_default(),
-                    span: byte_to_source_span(span, source_id),
-                });
-            }
             if chain.is_empty() {
                 Some(IrNode::FunctionCall {
                     name: name.clone(),
