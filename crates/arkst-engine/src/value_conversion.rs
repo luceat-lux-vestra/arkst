@@ -116,27 +116,103 @@ pub(crate) enum ValueOrigin {
     Dynamic,
 }
 
-/// An evaluated invocation argument together with the origin used by the
-/// target-driven conversion boundary.
+/// Evaluator-local provenance attached to one runtime value.
+///
+/// This metadata is deliberately not part of `IrValue` or its wire format.
+/// Consumers may only observe provenance through an explicit target conversion;
+/// semantic values remain backend-neutral and serializable without it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum ValueProvenance {
+    /// The value was produced by semantic evaluation or another materializing
+    /// operation. This is the default for all ordinary invocation values.
+    #[default]
+    Materialized,
+    /// The value still denotes independently authored Markdown source rather
+    /// than a materialized semantic node. Exact source spelling is retained
+    /// only when an evidenced consumer requires it.
+    SourceBackedMarkdown { source_text: Option<String> },
+    /// Per-element provenance for a runtime collection. This sidecar mirrors
+    /// only provenance cardinality; the semantic collection remains in
+    /// `IrValue::Collection`.
+    #[allow(dead_code)]
+    Collection(Vec<ValueProvenance>),
+}
+
+impl ValueProvenance {
+    #[allow(dead_code)]
+    pub(crate) fn source_backed_markdown() -> Self {
+        Self::SourceBackedMarkdown { source_text: None }
+    }
+
+    pub(crate) fn source_backed_markdown_text(source_text: impl Into<String>) -> Self {
+        Self::SourceBackedMarkdown {
+            source_text: Some(source_text.into()),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn collection(elements: Vec<Self>) -> Self {
+        Self::Collection(elements)
+    }
+
+    pub(crate) fn source_text(&self) -> Option<&str> {
+        match self {
+            Self::SourceBackedMarkdown {
+                source_text: Some(source_text),
+            } => Some(source_text),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn element(&self, index: usize) -> Option<&Self> {
+        match self {
+            Self::Collection(elements) => elements.get(index),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_materialized(&self) -> bool {
+        matches!(self, Self::Materialized)
+    }
+}
+
+/// An evaluated invocation argument together with orthogonal binder origin and
+/// evaluator-local provenance used by target-driven conversion.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InvocationValue {
     pub value: IrValue,
     pub origin: ValueOrigin,
+    provenance: ValueProvenance,
 }
 
 impl InvocationValue {
-    pub(crate) fn static_value(value: IrValue) -> Self {
+    pub(crate) fn new(value: IrValue, origin: ValueOrigin) -> Self {
         Self {
             value,
-            origin: ValueOrigin::Static,
+            origin,
+            provenance: ValueProvenance::Materialized,
         }
     }
 
+    pub(crate) fn static_value(value: IrValue) -> Self {
+        Self::new(value, ValueOrigin::Static)
+    }
+
     pub(crate) fn dynamic_value(value: IrValue) -> Self {
-        Self {
-            value,
-            origin: ValueOrigin::Dynamic,
-        }
+        Self::new(value, ValueOrigin::Dynamic)
+    }
+
+    pub(crate) fn with_provenance(mut self, provenance: ValueProvenance) -> Self {
+        self.provenance = provenance;
+        self
+    }
+
+    pub(crate) fn provenance(&self) -> &ValueProvenance {
+        &self.provenance
+    }
+
+    pub(crate) fn source_backed_markdown_text(&self) -> Option<&str> {
+        self.provenance.source_text()
     }
 }
 
@@ -2994,7 +3070,7 @@ mod tests {
         convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
         ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
         DomainTarget, DomainValue, InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue,
-        TargetValue,
+        TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
@@ -3015,6 +3091,40 @@ mod tests {
             SourceText::new(source.to_owned()),
             ByteSpan::new(0, source.len()),
         )
+    }
+
+    #[test]
+    fn runtime_provenance_is_orthogonal_and_models_per_element_source_identity() {
+        let direct = InvocationValue::dynamic_value(IrValue::Content(Vec::new()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("* alpha"));
+        assert_eq!(direct.origin, ValueOrigin::Dynamic);
+        assert_eq!(direct.source_backed_markdown_text(), Some("* alpha"));
+
+        let repeated = InvocationValue::static_value(IrValue::Collection(vec![
+            IrValue::Content(Vec::new()),
+            IrValue::Content(Vec::new()),
+        ]))
+        .with_provenance(ValueProvenance::collection(vec![
+            ValueProvenance::source_backed_markdown(),
+            ValueProvenance::source_backed_markdown(),
+        ]));
+        assert_eq!(repeated.origin, ValueOrigin::Static);
+        assert!(matches!(
+            repeated.provenance().element(0),
+            Some(ValueProvenance::SourceBackedMarkdown { source_text: None })
+        ));
+        assert!(matches!(
+            repeated.provenance().element(1),
+            Some(ValueProvenance::SourceBackedMarkdown { source_text: None })
+        ));
+
+        // Materializing a transformed Collection or a generated Table publishes
+        // only the semantic value. A later invocation therefore starts with
+        // materialized provenance unless a source producer explicitly marks it.
+        let transformed = InvocationValue::static_value(repeated.value.clone());
+        let generated_table = InvocationValue::static_value(IrValue::Content(Vec::new()));
+        assert!(transformed.provenance().is_materialized());
+        assert!(generated_table.provenance().is_materialized());
     }
 
     #[test]

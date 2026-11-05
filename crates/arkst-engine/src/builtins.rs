@@ -664,10 +664,7 @@ pub(crate) fn evaluate_with_origins(
     candidates.extend(named_args.iter().map(|argument| Candidate::Named {
         name: argument.name.clone(),
         name_span: argument.name_span,
-        value: InvocationValue {
-            value: argument.arg.value.clone(),
-            origin: argument.origin,
-        },
+        value: InvocationValue::new(argument.arg.value.clone(), argument.origin),
         span: argument.arg.span,
     }));
     let body = has_body.then_some(Candidate::Positional {
@@ -2240,13 +2237,14 @@ pub(crate) fn scalar_string_conversion(
 /// provenance boundary; operation-generated Collections remain fail-closed.
 pub(crate) fn logger_string_conversion(
     value: &InvocationValue,
-    direct_markdown_list: Option<&str>,
 ) -> Result<String, value_conversion::ConversionError> {
     match scalar_string_conversion(value) {
         Ok(value) => Ok(value),
         Err(error) => logger_structured_string_value(&value.value)
-            .or_else(|| match (&value.value, direct_markdown_list) {
-                (IrValue::Content(_), Some(source_text)) => Some(source_text.to_string()),
+            .or_else(|| match &value.value {
+                IrValue::Content(_) => {
+                    value.source_backed_markdown_text().map(ToOwned::to_owned)
+                }
                 _ => None,
             })
             .ok_or(error),

@@ -53,6 +53,7 @@ use crate::invocation_binder::{
 };
 use crate::value_conversion::{
     self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
+    ValueProvenance,
 };
 use crate::{ast_to_ir, builtins};
 use crate::{
@@ -94,56 +95,37 @@ use std::rc::{Rc, Weak};
 /// at declaration time (for scalars) or stored as content nodes for
 /// block variables.
 #[derive(Debug, Clone)]
-enum VariableValue {
-    Scalar(IrValue),
-    Content(Vec<IrNode>),
-    /// A direct source-authored Markdown list retained as semantic content
-    /// plus its independently evidenced source-spelling String projection.
-    ///
-    /// Clean-room #405 proves marker choice, spacing, ordered numbering,
-    /// emphasis spelling, task markers, nesting, and multiline indentation are
-    /// observable at the logger String boundary. This evaluator-local metadata
-    /// is intentionally absent from durable IR and is never propagated through
-    /// aliases, callable captures, or collection-producing operations.
-    DirectMarkdownList {
-        nodes: Vec<IrNode>,
-        source_text: String,
-    },
+struct VariableValue {
+    value: IrValue,
+    provenance: ValueProvenance,
 }
 
 impl VariableValue {
-    /// Creates a VariableValue from an evaluated IrValue, preserving content semantics.
+    /// Creates an evaluator runtime value from a semantic value. Materializing
+    /// operations clear transient source provenance by default.
     fn from_evaluated_value(value: IrValue) -> Self {
-        match value {
-            IrValue::Content(nodes) => VariableValue::Content(nodes),
-            scalar => VariableValue::Scalar(scalar),
+        Self {
+            value,
+            provenance: ValueProvenance::Materialized,
         }
     }
 
     /// Returns the backend-neutral value used when this variable participates
-    /// in a chain.
+    /// in a chain or durable callable capture. Runtime provenance is
+    /// intentionally stripped at that boundary.
     fn to_value(&self) -> IrValue {
-        match self {
-            VariableValue::Scalar(value) => value.clone(),
-            VariableValue::Content(nodes) | VariableValue::DirectMarkdownList { nodes, .. } => {
-                IrValue::Content(nodes.clone())
-            }
-        }
+        self.value.clone()
     }
 
-    fn direct_markdown_list_text(&self) -> Option<&str> {
-        match self {
-            Self::DirectMarkdownList { source_text, .. } => Some(source_text),
-            _ => None,
-        }
+    fn provenance(&self) -> &ValueProvenance {
+        &self.provenance
     }
 
-    fn mark_direct_markdown_list(&mut self, source_text: String) -> bool {
-        let Self::Content(nodes) = self else {
+    fn mark_source_backed_markdown(&mut self, source_text: String) -> bool {
+        if !matches!(&self.value, IrValue::Content(_)) {
             return false;
-        };
-        let nodes = std::mem::take(nodes);
-        *self = Self::DirectMarkdownList { nodes, source_text };
+        }
+        self.provenance = ValueProvenance::source_backed_markdown_text(source_text);
         true
     }
 }
@@ -418,6 +400,7 @@ struct IterationOptions {
 struct EvidencedIterableElement {
     value: IrValue,
     span: SourceSpan,
+    provenance: ValueProvenance,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1113,11 +1096,16 @@ fn table_row_from_elements(
         return Err(CallOutcome::Failed);
     }
     for element in elements {
-        let content = value_into_table_cell(element.value, element.span, diagnostics)?;
+        let EvidencedIterableElement {
+            value,
+            span: element_span,
+            provenance: _source_provenance,
+        } = element;
+        let content = value_into_table_cell(value, element_span, diagnostics)?;
         cells.push(IrTableCell {
             content,
             alignment: IrTableAlignment::None,
-            span: element.span,
+            span: element_span,
         });
     }
     Ok(IrTableRow { cells, span })
@@ -2249,14 +2237,14 @@ impl<'a> EvaluationContext<'a> {
     /// pre-write value in the current savepoint, so this metadata refinement
     /// participates in the same rollback entry rather than creating a second
     /// transaction path.
-    fn mark_direct_markdown_list_owner(&mut self, name: &str, source_text: String) -> bool {
+    fn mark_source_backed_markdown_owner(&mut self, name: &str, source_text: String) -> bool {
         if !self.variable_owners.contains(name) {
             return false;
         }
         self.record_variable_before(name);
         self.variables
             .get_mut(name)
-            .is_some_and(|value| value.mark_direct_markdown_list(source_text))
+            .is_some_and(|value| value.mark_source_backed_markdown(source_text))
     }
 
     /// Publishes a successful nested callable assignment into an actual
@@ -10339,13 +10327,17 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let direct_markdown_list =
+        let direct_provenance =
             if implicit_argument.is_none() && named_args.is_empty() && positional_args.len() == 1 {
-                direct_markdown_list_variable_text(&positional_args[0], context)
+                direct_variable_provenance(&positional_args[0], context)
             } else {
                 None
             };
-        let message = match builtins::logger_string_conversion(&argument, direct_markdown_list) {
+        let argument = match direct_provenance {
+            Some(provenance) => argument.with_provenance(provenance),
+            None => argument,
+        };
+        let message = match builtins::logger_string_conversion(&argument) {
             Ok(message) => message,
             Err(error) => {
                 let call = format!("`.{name}`");
@@ -11831,10 +11823,7 @@ impl Evaluator {
                 CaptionPositionArgumentLocation::Named(index) => {
                     let argument = &evaluated_named[index];
                     (
-                        InvocationValue {
-                            value: argument.value.clone(),
-                            origin: argument.origin,
-                        },
+                        InvocationValue::new(argument.value.clone(), argument.origin),
                         argument.span,
                         Some(argument.name_span),
                     )
@@ -17101,7 +17090,7 @@ impl Evaluator {
             }
             IrValue::Range(range) => self.materialize_range(range, span, diagnostics),
             value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
-                let argument = InvocationValue { value, origin };
+                let argument = InvocationValue::new(value, origin);
                 match value_conversion::convert_range_with_origin(&argument, *span) {
                     Ok(range) => self.materialize_range(range, span, diagnostics),
                     Err(_) => {
@@ -17157,6 +17146,7 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<EvidencedIterableElement>, CallOutcome> {
+        let provenance = value.provenance().clone();
         let element_spans = iterable_element_spans(&value.value, *span);
         let values = self.coerce_iterable(value, span, diagnostics, context)?;
         let use_captured_spans = element_spans.len() == values.len();
@@ -17174,9 +17164,11 @@ impl Evaluator {
             } else {
                 semantic_value_span(&value, *span)
             };
+            let element_provenance = provenance.element(index).cloned().unwrap_or_default();
             elements.push(EvidencedIterableElement {
                 value,
                 span: element_span,
+                provenance: element_provenance,
             });
         }
         Ok(elements)
@@ -18559,10 +18551,7 @@ impl Evaluator {
             // The previous result is always first. Explicit positional
             // arguments follow it in their original order; named arguments
             // remain in the named collection untouched.
-            let implicit_argument = InvocationValue {
-                value: value.clone(),
-                origin: value_origin,
-            };
+            let implicit_argument = InvocationValue::new(value.clone(), value_origin);
             positional_args.push(value);
             positional_args.extend(source_segment.positional_args.iter().cloned());
             let mut ordered_args = Vec::with_capacity(
@@ -18952,10 +18941,7 @@ impl Evaluator {
             context
                 .get(name)
                 .map(|value| InvocationValue::dynamic_value(value.to_value()))
-                .unwrap_or_else(|| InvocationValue {
-                    value: raw_condition.clone(),
-                    origin: first_origin.unwrap_or(ValueOrigin::Dynamic),
-                })
+                .unwrap_or_else(|| InvocationValue::new(raw_condition.clone(), first_origin.unwrap_or(ValueOrigin::Dynamic)))
         } else {
             let Some(condition) = self
                 .evaluate_invocation_values(
@@ -19600,10 +19586,7 @@ impl Evaluator {
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             };
-            evaluated.push(InvocationValue {
-                value: evaluated_value,
-                origin,
-            });
+            evaluated.push(InvocationValue::new(evaluated_value, origin));
         }
         Ok(evaluated)
     }
@@ -19648,10 +19631,7 @@ impl Evaluator {
                         name: argument.arg.name.clone(),
                         name_span: argument.arg.name_span,
                         span: argument.arg.span,
-                        value: InvocationValue {
-                            value: argument.arg.value,
-                            origin: argument.origin,
-                        },
+                        value: InvocationValue::new(argument.arg.value, argument.origin),
                     }),
             );
             return Ok(candidates);
@@ -19721,7 +19701,7 @@ impl Evaluator {
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             };
-            let value = InvocationValue { value, origin };
+            let value = InvocationValue::new(value, origin);
             candidates.push(match candidate {
                 CandidateKind::Positional(arg_span) => Candidate::Positional {
                     value,
@@ -20518,10 +20498,7 @@ fn bind_whitespace_arguments(
     candidates.extend(named.into_iter().map(|argument| Candidate::Named {
         name: argument.arg.name,
         name_span: argument.arg.name_span,
-        value: InvocationValue {
-            value: argument.arg.value,
-            origin: argument.origin,
-        },
+        value: InvocationValue::new(argument.arg.value, argument.origin),
         span: argument.arg.span,
     }));
     let bound = plan.bind(&candidates, None, *span).map_err(|error| {
@@ -24446,10 +24423,7 @@ fn invocation_candidates(
     candidates.extend(named.into_iter().map(|argument| Candidate::Named {
         name: argument.arg.name,
         name_span: argument.arg.name_span,
-        value: InvocationValue {
-            value: argument.arg.value,
-            origin: argument.origin,
-        },
+        value: InvocationValue::new(argument.arg.value, argument.origin),
         span: argument.arg.span,
     }));
     candidates
@@ -26038,16 +26012,16 @@ fn call_result_origin(name: &str, context: &EvaluationContext<'_>) -> ValueOrigi
     }
 }
 
-/// Returns the evidenced source-spelling String only when this exact raw
-/// argument is a direct reference to a direct-list variable owned by the same
-/// evaluation scope.
+/// Returns explicit evaluator-local provenance only when this exact raw
+/// argument is a direct variable reference owned by the same evaluation scope.
 ///
 /// The gate intentionally does not follow parent scopes, aliases, chains,
-/// callable captures/results, conditionals, or collection transforms.
-fn direct_markdown_list_variable_text<'a>(
+/// callable captures/results, conditionals, or collection transforms. Those
+/// boundaries materialize ordinary semantic values unless separately evidenced.
+fn direct_variable_provenance(
     value: &IrValue,
-    context: &'a EvaluationContext<'_>,
-) -> Option<&'a str> {
+    context: &EvaluationContext<'_>,
+) -> Option<ValueProvenance> {
     let IrValue::Content(nodes) = value else {
         return None;
     };
@@ -26073,7 +26047,9 @@ fn direct_markdown_list_variable_text<'a>(
     context
         .variables
         .get(name)
-        .and_then(VariableValue::direct_markdown_list_text)
+        .map(VariableValue::provenance)
+        .filter(|provenance| !provenance.is_materialized())
+        .cloned()
 }
 
 fn direct_markdown_list_source_text(
@@ -26459,7 +26435,7 @@ impl Evaluator {
                     context.assign_value(var_name.clone(), value);
                     if evaluated_list {
                         if let Some(source_text) = direct_markdown_list_text {
-                            let _ = context.mark_direct_markdown_list_owner(&var_name, source_text);
+                            let _ = context.mark_source_backed_markdown_owner(&var_name, source_text);
                         }
                     }
                     return CallOutcome::NoValue;
@@ -33539,4 +33515,37 @@ mod tests {
         assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
         assert_eq!((candidate_start, candidate_end), (11, 27));
     }
+
+    #[test]
+    fn evidenced_iterable_preserves_per_element_runtime_provenance() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let operation_span = span(0, 20);
+        let value = InvocationValue::static_value(IrValue::Collection(vec![
+            IrValue::String("source".to_string()),
+            IrValue::String("materialized".to_string()),
+        ]))
+        .with_provenance(ValueProvenance::collection(vec![
+            ValueProvenance::source_backed_markdown(),
+            ValueProvenance::Materialized,
+        ]));
+
+        let elements = evaluator
+            .coerce_evidenced_iterable(
+                value,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            )
+            .expect("evidenced iterable must materialize");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(elements.len(), 2);
+        assert!(matches!(
+            &elements[0].provenance,
+            ValueProvenance::SourceBackedMarkdown { source_text: None }
+        ));
+        assert!(elements[1].provenance.is_materialized());
+    }
+
 }
