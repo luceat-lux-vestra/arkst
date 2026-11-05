@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown table aggregate computation (#712 candidate):** `.tablecompute`
+  now reuses the established table-column String projection and shared callable
+  boundary to pass one complete body column to a one-argument callback and
+  append its result in a padded final table row. Original headers, rows, rich
+  cells, and spans are preserved; one-based validation, source-defined
+  precedence, diagnostics, depth, and materialization limits remain shared.
+  Official v2.7.0 black-box edge reconciliation remains required before PR.
+
 - **Quarkdown table filtering (#710):** `.tablefilter` now invokes a shared
   one-argument Boolean callable once per body row over an evaluated plain-text
   cell value, preserving the header, retained-row order, original rich cells,
