@@ -211,28 +211,21 @@ jobs:
             set +e
             (
               cd "$dir"
-              "$QD" --log-level error c input.qd --clean
+              "$QD" --log-level error c input.qd --pipe -r html
             ) >"$dir/stdout.log" 2>"$dir/stderr.log"
             rc=$?
             set -e
             echo "RESULT name=$name rc=$rc"
-            if [ -s "$dir/stdout.log" ]; then
-              echo "STDOUT:"
-              sed -n '1,80p' "$dir/stdout.log"
-            fi
             if [ -s "$dir/stderr.log" ]; then
               echo "STDERR:"
               sed -n '1,120p' "$dir/stderr.log"
             fi
             if [ "$rc" -eq 0 ]; then
-              html="$(find "$dir/output" -type f -name '*.html' -print 2>/dev/null | sort | head -1)"
-              if [ -n "$html" ]; then
-                echo "HTML=$html"
-                extract_tables "$html"
-              else
-                echo "NO_HTML_OUTPUT"
-                find "$dir" -maxdepth 4 -type f -print | sort
-              fi
+              echo "RENDERED_TABLES:"
+              extract_tables "$dir/stdout.log"
+            elif [ -s "$dir/stdout.log" ]; then
+              echo "STDOUT:"
+              sed -n '1,120p' "$dir/stdout.log"
             fi
             echo "::endgroup::"
           }
