@@ -14593,7 +14593,6 @@ impl Evaluator {
         )
     }
 
-
     /// Evaluates .repeat through the same iteration engine as .foreach.
     /// The ordinary semantic path materializes the runtime collection only at
     /// its public CallOutcome boundary.
@@ -14624,9 +14623,12 @@ impl Evaluator {
         }
     }
 
-    /// Runtime-valued .repeat result used by target-driven invocation
-    /// evaluation. Child results retain evaluator-only provenance until an
-    /// explicit semantic materialization boundary consumes them.
+    /// Runtime-valued .repeat result that retains child-owned evaluator
+    /// provenance until an explicit semantic materialization boundary.
+    ///
+    /// The current production semantic path materializes this result
+    /// immediately. Focused tests exercise the runtime form directly until a
+    /// provenance-sensitive production consumer is wired in a later slice.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_repeat_runtime(
         &self,
@@ -16817,11 +16819,7 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<RuntimeValue, CallOutcome> {
-        if let Err(outcome) =
-            self.check_materialized_elements_len(elements.len(), options.span, diagnostics)
-        {
-            return Err(outcome);
-        }
+        self.check_materialized_elements_len(elements.len(), options.span, diagnostics)?;
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -19649,8 +19647,10 @@ impl Evaluator {
         Ok(evaluated)
     }
 
-    /// Evaluates one target-driven invocation value without prematurely
-    /// lowering evaluator-only runtime provenance into IrValue.
+    /// Test-only adapter that evaluates one target-driven invocation value
+    /// without prematurely lowering evaluator-only runtime provenance into
+    /// IrValue. Production consumers are intentionally not wired in this slice.
+    #[cfg(test)]
     fn evaluate_runtime_invocation_value(
         &self,
         value: &IrValue,
@@ -19661,8 +19661,7 @@ impl Evaluator {
         if let Some(value) = direct_variable_runtime_value(value, context) {
             return Ok(value.with_origin(origin));
         }
-        if let Some(result) =
-            self.evaluate_direct_repeat_runtime_value(value, diagnostics, context)
+        if let Some(result) = self.evaluate_direct_repeat_runtime_value(value, diagnostics, context)
         {
             return result.map(|value| value.with_origin(origin));
         }
@@ -19677,9 +19676,10 @@ impl Evaluator {
         Ok(RuntimeValue::new(evaluated, origin))
     }
 
-    /// Runtime-valued sibling of evaluate_invocation_values. Existing semantic
-    /// consumers keep using InvocationValue; provenance-sensitive target
-    /// consumers can opt into this boundary without changing durable IR.
+    /// Test-only runtime-valued sibling of evaluate_invocation_values used to
+    /// prove the provenance boundary without changing production consumers or
+    /// durable IR in this slice.
+    #[cfg(test)]
     fn evaluate_runtime_invocation_values(
         &self,
         values: &[IrValue],
@@ -19714,9 +19714,10 @@ impl Evaluator {
         Ok(evaluated)
     }
 
-    /// Evaluates a direct native .repeat expression through the runtime result
-    /// path. Source-defined shadowing falls back to ordinary semantic
-    /// evaluation and cannot be mistaken for native provenance.
+    /// Test-only direct native .repeat adapter for the runtime result proof.
+    /// Source-defined shadowing falls back to ordinary semantic evaluation and
+    /// cannot be mistaken for native provenance.
+    #[cfg(test)]
     fn evaluate_direct_repeat_runtime_value(
         &self,
         value: &IrValue,
