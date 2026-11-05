@@ -406,40 +406,45 @@ fn compile_with_inputs(
         }
     };
     let metadata_defaults = engine_adapter::document_metadata_defaults(project.metadata());
-    let (ir, lowering_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
-        &parsed.document,
-        source_id,
-        project.metadata(),
-        source_mode,
-    );
     let resource_provider = engine_adapter::VirtualProjectResourceProvider::new(project);
-    let evaluator =
-        evaluator::Evaluator::with_capabilities_and_limits(capabilities, options.evaluation_limits);
-    let (ir, evaluation_diagnostics) = match host {
-        EvaluationHost::Default => evaluator.evaluate_with_resources(
-            &resource_provider,
-            source_id,
-            source_mode,
-            &ir,
-            &metadata_defaults,
-        ),
-        EvaluationHost::Environment(environment) => evaluator
-            .evaluate_with_resources_and_environment(
+    let evaluator = arkst_engine::evaluator::Evaluator::with_capabilities_and_limits(
+        capabilities,
+        options.evaluation_limits,
+    );
+    let engine_source_mode = match source_mode {
+        SourceMode::Markdown => arkst_markdown::Mode::Markdown,
+        SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
+    };
+    let (ir, evaluation_diagnostics, lowering_diagnostics) = match host {
+        EvaluationHost::Default => evaluator
+            .evaluate_frontend_with_resources_and_libraries_for_mode(
+                &resource_provider,
                 &resource_provider,
                 source_id,
-                source_mode,
-                &ir,
+                engine_source_mode,
+                &parsed.document,
                 &metadata_defaults,
-                environment,
             ),
-        EvaluationHost::LogSink(log_sink) => evaluator.evaluate_with_resources_and_log_sink(
-            &resource_provider,
-            source_id,
-            source_mode,
-            &ir,
-            &metadata_defaults,
-            log_sink,
-        ),
+        EvaluationHost::Environment(environment) => evaluator
+            .evaluate_frontend_with_resources_and_libraries_and_environment_for_mode(
+                &resource_provider,
+                &resource_provider,
+                environment,
+                source_id,
+                engine_source_mode,
+                &parsed.document,
+                &metadata_defaults,
+            ),
+        EvaluationHost::LogSink(log_sink) => evaluator
+            .evaluate_frontend_with_resources_and_libraries_and_log_sink_for_mode(
+                &resource_provider,
+                &resource_provider,
+                log_sink,
+                source_id,
+                engine_source_mode,
+                &parsed.document,
+                &metadata_defaults,
+            ),
     };
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
@@ -4056,6 +4061,19 @@ Yiddish"
         let (result, _) = compile_source(override_source);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert_eq!(output_text(&result), "QUARKDOWN\nquarkdown");
+    }
+
+    #[test]
+    fn compile_direct_ast_function_registration_is_source_ordered_and_outputless() {
+        let source = ".uppercase {Quarkdown}\n\n.function {uppercase}\n    text:\n    shadow .text\n\n.uppercase {Quarkdown}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "QUARKDOWN\nshadow Quarkdown");
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .all(|node| !matches!(node, IrNode::FunctionDeclaration { .. })));
     }
 
     #[test]
