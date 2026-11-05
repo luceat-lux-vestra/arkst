@@ -126,7 +126,7 @@ fn tablecompute_accepts_generated_nested_and_composed_tables() {
 fn tablecompute_matches_evidenced_result_text_and_ragged_input_projections() {
     for (source, expected) in [
         (
-            ".tablecompute {2} {values: .values::isempty}\n    | Signal | Amount |\n    |--------|--------|\n    | Torch | 2 |\n",
+            ".tablecompute {2} {values: .isgreater {.values::size} than:{1}}\n    | Signal | Amount |\n    |--------|--------|\n    | Torch | 2 |\n",
             "false",
         ),
         (
@@ -161,7 +161,10 @@ fn tablecompute_matches_evidenced_result_text_and_ragged_input_projections() {
     );
     assert!(ragged.diagnostics.is_empty(), "{ragged:?}");
     let (_, rows) = only_table(&ragged);
-    assert_eq!(row_text(rows.last().expect("computed row")), ["", "", "true"]);
+    assert_eq!(
+        row_text(rows.last().expect("computed row")),
+        ["", "", "true"]
+    );
 }
 
 #[test]

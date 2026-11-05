@@ -15253,7 +15253,6 @@ impl Evaluator {
         }]))
     }
 
-
     /// Computes one source-ordered body column through a one-argument callable
     /// and appends the result in a new final row. Existing header/body cells
     /// remain source-backed; generated cells use the call/result provenance.
