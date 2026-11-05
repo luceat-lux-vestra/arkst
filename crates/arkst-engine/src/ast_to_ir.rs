@@ -187,9 +187,7 @@ fn lower_function_declaration(
         .map(|blocks| {
             blocks
                 .iter()
-                .filter_map(|block| {
-                    block_to_ir(block, source_id, diagnostics, source_mode, true)
-                })
+                .filter_map(|block| block_to_ir(block, source_id, diagnostics, source_mode, true))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
