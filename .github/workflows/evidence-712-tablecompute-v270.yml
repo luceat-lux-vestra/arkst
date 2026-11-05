@@ -126,6 +126,54 @@ jobs:
               | Tide | 2 |
           QD
 
+          write_probe result_boolean <<'QD'
+          .tablecompute {2} {values: .values::isempty}
+              | Signal | Amount |
+              |--------|--------|
+              | Torch | 2 |
+          QD
+
+          write_probe result_range <<'QD'
+          .tablecompute {2} {values: .range {2} {4}}
+              | Signal | Amount |
+              |--------|--------|
+              | Union | 2 |
+          QD
+
+          write_probe result_none <<'QD'
+          .tablecompute {2} {values: .none}
+              | Signal | Amount |
+              |--------|--------|
+              | Vector | 2 |
+          QD
+
+          write_probe input_first <<'QD'
+          .tablecompute {1} {values: .values::first}
+              | Signal |
+              |--------|
+              | Alpha |
+              | Beta |
+              | Gamma |
+          QD
+
+          write_probe input_last <<'QD'
+          .tablecompute {1} {values: .values::last}
+              | Signal |
+              |--------|
+              | Alpha |
+              | Beta |
+              | Gamma |
+          QD
+
+          write_probe ragged_second_isempty <<'QD'
+          .tablecompute {3} {values: .values::getat {2}::isempty}
+              | Signal | Code | Note |
+              |--------|------|------|
+              | Delta | d | present |
+              | Epsilon | e |
+              | Zeta | z | tail |
+          QD
+
           write_probe no_value <<'QD'
           .tablecompute {2} {values: .var {local} {x}}
               | Signal | Amount |
@@ -211,7 +259,7 @@ jobs:
             set +e
             (
               cd "$dir"
-              "$QD" --log-level error c input.qd --pipe -r html
+              "$QD" --log-level error c input.qd --pipe -r html --strict
             ) >"$dir/stdout.log" 2>"$dir/stderr.log"
             rc=$?
             set -e
@@ -230,7 +278,7 @@ jobs:
             echo "::endgroup::"
           }
 
-          for name in             standard header_only ragged_join rich_input generated_headerless             nested_table composed_filter result_string result_rich result_collection             no_value invalid_index callback_error empty_generated
+          for name in             standard header_only ragged_join rich_input generated_headerless             nested_table composed_filter result_string result_rich result_collection             result_boolean result_range result_none input_first input_last ragged_second_isempty             no_value invalid_index callback_error empty_generated
           do
             run_probe "$name"
           done
