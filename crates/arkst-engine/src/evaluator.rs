@@ -18580,17 +18580,13 @@ impl Evaluator {
             })
             .collect::<Vec<_>>();
         if let Some(body) = body {
-            let value = match self.evaluate_call_body_value_context(
-                body,
-                span,
-                diagnostics,
-                context,
-            ) {
-                CallOutcome::Value(value) => value,
-                CallOutcome::NoValue => return Err(CallOutcome::NoValue),
-                CallOutcome::Failed => return Err(CallOutcome::Failed),
-                CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
-            };
+            let value =
+                match self.evaluate_call_body_value_context(body, span, diagnostics, context) {
+                    CallOutcome::Value(value) => value,
+                    CallOutcome::NoValue => return Err(CallOutcome::NoValue),
+                    CallOutcome::Failed => return Err(CallOutcome::Failed),
+                    CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
+                };
             arguments.push(value);
         }
         Ok(BoundLambdaArguments::Implicit(arguments))
@@ -33783,10 +33779,7 @@ mod tests {
 
         let outcome = evaluator.evaluate_call_value(
             "takes_one",
-            &[
-                mutating_typed_candidate("payload"),
-                IrValue::Number(9.0),
-            ],
+            &[mutating_typed_candidate("payload"), IrValue::Number(9.0)],
             &[],
             None,
             None,
