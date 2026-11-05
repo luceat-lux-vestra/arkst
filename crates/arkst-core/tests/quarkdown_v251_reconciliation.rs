@@ -120,8 +120,10 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     assert_eq!(csv[17], "PARTIAL");
     assert!(csv[16].contains("csv_resource.rs"));
     assert!(csv[16].contains("#376"));
+    assert!(csv[16].contains("V270_CSV_MARKDOWN.md"));
     assert!(csv[18].contains("raw `CsvResourceData`"));
     assert!(csv[18].contains("#714"));
+    assert!(csv[18].contains("#716"));
     assert!(csv[19].contains("MARKDOWN"));
     assert!(csv[19].contains("#183"));
     assert!(csv[19].contains("#181"));

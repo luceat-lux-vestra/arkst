@@ -13224,16 +13224,6 @@ impl Evaluator {
                 Err(()) => return CallOutcome::Failed,
             };
 
-        if arguments.mode == CsvMode::Markdown {
-            diagnostics.push(resource_diagnostic(
-                "E8001",
-                "`.csv` `mode:markdown` is outside the independently evidenced #714 plain-table slice"
-                    .to_string(),
-                *span,
-                "Use the default or explicit `mode:plain`; Markdown cell materialization remains a separate compatibility boundary.",
-            ));
-            return CallOutcome::Failed;
-        }
         if reject_host_filesystem_reference("csv", &arguments.reference, *span, diagnostics) {
             return CallOutcome::Failed;
         }
@@ -13323,11 +13313,20 @@ impl Evaluator {
             return CallOutcome::Failed;
         }
         for column in &data.columns {
-            header_cells.push(IrTableCell {
-                content: vec![IrInline::Text {
+            let content = match arguments.mode {
+                CsvMode::Plain => vec![IrInline::Text {
                     content: column.header.clone(),
                     span: *span,
                 }],
+                CsvMode::Markdown => {
+                    match self.csv_markdown_cell_inlines(&column.header, *span, diagnostics) {
+                        Ok(content) => content,
+                        Err(outcome) => return outcome,
+                    }
+                }
+            };
+            header_cells.push(IrTableCell {
+                content,
                 alignment: IrTableAlignment::None,
                 span: *span,
             });
@@ -13355,11 +13354,22 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
             for column in &data.columns {
-                cells.push(IrTableCell {
-                    content: vec![IrInline::Text {
+                let content = match arguments.mode {
+                    CsvMode::Plain => vec![IrInline::Text {
                         content: column.cells[row_index].clone(),
                         span: *span,
                     }],
+                    CsvMode::Markdown => match self.csv_markdown_cell_inlines(
+                        &column.cells[row_index],
+                        *span,
+                        diagnostics,
+                    ) {
+                        Ok(content) => content,
+                        Err(outcome) => return outcome,
+                    },
+                };
+                cells.push(IrTableCell {
+                    content,
                     alignment: IrTableAlignment::None,
                     span: *span,
                 });
@@ -13375,6 +13385,56 @@ impl Evaluator {
             rows,
             span: *span,
         }]))
+    }
+
+    fn csv_markdown_cell_inlines(
+        &self,
+        text: &str,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        let nodes = self.parse_dynamic_markdown_content(
+            text,
+            span,
+            value_conversion::RawMarkdownTarget::Inline,
+            diagnostics,
+        )?;
+        let content = match nodes.as_slice() {
+            [] => Vec::new(),
+            [IrNode::Paragraph { content, .. }] => content.clone(),
+            _ => {
+                diagnostics.push(resource_diagnostic(
+                    "E8001",
+                    "`.csv mode:markdown` produced a non-inline table-cell shape".to_string(),
+                    span,
+                    "The independently evidenced #716 boundary supports inline Markdown cells only; block-valued cells require separate architecture review.",
+                ));
+                return Err(CallOutcome::Failed);
+            }
+        };
+        if !Self::csv_markdown_inlines_are_evidenced(&content) {
+            diagnostics.push(resource_diagnostic(
+                "E8001",
+                "`.csv mode:markdown` produced an unevidenced inline content shape".to_string(),
+                span,
+                "The bounded #716 slice supports text, emphasis, strong, code, links, and soft/hard line breaks; other inline categories remain fail-closed.",
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        Ok(content)
+    }
+
+    fn csv_markdown_inlines_are_evidenced(inlines: &[IrInline]) -> bool {
+        inlines.iter().all(|inline| match inline {
+            IrInline::Text { .. }
+            | IrInline::Code { .. }
+            | IrInline::SoftBreak { .. }
+            | IrInline::HardBreak { .. } => true,
+            IrInline::Emphasis { content, .. }
+            | IrInline::Strong { content, .. }
+            | IrInline::Link { content, .. } => Self::csv_markdown_inlines_are_evidenced(content),
+            _ => false,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

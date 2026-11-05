@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown Markdown CSV cells (#716):** explicit `.csv mode:markdown` now
+  materializes the independently evidenced inline Markdown subset in headers
+  and cells through the existing table IR. Strong/emphasis, links, code,
+  escaping, soft/hard line breaks, source-relative resources, and rich-cell
+  table-consumer composition are preserved; block-looking markers stay literal
+  and unevidenced inline categories fail closed. Caption/ref remain separate.
+
 - **Quarkdown plain CSV table production (#714):** `.csv` now consumes the
   existing source-relative bounded CSV resource/parser layer and materializes
   default or explicit `mode:plain` data through the existing table IR. Official
