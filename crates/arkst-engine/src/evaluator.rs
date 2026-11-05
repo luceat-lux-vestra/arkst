@@ -33883,7 +33883,10 @@ mod tests {
             &mut context,
         );
 
-        assert!(matches!(outcome, CallOutcome::Value(IrValue::Number(value)) if value == 7.0));
+        let CallOutcome::Value(IrValue::Content(nodes)) = outcome else {
+            panic!("expected selected block body content");
+        };
+        assert_paragraph_text(&nodes, "7");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_ne!(context.document_state_snapshot(), before);
     }
