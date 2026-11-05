@@ -90,6 +90,16 @@ jobs:
            Iris , 3 , tail
           CSV
 
+          mkprobe quoted_clean
+          cat > "$root/quoted_clean/input.qd" <<'QD'
+          .csv {data.csv}
+          QD
+          cat > "$root/quoted_clean/data.csv" <<'CSV'
+          Name,Value,Note
+          "Harbor, Jr.",7,"a ""quote"""
+          Iris,3,tail
+          CSV
+
           mkprobe header_only
           cat > "$root/header_only/input.qd" <<'QD'
           .csv {data.csv}
@@ -214,7 +224,7 @@ jobs:
             echo "::endgroup::"
           }
 
-          for name in standard_default explicit_plain plain_markers markdown_markers quoted_trim header_only empty_file composed_compute invalid_mode
+          for name in standard_default explicit_plain plain_markers markdown_markers quoted_trim quoted_clean header_only empty_file composed_compute invalid_mode
           do
             run_probe "$name"
           done
