@@ -1062,6 +1062,26 @@ fn table_compute_result_text(value: &IrValue) -> Option<String> {
     }
 }
 
+/// Classifies the callable's authored body at the source/evaluation boundary,
+/// before semantic output shape can erase provenance.
+///
+/// Exactly one direct structural Markdown statement is source-backed. Function
+/// calls, chains, declarations, and multi-statement composition are
+/// materialization boundaries. This deliberately does not inspect a produced
+/// Table/Content shape and does not name any producer.
+fn callable_body_is_direct_source_markdown(body: &[IrNode]) -> bool {
+    matches!(
+        body,
+        [node]
+            if !matches!(
+                node,
+                IrNode::FunctionCall { .. }
+                    | IrNode::ChainedFunctionCall { .. }
+                    | IrNode::FunctionDeclaration { .. }
+            )
+    )
+}
+
 fn table_sort_order(value: &InvocationValue) -> Option<TableSortOrder> {
     if value.origin != ValueOrigin::Dynamic {
         return None;
@@ -14573,8 +14593,10 @@ impl Evaluator {
         )
     }
 
-    /// Evaluates `.repeat` through the same iteration engine as `.foreach`.
-    /// The count is a checked semantic integer, and indices are one-based.
+
+    /// Evaluates .repeat through the same iteration engine as .foreach.
+    /// The ordinary semantic path materializes the runtime collection only at
+    /// its public CallOutcome boundary.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_repeat(
         &self,
@@ -14587,15 +14609,70 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
+        match self.evaluate_repeat_runtime(
+            positional_args,
+            named_args,
+            body,
+            lambda_parameters,
+            span,
+            diagnostics,
+            context,
+            binding_plan,
+        ) {
+            Ok(value) => CallOutcome::Value(value.into_ir_value()),
+            Err(outcome) => outcome,
+        }
+    }
+
+    /// Runtime-valued .repeat result used by target-driven invocation
+    /// evaluation. Child results retain evaluator-only provenance until an
+    /// explicit semantic materialization boundary consumes them.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_repeat_runtime(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+    ) -> Result<RuntimeValue, CallOutcome> {
+        let (elements, callable, options) = self.prepare_repeat_iteration(
+            positional_args,
+            named_args,
+            body,
+            lambda_parameters,
+            span,
+            diagnostics,
+            context,
+            binding_plan,
+        )?;
+        self.map_callable_runtime_values(&elements, &callable, options, diagnostics, context)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_repeat_iteration(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+    ) -> Result<(Vec<IrValue>, IrCallable, IterationOptions), CallOutcome> {
         let Some(binding_plan) = binding_plan else {
-            return CallOutcome::Failed;
+            return Err(CallOutcome::Failed);
         };
         let raw_candidates = raw_invocation_candidates(positional_args, named_args, *span);
         let bound = match binding_plan.bind(&raw_candidates, None, *span) {
             Ok(bound) => bound,
             Err(error) => {
                 diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
-                return CallOutcome::Failed;
+                return Err(CallOutcome::Failed);
             }
         };
         let mut slots = bound.slots.into_iter();
@@ -14604,7 +14681,7 @@ impl Evaluator {
             ..
         }) = slots.next()
         else {
-            return CallOutcome::Failed;
+            return Err(CallOutcome::Failed);
         };
         let callback_argument = match slots.next() {
             Some(BoundSlot::Explicit { value, .. }) => Some(value),
@@ -14617,7 +14694,7 @@ impl Evaluator {
                     "`.repeat` does not accept an ordinary inline content body".to_string(),
                     *span,
                 ));
-                return CallOutcome::Failed;
+                return Err(CallOutcome::Failed);
             }
             None => {
                 let Some(callback) = callback_argument else {
@@ -14625,7 +14702,7 @@ impl Evaluator {
                         "`.repeat` requires a block or inline callable body".to_string(),
                         *span,
                     ));
-                    return CallOutcome::Failed;
+                    return Err(CallOutcome::Failed);
                 };
                 let callable = match callback {
                     IrValue::Callable(callable) => callable,
@@ -14645,7 +14722,7 @@ impl Evaluator {
                             "`.repeat` inline body must be a callable".to_string(),
                             value_source_span(&value, span),
                         ));
-                        return CallOutcome::Failed;
+                        return Err(CallOutcome::Failed);
                     }
                 };
                 IterationBody::Inline(callable)
@@ -14656,22 +14733,19 @@ impl Evaluator {
             IterationBody::Inline(callable) => callable.parameters.as_deref(),
         };
         if !validate_iteration_lambda(callable_parameters, ".repeat", false, span, diagnostics) {
-            return CallOutcome::Failed;
+            return Err(CallOutcome::Failed);
         }
 
         let count_value = match self.evaluate_value(&count_argument, diagnostics, context) {
             CallOutcome::Value(value) => value,
             CallOutcome::Unresolved => {
-                match self.preserve_value_expression(&count_argument, diagnostics, context) {
-                    Ok(value) => value,
-                    Err(outcome) => return outcome,
-                }
+                self.preserve_value_expression(&count_argument, diagnostics, context)?
             }
             CallOutcome::NoValue => {
                 diagnostics.push(no_value_required(value_source_span(&count_argument, span)));
-                return CallOutcome::Failed;
+                return Err(CallOutcome::Failed);
             }
-            CallOutcome::Failed => return CallOutcome::Failed,
+            CallOutcome::Failed => return Err(CallOutcome::Failed),
         };
         let count = match repeat_count(&count_value) {
             Ok(count) => count,
@@ -14680,10 +14754,10 @@ impl Evaluator {
                     message,
                     value_source_span(&count_value, span),
                 ));
-                return CallOutcome::Failed;
+                return Err(CallOutcome::Failed);
             }
         };
-        let elements = match self.materialize_closed_range(
+        let elements = self.materialize_closed_range(
             IrRange {
                 start: Some(1),
                 end: Some(count),
@@ -14691,30 +14765,22 @@ impl Evaluator {
             },
             span,
             diagnostics,
-        ) {
-            Ok(elements) => elements,
-            Err(outcome) => return outcome,
-        };
-        let callable = match self.materialize_iteration_callable(
+        )?;
+        let callable = self.materialize_iteration_callable(
             iteration_body,
             lambda_parameters,
             *span,
             diagnostics,
             context,
-        ) {
-            Ok(callable) => callable,
-            Err(outcome) => return outcome,
-        };
-        self.map_callable_values(
-            &elements,
-            &callable,
+        )?;
+        Ok((
+            elements,
+            callable,
             IterationOptions {
                 span: *span,
                 allow_destructuring: false,
             },
-            diagnostics,
-            context,
-        )
+        ))
     }
 
     /// Extracts one or every body column from the first evaluated table value.
@@ -16737,10 +16803,24 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
+        match self.map_callable_runtime_values(elements, callable, options, diagnostics, context) {
+            Ok(value) => CallOutcome::Value(value.into_ir_value()),
+            Err(outcome) => outcome,
+        }
+    }
+
+    fn map_callable_runtime_values(
+        &self,
+        elements: &[IrValue],
+        callable: &IrCallable,
+        options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<RuntimeValue, CallOutcome> {
         if let Err(outcome) =
             self.check_materialized_elements_len(elements.len(), options.span, diagnostics)
         {
-            return outcome;
+            return Err(outcome);
         }
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
@@ -16748,8 +16828,9 @@ impl Evaluator {
                 format!("iteration result collection cannot be allocated: {error}"),
                 options.span,
             ));
-            return CallOutcome::Failed;
+            return Err(CallOutcome::Failed);
         }
+        let source_backed_body = callable_body_is_direct_source_markdown(&callable.body);
         for element in elements {
             match self.invoke_callable(
                 callable,
@@ -16758,16 +16839,22 @@ impl Evaluator {
                 diagnostics,
                 context,
             ) {
-                CallOutcome::Value(value) => results.push(value),
+                CallOutcome::Value(value) => {
+                    let mut value = RuntimeValue::static_value(value);
+                    if source_backed_body && value.is_content() {
+                        value.set_provenance(ValueProvenance::source_backed_markdown());
+                    }
+                    results.push(value);
+                }
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(options.span));
-                    return CallOutcome::Failed;
+                    return Err(CallOutcome::Failed);
                 }
-                CallOutcome::Failed => return CallOutcome::Failed,
-                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                CallOutcome::Failed => return Err(CallOutcome::Failed),
+                CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
             }
         }
-        CallOutcome::Value(IrValue::Collection(results))
+        Ok(RuntimeValue::collection(results, ValueOrigin::Static))
     }
 
     fn filter_callable_values(
@@ -19560,6 +19647,148 @@ impl Evaluator {
             }
         }
         Ok(evaluated)
+    }
+
+    /// Evaluates one target-driven invocation value without prematurely
+    /// lowering evaluator-only runtime provenance into IrValue.
+    fn evaluate_runtime_invocation_value(
+        &self,
+        value: &IrValue,
+        origin: ValueOrigin,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<RuntimeValue, CallOutcome> {
+        if let Some(value) = direct_variable_runtime_value(value, context) {
+            return Ok(value.with_origin(origin));
+        }
+        if let Some(result) =
+            self.evaluate_direct_repeat_runtime_value(value, diagnostics, context)
+        {
+            return result.map(|value| value.with_origin(origin));
+        }
+        let evaluated = match self.evaluate_value(value, diagnostics, context) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::Unresolved => {
+                self.preserve_value_expression(value, diagnostics, context)?
+            }
+            CallOutcome::NoValue => return Err(CallOutcome::NoValue),
+            CallOutcome::Failed => return Err(CallOutcome::Failed),
+        };
+        Ok(RuntimeValue::new(evaluated, origin))
+    }
+
+    /// Runtime-valued sibling of evaluate_invocation_values. Existing semantic
+    /// consumers keep using InvocationValue; provenance-sensitive target
+    /// consumers can opt into this boundary without changing durable IR.
+    fn evaluate_runtime_invocation_values(
+        &self,
+        values: &[IrValue],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        first_origin: Option<ValueOrigin>,
+    ) -> Result<Vec<RuntimeValue>, CallOutcome> {
+        let mut evaluated = Vec::new();
+        if let Err(error) = evaluated.try_reserve(values.len()) {
+            diagnostics.push(iteration_error(
+                format!("call arguments cannot be allocated: {error}"),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for (index, value) in values.iter().enumerate() {
+            let origin = if index == 0 {
+                first_origin.unwrap_or_else(|| invocation_origin(value, context))
+            } else {
+                invocation_origin(value, context)
+            };
+            match self.evaluate_runtime_invocation_value(value, origin, diagnostics, context) {
+                Ok(value) => evaluated.push(value),
+                Err(CallOutcome::NoValue) => {
+                    diagnostics.push(no_value_required(value_source_span(value, span)));
+                    return Err(CallOutcome::Failed);
+                }
+                Err(outcome) => return Err(outcome),
+            }
+        }
+        Ok(evaluated)
+    }
+
+    /// Evaluates a direct native .repeat expression through the runtime result
+    /// path. Source-defined shadowing falls back to ordinary semantic
+    /// evaluation and cannot be mistaken for native provenance.
+    fn evaluate_direct_repeat_runtime_value(
+        &self,
+        value: &IrValue,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Option<Result<RuntimeValue, CallOutcome>> {
+        let IrValue::Content(nodes) = value else {
+            return None;
+        };
+        let [IrNode::FunctionCall {
+            name,
+            positional_args,
+            named_args,
+            ordered_args,
+            lambda_parameters,
+            body,
+            span,
+            ..
+        }] = nodes.as_slice()
+        else {
+            return None;
+        };
+        if !is_repeat(name) || context.get_function(name).is_some() {
+            return None;
+        }
+
+        let result = (|| {
+            let _depth = context.enter_evaluation_depth(*span, diagnostics)?;
+            context.begin_invocation();
+            let checkpoint = InvocationCheckpoint::capture();
+            let result = (|| {
+                validate_ordered_invocation(
+                    name,
+                    ordered_args.as_deref(),
+                    positional_args,
+                    named_args,
+                    *span,
+                    diagnostics,
+                )?;
+                let binding_plan = self
+                    .preflight_native_binding(
+                        name,
+                        ordered_args.as_deref(),
+                        positional_args,
+                        named_args,
+                        body.as_deref().map(CallBody::Block),
+                        lambda_parameters.as_deref(),
+                        *span,
+                        context,
+                        diagnostics,
+                    )
+                    .map_err(|()| CallOutcome::Failed)?;
+                self.evaluate_repeat_runtime(
+                    positional_args,
+                    named_args,
+                    body.as_deref().map(CallBody::Block),
+                    lambda_parameters.as_deref(),
+                    span,
+                    diagnostics,
+                    context,
+                    binding_plan.as_ref(),
+                )
+            })();
+            if result.is_err() {
+                checkpoint.restore(context);
+            } else {
+                checkpoint.commit(context);
+            }
+            context.end_invocation();
+            result
+        })();
+        Some(result)
     }
 
     /// Evaluates arguments while preserving the invocation-time distinction
@@ -33528,6 +33757,120 @@ mod tests {
         assert_eq!(diagnostics[0].primary, Some(candidate_span));
         assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
         assert_eq!((candidate_start, candidate_end), (11, 27));
+    }
+
+    fn runtime_repeat_value(body: Vec<IrNode>) -> IrValue {
+        IrValue::Content(vec![IrNode::FunctionCall {
+            name: "repeat".to_string(),
+            positional_args: vec![IrValue::Number(2.0)],
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: Some(vec![lambda_parameter("n", 1)]),
+            body: Some(body),
+            raw_body: None,
+            span: span(0, 40),
+        }])
+    }
+
+    fn runtime_proof_table(label: &str, table_span: SourceSpan) -> IrNode {
+        let cell = |text: &str| IrTableCell {
+            content: vec![IrInline::Text {
+                content: text.to_string(),
+                span: table_span,
+            }],
+            alignment: IrTableAlignment::None,
+            span: table_span,
+        };
+        IrNode::Table {
+            header: IrTableRow {
+                cells: vec![cell(label)],
+                span: table_span,
+            },
+            rows: vec![IrTableRow {
+                cells: vec![cell("value")],
+                span: table_span,
+            }],
+            span: table_span,
+        }
+    }
+
+    fn generated_tablebyrows_call() -> IrNode {
+        IrNode::FunctionCall {
+            name: "tablebyrows".to_string(),
+            positional_args: Vec::new(),
+            named_args: vec![named_arg(
+                "rows",
+                IrValue::Collection(vec![IrValue::Collection(vec![IrValue::String(
+                    "value".to_string(),
+                )])]),
+            )],
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(10, 30),
+        }
+    }
+
+    #[test]
+    fn repeat_runtime_provenance_distinguishes_source_tables_from_generated_tables() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let source_repeat = runtime_repeat_value(vec![runtime_proof_table("H", span(12, 28))]);
+        let source_runtime = evaluator
+            .evaluate_runtime_invocation_values(
+                &[source_repeat],
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+                None,
+            )
+            .expect("direct Markdown table repeat must evaluate")
+            .pop()
+            .expect("repeat runtime value");
+        let source_elements = evaluator
+            .coerce_evidenced_iterable(
+                source_runtime,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            )
+            .expect("repeat runtime collection must stay iterable");
+        assert_eq!(source_elements.len(), 2);
+        assert!(source_elements.iter().all(|element| matches!(
+            element.value.provenance(),
+            ValueProvenance::SourceBackedMarkdown { .. }
+        )));
+
+        let generated_repeat = runtime_repeat_value(vec![generated_tablebyrows_call()]);
+        let generated_runtime = evaluator
+            .evaluate_runtime_invocation_values(
+                &[generated_repeat],
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+                None,
+            )
+            .expect("generated table repeat must evaluate")
+            .pop()
+            .expect("repeat runtime value");
+        let generated_elements = evaluator
+            .coerce_evidenced_iterable(
+                generated_runtime,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            )
+            .expect("generated repeat collection must stay iterable");
+        assert_eq!(generated_elements.len(), 2);
+        assert!(generated_elements
+            .iter()
+            .all(|element| element.value.provenance().is_materialized()));
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
