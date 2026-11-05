@@ -2243,9 +2243,7 @@ pub(crate) fn logger_string_conversion(
         Ok(value) => Ok(value),
         Err(error) => logger_structured_string_value(&value.value)
             .or_else(|| match &value.value {
-                IrValue::Content(_) => runtime
-                    .source_backed_markdown_text()
-                    .map(ToOwned::to_owned),
+                IrValue::Content(_) => runtime.source_backed_markdown_text().map(ToOwned::to_owned),
                 _ => None,
             })
             .ok_or(error),

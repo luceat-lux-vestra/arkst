@@ -17141,25 +17141,22 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<EvidencedIterableElement>, CallOutcome> {
         let value = value.into();
+        let origin = value.origin;
         let semantic_value = value.to_ir_value();
         let element_spans = iterable_element_spans(&semantic_value, *span);
-        let values = match value.into_collection() {
-            Ok(values) => {
-                self.check_materialized_elements_len(values.len(), *span, diagnostics)?;
-                values
-            }
-            Err(value) => {
-                let origin = value.origin;
-                self.coerce_iterable(
-                    InvocationValue::new(value.into_ir_value(), origin),
-                    span,
-                    diagnostics,
-                    context,
-                )?
-                .into_iter()
-                .map(RuntimeValue::static_value)
-                .collect()
-            }
+        let values = if let Some(values) = value.into_collection() {
+            self.check_materialized_elements_len(values.len(), *span, diagnostics)?;
+            values
+        } else {
+            self.coerce_iterable(
+                InvocationValue::new(semantic_value, origin),
+                span,
+                diagnostics,
+                context,
+            )?
+            .into_iter()
+            .map(RuntimeValue::static_value)
+            .collect()
         };
         let use_captured_spans = element_spans.len() == values.len();
         let mut elements = Vec::new();
@@ -18952,7 +18949,12 @@ impl Evaluator {
             context
                 .get(name)
                 .map(|value| InvocationValue::dynamic_value(value.to_value()))
-                .unwrap_or_else(|| InvocationValue::new(raw_condition.clone(), first_origin.unwrap_or(ValueOrigin::Dynamic)))
+                .unwrap_or_else(|| {
+                    InvocationValue::new(
+                        raw_condition.clone(),
+                        first_origin.unwrap_or(ValueOrigin::Dynamic),
+                    )
+                })
         } else {
             let Some(condition) = self
                 .evaluate_invocation_values(
@@ -26446,7 +26448,8 @@ impl Evaluator {
                     context.assign_value(var_name.clone(), value);
                     if evaluated_list {
                         if let Some(source_text) = direct_markdown_list_text {
-                            let _ = context.mark_source_backed_markdown_owner(&var_name, source_text);
+                            let _ =
+                                context.mark_source_backed_markdown_owner(&var_name, source_text);
                         }
                     }
                     return CallOutcome::NoValue;
@@ -33543,12 +33546,7 @@ mod tests {
         );
 
         let elements = evaluator
-            .coerce_evidenced_iterable(
-                value,
-                &operation_span,
-                &mut diagnostics,
-                &mut context,
-            )
+            .coerce_evidenced_iterable(value, &operation_span, &mut diagnostics, &mut context)
             .expect("evidenced iterable must materialize");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(elements.len(), 2);
@@ -33558,5 +33556,4 @@ mod tests {
         ));
         assert!(elements[1].value.provenance().is_materialized());
     }
-
 }

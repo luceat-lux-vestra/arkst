@@ -125,7 +125,9 @@ pub(crate) enum ValueOrigin {
 pub(crate) enum ValueProvenance {
     #[default]
     Materialized,
-    SourceBackedMarkdown { source_text: Option<String> },
+    SourceBackedMarkdown {
+        source_text: Option<String>,
+    },
 }
 
 impl ValueProvenance {
@@ -233,7 +235,10 @@ impl RuntimeValue {
     }
 
     pub(crate) fn is_content(&self) -> bool {
-        matches!(&self.kind, RuntimeValueKind::SemanticLeaf(IrValue::Content(_)))
+        matches!(
+            &self.kind,
+            RuntimeValueKind::SemanticLeaf(IrValue::Content(_))
+        )
     }
 
     pub(crate) fn to_ir_value(&self) -> IrValue {
@@ -254,13 +259,13 @@ impl RuntimeValue {
         }
     }
 
-    pub(crate) fn into_collection(self) -> Result<Vec<Self>, Self> {
+    pub(crate) fn into_collection(self) -> Option<Vec<Self>> {
         match self {
             Self {
                 kind: RuntimeValueKind::Collection(elements),
                 ..
-            } => Ok(elements),
-            value => Err(value),
+            } => Some(elements),
+            _ => None,
         }
     }
 
