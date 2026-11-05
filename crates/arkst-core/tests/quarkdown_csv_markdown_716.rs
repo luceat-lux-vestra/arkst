@@ -37,7 +37,10 @@ fn inline_text(inlines: &[IrInline]) -> String {
 }
 
 fn row_text(row: &IrTableRow) -> Vec<String> {
-    row.cells.iter().map(|cell| inline_text(&cell.content)).collect()
+    row.cells
+        .iter()
+        .map(|cell| inline_text(&cell.content))
+        .collect()
 }
 
 fn only_table(result: &arkst_core::CompileResult) -> (&IrTableRow, &[IrTableRow]) {
@@ -52,15 +55,30 @@ fn csv_markdown_materializes_evidenced_rich_inline_headers_and_cells() {
     let p = project(
         "main.qd",
         ".csv {data.csv} mode:{markdown}\n",
-        &[("data.csv", b"**Name**,_Note_,Link,Code\n**Alder**,*east*,[site](https://example.com),`x + y`\n")],
+        &[(
+            "data.csv",
+            b"**Name**,_Note_,Link,Code\n**Alder**,*east*,[site](https://example.com),`x + y`\n",
+        )],
     );
     let result = compile_project(&p);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let (header, rows) = only_table(&result);
-    assert!(matches!(header.cells[0].content.as_slice(), [IrInline::Strong { .. }]));
-    assert!(matches!(header.cells[1].content.as_slice(), [IrInline::Emphasis { .. }]));
-    assert!(matches!(rows[0].cells[0].content.as_slice(), [IrInline::Strong { .. }]));
-    assert!(matches!(rows[0].cells[1].content.as_slice(), [IrInline::Emphasis { .. }]));
+    assert!(matches!(
+        header.cells[0].content.as_slice(),
+        [IrInline::Strong { .. }]
+    ));
+    assert!(matches!(
+        header.cells[1].content.as_slice(),
+        [IrInline::Emphasis { .. }]
+    ));
+    assert!(matches!(
+        rows[0].cells[0].content.as_slice(),
+        [IrInline::Strong { .. }]
+    ));
+    assert!(matches!(
+        rows[0].cells[1].content.as_slice(),
+        [IrInline::Emphasis { .. }]
+    ));
     assert!(matches!(
         rows[0].cells[2].content.as_slice(),
         [IrInline::Link { destination, .. }] if destination == "https://example.com"
@@ -76,13 +94,23 @@ fn csv_markdown_keeps_block_looking_markers_literal_inside_cells() {
     let p = project(
         "main.qd",
         ".csv {data.csv} mode:{markdown}\n",
-        &[("data.csv", b"Heading,Listish,Quoteish,Tableish\n\"# Heading\",\"- item\",\"> quote\",\"| A | B |\"\n")],
+        &[(
+            "data.csv",
+            b"Heading,Listish,Quoteish,Tableish\n\"# Heading\",\"- item\",\"> quote\",\"| A | B |\"\n",
+        )],
     );
     let result = compile_project(&p);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let (_, rows) = only_table(&result);
-    assert_eq!(row_text(&rows[0]), ["# Heading", "- item", "> quote", "| A | B |"]);
-    assert!(rows[0].cells.iter().all(|cell| matches!(cell.content.as_slice(), [IrInline::Text { .. }])));
+    assert_eq!(
+        row_text(&rows[0]),
+        ["# Heading", "- item", "> quote", "| A | B |"]
+    );
+    assert!(rows[0].cells.iter().all(|cell| {
+        cell.content
+            .iter()
+            .all(|inline| matches!(inline, IrInline::Text { .. }))
+    }));
 }
 
 #[test]
@@ -90,14 +118,26 @@ fn csv_markdown_preserves_soft_and_hard_inline_break_semantics() {
     let p = project(
         "main.qd",
         ".csv {data.csv} mode:{markdown}\n",
-        &[("data.csv", b"Name,Soft,Hard\nAlder,\"first line\n**second line**\",\"first  \nsecond\"\n")],
+        &[(
+            "data.csv",
+            b"Name,Soft,Hard\nAlder,\"first line\n**second line**\",\"first  \nsecond\"\n",
+        )],
     );
     let result = compile_project(&p);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let (_, rows) = only_table(&result);
-    assert!(rows[0].cells[1].content.iter().any(|x| matches!(x, IrInline::SoftBreak { .. })));
-    assert!(rows[0].cells[1].content.iter().any(|x| matches!(x, IrInline::Strong { .. })));
-    assert!(rows[0].cells[2].content.iter().any(|x| matches!(x, IrInline::HardBreak { .. })));
+    assert!(rows[0].cells[1]
+        .content
+        .iter()
+        .any(|x| matches!(x, IrInline::SoftBreak { .. })));
+    assert!(rows[0].cells[1]
+        .content
+        .iter()
+        .any(|x| matches!(x, IrInline::Strong { .. })));
+    assert!(rows[0].cells[2]
+        .content
+        .iter()
+        .any(|x| matches!(x, IrInline::HardBreak { .. })));
 }
 
 #[test]
@@ -112,14 +152,24 @@ fn csv_markdown_composes_with_sort_while_preserving_rich_cells() {
     let (_, rows) = only_table(&result);
     assert_eq!(row_text(&rows[0]), ["A2", "5"]);
     assert_eq!(row_text(&rows[1]), ["B10", "2"]);
-    assert!(matches!(rows[0].cells[0].content.as_slice(), [IrInline::Emphasis { .. }]));
-    assert!(matches!(rows[1].cells[0].content.as_slice(), [IrInline::Strong { .. }]));
+    assert!(matches!(
+        rows[0].cells[0].content.as_slice(),
+        [IrInline::Emphasis { .. }]
+    ));
+    assert!(matches!(
+        rows[1].cells[0].content.as_slice(),
+        [IrInline::Strong { .. }]
+    ));
 }
 
 #[test]
 fn csv_markdown_empty_and_header_only_keep_the_existing_empty_table_contract() {
     for csv in [b"".as_slice(), b"**Name**,_Value_\n".as_slice()] {
-        let p = project("main.qd", ".csv {data.csv} mode:{markdown}\n", &[("data.csv", csv)]);
+        let p = project(
+            "main.qd",
+            ".csv {data.csv} mode:{markdown}\n",
+            &[("data.csv", csv)],
+        );
         let result = compile_project(&p);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         let (header, rows) = only_table(&result);
@@ -138,16 +188,22 @@ fn csv_markdown_resolves_relative_to_the_current_source() {
     let result = compile_project(&p);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let (_, rows) = only_table(&result);
-    assert!(matches!(rows[0].cells[0].content.as_slice(), [IrInline::Strong { .. }]));
-    assert!(matches!(rows[0].cells[1].content.as_slice(), [IrInline::Emphasis { .. }]));
+    assert!(matches!(
+        rows[0].cells[0].content.as_slice(),
+        [IrInline::Strong { .. }]
+    ));
+    assert!(matches!(
+        rows[0].cells[1].content.as_slice(),
+        [IrInline::Emphasis { .. }]
+    ));
 }
 
 #[test]
-fn csv_markdown_fails_closed_for_unevidenced_inline_categories() {
+fn csv_markdown_fails_closed_for_unevidenced_representable_inline_categories() {
     let p = project(
         "main.qd",
         ".csv {data.csv} mode:{markdown}\n",
-        &[("data.csv", b"Name,Image\nAlder,![alt](image.png)\n")],
+        &[("data.csv", b"Name,Style\nAlder,~~removed~~\n")],
     );
     let result = compile_project(&p);
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");

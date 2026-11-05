@@ -4447,7 +4447,6 @@ fn integration_implicit_lambda_parameter_reaches_typst_and_pdf() {
     });
 }
 
-
 #[test]
 fn integration_csv_markdown_rich_cells_lower_to_valid_typst_and_pdf() {
     let project = VirtualProjectBuilder::new()
@@ -4460,19 +4459,35 @@ fn integration_csv_markdown_rich_cells_lower_to_valid_typst_and_pdf() {
         .build()
         .expect("valid project");
     let result = compile(&project, &CompileOptions::default());
-    assert!(result.diagnostics.is_empty(), "csv markdown diagnostics: {:?}", result.diagnostics);
+    assert!(
+        result.diagnostics.is_empty(),
+        "csv markdown diagnostics: {:?}",
+        result.diagnostics
+    );
     let [IrNode::Table { rows, .. }] = result.ir.nodes.as_slice() else {
         panic!("expected csv table: {:?}", result.ir.nodes);
     };
-    assert!(matches!(rows[0].cells[0].content.as_slice(), [IrInline::Strong { .. }]));
-    assert!(matches!(rows[0].cells[1].content.as_slice(), [IrInline::Emphasis { .. }]));
+    assert!(matches!(
+        rows[0].cells[0].content.as_slice(),
+        [IrInline::Strong { .. }]
+    ));
+    assert!(matches!(
+        rows[0].cells[1].content.as_slice(),
+        [IrInline::Emphasis { .. }]
+    ));
 
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(typst_code.contains("#table("), "{typst_code}");
     with_typst("csv-markdown-rich-cells", |backend| {
         let output = backend
-            .compile(&TypstInput { source: typst_code, entry_path: "csv-markdown.qd".to_string() })
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "csv-markdown.qd".to_string(),
+            })
             .expect("csv markdown Typst must compile");
-        assert!(output.pdf.expect("PDF output must be present").starts_with(b"%PDF-"));
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
     });
 }
