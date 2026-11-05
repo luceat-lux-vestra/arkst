@@ -47,6 +47,7 @@
 //! segments continue in source order. No source or backend text is generated
 //! during this process.
 
+use crate::csv_resource::{load_csv_resource, CsvResourceError};
 use crate::invocation_binder::{
     self, BindingPlan, BodyPolicy, BoundSlot, Candidate, ParameterMetadata,
 };
@@ -4913,10 +4914,10 @@ impl Evaluator {
 
         // Adding a native resource name must not steal a source-defined callable
         // that was valid before the compatibility builtin existed. Keep the
-        // bounded `.subdocument` addition shadowable without changing the
-        // established precedence of older resource natives.
+        // bounded `.subdocument` and `.csv` additions shadowable without
+        // changing the established precedence of older resource natives.
         let source_defined_shadowable_resource =
-            name == "subdocument" && context.get_function(name).is_some();
+            matches!(name, "subdocument" | "csv") && context.get_function(name).is_some();
         if is_resource(name) && !source_defined_shadowable_resource {
             return self.evaluate_resource_builtin(
                 name,
@@ -12689,6 +12690,14 @@ impl Evaluator {
                 context,
                 binding_plan,
             ),
+            "csv" => self.evaluate_csv(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+            ),
             "includeall" => self.evaluate_include_all(
                 &evaluated_positional,
                 &evaluated_named,
@@ -13198,6 +13207,174 @@ impl Evaluator {
                 CallOutcome::Failed
             }
         }
+    }
+
+    fn evaluate_csv(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
+    ) -> CallOutcome {
+        let arguments =
+            match csv_arguments(positional_args, named_args, binding_plan, span, diagnostics) {
+                Ok(arguments) => arguments,
+                Err(()) => return CallOutcome::Failed,
+            };
+
+        if arguments.mode == CsvMode::Markdown {
+            diagnostics.push(resource_diagnostic(
+                "E8001",
+                "`.csv` `mode:markdown` is outside the independently evidenced #714 plain-table slice"
+                    .to_string(),
+                *span,
+                "Use the default or explicit `mode:plain`; Markdown cell materialization remains a separate compatibility boundary.",
+            ));
+            return CallOutcome::Failed;
+        }
+        if reject_host_filesystem_reference("csv", &arguments.reference, *span, diagnostics) {
+            return CallOutcome::Failed;
+        }
+
+        let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
+            return CallOutcome::Failed;
+        };
+        let data = match load_csv_resource(
+            provider,
+            source_id,
+            &arguments.reference,
+            self.limits.max_materialized_elements,
+        ) {
+            Ok(data) => data,
+            Err(CsvResourceError::Resource(error)) => {
+                diagnostics.push(resource_access_diagnostic("csv", error, *span));
+                return CallOutcome::Failed;
+            }
+            Err(CsvResourceError::FieldLimit { attempted, .. }) => {
+                diagnostics.push(materialized_elements_limit_error(
+                    u64::try_from(attempted).unwrap_or(u64::MAX),
+                    self.limits.max_materialized_elements,
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(error) => {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    format!("`.csv` could not parse `{}`: {error}", arguments.reference),
+                    *span,
+                    "Use the bounded UTF-8 CSV syntax evidenced by the project resource parser.",
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        if data.columns.is_empty() {
+            return CallOutcome::Value(IrValue::Content(vec![IrNode::Table {
+                header: IrTableRow {
+                    cells: Vec::new(),
+                    span: *span,
+                },
+                rows: Vec::new(),
+                span: *span,
+            }]));
+        }
+
+        let width = data.columns.len();
+        let row_count = data.columns[0].cells.len();
+        if data
+            .columns
+            .iter()
+            .any(|column| column.cells.len() != row_count)
+        {
+            diagnostics.push(resource_diagnostic(
+                "E9001",
+                format!(
+                    "`.csv` parser returned inconsistent column lengths for `{}`",
+                    data.path
+                ),
+                *span,
+                "The bounded CSV parser must preserve one rectangular data shape.",
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let requested = match width
+            .checked_mul(row_count)
+            .and_then(|cells| cells.checked_add(width))
+        {
+            Some(requested) => u64::try_from(requested).unwrap_or(u64::MAX),
+            None => u64::MAX,
+        };
+        if let Err(outcome) = self.check_materialized_elements(requested, *span, diagnostics) {
+            return outcome;
+        }
+
+        let mut header_cells = Vec::new();
+        if let Err(error) = header_cells.try_reserve_exact(width) {
+            diagnostics.push(resource_diagnostic(
+                "E3005",
+                format!("`.csv` header cells cannot be allocated: {error}"),
+                *span,
+                "Reduce the CSV table size or the evaluator materialization limit.",
+            ));
+            return CallOutcome::Failed;
+        }
+        for column in &data.columns {
+            header_cells.push(IrTableCell {
+                content: vec![IrInline::Text {
+                    content: column.header.clone(),
+                    span: *span,
+                }],
+                alignment: IrTableAlignment::None,
+                span: *span,
+            });
+        }
+
+        let mut rows = Vec::new();
+        if let Err(error) = rows.try_reserve_exact(row_count) {
+            diagnostics.push(resource_diagnostic(
+                "E3005",
+                format!("`.csv` rows cannot be allocated: {error}"),
+                *span,
+                "Reduce the CSV table size or the evaluator materialization limit.",
+            ));
+            return CallOutcome::Failed;
+        }
+        for row_index in 0..row_count {
+            let mut cells = Vec::new();
+            if let Err(error) = cells.try_reserve_exact(width) {
+                diagnostics.push(resource_diagnostic(
+                    "E3005",
+                    format!("`.csv` row cells cannot be allocated: {error}"),
+                    *span,
+                    "Reduce the CSV table size or the evaluator materialization limit.",
+                ));
+                return CallOutcome::Failed;
+            }
+            for column in &data.columns {
+                cells.push(IrTableCell {
+                    content: vec![IrInline::Text {
+                        content: column.cells[row_index].clone(),
+                        span: *span,
+                    }],
+                    alignment: IrTableAlignment::None,
+                    span: *span,
+                });
+            }
+            rows.push(IrTableRow { cells, span: *span });
+        }
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Table {
+            header: IrTableRow {
+                cells: header_cells,
+                span: *span,
+            },
+            rows,
+            span: *span,
+        }]))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -19842,6 +20019,7 @@ const RESOURCE_NATIVE_NAMES: &[&str] = &[
     "filename",
     "listfiles",
     "json",
+    "csv",
     "include",
     "includeall",
     "pathtoroot",
@@ -22040,6 +22218,15 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             vec![ParameterMetadata::required("path").named(false)],
             BodyPolicy::Reject,
         ),
+        "csv" => (
+            vec![
+                ParameterMetadata::required("path"),
+                ParameterMetadata::defaulted("mode").positional(false),
+                ParameterMetadata::optional("caption").positional(false),
+                ParameterMetadata::optional("ref"),
+            ],
+            BodyPolicy::Reject,
+        ),
         "include" => (
             vec![
                 ParameterMetadata::required("path"),
@@ -23173,6 +23360,107 @@ fn resource_path_argument(
         return None;
     };
     Some(path)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CsvMode {
+    Plain,
+    Markdown,
+}
+
+struct CsvArguments {
+    reference: String,
+    mode: CsvMode,
+}
+
+fn csv_arguments(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    binding_plan: &BindingPlan,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<CsvArguments, ()> {
+    let candidates = raw_invocation_candidates(positional_args, named_args, *span);
+    let bound = binding_plan
+        .bind(&candidates, None, *span)
+        .map_err(|error| {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                error.message,
+                error.primary,
+                "Pass one logical CSV path and only the documented mode/caption/ref options.",
+            ));
+        })?;
+    let mut slots = bound.slots.into_iter();
+
+    let Some(BoundSlot::Explicit {
+        value: path_value,
+        span: path_span,
+    }) = slots.next()
+    else {
+        return Err(());
+    };
+    let Some(reference) = builtins::adapt_string_argument(&path_value) else {
+        diagnostics.push(resource_diagnostic(
+            "E3003",
+            "`.csv` resource path must adapt to String".to_string(),
+            path_span,
+            "Use a scalar or plain-text logical resource path.",
+        ));
+        return Err(());
+    };
+
+    let mode = match slots.next() {
+        Some(BoundSlot::Explicit { value, span }) => {
+            let Some(value) = builtins::adapt_string_argument(&value) else {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    "`.csv` `mode` must be `plain` or `markdown`".to_string(),
+                    span,
+                    "Use the closed public CsvParsingMode values.",
+                ));
+                return Err(());
+            };
+            match value.to_ascii_lowercase().as_str() {
+                "plain" => CsvMode::Plain,
+                "markdown" => CsvMode::Markdown,
+                _ => {
+                    diagnostics.push(resource_diagnostic(
+                        "E3003",
+                        format!("unsupported `.csv` mode `{value}`"),
+                        span,
+                        "Use `plain` or `markdown`.",
+                    ));
+                    return Err(());
+                }
+            }
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => CsvMode::Plain,
+    };
+
+    for (name, slot) in [("caption", slots.next()), ("ref", slots.next())] {
+        match slot {
+            Some(BoundSlot::Explicit {
+                value: IrValue::None,
+                ..
+            })
+            | Some(BoundSlot::Defaulted | BoundSlot::Omitted)
+            | None => {}
+            Some(BoundSlot::Explicit { span, .. }) => {
+                diagnostics.push(resource_diagnostic(
+                    "E8001",
+                    format!(
+                        "`.csv` non-null `{name}` is outside the #714 plain-table slice"
+                    ),
+                    span,
+                    "Caption/reference integration is owned by the shared #181 content index boundary.",
+                ));
+                return Err(());
+            }
+        }
+    }
+
+    Ok(CsvArguments { reference, mode })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

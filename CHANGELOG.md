@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown plain CSV table production (#714):** `.csv` now consumes the
+  existing source-relative bounded CSV resource/parser layer and materializes
+  default or explicit `mode:plain` data through the existing table IR. Official
+  v2.7.0 black-box evidence covers literal Markdown markers, empty/header-only
+  tables, quoted fields, nested resource bases, and `.tablecompute` composition;
+  `mode:markdown` and non-null caption/ref remain explicit fail-closed boundaries.
+
 - **Quarkdown table aggregate computation (#712):** `.tablecompute`
   now reuses the established table-column String projection and shared callable
   boundary to pass one complete body column to a one-argument callback and

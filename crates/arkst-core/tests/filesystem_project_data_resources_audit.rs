@@ -345,11 +345,13 @@ fn resource_architecture_and_historical_reconciliation_are_explicit() {
     let csv = row(&rows, "builtin:.csv");
     assert_eq!(csv[17], "PARTIAL");
     assert!(csv[13].contains("csv_resource"));
-    assert!(csv[13].contains("no evaluator dispatch"));
+    assert!(csv[13].contains("Evaluator-native"));
+    assert!(csv[13].contains("IrNode::Table"));
     assert!(csv[18].contains("CsvResourceData"));
-    assert!(csv[18].contains("field-count limit"));
+    assert!(csv[18].contains("#714"));
     assert!(csv[19].contains("#183"));
-    assert!(csv[19].contains("table-node materialization"));
+    assert!(csv[19].contains("#181"));
+    assert!(csv[19].contains("MARKDOWN"));
     assert_eq!(csv[21], "#189;#183;POLICY_DIVERGENCE:global-read;#191");
 
     let filename = row(&rows, "builtin:.filename");
