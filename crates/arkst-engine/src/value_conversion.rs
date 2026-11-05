@@ -116,26 +116,16 @@ pub(crate) enum ValueOrigin {
     Dynamic,
 }
 
-/// Evaluator-local provenance attached to one runtime value.
+/// Evaluator-local provenance attached to exactly one runtime value.
 ///
-/// This metadata is deliberately not part of `IrValue` or its wire format.
-/// Consumers may only observe provenance through an explicit target conversion;
-/// semantic values remain backend-neutral and serializable without it.
+/// Provenance never forms a parallel aggregate tree: nested runtime values own
+/// their own provenance. Durable `IrValue` and backend lowering never observe
+/// this metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum ValueProvenance {
-    /// The value was produced by semantic evaluation or another materializing
-    /// operation. This is the default for all ordinary invocation values.
     #[default]
     Materialized,
-    /// The value still denotes independently authored Markdown source rather
-    /// than a materialized semantic node. Exact source spelling is retained
-    /// only when an evidenced consumer requires it.
     SourceBackedMarkdown { source_text: Option<String> },
-    /// Per-element provenance for a runtime collection. This sidecar mirrors
-    /// only provenance cardinality; the semantic collection remains in
-    /// `IrValue::Collection`.
-    #[allow(dead_code)]
-    Collection(Vec<ValueProvenance>),
 }
 
 impl ValueProvenance {
@@ -150,11 +140,6 @@ impl ValueProvenance {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn collection(elements: Vec<Self>) -> Self {
-        Self::Collection(elements)
-    }
-
     pub(crate) fn source_text(&self) -> Option<&str> {
         match self {
             Self::SourceBackedMarkdown {
@@ -164,33 +149,46 @@ impl ValueProvenance {
         }
     }
 
-    pub(crate) fn element(&self, index: usize) -> Option<&Self> {
-        match self {
-            Self::Collection(elements) => elements.get(index),
-            _ => None,
-        }
-    }
-
     pub(crate) fn is_materialized(&self) -> bool {
         matches!(self, Self::Materialized)
     }
 }
 
-/// An evaluated invocation argument together with orthogonal binder origin and
-/// evaluator-local provenance used by target-driven conversion.
+/// First evaluator-owned runtime value carrier.
+///
+/// This bounded foundation decomposes Collections immediately so every element
+/// owns its own origin/provenance. Non-Collection semantic categories remain a
+/// temporary leaf bridge while the wider evaluator migrates away from the
+/// current one-IR model. A `SemanticLeaf` must never contain
+/// `IrValue::Collection`.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InvocationValue {
-    pub value: IrValue,
+enum RuntimeValueKind {
+    SemanticLeaf(IrValue),
+    Collection(Vec<RuntimeValue>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeValue {
+    kind: RuntimeValueKind,
     pub origin: ValueOrigin,
     provenance: ValueProvenance,
 }
 
-impl InvocationValue {
+impl RuntimeValue {
     pub(crate) fn new(value: IrValue, origin: ValueOrigin) -> Self {
-        Self {
-            value,
-            origin,
-            provenance: ValueProvenance::Materialized,
+        match value {
+            IrValue::Collection(values) => Self::collection(
+                values
+                    .into_iter()
+                    .map(|value| Self::new(value, origin))
+                    .collect(),
+                origin,
+            ),
+            value => Self {
+                kind: RuntimeValueKind::SemanticLeaf(value),
+                origin,
+                provenance: ValueProvenance::Materialized,
+            },
         }
     }
 
@@ -198,13 +196,32 @@ impl InvocationValue {
         Self::new(value, ValueOrigin::Static)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn dynamic_value(value: IrValue) -> Self {
         Self::new(value, ValueOrigin::Dynamic)
     }
 
+    pub(crate) fn collection(elements: Vec<Self>, origin: ValueOrigin) -> Self {
+        Self {
+            kind: RuntimeValueKind::Collection(elements),
+            origin,
+            provenance: ValueProvenance::Materialized,
+        }
+    }
+
+    pub(crate) fn with_origin(mut self, origin: ValueOrigin) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn with_provenance(mut self, provenance: ValueProvenance) -> Self {
         self.provenance = provenance;
         self
+    }
+
+    pub(crate) fn set_provenance(&mut self, provenance: ValueProvenance) {
+        self.provenance = provenance;
     }
 
     pub(crate) fn provenance(&self) -> &ValueProvenance {
@@ -213,6 +230,73 @@ impl InvocationValue {
 
     pub(crate) fn source_backed_markdown_text(&self) -> Option<&str> {
         self.provenance.source_text()
+    }
+
+    pub(crate) fn is_content(&self) -> bool {
+        matches!(&self.kind, RuntimeValueKind::SemanticLeaf(IrValue::Content(_)))
+    }
+
+    pub(crate) fn to_ir_value(&self) -> IrValue {
+        match &self.kind {
+            RuntimeValueKind::SemanticLeaf(value) => value.clone(),
+            RuntimeValueKind::Collection(elements) => {
+                IrValue::Collection(elements.iter().map(Self::to_ir_value).collect())
+            }
+        }
+    }
+
+    pub(crate) fn into_ir_value(self) -> IrValue {
+        match self.kind {
+            RuntimeValueKind::SemanticLeaf(value) => value,
+            RuntimeValueKind::Collection(elements) => {
+                IrValue::Collection(elements.into_iter().map(Self::into_ir_value).collect())
+            }
+        }
+    }
+
+    pub(crate) fn into_collection(self) -> Result<Vec<Self>, Self> {
+        match self {
+            Self {
+                kind: RuntimeValueKind::Collection(elements),
+                ..
+            } => Ok(elements),
+            value => Err(value),
+        }
+    }
+
+    pub(crate) fn invocation_value(&self) -> InvocationValue {
+        InvocationValue::new(self.to_ir_value(), self.origin)
+    }
+}
+
+impl From<InvocationValue> for RuntimeValue {
+    fn from(value: InvocationValue) -> Self {
+        Self::new(value.value, value.origin)
+    }
+}
+
+/// An evaluated invocation argument plus the binder-origin distinction used by
+/// the existing target-conversion API.
+///
+/// Provenance deliberately does not live here anymore. This remains a bounded
+/// compatibility adapter while conversion call sites migrate to `RuntimeValue`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InvocationValue {
+    pub value: IrValue,
+    pub origin: ValueOrigin,
+}
+
+impl InvocationValue {
+    pub(crate) fn new(value: IrValue, origin: ValueOrigin) -> Self {
+        Self { value, origin }
+    }
+
+    pub(crate) fn static_value(value: IrValue) -> Self {
+        Self::new(value, ValueOrigin::Static)
+    }
+
+    pub(crate) fn dynamic_value(value: IrValue) -> Self {
+        Self::new(value, ValueOrigin::Dynamic)
     }
 }
 
@@ -3069,8 +3153,8 @@ mod tests {
         convert_text_size_with_origin, convert_text_style_with_origin,
         convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
         ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
-        DomainTarget, DomainValue, InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue,
-        TargetValue, ValueOrigin, ValueProvenance,
+        DomainTarget, DomainValue, InvocationValue, RawMarkdownTarget, RuntimeValue, ScalarTarget,
+        ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
@@ -3094,36 +3178,39 @@ mod tests {
     }
 
     #[test]
-    fn runtime_provenance_is_orthogonal_and_models_per_element_source_identity() {
-        let direct = InvocationValue::dynamic_value(IrValue::Content(Vec::new()))
+    fn runtime_value_tree_owns_nested_collection_provenance() {
+        let direct = RuntimeValue::dynamic_value(IrValue::Content(Vec::new()))
             .with_provenance(ValueProvenance::source_backed_markdown_text("* alpha"));
         assert_eq!(direct.origin, ValueOrigin::Dynamic);
         assert_eq!(direct.source_backed_markdown_text(), Some("* alpha"));
 
-        let repeated = InvocationValue::static_value(IrValue::Collection(vec![
-            IrValue::Content(Vec::new()),
-            IrValue::Content(Vec::new()),
-        ]))
-        .with_provenance(ValueProvenance::collection(vec![
-            ValueProvenance::source_backed_markdown(),
-            ValueProvenance::source_backed_markdown(),
-        ]));
-        assert_eq!(repeated.origin, ValueOrigin::Static);
+        let repeated = RuntimeValue::collection(
+            vec![
+                RuntimeValue::static_value(IrValue::Content(Vec::new()))
+                    .with_provenance(ValueProvenance::source_backed_markdown()),
+                RuntimeValue::static_value(IrValue::Content(Vec::new())),
+            ],
+            ValueOrigin::Static,
+        );
+        let elements = repeated
+            .clone()
+            .into_collection()
+            .expect("runtime Collection keeps child values");
         assert!(matches!(
-            repeated.provenance().element(0),
-            Some(ValueProvenance::SourceBackedMarkdown { source_text: None })
+            elements[0].provenance(),
+            ValueProvenance::SourceBackedMarkdown { source_text: None }
         ));
-        assert!(matches!(
-            repeated.provenance().element(1),
-            Some(ValueProvenance::SourceBackedMarkdown { source_text: None })
-        ));
+        assert!(elements[1].provenance().is_materialized());
 
-        // Materializing a transformed Collection or a generated Table publishes
-        // only the semantic value. A later invocation therefore starts with
-        // materialized provenance unless a source producer explicitly marks it.
-        let transformed = InvocationValue::static_value(repeated.value.clone());
-        let generated_table = InvocationValue::static_value(IrValue::Content(Vec::new()));
-        assert!(transformed.provenance().is_materialized());
+        let rematerialized = RuntimeValue::static_value(repeated.into_ir_value());
+        let elements = rematerialized
+            .into_collection()
+            .expect("materialized Collection remains a runtime Collection");
+        assert!(elements
+            .iter()
+            .all(|element| element.provenance().is_materialized()));
+
+        let generated_table = RuntimeValue::static_value(IrValue::Content(Vec::new()));
         assert!(generated_table.provenance().is_materialized());
     }
 

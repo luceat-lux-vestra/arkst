@@ -14,7 +14,7 @@ use crate::unicode_case::{
 use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
-use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
+use crate::value_conversion::{self, InvocationValue, RuntimeValue, ScalarTarget, ScalarValue};
 use arkst_ir::{
     IrColor, IrDictionary, IrInline, IrKeybindingPart, IrNode, IrTextDecoration, IrTextScript,
     IrValue,
@@ -2236,15 +2236,16 @@ pub(crate) fn scalar_string_conversion(
 /// source-backed String only for the independently evidenced direct-variable
 /// provenance boundary; operation-generated Collections remain fail-closed.
 pub(crate) fn logger_string_conversion(
-    value: &InvocationValue,
+    runtime: &RuntimeValue,
 ) -> Result<String, value_conversion::ConversionError> {
-    match scalar_string_conversion(value) {
+    let value = runtime.invocation_value();
+    match scalar_string_conversion(&value) {
         Ok(value) => Ok(value),
         Err(error) => logger_structured_string_value(&value.value)
             .or_else(|| match &value.value {
-                IrValue::Content(_) => {
-                    value.source_backed_markdown_text().map(ToOwned::to_owned)
-                }
+                IrValue::Content(_) => runtime
+                    .source_backed_markdown_text()
+                    .map(ToOwned::to_owned),
                 _ => None,
             })
             .ok_or(error),

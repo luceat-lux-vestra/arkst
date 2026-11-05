@@ -52,8 +52,8 @@ use crate::invocation_binder::{
     self, BindingPlan, BodyPolicy, BoundSlot, Candidate, ParameterMetadata,
 };
 use crate::value_conversion::{
-    self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
-    ValueProvenance,
+    self, InvocationNamedArg, InvocationValue, RuntimeValue, ScalarTarget, ScalarValue,
+    ValueOrigin, ValueProvenance,
 };
 use crate::{ast_to_ir, builtins};
 use crate::{
@@ -96,36 +96,32 @@ use std::rc::{Rc, Weak};
 /// block variables.
 #[derive(Debug, Clone)]
 struct VariableValue {
-    value: IrValue,
-    provenance: ValueProvenance,
+    runtime: RuntimeValue,
 }
 
 impl VariableValue {
-    /// Creates an evaluator runtime value from a semantic value. Materializing
-    /// operations clear transient source provenance by default.
     fn from_evaluated_value(value: IrValue) -> Self {
         Self {
-            value,
-            provenance: ValueProvenance::Materialized,
+            runtime: RuntimeValue::static_value(value),
         }
     }
 
-    /// Returns the backend-neutral value used when this variable participates
-    /// in a chain or durable callable capture. Runtime provenance is
-    /// intentionally stripped at that boundary.
+    /// Returns the backend-neutral value used by legacy evaluator paths.
+    /// Runtime-only origin/provenance is intentionally stripped here.
     fn to_value(&self) -> IrValue {
-        self.value.clone()
+        self.runtime.to_ir_value()
     }
 
-    fn provenance(&self) -> &ValueProvenance {
-        &self.provenance
+    fn runtime_value(&self) -> &RuntimeValue {
+        &self.runtime
     }
 
     fn mark_source_backed_markdown(&mut self, source_text: String) -> bool {
-        if !matches!(&self.value, IrValue::Content(_)) {
+        if !self.runtime.is_content() {
             return false;
         }
-        self.provenance = ValueProvenance::source_backed_markdown_text(source_text);
+        self.runtime
+            .set_provenance(ValueProvenance::source_backed_markdown_text(source_text));
         true
     }
 }
@@ -398,9 +394,8 @@ struct IterationOptions {
 }
 
 struct EvidencedIterableElement {
-    value: IrValue,
+    value: RuntimeValue,
     span: SourceSpan,
-    provenance: ValueProvenance,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1099,9 +1094,8 @@ fn table_row_from_elements(
         let EvidencedIterableElement {
             value,
             span: element_span,
-            provenance: _source_provenance,
         } = element;
-        let content = value_into_table_cell(value, element_span, diagnostics)?;
+        let content = value_into_table_cell(value.into_ir_value(), element_span, diagnostics)?;
         cells.push(IrTableCell {
             content,
             alignment: IrTableAlignment::None,
@@ -10327,17 +10321,15 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let direct_provenance =
+        let runtime_argument =
             if implicit_argument.is_none() && named_args.is_empty() && positional_args.len() == 1 {
-                direct_variable_provenance(&positional_args[0], context)
+                direct_variable_runtime_value(&positional_args[0], context)
+                    .map(|value| value.with_origin(argument.origin))
+                    .unwrap_or_else(|| RuntimeValue::from(argument.clone()))
             } else {
-                None
+                RuntimeValue::from(argument.clone())
             };
-        let argument = match direct_provenance {
-            Some(provenance) => argument.with_provenance(provenance),
-            None => argument,
-        };
-        let message = match builtins::logger_string_conversion(&argument) {
+        let message = match builtins::logger_string_conversion(&runtime_argument) {
             Ok(message) => message,
             Err(error) => {
                 let call = format!("`.{name}`");
@@ -15943,7 +15935,9 @@ impl Evaluator {
         for row in row_elements {
             let row_span = row.span;
             let cells = match self.coerce_evidenced_iterable(
-                InvocationValue::static_value(unwrap_source_backed_table_row(row.value)),
+                InvocationValue::static_value(unwrap_source_backed_table_row(
+                    row.value.into_ir_value(),
+                )),
                 &row_span,
                 diagnostics,
                 context,
@@ -17141,14 +17135,32 @@ impl Evaluator {
 
     fn coerce_evidenced_iterable(
         &self,
-        value: InvocationValue,
+        value: impl Into<RuntimeValue>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<EvidencedIterableElement>, CallOutcome> {
-        let provenance = value.provenance().clone();
-        let element_spans = iterable_element_spans(&value.value, *span);
-        let values = self.coerce_iterable(value, span, diagnostics, context)?;
+        let value = value.into();
+        let semantic_value = value.to_ir_value();
+        let element_spans = iterable_element_spans(&semantic_value, *span);
+        let values = match value.into_collection() {
+            Ok(values) => {
+                self.check_materialized_elements_len(values.len(), *span, diagnostics)?;
+                values
+            }
+            Err(value) => {
+                let origin = value.origin;
+                self.coerce_iterable(
+                    InvocationValue::new(value.into_ir_value(), origin),
+                    span,
+                    diagnostics,
+                    context,
+                )?
+                .into_iter()
+                .map(RuntimeValue::static_value)
+                .collect()
+            }
+        };
         let use_captured_spans = element_spans.len() == values.len();
         let mut elements = Vec::new();
         if let Err(error) = elements.try_reserve_exact(values.len()) {
@@ -17159,16 +17171,15 @@ impl Evaluator {
             return Err(CallOutcome::Failed);
         }
         for (index, value) in values.into_iter().enumerate() {
+            let semantic_value = value.to_ir_value();
             let element_span = if use_captured_spans {
                 element_spans[index]
             } else {
-                semantic_value_span(&value, *span)
+                semantic_value_span(&semantic_value, *span)
             };
-            let element_provenance = provenance.element(index).cloned().unwrap_or_default();
             elements.push(EvidencedIterableElement {
                 value,
                 span: element_span,
-                provenance: element_provenance,
             });
         }
         Ok(elements)
@@ -26012,16 +26023,16 @@ fn call_result_origin(name: &str, context: &EvaluationContext<'_>) -> ValueOrigi
     }
 }
 
-/// Returns explicit evaluator-local provenance only when this exact raw
-/// argument is a direct variable reference owned by the same evaluation scope.
+/// Returns the evaluator runtime value only when this exact raw argument is a
+/// direct variable reference owned by the same evaluation scope.
 ///
 /// The gate intentionally does not follow parent scopes, aliases, chains,
 /// callable captures/results, conditionals, or collection transforms. Those
 /// boundaries materialize ordinary semantic values unless separately evidenced.
-fn direct_variable_provenance(
+fn direct_variable_runtime_value(
     value: &IrValue,
     context: &EvaluationContext<'_>,
-) -> Option<ValueProvenance> {
+) -> Option<RuntimeValue> {
     let IrValue::Content(nodes) = value else {
         return None;
     };
@@ -26047,8 +26058,8 @@ fn direct_variable_provenance(
     context
         .variables
         .get(name)
-        .map(VariableValue::provenance)
-        .filter(|provenance| !provenance.is_materialized())
+        .map(VariableValue::runtime_value)
+        .filter(|value| !value.provenance().is_materialized())
         .cloned()
 }
 
@@ -33517,19 +33528,19 @@ mod tests {
     }
 
     #[test]
-    fn evidenced_iterable_preserves_per_element_runtime_provenance() {
+    fn evidenced_iterable_preserves_runtime_children_without_parallel_sidecar() {
         let evaluator = Evaluator::new();
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
         let operation_span = span(0, 20);
-        let value = InvocationValue::static_value(IrValue::Collection(vec![
-            IrValue::String("source".to_string()),
-            IrValue::String("materialized".to_string()),
-        ]))
-        .with_provenance(ValueProvenance::collection(vec![
-            ValueProvenance::source_backed_markdown(),
-            ValueProvenance::Materialized,
-        ]));
+        let value = RuntimeValue::collection(
+            vec![
+                RuntimeValue::static_value(IrValue::String("source".to_string()))
+                    .with_provenance(ValueProvenance::source_backed_markdown()),
+                RuntimeValue::static_value(IrValue::String("materialized".to_string())),
+            ],
+            ValueOrigin::Static,
+        );
 
         let elements = evaluator
             .coerce_evidenced_iterable(
@@ -33542,10 +33553,10 @@ mod tests {
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(elements.len(), 2);
         assert!(matches!(
-            &elements[0].provenance,
+            elements[0].value.provenance(),
             ValueProvenance::SourceBackedMarkdown { source_text: None }
         ));
-        assert!(elements[1].provenance.is_materialized());
+        assert!(elements[1].value.provenance().is_materialized());
     }
 
 }
