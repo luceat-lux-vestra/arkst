@@ -1275,6 +1275,35 @@ mod tests {
     }
 
     #[test]
+    fn top_level_function_bridge_returns_runtime_payload_without_ir_carrier() {
+        let source = ".function {greet}\n    name:\n    Hello .name\n";
+        let document = arkst_markdown::parse_qd(source);
+        let mut diagnostics = Vec::new();
+
+        let lowering = lower_top_level_function_declaration(
+            &document.nodes[0],
+            source_id(),
+            &mut diagnostics,
+            Mode::Quarkdown,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let TopLevelFunctionDeclarationLowering::Declaration(declaration) = lowering else {
+            panic!("expected direct function declaration payload")
+        };
+        assert!(matches!(
+            declaration.name,
+            arkst_ir::IrValue::Identifier(ref name) if name == "greet"
+        ));
+        assert_eq!(declaration.parameters.len(), 1);
+        assert_eq!(declaration.parameters[0].name, "name");
+        assert!(matches!(
+            declaration.body.as_slice(),
+            [IrNode::Paragraph { .. }]
+        ));
+    }
+
+    #[test]
     fn convert_heading() {
         let doc = Document {
             nodes: vec![Block::Heading {
