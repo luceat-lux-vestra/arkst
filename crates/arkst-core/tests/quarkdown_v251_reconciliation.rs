@@ -121,8 +121,10 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     assert!(csv[16].contains("csv_resource.rs"));
     assert!(csv[16].contains("#376"));
     assert!(csv[18].contains("raw `CsvResourceData`"));
-    assert!(csv[19].contains("function binding"));
+    assert!(csv[18].contains("#714"));
+    assert!(csv[19].contains("MARKDOWN"));
     assert!(csv[19].contains("#183"));
+    assert!(csv[19].contains("#181"));
     assert_eq!(csv[21], "#189;#183;POLICY_DIVERGENCE:global-read;#191");
 
     let listfiles = resource_row("builtin:.listfiles");
