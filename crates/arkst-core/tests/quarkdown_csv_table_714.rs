@@ -140,9 +140,8 @@ fn csv_preserves_the_bounded_quoted_parser_contract() {
 }
 
 #[test]
-fn csv_fails_closed_for_unclaimed_mode_caption_ref_and_host_paths() {
+fn csv_fails_closed_for_unclaimed_caption_ref_and_host_paths() {
     for (source, expected_code) in [
-        (".csv {data.csv} mode:{markdown}\n", "E8001"),
         (".csv {data.csv} caption:{Report}\n", "E8001"),
         (".csv {data.csv} ref:{signals}\n", "E8001"),
         (".csv {data.csv} mode:{unknown}\n", "E3003"),
