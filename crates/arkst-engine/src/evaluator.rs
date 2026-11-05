@@ -34,13 +34,14 @@
 //! Block variables (`.var {name}\n    body\n.name`) store evaluated content
 //! and materialize it at reference sites.
 //!
-//! User-defined functions are registered in source order. A call evaluates
-//! positional and named arguments first, creates a child scope, binds its
-//! parameters, and then evaluates the body statement-by-statement in value
-//! context. Outputless statements update the child scope, one substantive
-//! semantic value remains an `IrValue` at that boundary, and multiple
-//! structured outputs become `IrValue::Content` only when composition requires
-//! it.
+//! User-defined functions are registered in source order. Explicit callable
+//! invocations first bind evaluator-owned unevaluated argument/body candidates,
+//! then evaluate only the selected slots in source order before creating the
+//! callee scope. Headerless implicit callables retain their positional runtime
+//! path. Callable bodies still evaluate statement-by-statement in value context:
+//! outputless statements update the child scope, one substantive semantic value
+//! remains an `IrValue` at that boundary, and multiple structured outputs
+//! become `IrValue::Content` only when composition requires it.
 //!
 //! Chain evaluation is structural: the head is invoked first, its semantic
 //! `IrValue` becomes the first positional argument of the next segment, and
@@ -314,6 +315,46 @@ enum ImplicitParameterError {
 enum CallBody<'a> {
     Block(&'a [IrNode]),
     Inline(&'a [IrInline]),
+}
+
+/// Evaluator-owned unevaluated input for an explicit callable slot.
+///
+/// Expressions intentionally retain the current pre-evaluation `IrValue` only
+/// as a transitional syntax carrier until direct frontend-AST evaluation lands.
+/// Bodies remain distinct candidates so structural binding can accept or reject
+/// them without executing their contents. Already-evaluated values are used
+/// only for invocation boundaries that genuinely supply a prior runtime value,
+/// such as a chained call's implicit first argument.
+#[derive(Clone)]
+enum ArgumentCandidate<'a> {
+    Expression {
+        value: &'a IrValue,
+        origin: ValueOrigin,
+        source_order: usize,
+    },
+    BlockBody {
+        nodes: &'a [IrNode],
+        source_order: usize,
+    },
+    InlineBody {
+        inlines: &'a [IrInline],
+        source_order: usize,
+    },
+    Evaluated {
+        value: InvocationValue,
+        source_order: usize,
+    },
+}
+
+impl ArgumentCandidate<'_> {
+    fn source_order(&self) -> usize {
+        match self {
+            Self::Expression { source_order, .. }
+            | Self::BlockBody { source_order, .. }
+            | Self::InlineBody { source_order, .. }
+            | Self::Evaluated { source_order, .. } => *source_order,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -17467,32 +17508,66 @@ impl Evaluator {
             }
             None
         };
-        // Caller arguments are evaluated before any callee scope is created.
-        let candidates = match self.evaluate_invocation_candidates(
-            ordered_args,
-            positional_args,
-            named_args,
-            span,
-            diagnostics,
-            context,
-            None,
-            implicit_argument.as_ref(),
-        ) {
-            Ok(values) => values,
-            Err(outcome) => return outcome,
+
+        let bound = match &binding.parameters {
+            LambdaParameters::Explicit(_) => {
+                let Some(binding_plan) = binding_plan.as_ref() else {
+                    return CallOutcome::Failed;
+                };
+                let candidates = match argument_candidates(
+                    ordered_args,
+                    positional_args,
+                    named_args,
+                    *span,
+                    context,
+                    None,
+                    implicit_argument.as_ref(),
+                ) {
+                    Ok(candidates) => candidates,
+                    Err(outcome) => return outcome,
+                };
+                match self.bind_explicit_callable_arguments(
+                    binding_plan,
+                    candidates,
+                    body,
+                    span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(bound) => bound,
+                    Err(outcome) => return outcome,
+                }
+            }
+            LambdaParameters::Implicit => {
+                // Headerless callables retain the existing positional runtime
+                // path; the first #719 migration slice deliberately moves only
+                // explicit structural binding onto ArgumentCandidate.
+                let candidates = match self.evaluate_invocation_candidates(
+                    ordered_args,
+                    positional_args,
+                    named_args,
+                    span,
+                    diagnostics,
+                    context,
+                    None,
+                    implicit_argument.as_ref(),
+                ) {
+                    Ok(values) => values,
+                    Err(outcome) => return outcome,
+                };
+                match self.bind_implicit_callable_arguments(
+                    candidates,
+                    body,
+                    span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(bound) => bound,
+                    Err(outcome) => return outcome,
+                }
+            }
         };
-        let bound = match self.bind_callable_arguments(
-            &binding.parameters,
-            binding_plan.as_ref(),
-            candidates,
-            body,
-            span,
-            diagnostics,
-            context,
-        ) {
-            Ok(bound) => bound,
-            Err(outcome) => return outcome,
-        };
+
         let callable = binding.as_callable();
         self.invoke_bound_callable(
             &callable,
@@ -18393,88 +18468,128 @@ impl Evaluator {
         )
     }
 
-    /// Evaluates and binds one callable's arguments for either parameter mode.
-    /// The result is consumed by the shared child-scope/body invocation path.
-    #[allow(clippy::too_many_arguments)]
-    fn bind_callable_arguments(
+    fn evaluate_argument_candidate(
         &self,
-        parameters: &LambdaParameters,
-        binding_plan: Option<&BindingPlan>,
+        candidate: &ArgumentCandidate<'_>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<InvocationValue, CallOutcome> {
+        match candidate {
+            ArgumentCandidate::Expression { value, origin, .. } => {
+                let evaluated_value = match self.evaluate_value(value, diagnostics, context) {
+                    CallOutcome::Value(value) => value,
+                    CallOutcome::Unresolved => {
+                        self.preserve_value_expression(value, diagnostics, context)?
+                    }
+                    CallOutcome::NoValue => {
+                        diagnostics.push(no_value_required(value_source_span(value, span)));
+                        return Err(CallOutcome::Failed);
+                    }
+                    CallOutcome::Failed => return Err(CallOutcome::Failed),
+                };
+                Ok(InvocationValue::new(evaluated_value, *origin))
+            }
+            ArgumentCandidate::BlockBody { nodes, .. } => {
+                match self.evaluate_call_body_value_context(
+                    CallBody::Block(nodes),
+                    span,
+                    diagnostics,
+                    context,
+                ) {
+                    CallOutcome::Value(value) => Ok(InvocationValue::static_value(value)),
+                    CallOutcome::NoValue => Err(CallOutcome::NoValue),
+                    CallOutcome::Failed => Err(CallOutcome::Failed),
+                    CallOutcome::Unresolved => Err(CallOutcome::Unresolved),
+                }
+            }
+            ArgumentCandidate::InlineBody { inlines, .. } => {
+                match self.evaluate_call_body_value_context(
+                    CallBody::Inline(inlines),
+                    span,
+                    diagnostics,
+                    context,
+                ) {
+                    CallOutcome::Value(value) => Ok(InvocationValue::static_value(value)),
+                    CallOutcome::NoValue => Err(CallOutcome::NoValue),
+                    CallOutcome::Failed => Err(CallOutcome::Failed),
+                    CallOutcome::Unresolved => Err(CallOutcome::Unresolved),
+                }
+            }
+            ArgumentCandidate::Evaluated { value, .. } => Ok(value.clone()),
+        }
+    }
+
+    /// Bind explicit callable slots while their expressions/bodies are still
+    /// unevaluated, then evaluate only selected slots in source order.
+    #[allow(clippy::too_many_arguments)]
+    fn bind_explicit_callable_arguments<'a>(
+        &self,
+        binding_plan: &BindingPlan,
+        candidates: Vec<Candidate<ArgumentCandidate<'a>>>,
+        body: Option<CallBody<'a>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<BoundLambdaArguments, CallOutcome> {
+        let body_candidate =
+            body.map(|body| argument_body_candidate(body, *span, candidates.len()));
+        let bound = binding_plan
+            .bind(&candidates, body_candidate.as_ref(), *span)
+            .map_err(|error| {
+                diagnostics.push(binding_diagnostic_with_message(
+                    error,
+                    callable_binding_message,
+                ));
+                CallOutcome::Failed
+            })?;
+
+        let slot_count = bound.slots.len();
+        let mut selected = Vec::with_capacity(slot_count);
+        for (slot_index, slot) in bound.slots.into_iter().enumerate() {
+            if let BoundSlot::Explicit { value, .. } = slot {
+                selected.push((value.source_order(), slot_index, value));
+            }
+        }
+        selected.sort_by_key(|(source_order, _, _)| *source_order);
+
+        let mut values = vec![IrValue::None; slot_count];
+        for (_, slot_index, candidate) in selected {
+            values[slot_index] = self
+                .evaluate_argument_candidate(&candidate, span, diagnostics, context)?
+                .value;
+        }
+        Ok(BoundLambdaArguments::Explicit(values))
+    }
+
+    /// Headerless callable binding remains positional for this bounded slice.
+    #[allow(clippy::too_many_arguments)]
+    fn bind_implicit_callable_arguments(
+        &self,
         candidates: Vec<Candidate<InvocationValue>>,
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<BoundLambdaArguments, CallOutcome> {
-        match parameters {
-            LambdaParameters::Implicit => {
-                let mut arguments = candidates
-                    .into_iter()
-                    .filter_map(|candidate| match candidate {
-                        Candidate::Positional { value, .. } => Some(value.value),
-                        Candidate::Named { .. } => None,
-                    })
-                    .collect::<Vec<_>>();
-                if let Some(body) = body {
-                    let value = match self.evaluate_call_body_value_context(
-                        body,
-                        span,
-                        diagnostics,
-                        context,
-                    ) {
-                        CallOutcome::Value(value) => value,
-                        CallOutcome::NoValue => return Err(CallOutcome::NoValue),
-                        CallOutcome::Failed => return Err(CallOutcome::Failed),
-                        CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
-                    };
-                    arguments.push(value);
-                }
-                Ok(BoundLambdaArguments::Implicit(arguments))
-            }
-            LambdaParameters::Explicit(_parameters) => {
-                let body_value = if let Some(body) = body {
-                    let value = match self.evaluate_call_body_value_context(
-                        body,
-                        span,
-                        diagnostics,
-                        context,
-                    ) {
-                        CallOutcome::Value(value) => value,
-                        CallOutcome::NoValue => return Err(CallOutcome::NoValue),
-                        CallOutcome::Failed => return Err(CallOutcome::Failed),
-                        CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
-                    };
-                    Some(Candidate::Positional {
-                        value: InvocationValue::static_value(value),
-                        span: call_body_source_span(body, *span),
-                    })
-                } else {
-                    None
+        let mut arguments = candidates
+            .into_iter()
+            .filter_map(|candidate| match candidate {
+                Candidate::Positional { value, .. } => Some(value.value),
+                Candidate::Named { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        if let Some(body) = body {
+            let value =
+                match self.evaluate_call_body_value_context(body, span, diagnostics, context) {
+                    CallOutcome::Value(value) => value,
+                    CallOutcome::NoValue => return Err(CallOutcome::NoValue),
+                    CallOutcome::Failed => return Err(CallOutcome::Failed),
+                    CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
                 };
-                let Some(binding_plan) = binding_plan else {
-                    return Err(CallOutcome::Failed);
-                };
-                let bound = binding_plan
-                    .bind(&candidates, body_value.as_ref(), *span)
-                    .map_err(|error| {
-                        diagnostics.push(binding_diagnostic_with_message(
-                            error,
-                            callable_binding_message,
-                        ));
-                        CallOutcome::Failed
-                    })?;
-                Ok(BoundLambdaArguments::Explicit(
-                    bound
-                        .slots
-                        .into_iter()
-                        .map(|slot| match slot {
-                            BoundSlot::Explicit { value, .. } => value.value,
-                            BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None,
-                        })
-                        .collect(),
-                ))
-            }
+            arguments.push(value);
         }
+        Ok(BoundLambdaArguments::Implicit(arguments))
     }
 
     fn evaluate_callable_body_value(
@@ -24549,6 +24664,137 @@ fn structural_candidates(
         span: argument.span,
     }));
     candidates
+}
+
+/// Build evaluator-owned callable candidates without evaluating expressions or
+/// bodies. The resulting vector preserves source order for later selected-slot
+/// evaluation after the binder has accepted the invocation shape.
+fn argument_candidates<'a>(
+    ordered: Option<&[IrCallArgument]>,
+    positional: &'a [IrValue],
+    named: &'a [IrNamedArg],
+    fallback_span: SourceSpan,
+    context: &EvaluationContext<'_>,
+    first_origin: Option<ValueOrigin>,
+    implicit_argument: Option<&InvocationValue>,
+) -> Result<Vec<Candidate<ArgumentCandidate<'a>>>, CallOutcome> {
+    if let Some(ordered) = ordered {
+        let mut candidates = Vec::with_capacity(ordered.len());
+        let mut first_positional = implicit_argument.is_none();
+        for (source_order, argument) in ordered.iter().enumerate() {
+            if source_order == 0 {
+                if let Some(implicit_argument) = implicit_argument {
+                    let IrCallArgument::Positional { index: 0, span } = argument else {
+                        return Err(CallOutcome::Failed);
+                    };
+                    candidates.push(Candidate::Positional {
+                        value: ArgumentCandidate::Evaluated {
+                            value: implicit_argument.clone(),
+                            source_order,
+                        },
+                        span: *span,
+                    });
+                    continue;
+                }
+            }
+
+            match argument {
+                IrCallArgument::Positional {
+                    index,
+                    span: argument_span,
+                } => {
+                    let Some(value) = positional.get(*index) else {
+                        return Err(CallOutcome::Failed);
+                    };
+                    let origin = if first_positional {
+                        first_positional = false;
+                        first_origin.unwrap_or_else(|| invocation_origin(value, context))
+                    } else {
+                        invocation_origin(value, context)
+                    };
+                    candidates.push(Candidate::Positional {
+                        value: ArgumentCandidate::Expression {
+                            value,
+                            origin,
+                            source_order,
+                        },
+                        span: *argument_span,
+                    });
+                }
+                IrCallArgument::Named {
+                    index,
+                    name_span,
+                    span: argument_span,
+                } => {
+                    let Some(argument) = named.get(*index) else {
+                        return Err(CallOutcome::Failed);
+                    };
+                    candidates.push(Candidate::Named {
+                        name: argument.name.clone(),
+                        name_span: *name_span,
+                        value: ArgumentCandidate::Expression {
+                            value: &argument.value,
+                            origin: invocation_origin(&argument.value, context),
+                            source_order,
+                        },
+                        span: *argument_span,
+                    });
+                }
+            }
+        }
+        return Ok(candidates);
+    }
+
+    // Legacy manually constructed IR has no mixed-kind source-order
+    // projection, so retain its historical positional-then-named ordering.
+    let mut candidates = Vec::with_capacity(positional.len() + named.len());
+    for (index, value) in positional.iter().enumerate() {
+        let origin = if index == 0 {
+            first_origin.unwrap_or_else(|| invocation_origin(value, context))
+        } else {
+            invocation_origin(value, context)
+        };
+        candidates.push(Candidate::Positional {
+            value: ArgumentCandidate::Expression {
+                value,
+                origin,
+                source_order: index,
+            },
+            span: value_source_span(value, &fallback_span),
+        });
+    }
+    for (index, argument) in named.iter().enumerate() {
+        candidates.push(Candidate::Named {
+            name: argument.name.clone(),
+            name_span: argument.name_span,
+            value: ArgumentCandidate::Expression {
+                value: &argument.value,
+                origin: invocation_origin(&argument.value, context),
+                source_order: positional.len() + index,
+            },
+            span: argument.span,
+        });
+    }
+    Ok(candidates)
+}
+
+fn argument_body_candidate<'a>(
+    body: CallBody<'a>,
+    fallback_span: SourceSpan,
+    source_order: usize,
+) -> Candidate<ArgumentCandidate<'a>> {
+    let span = call_body_source_span(body, fallback_span);
+    let value = match body {
+        CallBody::Block(nodes) => ArgumentCandidate::BlockBody {
+            nodes,
+            source_order,
+        },
+        CallBody::Inline(inlines) => ArgumentCandidate::InlineBody {
+            inlines,
+            source_order,
+        },
+    };
+    Candidate::Positional { value, span }
 }
 
 /// Enforce the universal source-order invariant before target lookup or any
@@ -33512,6 +33758,137 @@ mod tests {
                 var_ref(variable_name),
             ]),
         )])
+    }
+
+    #[test]
+    fn argument_candidate_explicit_binding_failure_prevents_argument_evaluation() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 60);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_document_state_value("docname", "before".to_string());
+        context.set_value("payload".to_string(), IrValue::Number(7.0));
+        context.set_function_binding(
+            "takes_one".to_string(),
+            LambdaParameters::Explicit(vec![lambda_parameter("value", 2)]),
+            vec![var_ref("value")],
+            span(20, 30),
+            None,
+        );
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "takes_one",
+            &[mutating_typed_candidate("payload"), IrValue::Number(9.0)],
+            &[],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn argument_candidate_unselected_body_is_never_evaluated() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 70);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_document_state_value("docname", "before".to_string());
+        context.set_value("payload".to_string(), IrValue::Number(7.0));
+        context.set_function_binding(
+            "needs_two".to_string(),
+            LambdaParameters::Explicit(vec![
+                lambda_parameter("first", 2),
+                lambda_parameter("second", 10),
+            ]),
+            vec![var_ref("second")],
+            span(30, 40),
+            None,
+        );
+        let before = context.document_state_snapshot();
+        let body = vec![
+            IrNode::FunctionCall {
+                name: "docname".to_string(),
+                positional_args: vec![IrValue::String("mutated".to_string())],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(41, 52),
+            },
+            var_ref("payload"),
+        ];
+
+        let outcome = evaluator.evaluate_call_value(
+            "needs_two",
+            &[],
+            &[],
+            Some(CallBody::Block(&body)),
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn argument_candidate_selected_body_evaluates_after_binding() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 70);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_document_state_value("docname", "before".to_string());
+        context.set_value("payload".to_string(), IrValue::Number(7.0));
+        context.set_function_binding(
+            "from_body".to_string(),
+            LambdaParameters::Explicit(vec![lambda_parameter("value", 2)]),
+            vec![var_ref("value")],
+            span(30, 40),
+            None,
+        );
+        let before = context.document_state_snapshot();
+        let body = vec![
+            IrNode::FunctionCall {
+                name: "docname".to_string(),
+                positional_args: vec![IrValue::String("mutated".to_string())],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(41, 52),
+            },
+            var_ref("payload"),
+        ];
+
+        let outcome = evaluator.evaluate_call_value(
+            "from_body",
+            &[],
+            &[],
+            Some(CallBody::Block(&body)),
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        let CallOutcome::Value(IrValue::Content(nodes)) = outcome else {
+            panic!("expected selected block body content");
+        };
+        assert_paragraph_text(&nodes, "7");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_ne!(context.document_state_snapshot(), before);
     }
 
     #[test]
