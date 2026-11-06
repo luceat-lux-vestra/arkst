@@ -116,7 +116,15 @@ pub(crate) struct LoweredFunctionDeclaration {
 pub(crate) enum TopLevelFunctionDeclarationLowering {
     NotFunctionDeclaration,
     Invalid,
-    Declaration(LoweredFunctionDeclaration),
+    Declaration(Box<LoweredFunctionDeclaration>),
+}
+
+struct FunctionDeclarationSyntax<'a> {
+    arguments: &'a [CallArgument],
+    chain: &'a [CallSegment],
+    body: Option<&'a [Block]>,
+    lambda_header: Option<&'a arkst_markdown::ast::LambdaHeader>,
+    span: &'a ByteSpan,
 }
 
 /// Recognize and lower only a top-level frontend `.function` declaration
@@ -144,17 +152,17 @@ pub(crate) fn lower_top_level_function_declaration(
         return TopLevelFunctionDeclarationLowering::NotFunctionDeclaration;
     }
 
-    match lower_function_declaration(
+    let syntax = FunctionDeclarationSyntax {
         arguments,
         chain,
-        body.as_deref(),
-        lambda_header.as_ref(),
+        body: body.as_deref(),
+        lambda_header: lambda_header.as_ref(),
         span,
-        source_id,
-        diagnostics,
-        source_mode,
-    ) {
-        Some(declaration) => TopLevelFunctionDeclarationLowering::Declaration(declaration),
+    };
+    match lower_function_declaration(syntax, source_id, diagnostics, source_mode) {
+        Some(declaration) => {
+            TopLevelFunctionDeclarationLowering::Declaration(Box::new(declaration))
+        }
         None => TopLevelFunctionDeclarationLowering::Invalid,
     }
 }
@@ -172,18 +180,15 @@ pub(crate) fn lower_top_level_block(
 }
 
 fn lower_function_declaration(
-    arguments: &[CallArgument],
-    chain: &[CallSegment],
-    body: Option<&[Block]>,
-    lambda_header: Option<&arkst_markdown::ast::LambdaHeader>,
-    span: &ByteSpan,
+    syntax: FunctionDeclarationSyntax<'_>,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
 ) -> Option<LoweredFunctionDeclaration> {
     let (ir_positional, ir_named, _) =
-        call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
-    let ir_body = body
+        call_arguments_to_ir(syntax.arguments, source_id, diagnostics, source_mode)?;
+    let ir_body = syntax
+        .body
         .map(|blocks| {
             blocks
                 .iter()
@@ -192,10 +197,10 @@ fn lower_function_declaration(
         })
         .unwrap_or_default();
 
-    if ir_positional.len() != 1 || !ir_named.is_empty() || !chain.is_empty() {
+    if ir_positional.len() != 1 || !ir_named.is_empty() || !syntax.chain.is_empty() {
         diagnostics.push(invalid_function_declaration(
             "`.function` requires exactly one positional name argument, no named arguments, and no chain",
-            span,
+            syntax.span,
             source_id,
         ));
         return None;
@@ -203,11 +208,12 @@ fn lower_function_declaration(
 
     Some(LoweredFunctionDeclaration {
         name: ir_positional.into_iter().next()?,
-        parameters: lambda_header
+        parameters: syntax
+            .lambda_header
             .map(|header| lambda_parameters_to_ir(header, source_id))
             .unwrap_or_default(),
         body: ir_body,
-        span: byte_to_source_span(span, source_id),
+        span: byte_to_source_span(syntax.span, source_id),
     })
 }
 
@@ -310,11 +316,13 @@ fn block_to_ir(
         } => {
             if name == "function" {
                 let declaration = lower_function_declaration(
-                    arguments,
-                    chain,
-                    body.as_deref(),
-                    lambda_header.as_ref(),
-                    span,
+                    FunctionDeclarationSyntax {
+                        arguments,
+                        chain,
+                        body: body.as_deref(),
+                        lambda_header: lambda_header.as_ref(),
+                        span,
+                    },
                     source_id,
                     diagnostics,
                     source_mode,
