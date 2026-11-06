@@ -148,33 +148,6 @@ pub mod evaluator {
             )
         }
 
-        pub(crate) fn evaluate_with_resources_and_log_sink<
-            R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
-        >(
-            &self,
-            resources: &R,
-            source_id: SourceId,
-            source_mode: SourceMode,
-            document: &IrDocument,
-            metadata_defaults: &arkst_engine::DocumentMetadataDefaults,
-            log_sink: &dyn arkst_engine::LogSink,
-        ) -> (IrDocument, Vec<Diagnostic>) {
-            let source_mode = match source_mode {
-                SourceMode::Markdown => arkst_markdown::Mode::Markdown,
-                SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
-            };
-            self.inner
-                .evaluate_with_resources_and_libraries_and_log_sink_for_mode(
-                    resources,
-                    resources,
-                    log_sink,
-                    source_id,
-                    source_mode,
-                    document,
-                    metadata_defaults,
-                )
-        }
-
         pub(crate) fn evaluate_with_resources_and_environment<
             R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
         >(
@@ -206,11 +179,10 @@ pub mod evaluator {
 
 /// Compatibility facade for the AST-to-IR module.
 ///
-/// The implementation is in `arkst-engine`; these small adapters preserve
-/// the historical core signatures that accepted project metadata and the
-/// core-private source-mode distinction.
+/// The implementation is in `arkst-engine`; this adapter preserves the
+/// historical public core signature that accepts project metadata.
 pub mod ast_to_ir {
-    use super::{engine_adapter, ProjectMetadata, SourceMode};
+    use super::{engine_adapter, ProjectMetadata};
     use arkst_diagnostics::Diagnostic;
     use arkst_ir::IrDocument;
     use arkst_markdown::ast::Document;
@@ -228,22 +200,6 @@ pub mod ast_to_ir {
         )
     }
 
-    pub(crate) fn ast_to_ir_with_diagnostics_for_mode(
-        doc: &Document,
-        source_id: SourceId,
-        project_metadata: &ProjectMetadata,
-        source_mode: SourceMode,
-    ) -> (IrDocument, Vec<Diagnostic>) {
-        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
-            doc,
-            source_id,
-            &engine_adapter::document_metadata_defaults(project_metadata),
-            match source_mode {
-                SourceMode::Markdown => arkst_markdown::Mode::Markdown,
-                SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
-            },
-        )
-    }
 }
 pub use arkst_project::virtual_project;
 
