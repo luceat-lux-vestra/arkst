@@ -199,7 +199,6 @@ pub mod ast_to_ir {
             &engine_adapter::document_metadata_defaults(project_metadata),
         )
     }
-
 }
 pub use arkst_project::virtual_project;
 
