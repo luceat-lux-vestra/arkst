@@ -3537,13 +3537,11 @@ impl Evaluator {
                                             ) else {
                                                 continue;
                                             };
-                                            nodes.extend(
-                                                self.evaluate_evidenced_structural_nodes(
-                                                    std::slice::from_ref(&node),
-                                                    evaluation_diagnostics,
-                                                    context,
-                                                ),
-                                            );
+                                            nodes.extend(self.evaluate_evidenced_structural_nodes(
+                                                std::slice::from_ref(&node),
+                                                evaluation_diagnostics,
+                                                context,
+                                            ));
                                         }
                                         ast_to_ir::TopLevelCallLowering::Invalid => {}
                                         ast_to_ir::TopLevelCallLowering::Call(call) => {
