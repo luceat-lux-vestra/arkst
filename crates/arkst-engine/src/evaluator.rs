@@ -8,10 +8,10 @@
 //! `::` call chains.
 //!
 //! Normal compilation advances the #719 direct-AST migration by consuming
-//! top-level user-function declarations and selected ordinary non-chained
-//! block calls directly from frontend syntax while retaining the established
-//! IR evaluator machinery and transitional callable-body lowering. Legacy IR
-//! entry points remain supported.
+//! top-level user-function declarations, selected ordinary non-chained block
+//! calls, and top-level block call chains directly from frontend syntax while
+//! retaining the established IR evaluator machinery and transitional
+//! callable-body lowering. Legacy IR entry points remain supported.
 //!
 //! A `FunctionCall` / `DirectiveCall` named `if` or
 //! `ifnot` is replaced by its content when its boolean condition holds,
@@ -3514,19 +3514,49 @@ impl Evaluator {
                         source_mode,
                     ) {
                         ast_to_ir::TopLevelCallLowering::NotSelected => {
-                            let Some(node) = ast_to_ir::lower_top_level_block(
+                            match ast_to_ir::lower_top_level_chain(
                                 block,
                                 source_id,
                                 lowering_diagnostics,
                                 source_mode,
-                            ) else {
-                                continue;
-                            };
-                            nodes.extend(self.evaluate_evidenced_structural_nodes(
-                                std::slice::from_ref(&node),
-                                evaluation_diagnostics,
-                                context,
-                            ));
+                            ) {
+                                ast_to_ir::TopLevelChainLowering::NotSelected => {
+                                    let Some(node) = ast_to_ir::lower_top_level_block(
+                                        block,
+                                        source_id,
+                                        lowering_diagnostics,
+                                        source_mode,
+                                    ) else {
+                                        continue;
+                                    };
+                                    nodes.extend(self.evaluate_evidenced_structural_nodes(
+                                        std::slice::from_ref(&node),
+                                        evaluation_diagnostics,
+                                        context,
+                                    ));
+                                }
+                                ast_to_ir::TopLevelChainLowering::Invalid => {}
+                                ast_to_ir::TopLevelChainLowering::Chain(chain) => {
+                                    match self.evaluate_block_chain(
+                                        &chain.head,
+                                        &chain.chain,
+                                        chain.lambda_parameters.as_deref(),
+                                        &chain.body,
+                                        chain.raw_body.as_ref(),
+                                        &chain.span,
+                                        evaluation_diagnostics,
+                                        context,
+                                    ) {
+                                        CallOutcome::Value(IrValue::Content(evaluated)) => {
+                                            nodes.extend(evaluated);
+                                        }
+                                        CallOutcome::Value(_)
+                                        | CallOutcome::NoValue
+                                        | CallOutcome::Failed
+                                        | CallOutcome::Unresolved => {}
+                                    }
+                                }
+                            }
                         }
                         ast_to_ir::TopLevelCallLowering::Invalid => {}
                         ast_to_ir::TopLevelCallLowering::Call(call) => {
