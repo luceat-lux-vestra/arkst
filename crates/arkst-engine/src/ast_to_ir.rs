@@ -156,6 +156,34 @@ pub(crate) enum TopLevelCallLowering {
     Call(Box<LoweredTopLevelCall>),
 }
 
+pub(crate) struct LoweredTopLevelChain {
+    pub(crate) head: IrCallSegment,
+    pub(crate) chain: Vec<IrCallSegment>,
+    pub(crate) lambda_parameters: Option<Vec<IrParameter>>,
+    pub(crate) body: Option<Vec<IrNode>>,
+    pub(crate) raw_body: Option<IrRawBody>,
+    pub(crate) span: SourceSpan,
+}
+
+impl LoweredTopLevelChain {
+    fn into_ir_node(self) -> IrNode {
+        IrNode::ChainedFunctionCall {
+            head: self.head,
+            chain: self.chain,
+            lambda_parameters: self.lambda_parameters,
+            body: self.body,
+            raw_body: self.raw_body,
+            span: self.span,
+        }
+    }
+}
+
+pub(crate) enum TopLevelChainLowering {
+    NotSelected,
+    Invalid,
+    Chain(Box<LoweredTopLevelChain>),
+}
+
 struct FunctionDeclarationSyntax<'a> {
     arguments: &'a [CallArgument],
     chain: &'a [CallSegment],
@@ -257,9 +285,55 @@ pub(crate) fn lower_top_level_call(
     }
 }
 
+/// Recognize and lower one top-level block call chain without constructing the
+/// executable document-node carrier used by the legacy AST -> IR path.
+pub(crate) fn lower_top_level_chain(
+    block: &Block,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> TopLevelChainLowering {
+    let Block::DirectiveCall {
+        name,
+        name_span,
+        head_span,
+        arguments,
+        chain,
+        body,
+        raw_body,
+        lambda_header,
+        span,
+    } = block
+    else {
+        return TopLevelChainLowering::NotSelected;
+    };
+
+    if name == "function" || chain.is_empty() {
+        return TopLevelChainLowering::NotSelected;
+    }
+
+    match lower_chained_block_call(
+        name,
+        name_span,
+        head_span,
+        arguments,
+        chain,
+        body.as_deref(),
+        raw_body.as_ref(),
+        lambda_header.as_ref(),
+        span,
+        source_id,
+        diagnostics,
+        source_mode,
+    ) {
+        Some(chain) => TopLevelChainLowering::Chain(Box::new(chain)),
+        None => TopLevelChainLowering::Invalid,
+    }
+}
+
 /// Lower one non-selected top-level frontend block through the established IR
 /// bridge. The hybrid evaluator calls this only after excluding the direct
-/// `.function` declaration and selected ordinary-call paths.
+/// `.function` declaration, ordinary-call, and block-chain paths.
 pub(crate) fn lower_top_level_block(
     block: &Block,
     source_id: SourceId,
@@ -304,6 +378,51 @@ fn lower_function_declaration(
             .unwrap_or_default(),
         body: ir_body,
         span: byte_to_source_span(syntax.span, source_id),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_chained_block_call(
+    name: &str,
+    name_span: &ByteSpan,
+    head_span: &ByteSpan,
+    arguments: &[CallArgument],
+    chain: &[CallSegment],
+    body: Option<&[Block]>,
+    raw_body: Option<&arkst_markdown::ast::RawBody>,
+    lambda_header: Option<&arkst_markdown::ast::LambdaHeader>,
+    span: &ByteSpan,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> Option<LoweredTopLevelChain> {
+    let (positional_args, named_args, ordered_args) =
+        call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
+    let body = body.map(|blocks| {
+        blocks
+            .iter()
+            .filter_map(|block| block_to_ir(block, source_id, diagnostics, source_mode, true))
+            .collect::<Vec<_>>()
+    });
+    let chain = chain
+        .iter()
+        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics, source_mode))
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(LoweredTopLevelChain {
+        head: IrCallSegment {
+            name: name.to_string(),
+            name_span: byte_to_source_span(name_span, source_id),
+            positional_args,
+            named_args,
+            ordered_args: Some(ordered_args),
+            span: byte_to_source_span(head_span, source_id),
+        },
+        chain,
+        lambda_parameters: lambda_header.map(|header| lambda_parameters_to_ir(header, source_id)),
+        body,
+        raw_body: raw_body.map(raw_body_to_ir),
+        span: byte_to_source_span(span, source_id),
     })
 }
 
@@ -472,36 +591,21 @@ fn block_to_ir(
                 )
                 .map(LoweredTopLevelCall::into_ir_node)
             } else {
-                let (ir_positional, ir_named, ordered_args) =
-                    call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
-                let ir_body = body.as_ref().map(|blocks| {
-                    blocks
-                        .iter()
-                        .filter_map(|b| block_to_ir(b, source_id, diagnostics, source_mode, true))
-                        .collect::<Vec<_>>()
-                });
-                Some(IrNode::ChainedFunctionCall {
-                    head: IrCallSegment {
-                        name: name.clone(),
-                        name_span: byte_to_source_span(name_span, source_id),
-                        positional_args: ir_positional,
-                        named_args: ir_named,
-                        ordered_args: Some(ordered_args),
-                        span: byte_to_source_span(head_span, source_id),
-                    },
-                    chain: chain
-                        .iter()
-                        .map(|segment| {
-                            call_segment_to_ir(segment, source_id, diagnostics, source_mode)
-                        })
-                        .collect::<Option<Vec<_>>>()?,
-                    lambda_parameters: lambda_header
-                        .as_ref()
-                        .map(|header| lambda_parameters_to_ir(header, source_id)),
-                    body: ir_body,
-                    raw_body: raw_body.as_ref().map(raw_body_to_ir),
-                    span: byte_to_source_span(span, source_id),
-                })
+                lower_chained_block_call(
+                    name,
+                    name_span,
+                    head_span,
+                    arguments,
+                    chain,
+                    body.as_deref(),
+                    raw_body.as_ref(),
+                    lambda_header.as_ref(),
+                    span,
+                    source_id,
+                    diagnostics,
+                    source_mode,
+                )
+                .map(LoweredTopLevelChain::into_ir_node)
             }
         }
         Block::Metadata { .. } => {
@@ -1491,6 +1595,73 @@ mod tests {
             );
             assert!(
                 matches!(lowering, TopLevelCallLowering::NotSelected),
+                "{source:?}"
+            );
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+        }
+    }
+
+    #[test]
+    fn top_level_chain_bridge_matches_legacy_chained_call_shape() {
+        let source = ".range {1} {2}::join separator:{|}\n    key value:\n    .key=.value\n";
+        let document = arkst_markdown::parse_qd(source);
+        let mut direct_diagnostics = Vec::new();
+        let lowering = lower_top_level_chain(
+            &document.nodes[0],
+            source_id(),
+            &mut direct_diagnostics,
+            Mode::Quarkdown,
+        );
+
+        assert!(direct_diagnostics.is_empty(), "{direct_diagnostics:?}");
+        let TopLevelChainLowering::Chain(chain) = lowering else {
+            panic!("expected direct top-level chain payload")
+        };
+        assert_eq!(chain.head.name, "range");
+        assert_eq!(chain.chain.len(), 1);
+        assert_eq!(chain.chain[0].name, "join");
+        assert_eq!(
+            chain
+                .lambda_parameters
+                .as_ref()
+                .expect("contextual lambda parameters")
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            ["key", "value"]
+        );
+        assert!(chain.body.as_ref().is_some_and(|body| !body.is_empty()));
+
+        let direct_node = (*chain).into_ir_node();
+        let mut legacy_diagnostics = Vec::new();
+        let legacy_node = lower_top_level_block(
+            &document.nodes[0],
+            source_id(),
+            &mut legacy_diagnostics,
+            Mode::Quarkdown,
+        )
+        .expect("legacy lowering");
+        assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
+        assert_eq!(direct_node, legacy_node);
+    }
+
+    #[test]
+    fn top_level_chain_bridge_leaves_non_chains_unselected() {
+        for source in [
+            ".range {1} {3}\n",
+            ".repeat {2}\n    body\n",
+            ".let {value}\n    body\n",
+        ] {
+            let document = arkst_markdown::parse_qd(source);
+            let mut diagnostics = Vec::new();
+            let lowering = lower_top_level_chain(
+                &document.nodes[0],
+                source_id(),
+                &mut diagnostics,
+                Mode::Quarkdown,
+            );
+            assert!(
+                matches!(lowering, TopLevelChainLowering::NotSelected),
                 "{source:?}"
             );
             assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
