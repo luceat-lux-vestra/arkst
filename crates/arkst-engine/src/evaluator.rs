@@ -10,7 +10,7 @@
 //! Normal compilation advances the #719 direct-AST migration by consuming
 //! top-level user-function declarations, selected ordinary non-chained block
 //! calls, top-level block call chains, and non-chained top-level `.let` /
-//! `.foreach` calls directly from frontend syntax while retaining the
+//! `.foreach` / `.repeat` calls directly from frontend syntax while retaining the
 //! established IR evaluator machinery and transitional callable-body lowering.
 //! Legacy IR entry points remain supported.
 //!
@@ -3536,23 +3536,57 @@ impl Evaluator {
                                                 source_mode,
                                             ) {
                                                 ast_to_ir::TopLevelCallLowering::NotSelected => {
-                                                    let Some(node) =
-                                                        ast_to_ir::lower_top_level_block(
-                                                            block,
-                                                            source_id,
-                                                            lowering_diagnostics,
-                                                            source_mode,
-                                                        )
-                                                    else {
-                                                        continue;
-                                                    };
-                                                    nodes.extend(
-                                                        self.evaluate_evidenced_structural_nodes(
-                                                            std::slice::from_ref(&node),
-                                                            evaluation_diagnostics,
-                                                            context,
-                                                        ),
-                                                    );
+                                                    match ast_to_ir::lower_top_level_repeat(
+                                                        block,
+                                                        source_id,
+                                                        lowering_diagnostics,
+                                                        source_mode,
+                                                    ) {
+                                                        ast_to_ir::TopLevelCallLowering::NotSelected => {
+                                                            let Some(node) =
+                                                                ast_to_ir::lower_top_level_block(
+                                                                    block,
+                                                                    source_id,
+                                                                    lowering_diagnostics,
+                                                                    source_mode,
+                                                                )
+                                                            else {
+                                                                continue;
+                                                            };
+                                                            nodes.extend(
+                                                                self.evaluate_evidenced_structural_nodes(
+                                                                    std::slice::from_ref(&node),
+                                                                    evaluation_diagnostics,
+                                                                    context,
+                                                                ),
+                                                            );
+                                                        }
+                                                        ast_to_ir::TopLevelCallLowering::Invalid => {}
+                                                        ast_to_ir::TopLevelCallLowering::Call(call) => {
+                                                            match self.evaluate_block_call(
+                                                                &call.name,
+                                                                Some(call.ordered_args.as_slice()),
+                                                                &call.positional_args,
+                                                                &call.named_args,
+                                                                call.lambda_parameters.as_deref(),
+                                                                call.body.as_deref(),
+                                                                call.raw_body.as_ref(),
+                                                                &call.span,
+                                                                evaluation_diagnostics,
+                                                                context,
+                                                            ) {
+                                                                CallOutcome::Value(IrValue::Content(
+                                                                    evaluated,
+                                                                )) => {
+                                                                    nodes.extend(evaluated);
+                                                                }
+                                                                CallOutcome::Value(_)
+                                                                | CallOutcome::NoValue
+                                                                | CallOutcome::Failed
+                                                                | CallOutcome::Unresolved => {}
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                                 ast_to_ir::TopLevelCallLowering::Invalid => {}
                                                 ast_to_ir::TopLevelCallLowering::Call(call) => {
