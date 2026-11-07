@@ -140,6 +140,50 @@ Any HEAD movement invalidates prior HEAD-specific CI/review/runtime evidence unl
 
 Green CI is necessary where required but is not by itself a correctness proof.
 
+## Base advancement with unchanged HEAD
+
+A protected-base advance does not by itself erase every fact established for an
+unchanged PR HEAD. Evidence reuse is claim-scoped: prior exact-HEAD evidence may
+still support facts that depend only on that unchanged source and the producer
+that created the evidence.
+
+Classify movement before using prior evidence:
+
+1. **PR HEAD moved** — prior HEAD-specific CI/review/runtime evidence is
+   invalid. Validate the new exact final HEAD.
+2. **PR HEAD unchanged; base unchanged** — apply the ordinary Arkst
+   exact-HEAD review and merge gates.
+3. **PR HEAD unchanged; base advanced** — prior exact-HEAD evidence may remain
+   useful for unchanged-HEAD claims, but it does not by itself prove the newly
+   composed base+HEAD result or authorize merge.
+4. **Evidence tied to an old synthetic merge/base composition** — do not reuse
+   it as proof for the new composition.
+5. **Material interaction or required authority is `UNKNOWN`, `UNVERIFIED`,
+   or `INSUFFICIENT EVIDENCE`** — fail closed and revalidate.
+
+Arkst has a stricter latest-base/current-composition merge requirement. The live
+`Protect main` ruleset and `.github/gate-policy.toml` remain authoritative:
+the sole required context is `Merge Gate`, required status checks are strict,
+and the protected branch must satisfy the current live gate before merge. If
+`main` advances, never treat an earlier `Merge Gate` result as blanket merge
+authorization merely because the PR HEAD SHA is unchanged. Fresh-read the
+current PR HEAD, `main`, merge-base, live ruleset, required checks,
+reviews/threads, and mergeability, then refresh or revalidate the current
+composition whenever the live policy requires it.
+
+Different filenames alone are not proof of semantic independence. Treat
+interaction as material when base movement may affect a proof-producing
+contract, including CI/workflow or gate-policy changes, the trusted-base
+documentation classifier, compatibility producers/policy, dependency or
+toolchain state, generated/reference evidence, architecture/ADR contracts,
+security controls, or other inputs that can change what prior evidence proves.
+
+Same-HEAD evidence reuse never weakens Arkst's architecture, compatibility,
+failure-classification, security, review, or merge requirements. Do not change
+CI workflows, `.github/gate-policy.toml`, live rulesets, compatibility
+baselines, generated/reference evidence, dependencies/toolchains, ADRs, or
+product code merely to make old evidence reusable.
+
 ## Failure handling
 
 - Read-only interruption: fresh-read and continue.
