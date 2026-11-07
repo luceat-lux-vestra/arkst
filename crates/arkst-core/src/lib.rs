@@ -4084,7 +4084,7 @@ Yiddish"
             .get(span.start..span.end)
             .expect("source-backed unresolved span");
         assert_eq!(
-            source_slice.trim_end_matches(|ch| ch == '\r' || ch == '\n'),
+            source_slice.trim_end_matches(['\r', '\n']),
             unresolved
         );
     }
