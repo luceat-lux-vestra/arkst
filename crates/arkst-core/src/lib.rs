@@ -4490,13 +4490,12 @@ Yiddish"
             .expect("source id");
         let parsed = arkst_markdown::parse_with_diagnostics(source);
         assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
-        let (ir, diagnostics) =
-            arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
-                &parsed.document,
-                source_id,
-                &crate::engine_adapter::document_metadata_defaults(project.metadata()),
-                arkst_markdown::Mode::Quarkdown,
-            );
+        let (ir, diagnostics) = arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            source_id,
+            &crate::engine_adapter::document_metadata_defaults(project.metadata()),
+            arkst_markdown::Mode::Quarkdown,
+        );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::FunctionDeclaration { parameters, .. } = &ir.nodes[0] else {
             panic!("expected function declaration")
