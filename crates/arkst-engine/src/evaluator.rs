@@ -7,8 +7,12 @@
 //! calls, user-defined functions, and the first value-flow builtins used by
 //! `::` call chains.
 //!
-//! Evaluation runs after parsing and `ast_to_ir` and before Typst lowering.
-//! It operates on the IR: a `FunctionCall` / `DirectiveCall` named `if` or
+//! Normal compilation now begins the #719 direct-AST migration by consuming
+//! top-level user-function declarations directly from frontend syntax while
+//! retaining the established IR evaluator for every other block and callable
+//! body. Legacy IR entry points remain supported.
+//!
+//! A `FunctionCall` / `DirectiveCall` named `if` or
 //! `ifnot` is replaced by its content when its boolean condition holds,
 //! otherwise it is removed (Quarkdown conditional-statements semantics,
 //! wiki badged `v2.5.0`, accessed 2026-08-08).
@@ -80,7 +84,7 @@ use arkst_ir::{
     IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
     IrTodoComponent, IrValue, NativeTarget, TargetSpecificContent,
 };
-use arkst_markdown::Mode;
+use arkst_markdown::{ast::Document as FrontendDocument, Mode};
 use arkst_quarkdown::is_valid_normal_call_name;
 use arkst_source::{SourceId, SourceSpan};
 use regex::RegexBuilder;
@@ -3296,6 +3300,121 @@ impl Evaluator {
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
+    /// Evaluates the normal compiler frontend directly for the first #719
+    /// stage-2 slice. Top-level `.function` declarations are consumed from
+    /// frontend syntax in source order; all other blocks continue through the
+    /// established AST-to-IR bridge.
+    pub fn evaluate_frontend_with_resources_and_libraries_for_mode<
+        R: ResourceProvider,
+        L: LoadableLibraryProvider,
+    >(
+        &self,
+        resources: &R,
+        loadable_libraries: &L,
+        source_id: SourceId,
+        source_mode: Mode,
+        document: &FrontendDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>, Vec<Diagnostic>) {
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_resources_and_libraries(
+            resources,
+            loadable_libraries,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            self.limits,
+        );
+        self.evaluate_frontend_with_context(
+            document,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            &mut evaluation_diagnostics,
+            &mut lowering_diagnostics,
+            &mut context,
+        )
+    }
+
+    /// Direct-frontend evaluation with an explicit deterministic environment
+    /// snapshot. The host input remains invocation-local and is not serialized
+    /// into callable captures or final IR.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_frontend_with_resources_and_libraries_and_environment_for_mode<
+        R: ResourceProvider,
+        L: LoadableLibraryProvider,
+    >(
+        &self,
+        resources: &R,
+        loadable_libraries: &L,
+        environment: &EnvironmentInputs,
+        source_id: SourceId,
+        source_mode: Mode,
+        document: &FrontendDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>, Vec<Diagnostic>) {
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_resources_and_libraries(
+            resources,
+            loadable_libraries,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            self.limits,
+        );
+        context.environment = Some(environment);
+        self.evaluate_frontend_with_context(
+            document,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            &mut evaluation_diagnostics,
+            &mut lowering_diagnostics,
+            &mut context,
+        )
+    }
+
+    /// Direct-frontend evaluation with an explicit platform-neutral logger
+    /// sink. Logger authority follows the same evaluation context used by the
+    /// legacy IR entry point.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_frontend_with_resources_and_libraries_and_log_sink_for_mode<
+        R: ResourceProvider,
+        L: LoadableLibraryProvider,
+    >(
+        &self,
+        resources: &R,
+        loadable_libraries: &L,
+        log_sink: &dyn LogSink,
+        source_id: SourceId,
+        source_mode: Mode,
+        document: &FrontendDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>, Vec<Diagnostic>) {
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_resources_and_libraries(
+            resources,
+            loadable_libraries,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            self.limits,
+        );
+        context.log_sink = Some(log_sink);
+        self.evaluate_frontend_with_context(
+            document,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            &mut evaluation_diagnostics,
+            &mut lowering_diagnostics,
+            &mut context,
+        )
+    }
+
     /// Resource/library evaluation with an explicit deterministic environment
     /// snapshot. The snapshot is never serialized into IR or callable captures;
     /// child evaluations reuse only this compilation's injected reference.
@@ -3356,6 +3475,75 @@ impl Evaluator {
         );
         context.log_sink = Some(log_sink);
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
+    /// Hybrid frontend evaluation used only by the normal compiler pipeline.
+    ///
+    /// The top-level loop is intentionally source ordered and owns one
+    /// EvaluationContext. A declaration is therefore visible only after its
+    /// source position, exactly like the legacy IrDocument evaluator.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_frontend_with_context(
+        &self,
+        document: &FrontendDocument,
+        source_id: SourceId,
+        source_mode: Mode,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+        evaluation_diagnostics: &mut Vec<Diagnostic>,
+        lowering_diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> (IrDocument, Vec<Diagnostic>, Vec<Diagnostic>) {
+        let metadata = ast_to_ir::document_metadata(document, metadata_defaults);
+        context.initialize_document_state(&metadata.document_state);
+
+        let mut nodes = Vec::new();
+        for block in &document.nodes {
+            match ast_to_ir::lower_top_level_function_declaration(
+                block,
+                source_id,
+                lowering_diagnostics,
+                source_mode,
+            ) {
+                ast_to_ir::TopLevelFunctionDeclarationLowering::NotFunctionDeclaration => {
+                    let Some(node) = ast_to_ir::lower_top_level_block(
+                        block,
+                        source_id,
+                        lowering_diagnostics,
+                        source_mode,
+                    ) else {
+                        continue;
+                    };
+                    nodes.extend(self.evaluate_evidenced_structural_nodes(
+                        std::slice::from_ref(&node),
+                        evaluation_diagnostics,
+                        context,
+                    ));
+                }
+                ast_to_ir::TopLevelFunctionDeclarationLowering::Invalid => {}
+                ast_to_ir::TopLevelFunctionDeclarationLowering::Declaration(declaration) => {
+                    self.handle_function_declaration(
+                        &declaration.name,
+                        &declaration.parameters,
+                        &declaration.body,
+                        &declaration.span,
+                        evaluation_diagnostics,
+                        context,
+                    );
+                }
+            }
+        }
+
+        (
+            IrDocument {
+                nodes,
+                metadata: arkst_ir::IrMetadata {
+                    document_state: context.document_state_snapshot(),
+                    ..metadata
+                },
+            },
+            std::mem::take(evaluation_diagnostics),
+            std::mem::take(lowering_diagnostics),
+        )
     }
 
     fn evaluate_with_context(

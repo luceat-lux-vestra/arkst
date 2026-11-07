@@ -148,33 +148,6 @@ pub mod evaluator {
             )
         }
 
-        pub(crate) fn evaluate_with_resources_and_log_sink<
-            R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
-        >(
-            &self,
-            resources: &R,
-            source_id: SourceId,
-            source_mode: SourceMode,
-            document: &IrDocument,
-            metadata_defaults: &arkst_engine::DocumentMetadataDefaults,
-            log_sink: &dyn arkst_engine::LogSink,
-        ) -> (IrDocument, Vec<Diagnostic>) {
-            let source_mode = match source_mode {
-                SourceMode::Markdown => arkst_markdown::Mode::Markdown,
-                SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
-            };
-            self.inner
-                .evaluate_with_resources_and_libraries_and_log_sink_for_mode(
-                    resources,
-                    resources,
-                    log_sink,
-                    source_id,
-                    source_mode,
-                    document,
-                    metadata_defaults,
-                )
-        }
-
         pub(crate) fn evaluate_with_resources_and_environment<
             R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
         >(
@@ -206,11 +179,10 @@ pub mod evaluator {
 
 /// Compatibility facade for the AST-to-IR module.
 ///
-/// The implementation is in `arkst-engine`; these small adapters preserve
-/// the historical core signatures that accepted project metadata and the
-/// core-private source-mode distinction.
+/// The implementation is in `arkst-engine`; this adapter preserves the
+/// historical public core signature that accepts project metadata.
 pub mod ast_to_ir {
-    use super::{engine_adapter, ProjectMetadata, SourceMode};
+    use super::{engine_adapter, ProjectMetadata};
     use arkst_diagnostics::Diagnostic;
     use arkst_ir::IrDocument;
     use arkst_markdown::ast::Document;
@@ -225,23 +197,6 @@ pub mod ast_to_ir {
             doc,
             source_id,
             &engine_adapter::document_metadata_defaults(project_metadata),
-        )
-    }
-
-    pub(crate) fn ast_to_ir_with_diagnostics_for_mode(
-        doc: &Document,
-        source_id: SourceId,
-        project_metadata: &ProjectMetadata,
-        source_mode: SourceMode,
-    ) -> (IrDocument, Vec<Diagnostic>) {
-        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
-            doc,
-            source_id,
-            &engine_adapter::document_metadata_defaults(project_metadata),
-            match source_mode {
-                SourceMode::Markdown => arkst_markdown::Mode::Markdown,
-                SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
-            },
         )
     }
 }
@@ -406,40 +361,45 @@ fn compile_with_inputs(
         }
     };
     let metadata_defaults = engine_adapter::document_metadata_defaults(project.metadata());
-    let (ir, lowering_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
-        &parsed.document,
-        source_id,
-        project.metadata(),
-        source_mode,
-    );
     let resource_provider = engine_adapter::VirtualProjectResourceProvider::new(project);
-    let evaluator =
-        evaluator::Evaluator::with_capabilities_and_limits(capabilities, options.evaluation_limits);
-    let (ir, evaluation_diagnostics) = match host {
-        EvaluationHost::Default => evaluator.evaluate_with_resources(
-            &resource_provider,
-            source_id,
-            source_mode,
-            &ir,
-            &metadata_defaults,
-        ),
-        EvaluationHost::Environment(environment) => evaluator
-            .evaluate_with_resources_and_environment(
+    let evaluator = arkst_engine::evaluator::Evaluator::with_capabilities_and_limits(
+        capabilities,
+        options.evaluation_limits,
+    );
+    let engine_source_mode = match source_mode {
+        SourceMode::Markdown => arkst_markdown::Mode::Markdown,
+        SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
+    };
+    let (ir, evaluation_diagnostics, lowering_diagnostics) = match host {
+        EvaluationHost::Default => evaluator
+            .evaluate_frontend_with_resources_and_libraries_for_mode(
+                &resource_provider,
                 &resource_provider,
                 source_id,
-                source_mode,
-                &ir,
+                engine_source_mode,
+                &parsed.document,
                 &metadata_defaults,
-                environment,
             ),
-        EvaluationHost::LogSink(log_sink) => evaluator.evaluate_with_resources_and_log_sink(
-            &resource_provider,
-            source_id,
-            source_mode,
-            &ir,
-            &metadata_defaults,
-            log_sink,
-        ),
+        EvaluationHost::Environment(environment) => evaluator
+            .evaluate_frontend_with_resources_and_libraries_and_environment_for_mode(
+                &resource_provider,
+                &resource_provider,
+                environment,
+                source_id,
+                engine_source_mode,
+                &parsed.document,
+                &metadata_defaults,
+            ),
+        EvaluationHost::LogSink(log_sink) => evaluator
+            .evaluate_frontend_with_resources_and_libraries_and_log_sink_for_mode(
+                &resource_provider,
+                &resource_provider,
+                log_sink,
+                source_id,
+                engine_source_mode,
+                &parsed.document,
+                &metadata_defaults,
+            ),
     };
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
@@ -481,8 +441,8 @@ pub struct CompileResult {
 mod tests {
     use crate::ir::{IrInline, IrNode};
     use crate::{
-        CompileOptions, EvaluationLimits, LogEvent, LogLevel, LogSink, Severity, SourceMode,
-        VirtualPathBuf, VirtualProjectBuilder,
+        CompileOptions, EvaluationLimits, LogEvent, LogLevel, LogSink, Severity, VirtualPathBuf,
+        VirtualProjectBuilder,
     };
     use std::cell::RefCell;
 
@@ -4059,6 +4019,19 @@ Yiddish"
     }
 
     #[test]
+    fn compile_direct_ast_function_registration_is_source_ordered_and_outputless() {
+        let source = ".uppercase {Quarkdown}\n\n.function {uppercase}\n    text:\n    shadow .text\n\n.uppercase {Quarkdown}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "QUARKDOWN\nshadow Quarkdown");
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .all(|node| !matches!(node, IrNode::FunctionDeclaration { .. })));
+    }
+
+    #[test]
     fn compile_user_functions_bind_block_last_and_isolate_child_scope() {
         let source = ".var {outside} {A}\n.var {value} {parent}\n.function {inner}\n    inherited\n\n.function {demo}\n    value:\n    .function {local}\n        local\n    .outside\n    .value\n    .inner\n    .var {local_value} {.value}\n    .local\n\n.demo {B}\n\n.outside\n.value\n.local\n";
         let (result, _) = compile_source(source);
@@ -4517,11 +4490,11 @@ Yiddish"
             .expect("source id");
         let parsed = arkst_markdown::parse_with_diagnostics(source);
         assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
-        let (ir, diagnostics) = crate::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+        let (ir, diagnostics) = arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
             &parsed.document,
             source_id,
-            project.metadata(),
-            SourceMode::Quarkdown,
+            &crate::engine_adapter::document_metadata_defaults(project.metadata()),
+            arkst_markdown::Mode::Quarkdown,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::FunctionDeclaration { parameters, .. } = &ir.nodes[0] else {
