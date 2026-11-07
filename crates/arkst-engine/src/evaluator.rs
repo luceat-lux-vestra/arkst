@@ -7,10 +7,11 @@
 //! calls, user-defined functions, and the first value-flow builtins used by
 //! `::` call chains.
 //!
-//! Normal compilation now begins the #719 direct-AST migration by consuming
-//! top-level user-function declarations directly from frontend syntax while
-//! retaining the established IR evaluator for every other block and callable
-//! body. Legacy IR entry points remain supported.
+//! Normal compilation advances the #719 direct-AST migration by consuming
+//! top-level user-function declarations and selected ordinary non-chained
+//! block calls directly from frontend syntax while retaining the established
+//! IR evaluator machinery and transitional callable-body lowering. Legacy IR
+//! entry points remain supported.
 //!
 //! A `FunctionCall` / `DirectiveCall` named `if` or
 //! `ifnot` is replaced by its content when its boolean condition holds,
@@ -3300,10 +3301,11 @@ impl Evaluator {
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
-    /// Evaluates the normal compiler frontend directly for the first #719
-    /// stage-2 slice. Top-level `.function` declarations are consumed from
-    /// frontend syntax in source order; all other blocks continue through the
-    /// established AST-to-IR bridge.
+    /// Evaluates the normal compiler frontend through the bounded #719
+    /// direct-AST migration. Top-level `.function` declarations and selected
+    /// ordinary non-chained block calls are consumed from frontend syntax in
+    /// source order; non-selected blocks continue through the established
+    /// AST-to-IR bridge.
     pub fn evaluate_frontend_with_resources_and_libraries_for_mode<
         R: ResourceProvider,
         L: LoadableLibraryProvider,
@@ -3505,19 +3507,51 @@ impl Evaluator {
                 source_mode,
             ) {
                 ast_to_ir::TopLevelFunctionDeclarationLowering::NotFunctionDeclaration => {
-                    let Some(node) = ast_to_ir::lower_top_level_block(
+                    match ast_to_ir::lower_top_level_call(
                         block,
                         source_id,
                         lowering_diagnostics,
                         source_mode,
-                    ) else {
-                        continue;
-                    };
-                    nodes.extend(self.evaluate_evidenced_structural_nodes(
-                        std::slice::from_ref(&node),
-                        evaluation_diagnostics,
-                        context,
-                    ));
+                    ) {
+                        ast_to_ir::TopLevelCallLowering::NotSelected => {
+                            let Some(node) = ast_to_ir::lower_top_level_block(
+                                block,
+                                source_id,
+                                lowering_diagnostics,
+                                source_mode,
+                            ) else {
+                                continue;
+                            };
+                            nodes.extend(self.evaluate_evidenced_structural_nodes(
+                                std::slice::from_ref(&node),
+                                evaluation_diagnostics,
+                                context,
+                            ));
+                        }
+                        ast_to_ir::TopLevelCallLowering::Invalid => {}
+                        ast_to_ir::TopLevelCallLowering::Call(call) => {
+                            match self.evaluate_block_call(
+                                &call.name,
+                                Some(call.ordered_args.as_slice()),
+                                &call.positional_args,
+                                &call.named_args,
+                                call.lambda_parameters.as_deref(),
+                                call.body.as_deref(),
+                                call.raw_body.as_ref(),
+                                &call.span,
+                                evaluation_diagnostics,
+                                context,
+                            ) {
+                                CallOutcome::Value(IrValue::Content(evaluated)) => {
+                                    nodes.extend(evaluated);
+                                }
+                                CallOutcome::Value(_)
+                                | CallOutcome::NoValue
+                                | CallOutcome::Failed
+                                | CallOutcome::Unresolved => {}
+                            }
+                        }
+                    }
                 }
                 ast_to_ir::TopLevelFunctionDeclarationLowering::Invalid => {}
                 ast_to_ir::TopLevelFunctionDeclarationLowering::Declaration(declaration) => {

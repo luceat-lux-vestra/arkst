@@ -4032,6 +4032,61 @@ Yiddish"
     }
 
     #[test]
+    fn compile_direct_ast_top_level_calls_preserve_source_order_and_unresolved_shape() {
+        let source =
+            ".var {name} {처음}\r\n.name\r\n.var {name} {나중}\r\n.name\r\n.unknown {A} key:{한글}\r\n";
+        let (result, source_id) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "처음\n나중");
+
+        let function_calls = result
+            .ir
+            .nodes
+            .iter()
+            .filter(|node| matches!(node, IrNode::FunctionCall { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(function_calls.len(), 1, "{:?}", result.ir.nodes);
+
+        let IrNode::FunctionCall {
+            name,
+            positional_args,
+            named_args,
+            ordered_args,
+            lambda_parameters,
+            body,
+            raw_body,
+            span,
+        } = function_calls[0]
+        else {
+            panic!("expected preserved unresolved call")
+        };
+        assert_eq!(name, "unknown");
+        assert_eq!(positional_args.len(), 1);
+        assert_eq!(named_args.len(), 1);
+        let ordered = ordered_args.as_deref().expect("source-order projection");
+        assert_eq!(ordered.len(), 2);
+        assert!(matches!(
+            &ordered[0],
+            crate::ir::IrCallArgument::Positional { index: 0, .. }
+        ));
+        assert!(matches!(
+            &ordered[1],
+            crate::ir::IrCallArgument::Named { index: 0, .. }
+        ));
+        assert!(lambda_parameters.is_none());
+        assert!(body.is_none());
+        assert!(raw_body.is_none());
+        assert_eq!(span.source_id, source_id);
+        let unresolved = ".unknown {A} key:{한글}";
+        let start = source.find(unresolved).expect("unresolved call");
+        assert_eq!(span.start, start);
+        let source_slice = source
+            .get(span.start..span.end)
+            .expect("source-backed unresolved span");
+        assert_eq!(source_slice.trim_end_matches(['\r', '\n']), unresolved);
+    }
+
+    #[test]
     fn compile_user_functions_bind_block_last_and_isolate_child_scope() {
         let source = ".var {outside} {A}\n.var {value} {parent}\n.function {inner}\n    inherited\n\n.function {demo}\n    value:\n    .function {local}\n        local\n    .outside\n    .value\n    .inner\n    .var {local_value} {.value}\n    .local\n\n.demo {B}\n\n.outside\n.value\n.local\n";
         let (result, _) = compile_source(source);
