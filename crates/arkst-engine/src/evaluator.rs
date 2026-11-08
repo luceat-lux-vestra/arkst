@@ -19253,12 +19253,8 @@ impl Evaluator {
                 };
                 diagnostics.extend(lowering_diagnostics);
                 let origin = invocation_origin(&lowered, context);
-                match self.evaluate_runtime_invocation_value(
-                    &lowered,
-                    origin,
-                    diagnostics,
-                    context,
-                ) {
+                match self.evaluate_runtime_invocation_value(&lowered, origin, diagnostics, context)
+                {
                     Ok(value) => Ok(value),
                     Err(CallOutcome::NoValue) => {
                         diagnostics.push(no_value_required(*candidate_span));
