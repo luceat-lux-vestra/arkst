@@ -378,6 +378,23 @@ fn lower_function_declaration(
     })
 }
 
+/// Lower only parser-owned chain continuation segments.
+///
+/// Phase 3E uses this adapter after preserving the selected head arguments as
+/// frontend syntax through source-defined binding. The helper performs no
+/// dispatch and cannot lower or inspect the head arguments.
+pub(crate) fn lower_top_level_chain_tail(
+    chain: &[CallSegment],
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> Option<Vec<IrCallSegment>> {
+    chain
+        .iter()
+        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics, source_mode))
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn lower_chained_block_call(
     name: &str,
@@ -401,10 +418,7 @@ fn lower_chained_block_call(
             .filter_map(|block| block_to_ir(block, source_id, diagnostics, source_mode, true))
             .collect::<Vec<_>>()
     });
-    let chain = chain
-        .iter()
-        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics, source_mode))
-        .collect::<Option<Vec<_>>>()?;
+    let chain = lower_top_level_chain_tail(chain, source_id, diagnostics, source_mode)?;
 
     Some(LoweredTopLevelChain {
         head: IrCallSegment {
@@ -1675,6 +1689,33 @@ mod tests {
         .expect("legacy lowering");
         assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
         assert_eq!(direct_node, legacy_node);
+    }
+
+    #[test]
+    fn top_level_chain_tail_bridge_matches_whole_chain_continuation() {
+        let source = ".range {1} {2}::sum {3}::multiply {4}\n";
+        let document = arkst_markdown::parse_qd(source);
+        let Block::DirectiveCall { chain, .. } = &document.nodes[0] else {
+            panic!("expected chain directive")
+        };
+
+        let mut tail_diagnostics = Vec::new();
+        let tail =
+            lower_top_level_chain_tail(chain, source_id(), &mut tail_diagnostics, Mode::Quarkdown)
+                .expect("tail lowering");
+        assert!(tail_diagnostics.is_empty(), "{tail_diagnostics:?}");
+
+        let mut whole_diagnostics = Vec::new();
+        let TopLevelChainLowering::Chain(whole) = lower_top_level_chain(
+            &document.nodes[0],
+            source_id(),
+            &mut whole_diagnostics,
+            Mode::Quarkdown,
+        ) else {
+            panic!("expected whole chain lowering")
+        };
+        assert!(whole_diagnostics.is_empty(), "{whole_diagnostics:?}");
+        assert_eq!(tail, whole.chain);
     }
 
     #[test]

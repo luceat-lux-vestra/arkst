@@ -341,6 +341,8 @@ enum CallBody<'a> {
 struct FrontendInvocation<'a> {
     block: &'a FrontendBlock,
     name: &'a str,
+    name_span: &'a ByteSpan,
+    head_span: &'a ByteSpan,
     arguments: &'a [FrontendCallArgument],
     chain: &'a [FrontendCallSegment],
     body: Option<&'a [FrontendBlock]>,
@@ -359,6 +361,8 @@ impl<'a> FrontendInvocation<'a> {
     fn from_block(block: &'a FrontendBlock) -> Option<Self> {
         let FrontendBlock::DirectiveCall {
             name,
+            name_span,
+            head_span,
             arguments,
             chain,
             body,
@@ -372,6 +376,8 @@ impl<'a> FrontendInvocation<'a> {
         Some(Self {
             block,
             name,
+            name_span,
+            head_span,
             arguments: arguments.as_slice(),
             chain: chain.as_slice(),
             body: body.as_deref(),
@@ -390,18 +396,44 @@ impl<'a> FrontendInvocation<'a> {
         }
     }
 
-    /// Phase 3A/3B may defer argument/body lowering only when this syntax
-    /// cannot be claimed by an earlier native, variable, or implicit-parameter
-    /// owner. Function lookup is intentionally absent: the existing dispatcher
-    /// still decides whether a source-defined callable owns the invocation.
-    fn can_defer_phase3a_arguments(self, context: &EvaluationContext<'_>) -> bool {
-        self.chain.is_empty()
-            && self.lambda_header.is_none()
-            && !matches!(self.name, "super" | "pageformat" | "code" | "extend")
+    /// Returns whether this invocation name can reach the ordinary
+    /// source-defined frontend-candidate path without stealing an earlier
+    /// native, variable, deferred, or implicit-parameter owner.
+    ///
+    /// Function lookup is intentionally absent: the existing semantic
+    /// dispatcher remains the single authority that decides whether a visible
+    /// source-defined callable owns the invocation.
+    fn can_defer_source_defined_arguments(self, context: &EvaluationContext<'_>) -> bool {
+        !matches!(self.name, "super" | "pageformat" | "code" | "extend")
             && !has_any_native_owner(self.name)
             && !is_deferred(self.name)
             && implicit_parameter_index(self.name).is_none()
             && !context.contains(self.name)
+    }
+
+    /// Phase 3A/3B/3C direct calls may defer parser-owned arguments/bodies
+    /// until source-defined binding selects them.
+    fn can_defer_phase3a_arguments(self, context: &EvaluationContext<'_>) -> bool {
+        self.chain.is_empty()
+            && self.lambda_header.is_none()
+            && self.can_defer_source_defined_arguments(context)
+    }
+
+    /// Phase 3E applies the same conservative source-defined gate only to a
+    /// bodyless top-level chain head. Tail segments remain on the transitional
+    /// IrCallSegment path until a later bounded chain migration.
+    fn can_defer_phase3e_chain_head(self, context: &EvaluationContext<'_>) -> bool {
+        !self.chain.is_empty()
+            && self.body.is_none()
+            && self.lambda_header.is_none()
+            && !matches!(
+                self.block,
+                FrontendBlock::DirectiveCall {
+                    raw_body: Some(_),
+                    ..
+                }
+            )
+            && self.can_defer_source_defined_arguments(context)
     }
 }
 
@@ -3904,35 +3936,128 @@ impl Evaluator {
                     }
                 }
             }
-            FrontendInvocationRoute::Chain => match ast_to_ir::lower_top_level_chain(
-                invocation.block,
-                source_id,
-                lowering_diagnostics,
-                source_mode,
-            ) {
-                ast_to_ir::TopLevelChainLowering::NotSelected => None,
-                ast_to_ir::TopLevelChainLowering::Invalid => Some(Vec::new()),
-                ast_to_ir::TopLevelChainLowering::Chain(chain) => {
-                    let outcome = self.evaluate_block_chain(
-                        &chain.head,
-                        &chain.chain,
-                        chain.lambda_parameters.as_deref(),
-                        &chain.body,
-                        chain.raw_body.as_ref(),
-                        &chain.span,
+            FrontendInvocationRoute::Chain => {
+                if invocation.can_defer_phase3e_chain_head(context) {
+                    let Some(chain) = ast_to_ir::lower_top_level_chain_tail(
+                        invocation.chain,
+                        source_id,
+                        lowering_diagnostics,
+                        source_mode,
+                    ) else {
+                        return Some(Vec::new());
+                    };
+                    let span = frontend_source_span(invocation.span, source_id);
+                    let outcome = self.evaluate_frontend_chain_head(
+                        invocation,
+                        source_id,
+                        source_mode,
+                        &chain,
                         evaluation_diagnostics,
                         context,
                     );
-                    Some(match outcome {
-                        CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
-                        CallOutcome::Value(_)
-                        | CallOutcome::NoValue
-                        | CallOutcome::Failed
-                        | CallOutcome::Unresolved => Vec::new(),
-                    })
+                    if !matches!(outcome, CallOutcome::Unresolved) {
+                        let outcome = self.materialize_block_chain_outcome(
+                            outcome,
+                            &span,
+                            evaluation_diagnostics,
+                        );
+                        return Some(match outcome {
+                            CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
+                            CallOutcome::Value(_)
+                            | CallOutcome::NoValue
+                            | CallOutcome::Failed
+                            | CallOutcome::Unresolved => Vec::new(),
+                        });
+                    }
                 }
-            },
+
+                match ast_to_ir::lower_top_level_chain(
+                    invocation.block,
+                    source_id,
+                    lowering_diagnostics,
+                    source_mode,
+                ) {
+                    ast_to_ir::TopLevelChainLowering::NotSelected => None,
+                    ast_to_ir::TopLevelChainLowering::Invalid => Some(Vec::new()),
+                    ast_to_ir::TopLevelChainLowering::Chain(chain) => {
+                        let outcome = self.evaluate_block_chain(
+                            &chain.head,
+                            &chain.chain,
+                            chain.lambda_parameters.as_deref(),
+                            &chain.body,
+                            chain.raw_body.as_ref(),
+                            &chain.span,
+                            evaluation_diagnostics,
+                            context,
+                        );
+                        Some(match outcome {
+                            CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
+                            CallOutcome::Value(_)
+                            | CallOutcome::NoValue
+                            | CallOutcome::Failed
+                            | CallOutcome::Unresolved => Vec::new(),
+                        })
+                    }
+                }
+            }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_frontend_chain_head(
+        &self,
+        invocation: FrontendInvocation<'_>,
+        source_id: SourceId,
+        source_mode: Mode,
+        chain: &[IrCallSegment],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let structural = frontend_structural_call(invocation.arguments, source_id);
+        let head_span = frontend_source_span(invocation.head_span, source_id);
+        let head = IrCallSegment {
+            name: invocation.name.to_string(),
+            name_span: frontend_source_span(invocation.name_span, source_id),
+            positional_args: Vec::new(),
+            named_args: Vec::new(),
+            ordered_args: None,
+            span: head_span,
+        };
+        let value_origin = call_result_origin(invocation.name, context);
+        let outcome = self.evaluate_call_value_with_frontend_arguments(
+            invocation.name,
+            &structural.ordered_args,
+            &structural.positional_args,
+            &structural.named_args,
+            &head_span,
+            FrontendCallInput {
+                arguments: invocation.arguments,
+                body: invocation.body,
+                source_id,
+                source_mode,
+            },
+            diagnostics,
+            context,
+        );
+        if matches!(outcome, CallOutcome::Unresolved) {
+            return outcome;
+        }
+        let value = match self.chain_outcome(outcome, &head, true, diagnostics, context) {
+            CallOutcome::Value(value) => value,
+            outcome => return outcome,
+        };
+        self.continue_chain_from_value(
+            value,
+            value_origin,
+            chain,
+            ChainFinalCall {
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+            },
+            diagnostics,
+            context,
+        )
     }
 
     fn evaluate_with_context(
@@ -5119,7 +5244,7 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        match self.evaluate_chain_value(
+        let outcome = self.evaluate_chain_value(
             head,
             chain,
             ChainFinalCall {
@@ -5129,7 +5254,17 @@ impl Evaluator {
             },
             diagnostics,
             context,
-        ) {
+        );
+        self.materialize_block_chain_outcome(outcome, span, diagnostics)
+    }
+
+    fn materialize_block_chain_outcome(
+        &self,
+        outcome: CallOutcome,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> CallOutcome {
+        match outcome {
             CallOutcome::Value(IrValue::Unit) => CallOutcome::NoValue,
             CallOutcome::Value(value) => {
                 match self.materialize_block_value(value, span, diagnostics) {
@@ -19633,8 +19768,8 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        let mut value_origin = call_result_origin(&head.name, context);
-        let mut value = match self.chain_outcome(
+        let value_origin = call_result_origin(&head.name, context);
+        let value = match self.chain_outcome(
             self.evaluate_call_value_with_ordered(
                 &head.name,
                 head.ordered_args.as_deref(),
@@ -19655,6 +19790,18 @@ impl Evaluator {
             CallOutcome::Value(value) => value,
             outcome => return outcome,
         };
+        self.continue_chain_from_value(value, value_origin, chain, final_call, diagnostics, context)
+    }
+
+    fn continue_chain_from_value(
+        &self,
+        mut value: IrValue,
+        mut value_origin: ValueOrigin,
+        chain: &[IrCallSegment],
+        final_call: ChainFinalCall<'_>,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
         if value_contains_explicit_error(&value) {
             return CallOutcome::Value(value);
         }
@@ -28484,11 +28631,15 @@ mod tests {
             }],
             None,
         );
-        assert_eq!(
-            FrontendInvocation::from_block(&chain)
-                .expect("directive")
-                .route(),
-            FrontendInvocationRoute::Chain
+        let chain_invocation = FrontendInvocation::from_block(&chain).expect("directive");
+        assert_eq!(chain_invocation.route(), FrontendInvocationRoute::Chain);
+        assert!(
+            chain_invocation.can_defer_phase3e_chain_head(&context),
+            "bodyless ordinary chain heads may reuse frontend candidates"
+        );
+        assert!(
+            !chain_invocation.can_defer_phase3a_arguments(&context),
+            "chain heads remain outside the direct-call Phase 3A gate"
         );
 
         let direct_with_lambda = frontend_invocation_block(
@@ -28505,6 +28656,141 @@ mod tests {
                 .route(),
             FrontendInvocationRoute::DirectCall
         );
+    }
+
+    #[test]
+    fn phase3e_chain_head_binding_rejects_shape_before_frontend_lowering() {
+        let arguments = vec![
+            FrontendCallArgument::Named(arkst_markdown::ast::NamedArg {
+                name: "first".to_string(),
+                name_span: arkst_source::ByteSpan::new(9, 14),
+                value: FrontendValue::String("one".to_string()),
+                value_span: arkst_source::ByteSpan::new(15, 20),
+                span: arkst_source::ByteSpan::new(9, 20),
+            }),
+            FrontendCallArgument::Positional {
+                value: FrontendValue::Content(vec![arkst_markdown::ast::Inline::Unsupported {
+                    kind: "must-not-lower".to_string(),
+                    span: arkst_source::ByteSpan::new(21, 27),
+                }]),
+                span: arkst_source::ByteSpan::new(21, 27),
+            },
+        ];
+        let block = FrontendBlock::DirectiveCall {
+            name: "ordinary".to_string(),
+            name_span: arkst_source::ByteSpan::new(1, 9),
+            head_span: arkst_source::ByteSpan::new(0, 27),
+            arguments,
+            chain: vec![FrontendCallSegment {
+                name: "uppercase".to_string(),
+                name_span: arkst_source::ByteSpan::new(29, 38),
+                arguments: Vec::new(),
+                span: arkst_source::ByteSpan::new(27, 38),
+            }],
+            body: None,
+            raw_body: None,
+            lambda_header: None,
+            span: arkst_source::ByteSpan::new(0, 38),
+        };
+        let invocation = FrontendInvocation::from_block(&block).expect("chain directive");
+        let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
+        context.set_function("ordinary".to_string(), vec!["first".to_string()]);
+        assert!(invocation.can_defer_phase3e_chain_head(&context));
+
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let output = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(15),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut context,
+            )
+            .expect("selected chain route");
+
+        assert!(output.is_empty());
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+        assert_eq!(evaluation_diagnostics.len(), 1);
+        assert_eq!(evaluation_diagnostics[0].code, "E3003");
+        assert!(evaluation_diagnostics[0]
+            .message
+            .contains("positional argument after named argument"));
+    }
+
+    #[test]
+    fn phase3e_frontend_chain_head_reuses_shared_tail_continuation() {
+        let block = FrontendBlock::DirectiveCall {
+            name: "identity".to_string(),
+            name_span: arkst_source::ByteSpan::new(1, 9),
+            head_span: arkst_source::ByteSpan::new(0, 13),
+            arguments: vec![FrontendCallArgument::Positional {
+                value: FrontendValue::Number(2.0),
+                span: arkst_source::ByteSpan::new(10, 13),
+            }],
+            chain: vec![FrontendCallSegment {
+                name: "multiply".to_string(),
+                name_span: arkst_source::ByteSpan::new(15, 23),
+                arguments: vec![FrontendCallArgument::Positional {
+                    value: FrontendValue::Number(3.0),
+                    span: arkst_source::ByteSpan::new(24, 27),
+                }],
+                span: arkst_source::ByteSpan::new(13, 27),
+            }],
+            body: None,
+            raw_body: None,
+            lambda_header: None,
+            span: arkst_source::ByteSpan::new(0, 27),
+        };
+        let invocation = FrontendInvocation::from_block(&block).expect("chain directive");
+        let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
+        context.set_function_binding(
+            "identity".to_string(),
+            LambdaParameters::Explicit(vec![lambda_parameter("value", 0)]),
+            vec![IrNode::FunctionCall {
+                name: "value".to_string(),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(0, 5),
+            }],
+            span(0, 8),
+            None,
+        );
+        assert!(invocation.can_defer_phase3e_chain_head(&context));
+
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let output = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(16),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut context,
+            )
+            .expect("selected chain route");
+
+        assert!(
+            evaluation_diagnostics.is_empty(),
+            "{evaluation_diagnostics:?}"
+        );
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+        assert!(matches!(
+            output.as_slice(),
+            [IrNode::Paragraph { content, .. }]
+                if matches!(
+                    content.as_slice(),
+                    [IrInline::Text { content, .. }] if content == "6"
+                )
+        ));
     }
 
     #[test]
