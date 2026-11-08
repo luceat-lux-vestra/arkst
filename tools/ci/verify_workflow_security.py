@@ -204,7 +204,11 @@ def verify_workflow(path: Path, root: Path) -> None:
         raise WorkflowSecurityError(f"{rel}: explicit concurrency policy is required")
 
     for job_id, block in _job_blocks(lines, rel):
-        if not any(
+        reusable_workflow_caller = any(
+            re.fullmatch(r"    uses:\s*\S+\s*", _code(line))
+            for line in block
+        )
+        if not reusable_workflow_caller and not any(
             re.fullmatch(r"    timeout-minutes:\s*[0-9]+\s*", _code(line))
             for line in block
         ):

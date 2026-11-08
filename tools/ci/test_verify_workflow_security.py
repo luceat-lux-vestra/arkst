@@ -209,6 +209,22 @@ class WorkflowSecurityTests(unittest.TestCase):
         )
 
 
+    def test_reusable_workflow_caller_does_not_require_timeout(self) -> None:
+        reusable = """
+name: Reusable Caller
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: reusable-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  deep:
+    uses: ./.github/workflows/deep.yml
+"""
+        self.verify(reusable)
+
     def test_missing_timeout_is_rejected(self) -> None:
         self.reject(BASE.replace("    timeout-minutes: 5\n", ""), "timeout-minutes")
 
