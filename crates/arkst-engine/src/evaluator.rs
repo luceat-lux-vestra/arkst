@@ -353,7 +353,6 @@ enum FrontendInvocationRoute {
     FunctionDeclaration,
     DirectCall,
     Chain,
-    LegacyBridge,
 }
 
 impl<'a> FrontendInvocation<'a> {
@@ -386,15 +385,8 @@ impl<'a> FrontendInvocation<'a> {
             FrontendInvocationRoute::FunctionDeclaration
         } else if !self.chain.is_empty() {
             FrontendInvocationRoute::Chain
-        } else if matches!(self.name, "extend" | "let" | "foreach" | "repeat")
-            || self.lambda_header.is_none()
-        {
-            FrontendInvocationRoute::DirectCall
         } else {
-            // Preserve the pre-#719 fallback for an ordinary non-contextual
-            // call carrying lambda metadata until that syntax has its own
-            // evidenced direct-evaluation contract.
-            FrontendInvocationRoute::LegacyBridge
+            FrontendInvocationRoute::DirectCall
         }
     }
 
@@ -3827,7 +3819,6 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> Option<Vec<IrNode>> {
         match invocation.route() {
-            FrontendInvocationRoute::LegacyBridge => None,
             FrontendInvocationRoute::FunctionDeclaration => {
                 match ast_to_ir::lower_top_level_function_declaration(
                     invocation.block,
@@ -3876,7 +3867,7 @@ impl Evaluator {
                                 Vec::new()
                             }
                             CallOutcome::Unresolved => unreachable!(
-                                "phase3a unresolved calls fall through to the legacy bridge"
+                                "phase3a unresolved calls continue through direct-call lowering"
                             ),
                         });
                     }
@@ -5836,8 +5827,8 @@ impl Evaluator {
             if let Some(frontend) = frontend {
                 // Extension bindings still require evaluate_extension_call() to
                 // install the active super target and preserve extension-chain
-                // semantics. Phase 3A therefore falls back to the legacy bridge
-                // until extension invocation itself is migrated.
+                // semantics. Phase 3A therefore falls back to the transitional
+                // IR-backed direct-call path until extension invocation itself is migrated.
                 if binding.extension.is_some() {
                     return CallOutcome::Unresolved;
                 }
@@ -28460,6 +28451,29 @@ mod tests {
             FrontendInvocationRoute::DirectCall
         );
 
+        let context = EvaluationContext::new();
+        for name in ["map", "filter", "sorted", "findfirst", "findall", "join"] {
+            let block_lambda = frontend_invocation_block(
+                name,
+                Vec::new(),
+                Some(FrontendLambdaHeader {
+                    parameters: Vec::new(),
+                    span: arkst_source::ByteSpan::new(0, 1),
+                }),
+            );
+            let invocation =
+                FrontendInvocation::from_block(&block_lambda).expect("block lambda directive");
+            assert_eq!(
+                invocation.route(),
+                FrontendInvocationRoute::DirectCall,
+                "{name}"
+            );
+            assert!(
+                !invocation.can_defer_phase3a_arguments(&context),
+                "{name} must keep lambda-header arguments on transitional direct lowering"
+            );
+        }
+
         let chain = frontend_invocation_block(
             "ordinary",
             vec![FrontendCallSegment {
@@ -28477,7 +28491,7 @@ mod tests {
             FrontendInvocationRoute::Chain
         );
 
-        let legacy = frontend_invocation_block(
+        let direct_with_lambda = frontend_invocation_block(
             "ordinary",
             Vec::new(),
             Some(FrontendLambdaHeader {
@@ -28486,10 +28500,10 @@ mod tests {
             }),
         );
         assert_eq!(
-            FrontendInvocation::from_block(&legacy)
+            FrontendInvocation::from_block(&direct_with_lambda)
                 .expect("directive")
                 .route(),
-            FrontendInvocationRoute::LegacyBridge
+            FrontendInvocationRoute::DirectCall
         );
     }
 
