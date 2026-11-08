@@ -105,7 +105,7 @@ class CargoGraphOwnershipTests(unittest.TestCase):
             directory.mkdir(parents=True)
             (directory / "Cargo.toml").write_text(content, encoding="utf-8")
         (root / ".github/workflows/ci.yml").write_text(CI_WORKFLOW, encoding="utf-8")
-        (root / ".github/workflows/security.yml").write_text(
+        (root / ".github/workflows/security-audit.yml").write_text(
             SECURITY_WORKFLOW, encoding="utf-8"
         )
         return root
@@ -372,9 +372,9 @@ class CargoGraphOwnershipTests(unittest.TestCase):
         ):
             mod.verify_repository(root)
 
-    def test_scheduled_supply_chain_job_cannot_use_docs_only_contract(self):
+    def test_shared_deep_supply_chain_job_cannot_use_docs_only_contract(self):
         root = self.make_repo()
-        path = root / ".github/workflows/security.yml"
+        path = root / ".github/workflows/security-audit.yml"
         path.write_text(
             path.read_text(encoding="utf-8").replace(
                 "  audit:\n",
@@ -383,7 +383,7 @@ class CargoGraphOwnershipTests(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(
-            mod.CargoGraphOwnershipError, "scheduled supply-chain authority job must remain unconditional"
+            mod.CargoGraphOwnershipError, "shared deep supply-chain authority job must remain unconditional"
         ):
             mod.verify_repository(root)
 

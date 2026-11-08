@@ -498,6 +498,137 @@ rationale = "fixture"
 
 
 
+    def test_local_reusable_workflow_jobs_are_discovered_as_pr_producers(self):
+        workflow = """
+name: CI
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  deep:
+    name: Deep
+    uses: ./.github/workflows/deep.yml
+"""
+        policy_text = """
+schema = 1
+[ruleset]
+name = "Protect main"
+required_check_integration_id = 15368
+[compatibility_scope]
+run = ["crates/**"]
+skip = ["docs/**"]
+[[producer]]
+workflow = ".github/workflows/deep.yml"
+job = "verify"
+classification = "advisory"
+contexts = ["deep-verify"]
+always_present = false
+rationale = "fixture"
+"""
+        tmp, root, policy = self.make_repo(workflow, policy_text)
+        self.addCleanup(tmp.cleanup)
+        (root / ".github/workflows/deep.yml").write_text(
+            textwrap.dedent(
+                """
+                name: Deep
+                on:
+                  workflow_call:
+                jobs:
+                  verify:
+                    name: deep-verify
+                    runs-on: ubuntu-latest
+                    steps:
+                      - run: true
+                """
+            ).lstrip(),
+            encoding="utf-8",
+        )
+        mod.verify_repository(root, policy)
+
+    def test_unclassified_reusable_child_job_fails(self):
+        workflow = """
+name: CI
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  anchor:
+    name: anchor
+    runs-on: ubuntu-latest
+  deep:
+    name: Deep
+    uses: ./.github/workflows/deep.yml
+"""
+        policy_text = """
+schema = 1
+[ruleset]
+name = "Protect main"
+required_check_integration_id = 15368
+[compatibility_scope]
+run = ["crates/**"]
+skip = ["docs/**"]
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "anchor"
+classification = "advisory"
+contexts = ["anchor"]
+always_present = false
+rationale = "fixture"
+"""
+        tmp, root, policy = self.make_repo(workflow, policy_text)
+        self.addCleanup(tmp.cleanup)
+        (root / ".github/workflows/deep.yml").write_text(
+            textwrap.dedent(
+                """
+                name: Deep
+                on:
+                  workflow_call:
+                jobs:
+                  verify:
+                    name: deep-verify
+                    runs-on: ubuntu-latest
+                    steps:
+                      - run: true
+                """
+            ).lstrip(),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            mod.PolicyError, r"unclassified PR-time producer.*deep.yml#verify"
+        ):
+            mod.verify_repository(root, policy)
+
+    def test_reusable_workflow_cycle_fails_closed(self):
+        workflow = """
+name: CI
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  deep:
+    name: Deep
+    uses: ./.github/workflows/deep.yml
+"""
+        tmp, root, policy = self.make_repo(workflow)
+        self.addCleanup(tmp.cleanup)
+        (root / ".github/workflows/deep.yml").write_text(
+            textwrap.dedent(
+                """
+                name: Deep
+                on:
+                  workflow_call:
+                jobs:
+                  recurse:
+                    name: recurse
+                    uses: ./.github/workflows/deep.yml
+                """
+            ).lstrip(),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(mod.PolicyError, "reusable workflow cycle"):
+            mod.verify_repository(root, policy)
+
+
 class NativeLinuxSupplyChainScopeTests(unittest.TestCase):
     """The native ARM runner must not silently narrow the cargo-deny graph."""
 

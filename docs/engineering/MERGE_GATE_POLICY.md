@@ -73,7 +73,7 @@ Observed failures still require evidence-backed root-cause classification before
 
 ## Non-required PR controls
 
-The path-scoped spelling and security-audit jobs, the reference-JVM deep oracle, and PR metadata automation are classified explicitly in the canonical policy. Their presence in the inventory prevents silent job/context drift without promoting conditional or advisory jobs into required checks.
+The path-scoped spelling and read-only security-audit jobs and the reference-JVM deep oracle are routed from the canonical `CI` PR workflow into same-repository reusable workflows. The scheduled/manual security wrapper retains its separate `issues: write` failure reporter and is not callable from the PR DAG; PR metadata automation remains separately permission-isolated. All PR producers remain classified explicitly in the canonical policy, so topology consolidation cannot silently promote conditional or advisory evidence into required merge checks or hide job/context drift.
 
 Arkst previously carried a custom advisory AI review workflow backed by GitHub Models. GitHub retired GitHub Models on July 30, 2026, so that dead integration and its review prompt were removed rather than preserved as a nonfunctional governance control. AI review is not part of merge authority; any future replacement requires a separate explicit trust-boundary review before being added to this inventory.
 
