@@ -28587,11 +28587,9 @@ mod tests {
             source_mode: Mode::Quarkdown,
         };
         let candidates = frontend_argument_candidates(frontend);
-        let body_candidate = frontend_body_candidate(
-            frontend,
-            SourceSpan::new(SourceId(10), 0, 34),
-        )
-        .expect("frontend block body candidate");
+        let body_candidate =
+            frontend_body_candidate(frontend, SourceSpan::new(SourceId(10), 0, 34))
+                .expect("frontend block body candidate");
         let body_shape = candidate_shape(&body_candidate);
         let parameters = [ParameterMetadata::required("content")];
 
@@ -28636,11 +28634,9 @@ mod tests {
             source_mode: Mode::Quarkdown,
         };
         let candidates = frontend_argument_candidates(frontend);
-        let body_candidate = frontend_body_candidate(
-            frontend,
-            SourceSpan::new(SourceId(11), 0, 33),
-        )
-        .expect("frontend block body candidate");
+        let body_candidate =
+            frontend_body_candidate(frontend, SourceSpan::new(SourceId(11), 0, 33))
+                .expect("frontend block body candidate");
         let body_shape = candidate_shape(&body_candidate);
         let parameters = [ParameterMetadata::required("content")];
         let plan = invocation_binder::plan(
