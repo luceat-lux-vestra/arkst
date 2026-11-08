@@ -19790,14 +19790,7 @@ impl Evaluator {
             CallOutcome::Value(value) => value,
             outcome => return outcome,
         };
-        self.continue_chain_from_value(
-            value,
-            value_origin,
-            chain,
-            final_call,
-            diagnostics,
-            context,
-        )
+        self.continue_chain_from_value(value, value_origin, chain, final_call, diagnostics, context)
     }
 
     fn continue_chain_from_value(
@@ -28785,7 +28778,10 @@ mod tests {
             )
             .expect("selected chain route");
 
-        assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+        assert!(
+            evaluation_diagnostics.is_empty(),
+            "{evaluation_diagnostics:?}"
+        );
         assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
         assert!(matches!(
             output.as_slice(),

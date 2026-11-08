@@ -1700,13 +1700,9 @@ mod tests {
         };
 
         let mut tail_diagnostics = Vec::new();
-        let tail = lower_top_level_chain_tail(
-            chain,
-            source_id(),
-            &mut tail_diagnostics,
-            Mode::Quarkdown,
-        )
-        .expect("tail lowering");
+        let tail =
+            lower_top_level_chain_tail(chain, source_id(), &mut tail_diagnostics, Mode::Quarkdown)
+                .expect("tail lowering");
         assert!(tail_diagnostics.is_empty(), "{tail_diagnostics:?}");
 
         let mut whole_diagnostics = Vec::new();
