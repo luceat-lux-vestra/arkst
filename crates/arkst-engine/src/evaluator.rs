@@ -86,7 +86,13 @@ use arkst_ir::{
     IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
     IrTodoComponent, IrValue, NativeTarget, TargetSpecificContent,
 };
-use arkst_markdown::{ast::Document as FrontendDocument, Mode};
+use arkst_markdown::{
+    ast::{
+        Block as FrontendBlock, CallSegment as FrontendCallSegment, Document as FrontendDocument,
+        LambdaHeader as FrontendLambdaHeader,
+    },
+    Mode,
+};
 use arkst_quarkdown::is_valid_normal_call_name;
 use arkst_source::{SourceId, SourceSpan};
 use regex::RegexBuilder;
@@ -321,6 +327,66 @@ enum ImplicitParameterError {
 enum CallBody<'a> {
     Block(&'a [IrNode]),
     Inline(&'a [IrInline]),
+}
+
+/// Evaluator-private borrowed view over one parser-owned block invocation.
+///
+/// This is deliberately not another compiler IR: it owns no syntax, is never
+/// serialized, and exists only to route the normal frontend path into the
+/// existing evaluator dispatch authority. Stage-2 top-level selectors are
+/// migration scaffolding; new syntax families must extend this shared boundary
+/// instead of adding another `lower_top_level_xxx` selector.
+#[derive(Clone, Copy)]
+struct FrontendInvocation<'a> {
+    block: &'a FrontendBlock,
+    name: &'a str,
+    chain: &'a [FrontendCallSegment],
+    lambda_header: Option<&'a FrontendLambdaHeader>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrontendInvocationRoute {
+    FunctionDeclaration,
+    DirectCall,
+    Chain,
+    LegacyBridge,
+}
+
+impl<'a> FrontendInvocation<'a> {
+    fn from_block(block: &'a FrontendBlock) -> Option<Self> {
+        let FrontendBlock::DirectiveCall {
+            name,
+            chain,
+            lambda_header,
+            ..
+        } = block
+        else {
+            return None;
+        };
+        Some(Self {
+            block,
+            name,
+            chain: chain.as_slice(),
+            lambda_header: lambda_header.as_ref(),
+        })
+    }
+
+    fn route(self) -> FrontendInvocationRoute {
+        if self.name == "function" {
+            FrontendInvocationRoute::FunctionDeclaration
+        } else if !self.chain.is_empty() {
+            FrontendInvocationRoute::Chain
+        } else if matches!(self.name, "extend" | "let" | "foreach" | "repeat")
+            || self.lambda_header.is_none()
+        {
+            FrontendInvocationRoute::DirectCall
+        } else {
+            // Preserve the pre-#719 fallback for an ordinary non-contextual
+            // call carrying lambda metadata until that syntax has its own
+            // evidenced direct-evaluation contract.
+            FrontendInvocationRoute::LegacyBridge
+        }
+    }
 }
 
 /// Evaluator-owned unevaluated input for an explicit callable slot.
@@ -584,6 +650,155 @@ fn value_context_outcome(outcome: CallOutcome) -> CallOutcome {
     match outcome {
         CallOutcome::Value(value) if value_contains_explicit_error(&value) => CallOutcome::Failed,
         outcome => outcome,
+    }
+}
+
+/// Test-visible architecture guard for the normal compiler's future final-IR
+/// boundary.
+///
+/// The public IR still accepts executable compatibility forms while #719 is in
+/// migration, so production enforcement would currently break deliberate
+/// legacy/direct-IR entry points. Keeping the complete recursive predicate in
+/// the evaluator gives each migration slice one authoritative proof target;
+/// once normal compilation reaches zero violations this predicate can move to
+/// the production backend gate and ultimately disappear into the final IR type.
+#[cfg(test)]
+fn final_document_contains_evaluator_executable_state(document: &IrDocument) -> bool {
+    document
+        .nodes
+        .iter()
+        .any(ir_node_contains_evaluator_executable_state)
+}
+
+#[cfg(test)]
+fn ir_nodes_contain_evaluator_executable_state(nodes: &[IrNode]) -> bool {
+    nodes
+        .iter()
+        .any(ir_node_contains_evaluator_executable_state)
+}
+
+#[cfg(test)]
+fn ir_node_contains_evaluator_executable_state(node: &IrNode) -> bool {
+    match node {
+        IrNode::FunctionCall { .. }
+        | IrNode::ChainedFunctionCall { .. }
+        | IrNode::FunctionDeclaration { .. } => true,
+        IrNode::Heading { content, .. } | IrNode::Paragraph { content, .. } => {
+            ir_inlines_contain_evaluator_executable_state(content)
+        }
+        IrNode::Blockquote { content, .. } => {
+            ir_nodes_contain_evaluator_executable_state(content)
+        }
+        IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => items
+            .iter()
+            .any(|item| ir_nodes_contain_evaluator_executable_state(&item.nodes)),
+        IrNode::Table { header, rows, .. } => {
+            ir_table_row_contains_evaluator_executable_state(header)
+                || rows
+                    .iter()
+                    .any(ir_table_row_contains_evaluator_executable_state)
+        }
+        IrNode::Component { component } => {
+            ir_component_contains_evaluator_executable_state(component)
+        }
+        IrNode::PageMarginContent { children, .. } => {
+            ir_nodes_contain_evaluator_executable_state(children)
+        }
+        IrNode::CodeBlock { .. }
+        | IrNode::RawHtml { .. }
+        | IrNode::TargetSpecificContent { .. }
+        | IrNode::ThematicBreak { .. }
+        | IrNode::PageBreak { .. }
+        | IrNode::Math { .. } => false,
+    }
+}
+
+#[cfg(test)]
+fn ir_table_row_contains_evaluator_executable_state(row: &IrTableRow) -> bool {
+    row.cells
+        .iter()
+        .any(|cell| ir_inlines_contain_evaluator_executable_state(&cell.content))
+}
+
+#[cfg(test)]
+fn ir_inlines_contain_evaluator_executable_state(inlines: &[IrInline]) -> bool {
+    inlines
+        .iter()
+        .any(ir_inline_contains_evaluator_executable_state)
+}
+
+#[cfg(test)]
+fn ir_inline_contains_evaluator_executable_state(inline: &IrInline) -> bool {
+    match inline {
+        IrInline::DirectiveCall { .. } | IrInline::ChainedDirectiveCall { .. } => true,
+        IrInline::Emphasis { content, .. }
+        | IrInline::Strong { content, .. }
+        | IrInline::TextSize { content, .. }
+        | IrInline::TextCase { content, .. }
+        | IrInline::TextVariant { content, .. }
+        | IrInline::TextScript { content, .. }
+        | IrInline::TextColor { content, .. }
+        | IrInline::Underline { content, .. }
+        | IrInline::Overline { content, .. }
+        | IrInline::Strikethrough { content, .. }
+        | IrInline::Link { content, .. }
+        | IrInline::Image { content, .. } => {
+            ir_inlines_contain_evaluator_executable_state(content)
+        }
+        IrInline::InlineCollapse { full, short, .. } => {
+            ir_inlines_contain_evaluator_executable_state(full)
+                || ir_inlines_contain_evaluator_executable_state(short)
+        }
+        IrInline::Text { .. }
+        | IrInline::Keybinding { .. }
+        | IrInline::Whitespace { .. }
+        | IrInline::PageCounter { .. }
+        | IrInline::PageNumberFormat { .. }
+        | IrInline::PageNumberReset { .. }
+        | IrInline::LastHeading { .. }
+        | IrInline::ExplicitError { .. }
+        | IrInline::Code { .. }
+        | IrInline::SoftBreak { .. }
+        | IrInline::HardBreak { .. }
+        | IrInline::RawHtml { .. }
+        | IrInline::TargetSpecificContent { .. } => false,
+    }
+}
+
+#[cfg(test)]
+fn ir_component_contains_evaluator_executable_state(component: &IrComponent) -> bool {
+    match component {
+        IrComponent::Stacked(component) => {
+            ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::Container(component) => {
+            ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::Landscape(component) => {
+            ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::Clip(component) => {
+            ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::Box(component) => {
+            component.title.as_ref().is_some_and(|title| {
+                ir_inlines_contain_evaluator_executable_state(title)
+            }) || ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::Collapse(component) => {
+            ir_inlines_contain_evaluator_executable_state(&component.title)
+                || ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::Todo(component) => {
+            ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::SpeakerNote(component) => {
+            ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::Fragment(component) => {
+            ir_nodes_contain_evaluator_executable_state(&component.children)
+        }
+        IrComponent::ExplicitError(_) => false,
     }
 }
 
@@ -3480,11 +3695,12 @@ impl Evaluator {
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
-    /// Hybrid frontend evaluation used only by the normal compiler pipeline.
+    /// Normal frontend evaluation used by the compiler pipeline.
     ///
-    /// The top-level loop is intentionally source ordered and owns one
-    /// EvaluationContext. A declaration is therefore visible only after its
-    /// source position, exactly like the legacy IrDocument evaluator.
+    /// One evaluator-owned borrowed invocation boundary now replaces the
+    /// stage-2 selector ladder. The route only decides which transitional
+    /// syntax bridge is needed; semantic ownership/precedence remains in the
+    /// existing block-call/chain dispatcher.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_frontend_with_context(
         &self,
@@ -3501,239 +3717,33 @@ impl Evaluator {
 
         let mut nodes = Vec::new();
         for block in &document.nodes {
-            match ast_to_ir::lower_top_level_function_declaration(
+            if let Some(invocation) = FrontendInvocation::from_block(block) {
+                if let Some(evaluated) = self.evaluate_frontend_invocation(
+                    invocation,
+                    source_id,
+                    source_mode,
+                    evaluation_diagnostics,
+                    lowering_diagnostics,
+                    context,
+                ) {
+                    nodes.extend(evaluated);
+                    continue;
+                }
+            }
+
+            let Some(node) = ast_to_ir::lower_top_level_block(
                 block,
                 source_id,
                 lowering_diagnostics,
                 source_mode,
-            ) {
-                ast_to_ir::TopLevelFunctionDeclarationLowering::NotFunctionDeclaration => {
-                    match ast_to_ir::lower_top_level_call(
-                        block,
-                        source_id,
-                        lowering_diagnostics,
-                        source_mode,
-                    ) {
-                        ast_to_ir::TopLevelCallLowering::NotSelected => {
-                            match ast_to_ir::lower_top_level_chain(
-                                block,
-                                source_id,
-                                lowering_diagnostics,
-                                source_mode,
-                            ) {
-                                ast_to_ir::TopLevelChainLowering::NotSelected => {
-                                    match ast_to_ir::lower_top_level_let(
-                                        block,
-                                        source_id,
-                                        lowering_diagnostics,
-                                        source_mode,
-                                    ) {
-                                        ast_to_ir::TopLevelCallLowering::NotSelected => {
-                                            match ast_to_ir::lower_top_level_foreach(
-                                                block,
-                                                source_id,
-                                                lowering_diagnostics,
-                                                source_mode,
-                                            ) {
-                                                ast_to_ir::TopLevelCallLowering::NotSelected => {
-                                                    match ast_to_ir::lower_top_level_repeat(
-                                                        block,
-                                                        source_id,
-                                                        lowering_diagnostics,
-                                                        source_mode,
-                                                    ) {
-                                                        ast_to_ir::TopLevelCallLowering::NotSelected => {
-                                                            match ast_to_ir::lower_top_level_extend(
-                                                                block,
-                                                                source_id,
-                                                                lowering_diagnostics,
-                                                                source_mode,
-                                                            ) {
-                                                                ast_to_ir::TopLevelCallLowering::NotSelected => {
-                                                                    let Some(node) =
-                                                                        ast_to_ir::lower_top_level_block(
-                                                                            block,
-                                                                            source_id,
-                                                                            lowering_diagnostics,
-                                                                            source_mode,
-                                                                        )
-                                                                    else {
-                                                                        continue;
-                                                                    };
-                                                                    nodes.extend(
-                                                                        self.evaluate_evidenced_structural_nodes(
-                                                                            std::slice::from_ref(&node),
-                                                                            evaluation_diagnostics,
-                                                                            context,
-                                                                        ),
-                                                                    );
-                                                                }
-                                                                ast_to_ir::TopLevelCallLowering::Invalid => {}
-                                                                ast_to_ir::TopLevelCallLowering::Call(call) => {
-                                                                    match self.evaluate_block_call(
-                                                                        &call.name,
-                                                                        Some(call.ordered_args.as_slice()),
-                                                                        &call.positional_args,
-                                                                        &call.named_args,
-                                                                        call.lambda_parameters.as_deref(),
-                                                                        call.body.as_deref(),
-                                                                        call.raw_body.as_ref(),
-                                                                        &call.span,
-                                                                        evaluation_diagnostics,
-                                                                        context,
-                                                                    ) {
-                                                                        CallOutcome::Value(IrValue::Content(
-                                                                            evaluated,
-                                                                        )) => {
-                                                                            nodes.extend(evaluated);
-                                                                        }
-                                                                        CallOutcome::Value(_)
-                                                                        | CallOutcome::NoValue
-                                                                        | CallOutcome::Failed
-                                                                        | CallOutcome::Unresolved => {}
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                        ast_to_ir::TopLevelCallLowering::Invalid => {}
-                                                        ast_to_ir::TopLevelCallLowering::Call(call) => {
-                                                            match self.evaluate_block_call(
-                                                                &call.name,
-                                                                Some(call.ordered_args.as_slice()),
-                                                                &call.positional_args,
-                                                                &call.named_args,
-                                                                call.lambda_parameters.as_deref(),
-                                                                call.body.as_deref(),
-                                                                call.raw_body.as_ref(),
-                                                                &call.span,
-                                                                evaluation_diagnostics,
-                                                                context,
-                                                            ) {
-                                                                CallOutcome::Value(IrValue::Content(
-                                                                    evaluated,
-                                                                )) => {
-                                                                    nodes.extend(evaluated);
-                                                                }
-                                                                CallOutcome::Value(_)
-                                                                | CallOutcome::NoValue
-                                                                | CallOutcome::Failed
-                                                                | CallOutcome::Unresolved => {}
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                ast_to_ir::TopLevelCallLowering::Invalid => {}
-                                                ast_to_ir::TopLevelCallLowering::Call(call) => {
-                                                    match self.evaluate_block_call(
-                                                        &call.name,
-                                                        Some(call.ordered_args.as_slice()),
-                                                        &call.positional_args,
-                                                        &call.named_args,
-                                                        call.lambda_parameters.as_deref(),
-                                                        call.body.as_deref(),
-                                                        call.raw_body.as_ref(),
-                                                        &call.span,
-                                                        evaluation_diagnostics,
-                                                        context,
-                                                    ) {
-                                                        CallOutcome::Value(IrValue::Content(
-                                                            evaluated,
-                                                        )) => {
-                                                            nodes.extend(evaluated);
-                                                        }
-                                                        CallOutcome::Value(_)
-                                                        | CallOutcome::NoValue
-                                                        | CallOutcome::Failed
-                                                        | CallOutcome::Unresolved => {}
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        ast_to_ir::TopLevelCallLowering::Invalid => {}
-                                        ast_to_ir::TopLevelCallLowering::Call(call) => {
-                                            match self.evaluate_block_call(
-                                                &call.name,
-                                                Some(call.ordered_args.as_slice()),
-                                                &call.positional_args,
-                                                &call.named_args,
-                                                call.lambda_parameters.as_deref(),
-                                                call.body.as_deref(),
-                                                call.raw_body.as_ref(),
-                                                &call.span,
-                                                evaluation_diagnostics,
-                                                context,
-                                            ) {
-                                                CallOutcome::Value(IrValue::Content(evaluated)) => {
-                                                    nodes.extend(evaluated);
-                                                }
-                                                CallOutcome::Value(_)
-                                                | CallOutcome::NoValue
-                                                | CallOutcome::Failed
-                                                | CallOutcome::Unresolved => {}
-                                            }
-                                        }
-                                    }
-                                }
-                                ast_to_ir::TopLevelChainLowering::Invalid => {}
-                                ast_to_ir::TopLevelChainLowering::Chain(chain) => {
-                                    match self.evaluate_block_chain(
-                                        &chain.head,
-                                        &chain.chain,
-                                        chain.lambda_parameters.as_deref(),
-                                        &chain.body,
-                                        chain.raw_body.as_ref(),
-                                        &chain.span,
-                                        evaluation_diagnostics,
-                                        context,
-                                    ) {
-                                        CallOutcome::Value(IrValue::Content(evaluated)) => {
-                                            nodes.extend(evaluated);
-                                        }
-                                        CallOutcome::Value(_)
-                                        | CallOutcome::NoValue
-                                        | CallOutcome::Failed
-                                        | CallOutcome::Unresolved => {}
-                                    }
-                                }
-                            }
-                        }
-                        ast_to_ir::TopLevelCallLowering::Invalid => {}
-                        ast_to_ir::TopLevelCallLowering::Call(call) => {
-                            match self.evaluate_block_call(
-                                &call.name,
-                                Some(call.ordered_args.as_slice()),
-                                &call.positional_args,
-                                &call.named_args,
-                                call.lambda_parameters.as_deref(),
-                                call.body.as_deref(),
-                                call.raw_body.as_ref(),
-                                &call.span,
-                                evaluation_diagnostics,
-                                context,
-                            ) {
-                                CallOutcome::Value(IrValue::Content(evaluated)) => {
-                                    nodes.extend(evaluated);
-                                }
-                                CallOutcome::Value(_)
-                                | CallOutcome::NoValue
-                                | CallOutcome::Failed
-                                | CallOutcome::Unresolved => {}
-                            }
-                        }
-                    }
-                }
-                ast_to_ir::TopLevelFunctionDeclarationLowering::Invalid => {}
-                ast_to_ir::TopLevelFunctionDeclarationLowering::Declaration(declaration) => {
-                    self.handle_function_declaration(
-                        &declaration.name,
-                        &declaration.parameters,
-                        &declaration.body,
-                        &declaration.span,
-                        evaluation_diagnostics,
-                        context,
-                    );
-                }
-            }
+            ) else {
+                continue;
+            };
+            nodes.extend(self.evaluate_evidenced_structural_nodes(
+                std::slice::from_ref(&node),
+                evaluation_diagnostics,
+                context,
+            ));
         }
 
         (
@@ -3747,6 +3757,110 @@ impl Evaluator {
             std::mem::take(evaluation_diagnostics),
             std::mem::take(lowering_diagnostics),
         )
+    }
+
+    /// Route one parser-owned block invocation through a single frontend
+    /// boundary while preserving the established evaluator dispatch authority.
+    ///
+    /// This method performs no builtin/source-defined precedence decision.
+    /// Direct calls still enter `evaluate_block_call`; chains still enter
+    /// `evaluate_block_chain`. The only responsibility here is selecting the
+    /// already-evidenced migration bridge for this source shape.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_frontend_invocation(
+        &self,
+        invocation: FrontendInvocation<'_>,
+        source_id: SourceId,
+        source_mode: Mode,
+        evaluation_diagnostics: &mut Vec<Diagnostic>,
+        lowering_diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Option<Vec<IrNode>> {
+        match invocation.route() {
+            FrontendInvocationRoute::LegacyBridge => None,
+            FrontendInvocationRoute::FunctionDeclaration => {
+                match ast_to_ir::lower_top_level_function_declaration(
+                    invocation.block,
+                    source_id,
+                    lowering_diagnostics,
+                    source_mode,
+                ) {
+                    ast_to_ir::TopLevelFunctionDeclarationLowering::NotFunctionDeclaration => None,
+                    ast_to_ir::TopLevelFunctionDeclarationLowering::Invalid => Some(Vec::new()),
+                    ast_to_ir::TopLevelFunctionDeclarationLowering::Declaration(declaration) => {
+                        self.handle_function_declaration(
+                            &declaration.name,
+                            &declaration.parameters,
+                            &declaration.body,
+                            &declaration.span,
+                            evaluation_diagnostics,
+                            context,
+                        );
+                        Some(Vec::new())
+                    }
+                }
+            }
+            FrontendInvocationRoute::DirectCall => {
+                match ast_to_ir::lower_top_level_direct_call(
+                    invocation.block,
+                    source_id,
+                    lowering_diagnostics,
+                    source_mode,
+                ) {
+                    ast_to_ir::TopLevelCallLowering::NotSelected => None,
+                    ast_to_ir::TopLevelCallLowering::Invalid => Some(Vec::new()),
+                    ast_to_ir::TopLevelCallLowering::Call(call) => {
+                        let outcome = self.evaluate_block_call(
+                            &call.name,
+                            Some(call.ordered_args.as_slice()),
+                            &call.positional_args,
+                            &call.named_args,
+                            call.lambda_parameters.as_deref(),
+                            call.body.as_deref(),
+                            call.raw_body.as_ref(),
+                            &call.span,
+                            evaluation_diagnostics,
+                            context,
+                        );
+                        Some(match outcome {
+                            CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
+                            CallOutcome::Value(_)
+                            | CallOutcome::NoValue
+                            | CallOutcome::Failed
+                            | CallOutcome::Unresolved => Vec::new(),
+                        })
+                    }
+                }
+            }
+            FrontendInvocationRoute::Chain => match ast_to_ir::lower_top_level_chain(
+                invocation.block,
+                source_id,
+                lowering_diagnostics,
+                source_mode,
+            ) {
+                ast_to_ir::TopLevelChainLowering::NotSelected => None,
+                ast_to_ir::TopLevelChainLowering::Invalid => Some(Vec::new()),
+                ast_to_ir::TopLevelChainLowering::Chain(chain) => {
+                    let outcome = self.evaluate_block_chain(
+                        &chain.head,
+                        &chain.chain,
+                        chain.lambda_parameters.as_deref(),
+                        &chain.body,
+                        chain.raw_body.as_ref(),
+                        &chain.span,
+                        evaluation_diagnostics,
+                        context,
+                    );
+                    Some(match outcome {
+                        CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
+                        CallOutcome::Value(_)
+                        | CallOutcome::NoValue
+                        | CallOutcome::Failed
+                        | CallOutcome::Unresolved => Vec::new(),
+                    })
+                }
+            },
+        }
     }
 
     fn evaluate_with_context(
@@ -27743,6 +27857,132 @@ mod tests {
 
     fn span(start: usize, end: usize) -> SourceSpan {
         SourceSpan::new(SourceId(1), start, end)
+    }
+
+    fn frontend_invocation_block(
+        name: &str,
+        chain: Vec<FrontendCallSegment>,
+        lambda_header: Option<FrontendLambdaHeader>,
+    ) -> FrontendBlock {
+        let end = name.len().max(1);
+        FrontendBlock::DirectiveCall {
+            name: name.to_string(),
+            name_span: arkst_source::ByteSpan::new(0, end),
+            head_span: arkst_source::ByteSpan::new(0, end),
+            arguments: Vec::new(),
+            chain,
+            body: None,
+            raw_body: None,
+            lambda_header,
+            span: arkst_source::ByteSpan::new(0, end),
+        }
+    }
+
+    #[test]
+    fn frontend_invocation_boundary_owns_the_stage2_route_policy() {
+        let function = frontend_invocation_block("function", Vec::new(), None);
+        assert_eq!(
+            FrontendInvocation::from_block(&function).expect("directive").route(),
+            FrontendInvocationRoute::FunctionDeclaration
+        );
+
+        let direct = frontend_invocation_block("ordinary", Vec::new(), None);
+        assert_eq!(
+            FrontendInvocation::from_block(&direct).expect("directive").route(),
+            FrontendInvocationRoute::DirectCall
+        );
+
+        let contextual = frontend_invocation_block(
+            "repeat",
+            Vec::new(),
+            Some(FrontendLambdaHeader {
+                parameters: Vec::new(),
+                span: arkst_source::ByteSpan::new(0, 1),
+            }),
+        );
+        assert_eq!(
+            FrontendInvocation::from_block(&contextual)
+                .expect("directive")
+                .route(),
+            FrontendInvocationRoute::DirectCall
+        );
+
+        let chain = frontend_invocation_block(
+            "ordinary",
+            vec![FrontendCallSegment {
+                name: "tail".to_string(),
+                name_span: arkst_source::ByteSpan::new(2, 6),
+                arguments: Vec::new(),
+                span: arkst_source::ByteSpan::new(2, 6),
+            }],
+            None,
+        );
+        assert_eq!(
+            FrontendInvocation::from_block(&chain).expect("directive").route(),
+            FrontendInvocationRoute::Chain
+        );
+
+        let legacy = frontend_invocation_block(
+            "ordinary",
+            Vec::new(),
+            Some(FrontendLambdaHeader {
+                parameters: Vec::new(),
+                span: arkst_source::ByteSpan::new(0, 1),
+            }),
+        );
+        assert_eq!(
+            FrontendInvocation::from_block(&legacy).expect("directive").route(),
+            FrontendInvocationRoute::LegacyBridge
+        );
+    }
+
+    #[test]
+    fn final_document_guard_detects_nested_block_and_inline_executable_state() {
+        let clean = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "clean".to_string(),
+                    span: span(0, 5),
+                }],
+                span: span(0, 5),
+            }],
+            metadata: arkst_ir::IrMetadata::default(),
+        };
+        assert!(!final_document_contains_evaluator_executable_state(&clean));
+
+        let nested_block = IrDocument {
+            nodes: vec![IrNode::Blockquote {
+                content: vec![IrNode::FunctionCall {
+                    name: "still-executable".to_string(),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: None,
+                    raw_body: None,
+                    span: span(1, 4),
+                }],
+                span: span(0, 5),
+            }],
+            metadata: arkst_ir::IrMetadata::default(),
+        };
+        assert!(final_document_contains_evaluator_executable_state(&nested_block));
+
+        let nested_inline = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::DirectiveCall {
+                    name: "still-executable-inline".to_string(),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    body: None,
+                    span: span(1, 4),
+                }],
+                span: span(0, 5),
+            }],
+            metadata: arkst_ir::IrMetadata::default(),
+        };
+        assert!(final_document_contains_evaluator_executable_state(&nested_inline));
     }
 
     #[test]

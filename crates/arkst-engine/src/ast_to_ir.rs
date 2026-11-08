@@ -232,16 +232,15 @@ pub(crate) fn lower_top_level_function_declaration(
     }
 }
 
-fn is_contextual_lambda_directive(name: &str) -> bool {
-    matches!(name, "extend" | "let" | "foreach" | "repeat")
-}
-
-/// Recognize and lower one selected ordinary top-level block call without
-/// constructing its executable document-node carrier.
+/// Lower one evaluator-selected non-chained top-level block invocation through
+/// the shared transitional call payload.
 ///
-/// Chained calls and parser-contextual lambda directives stay on the
-/// transitional AST -> IR path until their own bounded migration slices.
-pub(crate) fn lower_top_level_call(
+/// The evaluator-owned `FrontendInvocation` boundary owns migration selection.
+/// This helper intentionally performs no builtin/source-defined dispatch and no
+/// contextual-directive classification; those semantics remain in the evaluator
+/// call dispatcher. It only converts an already-selected direct block call to
+/// the established transitional argument/body representation.
+pub(crate) fn lower_top_level_direct_call(
     block: &Block,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
@@ -261,11 +260,7 @@ pub(crate) fn lower_top_level_call(
         return TopLevelCallLowering::NotSelected;
     };
 
-    if name == "function"
-        || !chain.is_empty()
-        || is_contextual_lambda_directive(name)
-        || lambda_header.is_some()
-    {
+    if name == "function" || !chain.is_empty() {
         return TopLevelCallLowering::NotSelected;
     }
 
@@ -331,186 +326,11 @@ pub(crate) fn lower_top_level_chain(
     }
 }
 
-/// Recognize and lower only a non-chained top-level `.let` call without
-/// constructing the executable FunctionCall carrier used by the legacy path.
+/// Lower one frontend block through the established compatibility IR bridge.
 ///
-/// Other parser-contextual lambda directives intentionally remain
-/// transitional until their own bounded migration slices.
-pub(crate) fn lower_top_level_let(
-    block: &Block,
-    source_id: SourceId,
-    diagnostics: &mut Vec<Diagnostic>,
-    source_mode: Mode,
-) -> TopLevelCallLowering {
-    let Block::DirectiveCall {
-        name,
-        arguments,
-        chain,
-        body,
-        raw_body,
-        lambda_header,
-        span,
-        ..
-    } = block
-    else {
-        return TopLevelCallLowering::NotSelected;
-    };
-
-    if name != "let" || !chain.is_empty() {
-        return TopLevelCallLowering::NotSelected;
-    }
-
-    match lower_simple_block_call(
-        name,
-        arguments,
-        body.as_deref(),
-        raw_body.as_ref(),
-        lambda_header.as_ref(),
-        span,
-        source_id,
-        diagnostics,
-        source_mode,
-    ) {
-        Some(call) => TopLevelCallLowering::Call(Box::new(call)),
-        None => TopLevelCallLowering::Invalid,
-    }
-}
-
-/// Recognize and lower only a non-chained top-level `.foreach` call without
-/// constructing the executable FunctionCall carrier used by the legacy path.
-///
-/// Other parser-contextual lambda directives intentionally remain
-/// transitional until their own bounded migration slices.
-pub(crate) fn lower_top_level_foreach(
-    block: &Block,
-    source_id: SourceId,
-    diagnostics: &mut Vec<Diagnostic>,
-    source_mode: Mode,
-) -> TopLevelCallLowering {
-    let Block::DirectiveCall {
-        name,
-        arguments,
-        chain,
-        body,
-        raw_body,
-        lambda_header,
-        span,
-        ..
-    } = block
-    else {
-        return TopLevelCallLowering::NotSelected;
-    };
-
-    if name != "foreach" || !chain.is_empty() {
-        return TopLevelCallLowering::NotSelected;
-    }
-
-    match lower_simple_block_call(
-        name,
-        arguments,
-        body.as_deref(),
-        raw_body.as_ref(),
-        lambda_header.as_ref(),
-        span,
-        source_id,
-        diagnostics,
-        source_mode,
-    ) {
-        Some(call) => TopLevelCallLowering::Call(Box::new(call)),
-        None => TopLevelCallLowering::Invalid,
-    }
-}
-
-/// Recognize and lower only a non-chained top-level `.repeat` call without
-/// constructing the executable FunctionCall carrier used by the legacy path.
-///
-/// `.extend` intentionally remains transitional until its own bounded
-/// migration slice.
-pub(crate) fn lower_top_level_repeat(
-    block: &Block,
-    source_id: SourceId,
-    diagnostics: &mut Vec<Diagnostic>,
-    source_mode: Mode,
-) -> TopLevelCallLowering {
-    let Block::DirectiveCall {
-        name,
-        arguments,
-        chain,
-        body,
-        raw_body,
-        lambda_header,
-        span,
-        ..
-    } = block
-    else {
-        return TopLevelCallLowering::NotSelected;
-    };
-
-    if name != "repeat" || !chain.is_empty() {
-        return TopLevelCallLowering::NotSelected;
-    }
-
-    match lower_simple_block_call(
-        name,
-        arguments,
-        body.as_deref(),
-        raw_body.as_ref(),
-        lambda_header.as_ref(),
-        span,
-        source_id,
-        diagnostics,
-        source_mode,
-    ) {
-        Some(call) => TopLevelCallLowering::Call(Box::new(call)),
-        None => TopLevelCallLowering::Invalid,
-    }
-}
-
-/// Recognize and lower only a non-chained top-level `.extend` call without
-/// constructing the executable FunctionCall carrier used by the legacy path.
-pub(crate) fn lower_top_level_extend(
-    block: &Block,
-    source_id: SourceId,
-    diagnostics: &mut Vec<Diagnostic>,
-    source_mode: Mode,
-) -> TopLevelCallLowering {
-    let Block::DirectiveCall {
-        name,
-        arguments,
-        chain,
-        body,
-        raw_body,
-        lambda_header,
-        span,
-        ..
-    } = block
-    else {
-        return TopLevelCallLowering::NotSelected;
-    };
-
-    if name != "extend" || !chain.is_empty() {
-        return TopLevelCallLowering::NotSelected;
-    }
-
-    match lower_simple_block_call(
-        name,
-        arguments,
-        body.as_deref(),
-        raw_body.as_ref(),
-        lambda_header.as_ref(),
-        span,
-        source_id,
-        diagnostics,
-        source_mode,
-    ) {
-        Some(call) => TopLevelCallLowering::Call(Box::new(call)),
-        None => TopLevelCallLowering::Invalid,
-    }
-}
-
-/// Lower one non-selected top-level frontend block through the established IR
-/// bridge. The hybrid evaluator calls this only after excluding the direct
-/// `.function` declaration, ordinary-call, block-chain, `.let`, `.foreach`, `.repeat`, and `.extend` paths.
+/// The evaluator-owned `FrontendInvocation` boundary decides whether a block
+/// invocation can use the shared direct bridge first. This fallback remains for
+/// non-invocation blocks and explicitly unmigrated invocation shapes.
 pub(crate) fn lower_top_level_block(
     block: &Block,
     source_id: SourceId,
@@ -1714,57 +1534,55 @@ mod tests {
     }
 
     #[test]
-    fn top_level_simple_call_bridge_matches_legacy_function_call_shape() {
-        let source = ".unknown {first} key:{둘}\n";
-        let document = arkst_markdown::parse_qd(source);
-        let mut direct_diagnostics = Vec::new();
-        let lowering = lower_top_level_call(
-            &document.nodes[0],
-            source_id(),
-            &mut direct_diagnostics,
-            Mode::Quarkdown,
-        );
+    fn top_level_direct_call_bridge_matches_legacy_shapes() {
+        for (source, expected_name) in [
+            (".unknown {first} key:{둘}\n", "unknown"),
+            (".let {Quarkdown}\n    name:\n    .uppercase {.name}\n", "let"),
+            (".foreach {2..4}\n    number:\n    .number\n", "foreach"),
+            (".repeat {3}\n    number:\n    .number\n", "repeat"),
+            (
+                ".extend {greet} where:{name: .name}\n    name:\n    extended .name\n",
+                "extend",
+            ),
+        ] {
+            let document = arkst_markdown::parse_qd(source);
+            let mut direct_diagnostics = Vec::new();
+            let lowering = lower_top_level_direct_call(
+                &document.nodes[0],
+                source_id(),
+                &mut direct_diagnostics,
+                Mode::Quarkdown,
+            );
 
-        assert!(direct_diagnostics.is_empty(), "{direct_diagnostics:?}");
-        let TopLevelCallLowering::Call(call) = lowering else {
-            panic!("expected direct top-level call payload")
-        };
-        assert_eq!(call.name, "unknown");
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.named_args.len(), 1);
-        assert_eq!(call.ordered_args.len(), 2);
-        assert!(matches!(
-            &call.ordered_args[0],
-            IrCallArgument::Positional { index: 0, .. }
-        ));
-        assert!(matches!(
-            &call.ordered_args[1],
-            IrCallArgument::Named { index: 0, .. }
-        ));
+            assert!(direct_diagnostics.is_empty(), "{source:?}: {direct_diagnostics:?}");
+            let TopLevelCallLowering::Call(call) = lowering else {
+                panic!("expected shared direct top-level call payload for {source:?}")
+            };
+            assert_eq!(call.name, expected_name, "{source:?}");
 
-        let direct_node = (*call).into_ir_node();
-        let mut legacy_diagnostics = Vec::new();
-        let legacy_node = lower_top_level_block(
-            &document.nodes[0],
-            source_id(),
-            &mut legacy_diagnostics,
-            Mode::Quarkdown,
-        )
-        .expect("legacy lowering");
-        assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
-        assert_eq!(direct_node, legacy_node);
+            let direct_node = (*call).into_ir_node();
+            let mut legacy_diagnostics = Vec::new();
+            let legacy_node = lower_top_level_block(
+                &document.nodes[0],
+                source_id(),
+                &mut legacy_diagnostics,
+                Mode::Quarkdown,
+            )
+            .expect("legacy lowering");
+            assert!(legacy_diagnostics.is_empty(), "{source:?}: {legacy_diagnostics:?}");
+            assert_eq!(direct_node, legacy_node, "{source:?}");
+        }
     }
 
     #[test]
-    fn top_level_simple_call_bridge_leaves_chains_and_lambda_directives_transitional() {
+    fn top_level_direct_call_bridge_rejects_function_declarations_and_chains() {
         for source in [
+            ".function {greet}\n    name:\n    Hello .name\n",
             ".range {1} {3}::size\n",
-            ".repeat {2}\n    body\n",
-            ".let {value}\n    body\n",
         ] {
             let document = arkst_markdown::parse_qd(source);
             let mut diagnostics = Vec::new();
-            let lowering = lower_top_level_call(
+            let lowering = lower_top_level_direct_call(
                 &document.nodes[0],
                 source_id(),
                 &mut diagnostics,
@@ -1839,275 +1657,6 @@ mod tests {
             );
             assert!(
                 matches!(lowering, TopLevelChainLowering::NotSelected),
-                "{source:?}"
-            );
-            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
-        }
-    }
-
-    #[test]
-    fn top_level_let_bridge_matches_legacy_function_call_shape() {
-        let source = ".let {Quarkdown}\n    name:\n    .uppercase {.name}\n";
-        let document = arkst_markdown::parse_qd(source);
-        let mut direct_diagnostics = Vec::new();
-        let lowering = lower_top_level_let(
-            &document.nodes[0],
-            source_id(),
-            &mut direct_diagnostics,
-            Mode::Quarkdown,
-        );
-
-        assert!(direct_diagnostics.is_empty(), "{direct_diagnostics:?}");
-        let TopLevelCallLowering::Call(call) = lowering else {
-            panic!("expected direct top-level let payload")
-        };
-        assert_eq!(call.name, "let");
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.ordered_args.len(), 1);
-        assert_eq!(
-            call.lambda_parameters
-                .as_ref()
-                .expect("explicit let lambda parameters")
-                .iter()
-                .map(|parameter| parameter.name.as_str())
-                .collect::<Vec<_>>(),
-            ["name"]
-        );
-        assert!(call.body.as_ref().is_some_and(|body| !body.is_empty()));
-
-        let direct_node = (*call).into_ir_node();
-        let mut legacy_diagnostics = Vec::new();
-        let legacy_node = lower_top_level_block(
-            &document.nodes[0],
-            source_id(),
-            &mut legacy_diagnostics,
-            Mode::Quarkdown,
-        )
-        .expect("legacy lowering");
-        assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
-        assert_eq!(direct_node, legacy_node);
-    }
-
-    #[test]
-    fn top_level_let_bridge_leaves_other_contextual_directives_and_chains_unselected() {
-        for source in [
-            ".extend {greet} where:{name: .name}\n    name:\n    extended .name\n",
-            ".foreach {2..4}\n    number:\n    .number\n",
-            ".repeat {3}\n    n:\n    .n\n",
-            ".let {outer}::uppercase\n",
-        ] {
-            let document = arkst_markdown::parse_qd(source);
-            let mut diagnostics = Vec::new();
-            let lowering = lower_top_level_let(
-                &document.nodes[0],
-                source_id(),
-                &mut diagnostics,
-                Mode::Quarkdown,
-            );
-            assert!(
-                matches!(lowering, TopLevelCallLowering::NotSelected),
-                "{source:?}"
-            );
-            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
-        }
-    }
-
-    #[test]
-    fn top_level_foreach_bridge_matches_legacy_function_call_shape() {
-        let source = ".foreach {2..4}\n    number:\n    .number\n";
-        let document = arkst_markdown::parse_qd(source);
-        let mut direct_diagnostics = Vec::new();
-        let lowering = lower_top_level_foreach(
-            &document.nodes[0],
-            source_id(),
-            &mut direct_diagnostics,
-            Mode::Quarkdown,
-        );
-
-        assert!(direct_diagnostics.is_empty(), "{direct_diagnostics:?}");
-        let TopLevelCallLowering::Call(call) = lowering else {
-            panic!("expected direct top-level foreach payload")
-        };
-        assert_eq!(call.name, "foreach");
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.ordered_args.len(), 1);
-        assert_eq!(
-            call.lambda_parameters
-                .as_ref()
-                .expect("explicit foreach lambda parameters")
-                .iter()
-                .map(|parameter| parameter.name.as_str())
-                .collect::<Vec<_>>(),
-            ["number"]
-        );
-        assert!(call.body.as_ref().is_some_and(|body| !body.is_empty()));
-
-        let direct_node = (*call).into_ir_node();
-        let mut legacy_diagnostics = Vec::new();
-        let legacy_node = lower_top_level_block(
-            &document.nodes[0],
-            source_id(),
-            &mut legacy_diagnostics,
-            Mode::Quarkdown,
-        )
-        .expect("legacy lowering");
-        assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
-        assert_eq!(direct_node, legacy_node);
-    }
-
-    #[test]
-    fn top_level_foreach_bridge_leaves_other_contextual_directives_and_chains_unselected() {
-        for source in [
-            ".extend {greet} where:{name: .name}\n    name:\n    extended .name\n",
-            ".repeat {3}\n    n:\n    .n\n",
-            ".let {value}\n    body\n",
-            ".foreach {2..4}::uppercase\n",
-        ] {
-            let document = arkst_markdown::parse_qd(source);
-            let mut diagnostics = Vec::new();
-            let lowering = lower_top_level_foreach(
-                &document.nodes[0],
-                source_id(),
-                &mut diagnostics,
-                Mode::Quarkdown,
-            );
-            assert!(
-                matches!(lowering, TopLevelCallLowering::NotSelected),
-                "{source:?}"
-            );
-            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
-        }
-    }
-
-    #[test]
-    fn top_level_repeat_bridge_matches_legacy_function_call_shape() {
-        let source = ".repeat {3}\n    number:\n    .number\n";
-        let document = arkst_markdown::parse_qd(source);
-        let mut direct_diagnostics = Vec::new();
-        let lowering = lower_top_level_repeat(
-            &document.nodes[0],
-            source_id(),
-            &mut direct_diagnostics,
-            Mode::Quarkdown,
-        );
-
-        assert!(direct_diagnostics.is_empty(), "{direct_diagnostics:?}");
-        let TopLevelCallLowering::Call(call) = lowering else {
-            panic!("expected direct top-level repeat payload")
-        };
-        assert_eq!(call.name, "repeat");
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.ordered_args.len(), 1);
-        assert_eq!(
-            call.lambda_parameters
-                .as_ref()
-                .expect("explicit repeat lambda parameters")
-                .iter()
-                .map(|parameter| parameter.name.as_str())
-                .collect::<Vec<_>>(),
-            ["number"]
-        );
-        assert!(call.body.as_ref().is_some_and(|body| !body.is_empty()));
-
-        let direct_node = (*call).into_ir_node();
-        let mut legacy_diagnostics = Vec::new();
-        let legacy_node = lower_top_level_block(
-            &document.nodes[0],
-            source_id(),
-            &mut legacy_diagnostics,
-            Mode::Quarkdown,
-        )
-        .expect("legacy lowering");
-        assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
-        assert_eq!(direct_node, legacy_node);
-    }
-
-    #[test]
-    fn top_level_repeat_bridge_leaves_extend_and_chains_unselected() {
-        for source in [
-            ".extend {greet} where:{name: .name}\n    name:\n    extended .name\n",
-            ".foreach {1..3}\n    item:\n    .item\n",
-            ".let {value}\n    body\n",
-            ".repeat {3}::uppercase\n",
-        ] {
-            let document = arkst_markdown::parse_qd(source);
-            let mut diagnostics = Vec::new();
-            let lowering = lower_top_level_repeat(
-                &document.nodes[0],
-                source_id(),
-                &mut diagnostics,
-                Mode::Quarkdown,
-            );
-            assert!(
-                matches!(lowering, TopLevelCallLowering::NotSelected),
-                "{source:?}"
-            );
-            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
-        }
-    }
-
-    #[test]
-    fn top_level_extend_bridge_matches_legacy_function_call_shape() {
-        let source = ".extend {greet} where:{name: .name}\n    name:\n    extended .name\n";
-        let document = arkst_markdown::parse_qd(source);
-        let mut direct_diagnostics = Vec::new();
-        let lowering = lower_top_level_extend(
-            &document.nodes[0],
-            source_id(),
-            &mut direct_diagnostics,
-            Mode::Quarkdown,
-        );
-
-        assert!(direct_diagnostics.is_empty(), "{direct_diagnostics:?}");
-        let TopLevelCallLowering::Call(call) = lowering else {
-            panic!("expected direct top-level extend payload")
-        };
-        assert_eq!(call.name, "extend");
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.named_args.len(), 1);
-        assert_eq!(call.ordered_args.len(), 2);
-        assert_eq!(
-            call.lambda_parameters
-                .as_ref()
-                .expect("explicit extend wrapper parameters")
-                .iter()
-                .map(|parameter| parameter.name.as_str())
-                .collect::<Vec<_>>(),
-            ["name"]
-        );
-        assert!(call.body.as_ref().is_some_and(|body| !body.is_empty()));
-
-        let direct_node = (*call).into_ir_node();
-        let mut legacy_diagnostics = Vec::new();
-        let legacy_node = lower_top_level_block(
-            &document.nodes[0],
-            source_id(),
-            &mut legacy_diagnostics,
-            Mode::Quarkdown,
-        )
-        .expect("legacy lowering");
-        assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
-        assert_eq!(direct_node, legacy_node);
-    }
-
-    #[test]
-    fn top_level_extend_bridge_leaves_other_contextual_directives_and_chains_unselected() {
-        for source in [
-            ".let {value}\n    body\n",
-            ".foreach {1..3}\n    item:\n    .item\n",
-            ".repeat {3}\n    item:\n    .item\n",
-            ".extend {greet}::uppercase\n",
-        ] {
-            let document = arkst_markdown::parse_qd(source);
-            let mut diagnostics = Vec::new();
-            let lowering = lower_top_level_extend(
-                &document.nodes[0],
-                source_id(),
-                &mut diagnostics,
-                Mode::Quarkdown,
-            );
-            assert!(
-                matches!(lowering, TopLevelCallLowering::NotSelected),
                 "{source:?}"
             );
             assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
