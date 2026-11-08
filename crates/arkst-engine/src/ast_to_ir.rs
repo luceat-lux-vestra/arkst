@@ -1537,7 +1537,10 @@ mod tests {
     fn top_level_direct_call_bridge_matches_legacy_shapes() {
         for (source, expected_name) in [
             (".unknown {first} key:{둘}\n", "unknown"),
-            (".let {Quarkdown}\n    name:\n    .uppercase {.name}\n", "let"),
+            (
+                ".let {Quarkdown}\n    name:\n    .uppercase {.name}\n",
+                "let",
+            ),
             (".foreach {2..4}\n    number:\n    .number\n", "foreach"),
             (".repeat {3}\n    number:\n    .number\n", "repeat"),
             (
@@ -1554,7 +1557,10 @@ mod tests {
                 Mode::Quarkdown,
             );
 
-            assert!(direct_diagnostics.is_empty(), "{source:?}: {direct_diagnostics:?}");
+            assert!(
+                direct_diagnostics.is_empty(),
+                "{source:?}: {direct_diagnostics:?}"
+            );
             let TopLevelCallLowering::Call(call) = lowering else {
                 panic!("expected shared direct top-level call payload for {source:?}")
             };
@@ -1569,7 +1575,10 @@ mod tests {
                 Mode::Quarkdown,
             )
             .expect("legacy lowering");
-            assert!(legacy_diagnostics.is_empty(), "{source:?}: {legacy_diagnostics:?}");
+            assert!(
+                legacy_diagnostics.is_empty(),
+                "{source:?}: {legacy_diagnostics:?}"
+            );
             assert_eq!(direct_node, legacy_node, "{source:?}");
         }
     }

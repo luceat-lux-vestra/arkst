@@ -686,9 +686,7 @@ fn ir_node_contains_evaluator_executable_state(node: &IrNode) -> bool {
         IrNode::Heading { content, .. } | IrNode::Paragraph { content, .. } => {
             ir_inlines_contain_evaluator_executable_state(content)
         }
-        IrNode::Blockquote { content, .. } => {
-            ir_nodes_contain_evaluator_executable_state(content)
-        }
+        IrNode::Blockquote { content, .. } => ir_nodes_contain_evaluator_executable_state(content),
         IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => items
             .iter()
             .any(|item| ir_nodes_contain_evaluator_executable_state(&item.nodes)),
@@ -742,9 +740,7 @@ fn ir_inline_contains_evaluator_executable_state(inline: &IrInline) -> bool {
         | IrInline::Overline { content, .. }
         | IrInline::Strikethrough { content, .. }
         | IrInline::Link { content, .. }
-        | IrInline::Image { content, .. } => {
-            ir_inlines_contain_evaluator_executable_state(content)
-        }
+        | IrInline::Image { content, .. } => ir_inlines_contain_evaluator_executable_state(content),
         IrInline::InlineCollapse { full, short, .. } => {
             ir_inlines_contain_evaluator_executable_state(full)
                 || ir_inlines_contain_evaluator_executable_state(short)
@@ -781,9 +777,11 @@ fn ir_component_contains_evaluator_executable_state(component: &IrComponent) -> 
             ir_nodes_contain_evaluator_executable_state(&component.children)
         }
         IrComponent::Box(component) => {
-            component.title.as_ref().is_some_and(|title| {
-                ir_inlines_contain_evaluator_executable_state(title)
-            }) || ir_nodes_contain_evaluator_executable_state(&component.children)
+            component
+                .title
+                .as_ref()
+                .is_some_and(|title| ir_inlines_contain_evaluator_executable_state(title))
+                || ir_nodes_contain_evaluator_executable_state(&component.children)
         }
         IrComponent::Collapse(component) => {
             ir_inlines_contain_evaluator_executable_state(&component.title)
@@ -27882,13 +27880,17 @@ mod tests {
     fn frontend_invocation_boundary_owns_the_stage2_route_policy() {
         let function = frontend_invocation_block("function", Vec::new(), None);
         assert_eq!(
-            FrontendInvocation::from_block(&function).expect("directive").route(),
+            FrontendInvocation::from_block(&function)
+                .expect("directive")
+                .route(),
             FrontendInvocationRoute::FunctionDeclaration
         );
 
         let direct = frontend_invocation_block("ordinary", Vec::new(), None);
         assert_eq!(
-            FrontendInvocation::from_block(&direct).expect("directive").route(),
+            FrontendInvocation::from_block(&direct)
+                .expect("directive")
+                .route(),
             FrontendInvocationRoute::DirectCall
         );
 
@@ -27918,7 +27920,9 @@ mod tests {
             None,
         );
         assert_eq!(
-            FrontendInvocation::from_block(&chain).expect("directive").route(),
+            FrontendInvocation::from_block(&chain)
+                .expect("directive")
+                .route(),
             FrontendInvocationRoute::Chain
         );
 
@@ -27931,7 +27935,9 @@ mod tests {
             }),
         );
         assert_eq!(
-            FrontendInvocation::from_block(&legacy).expect("directive").route(),
+            FrontendInvocation::from_block(&legacy)
+                .expect("directive")
+                .route(),
             FrontendInvocationRoute::LegacyBridge
         );
     }
@@ -27966,7 +27972,9 @@ mod tests {
             }],
             metadata: arkst_ir::IrMetadata::default(),
         };
-        assert!(final_document_contains_evaluator_executable_state(&nested_block));
+        assert!(final_document_contains_evaluator_executable_state(
+            &nested_block
+        ));
 
         let nested_inline = IrDocument {
             nodes: vec![IrNode::Paragraph {
@@ -27982,7 +27990,9 @@ mod tests {
             }],
             metadata: arkst_ir::IrMetadata::default(),
         };
-        assert!(final_document_contains_evaluator_executable_state(&nested_inline));
+        assert!(final_document_contains_evaluator_executable_state(
+            &nested_inline
+        ));
     }
 
     #[test]
