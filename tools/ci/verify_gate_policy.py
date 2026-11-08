@@ -42,6 +42,7 @@ class Job:
     if_expression: str | None = None
     needs: tuple[str, ...] = ()
     matrix: dict[str, list[str]] = field(default_factory=dict)
+    uses: str | None = None
     source: str = ""
 
 
@@ -230,6 +231,7 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
         if_expression: str | None = None
         needs: tuple[str, ...] = ()
         matrix: dict[str, list[str]] = {}
+        uses: str | None = None
         matrix_indent = None
         for block_raw in block:
             block_clean = _strip_comment(block_raw)
@@ -254,6 +256,9 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
                         needs = (_scalar(raw_needs),)
                     else:
                         needs = ("<block-needs>",)
+                uses_match = re.match(r"^\s{4}uses:\s*(.+)$", block_clean)
+                if uses_match:
+                    uses = _scalar(uses_match.group(1))
             if re.match(r"^\s{6}matrix:\s*$", block_clean):
                 matrix_indent = 6
                 continue
@@ -275,6 +280,7 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
             if_expression=if_expression,
             needs=needs,
             matrix=matrix,
+            uses=uses,
             source="\n".join([raw, *block]),
         )
         idx = end
@@ -336,6 +342,49 @@ def discover_workflows(root: Path) -> dict[str, Workflow]:
     return workflows
 
 
+def _effective_pr_jobs(workflows: dict[str, Workflow]) -> set[tuple[str, str]]:
+    """Resolve PR-time producer jobs through same-repository reusable workflows."""
+
+    actual: set[tuple[str, str]] = set()
+
+    def visit(workflow_path: str, stack: tuple[str, ...]) -> None:
+        if workflow_path in stack:
+            cycle = " -> ".join([*stack, workflow_path])
+            raise PolicyError(f"reusable workflow cycle in PR validation DAG: {cycle}")
+        workflow = workflows.get(workflow_path)
+        if workflow is None:
+            raise PolicyError(f"reusable workflow target is missing: {workflow_path}")
+
+        for job_id, job in workflow.jobs.items():
+            if job.uses is None:
+                actual.add((workflow_path, job_id))
+                continue
+
+            if not job.uses.startswith("./.github/workflows/"):
+                raise PolicyError(
+                    f"{workflow_path}#{job_id}: PR-time reusable workflow must be "
+                    f"same-repository ./.github/workflows/*, got {job.uses!r}"
+                )
+            target = job.uses[2:]
+            called = workflows.get(target)
+            if called is None:
+                raise PolicyError(
+                    f"{workflow_path}#{job_id}: reusable workflow target not found: {target}"
+                )
+            if "workflow_call" not in called.triggers:
+                raise PolicyError(
+                    f"{workflow_path}#{job_id}: reusable workflow target {target} "
+                    "does not declare workflow_call"
+                )
+            visit(target, (*stack, workflow_path))
+
+    for workflow in workflows.values():
+        if workflow.is_pr_time:
+            visit(workflow.path, ())
+
+    return actual
+
+
 def _producer_contexts(producer: dict, job: Job) -> list[str]:
     axis = producer.get("matrix_axis")
     if axis is None:
@@ -360,12 +409,7 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
     workflows = discover_workflows(root)
     producers = {(item["workflow"], item["job"]): item for item in policy["producer"]}
 
-    actual_pr_jobs: set[tuple[str, str]] = set()
-    for workflow in workflows.values():
-        if not workflow.is_pr_time:
-            continue
-        for job_id in workflow.jobs:
-            actual_pr_jobs.add((workflow.path, job_id))
+    actual_pr_jobs = _effective_pr_jobs(workflows)
 
     policy_jobs = set(producers)
     missing_policy = sorted(actual_pr_jobs - policy_jobs)

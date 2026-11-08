@@ -1,6 +1,7 @@
 name: Security Audit
 
 on:
+  workflow_call:
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
@@ -10,13 +11,6 @@ on:
         required: false
         type: boolean
         default: false
-  pull_request:
-    paths:
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - ".github/workflows/security.yml"
-      - ".github/actions/cargo-deny-prebuilt/action.yml"
-
 permissions:
   contents: read
 
