@@ -94,9 +94,11 @@ jobs:
             fi
           fi
 
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-          echo "run_docs=$run_docs" >> "$GITHUB_OUTPUT"
-          echo "run_security=$run_security" >> "$GITHUB_OUTPUT"
+          {
+            echo "docs_only=$docs_only"
+            echo "run_docs=$run_docs"
+            echo "run_security=$run_security"
+          } >> "$GITHUB_OUTPUT"
           echo "docs-only fast path: $docs_only"
           echo "docs checks: $run_docs"
           echo "security audit: $run_security"
