@@ -5841,18 +5841,18 @@ impl Evaluator {
                 if binding.extension.is_some() {
                     return CallOutcome::Unresolved;
                 }
-                if matches!(&binding.parameters, LambdaParameters::Explicit(_)) {
-                    return self.evaluate_user_function_with_frontend_candidates(
-                        &binding,
-                        frontend,
-                        *span,
-                        diagnostics,
-                        context,
-                    );
-                }
-                // Headerless callables remain on the legacy path in Phase 3A.
-                // Unresolved rolls back this speculative call before retry.
-                return CallOutcome::Unresolved;
+                // Phase 3A/3B moved explicit arguments and block bodies onto
+                // evaluator-owned frontend candidates. Phase 3C extends that
+                // same boundary to headerless source-defined callables; the
+                // binding itself still owns whether parameters are explicit or
+                // implicit, so frontend selection does not become a dispatcher.
+                return self.evaluate_user_function_with_frontend_candidates(
+                    &binding,
+                    frontend,
+                    *span,
+                    diagnostics,
+                    context,
+                );
             }
             return self.evaluate_function_binding(
                 &binding,
@@ -18173,49 +18173,62 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        let LambdaParameters::Explicit(parameters) = &binding.parameters else {
-            return CallOutcome::Unresolved;
-        };
-        let metadata = parameters
-            .iter()
-            .map(|parameter| {
-                let metadata = if parameter.optional {
-                    ParameterMetadata::optional(&parameter.name)
-                } else {
-                    ParameterMetadata::required(&parameter.name)
-                };
-                metadata.with_name_span(parameter.name_span)
-            })
-            .collect::<Vec<_>>();
         let candidates = frontend_argument_candidates(frontend);
         let body_candidate = frontend_body_candidate(frontend, span);
-        let body_shape = body_candidate.as_ref().map(candidate_shape);
-        let plan = match invocation_binder::plan(
-            &metadata,
-            &candidate_shapes(&candidates),
-            body_shape.as_ref(),
-            BodyPolicy::BindFinal,
-            span,
-        ) {
-            Ok(plan) => plan,
-            Err(error) => {
-                diagnostics.push(binding_diagnostic_with_message(
-                    error,
-                    callable_binding_message,
-                ));
-                return CallOutcome::Failed;
+        let bound = match &binding.parameters {
+            LambdaParameters::Explicit(parameters) => {
+                let metadata = parameters
+                    .iter()
+                    .map(|parameter| {
+                        let metadata = if parameter.optional {
+                            ParameterMetadata::optional(&parameter.name)
+                        } else {
+                            ParameterMetadata::required(&parameter.name)
+                        };
+                        metadata.with_name_span(parameter.name_span)
+                    })
+                    .collect::<Vec<_>>();
+                let body_shape = body_candidate.as_ref().map(candidate_shape);
+                let plan = match invocation_binder::plan(
+                    &metadata,
+                    &candidate_shapes(&candidates),
+                    body_shape.as_ref(),
+                    BodyPolicy::BindFinal,
+                    span,
+                ) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_message(
+                            error,
+                            callable_binding_message,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                match self.bind_explicit_callable_candidate_set(
+                    &plan,
+                    candidates,
+                    body_candidate,
+                    &span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(bound) => bound,
+                    Err(outcome) => return outcome,
+                }
             }
-        };
-        let bound = match self.bind_explicit_callable_candidate_set(
-            &plan,
-            candidates,
-            body_candidate,
-            &span,
-            diagnostics,
-            context,
-        ) {
-            Ok(bound) => bound,
-            Err(outcome) => return outcome,
+            LambdaParameters::Implicit => {
+                match self.bind_implicit_callable_candidate_set(
+                    candidates,
+                    body_candidate,
+                    &span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(bound) => bound,
+                    Err(outcome) => return outcome,
+                }
+            }
         };
         let callable = binding.as_callable();
         self.invoke_bound_callable(
@@ -19414,7 +19427,56 @@ impl Evaluator {
         Ok(BoundLambdaArguments::Explicit(values))
     }
 
-    /// Headerless callable binding remains positional for this bounded slice.
+    /// Bind a headerless source-defined call while parser-owned arguments and
+    /// its optional block body remain frontend candidates.
+    ///
+    /// Headerless callables accept positional values only. Validate that shape
+    /// before lowering any frontend expression/body, then evaluate candidates
+    /// in source order with the invocation body appended as the final implicit
+    /// value exactly as the legacy IR-backed path does.
+    #[allow(clippy::too_many_arguments)]
+    fn bind_implicit_callable_candidate_set<'a>(
+        &self,
+        candidates: Vec<Candidate<ArgumentCandidate<'a>>>,
+        body_candidate: Option<Candidate<ArgumentCandidate<'a>>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<BoundLambdaArguments, CallOutcome> {
+        if let Err(error) = invocation_binder::validate_implicit(&candidate_shapes(&candidates)) {
+            diagnostics.push(binding_diagnostic_with_message(
+                error,
+                callable_binding_message,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+
+        let mut selected = candidates
+            .into_iter()
+            .filter_map(|candidate| match candidate {
+                Candidate::Positional { value, .. } => Some(value),
+                Candidate::Named { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        if let Some(body_candidate) = body_candidate {
+            let Candidate::Positional { value, .. } = body_candidate else {
+                return Err(CallOutcome::Failed);
+            };
+            selected.push(value);
+        }
+        selected.sort_by_key(|candidate| candidate.source_order());
+
+        let mut arguments = Vec::with_capacity(selected.len());
+        for candidate in selected {
+            arguments.push(
+                self.evaluate_argument_candidate(&candidate, span, diagnostics, context)?
+                    .into_ir_value(),
+            );
+        }
+        Ok(BoundLambdaArguments::Implicit(arguments))
+    }
+
+    /// Legacy/pre-evaluation IR headerless callable binding remains positional.
     #[allow(clippy::too_many_arguments)]
     fn bind_implicit_callable_arguments(
         &self,
@@ -28678,6 +28740,175 @@ mod tests {
                 )
         ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn phase3c_headerless_binding_rejects_named_before_frontend_lowering() {
+        let arguments = vec![FrontendCallArgument::Named(arkst_markdown::ast::NamedArg {
+            name: "named".to_string(),
+            name_span: arkst_source::ByteSpan::new(2, 7),
+            value: FrontendValue::Content(vec![arkst_markdown::ast::Inline::Unsupported {
+                kind: "must-not-lower".to_string(),
+                span: arkst_source::ByteSpan::new(8, 22),
+            }]),
+            value_span: arkst_source::ByteSpan::new(8, 22),
+            span: arkst_source::ByteSpan::new(2, 22),
+        })];
+        let body = vec![FrontendBlock::Unsupported {
+            kind: "body-must-not-lower".to_string(),
+            span: arkst_source::ByteSpan::new(24, 43),
+        }];
+        let frontend = FrontendCallInput {
+            arguments: &arguments,
+            body: Some(&body),
+            source_id: SourceId(12),
+            source_mode: Mode::Quarkdown,
+        };
+        let candidates = frontend_argument_candidates(frontend);
+        let body_candidate =
+            frontend_body_candidate(frontend, SourceSpan::new(SourceId(12), 0, 43));
+
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let result = evaluator.bind_implicit_callable_candidate_set(
+            candidates,
+            body_candidate,
+            &SourceSpan::new(SourceId(12), 0, 43),
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "implicit lambda parameters are positional only"
+        );
+        assert!(matches!(
+            &arguments[0],
+            FrontendCallArgument::Named(argument)
+                if matches!(
+                    &argument.value,
+                    FrontendValue::Content(content)
+                        if matches!(
+                            content.as_slice(),
+                            [arkst_markdown::ast::Inline::Unsupported { kind, .. }]
+                                if kind == "must-not-lower"
+                        )
+                )
+        ));
+        assert!(matches!(
+            body.as_slice(),
+            [FrontendBlock::Unsupported { kind, .. }] if kind == "body-must-not-lower"
+        ));
+    }
+
+    #[test]
+    fn phase3c_headerless_binding_evaluates_arguments_then_body_in_source_order() {
+        let arguments = vec![
+            FrontendCallArgument::Positional {
+                value: FrontendValue::String("one".to_string()),
+                span: arkst_source::ByteSpan::new(2, 7),
+            },
+            FrontendCallArgument::Positional {
+                value: FrontendValue::Number(2.0),
+                span: arkst_source::ByteSpan::new(8, 11),
+            },
+        ];
+        let body = vec![FrontendBlock::Paragraph {
+            content: vec![arkst_markdown::ast::Inline::Text {
+                content: "body".to_string(),
+                span: arkst_source::ByteSpan::new(20, 24),
+            }],
+            span: arkst_source::ByteSpan::new(20, 24),
+        }];
+        let frontend = FrontendCallInput {
+            arguments: &arguments,
+            body: Some(&body),
+            source_id: SourceId(13),
+            source_mode: Mode::Quarkdown,
+        };
+        let candidates = frontend_argument_candidates(frontend);
+        let body_candidate =
+            frontend_body_candidate(frontend, SourceSpan::new(SourceId(13), 0, 24));
+
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let bound = evaluator
+            .bind_implicit_callable_candidate_set(
+                candidates,
+                body_candidate,
+                &SourceSpan::new(SourceId(13), 0, 24),
+                &mut diagnostics,
+                &mut context,
+            )
+            .expect("headerless frontend candidates bind");
+
+        let BoundLambdaArguments::Implicit(values) = bound else {
+            panic!("expected implicit callable binding");
+        };
+        assert_eq!(values.len(), 3);
+        assert!(matches!(&values[0], IrValue::String(value) if value == "one"));
+        assert!(matches!(&values[1], IrValue::Number(value) if *value == 2.0));
+        assert!(matches!(
+            &values[2],
+            IrValue::Content(nodes)
+                if matches!(
+                    nodes.as_slice(),
+                    [IrNode::Paragraph { content, .. }]
+                        if matches!(
+                            content.as_slice(),
+                            [IrInline::Text { content, .. }] if content == "body"
+                        )
+                )
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn phase3c_headerless_frontend_body_source_order_follows_all_arguments() {
+        let arguments = vec![
+            FrontendCallArgument::Positional {
+                value: FrontendValue::String("one".to_string()),
+                span: arkst_source::ByteSpan::new(2, 7),
+            },
+            FrontendCallArgument::Positional {
+                value: FrontendValue::String("two".to_string()),
+                span: arkst_source::ByteSpan::new(8, 13),
+            },
+        ];
+        let body = vec![FrontendBlock::Paragraph {
+            content: Vec::new(),
+            span: arkst_source::ByteSpan::new(20, 21),
+        }];
+        let frontend = FrontendCallInput {
+            arguments: &arguments,
+            body: Some(&body),
+            source_id: SourceId(14),
+            source_mode: Mode::Quarkdown,
+        };
+        let candidates = frontend_argument_candidates(frontend);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| match candidate {
+                    Candidate::Positional { value, .. } | Candidate::Named { value, .. } => {
+                        value.source_order()
+                    }
+                })
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        let Candidate::Positional { value: body, .. } =
+            frontend_body_candidate(frontend, SourceSpan::new(SourceId(14), 0, 21))
+                .expect("frontend body")
+        else {
+            panic!("expected positional body candidate");
+        };
+        assert_eq!(body.source_order(), 2);
     }
 
     #[test]
