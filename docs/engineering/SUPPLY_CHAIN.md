@@ -22,9 +22,9 @@ This extra scan does not make the spike production or distribution input. Produc
 - no production workspace member, path dependency, or path-based Cargo `[patch]`/`[replace]` override points into `tools/spikes/`;
 - the runnable Typst spike's `citationberg` patch exactly matches the production patch;
 - both production and research checks use the reviewed cargo-deny action identity `EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25`; an arbitrary different 40-hex action revision is not equivalent authority;
-- the scheduled production/research cargo-deny authority steps remain unconditional and fail-hard; the PR-time pair may use only the exact trusted docs-only step guard `${{ needs.scope.outputs.docs_only != 'true' }}`, and `continue-on-error` remains forbidden everywhere;
-- the PR-time authority stays inside `ci.yml` job `deny` with status name `license`; its only conditional form is the exact fail-closed combination `needs: [scope]` plus job guard `${{ always() }}`, while the scheduled `security.yml` job `audit` remains fully unconditional; and
-- GitHub Actions cannot execute or package the `tools/spikes` root or descendants, except for exactly one literal cargo-deny `manifest-path` reference to the runnable Typst spike in each of `ci.yml` and `security.yml`.
+- the shared deep production/research cargo-deny component remains unconditional and fail-hard; the authoritative PR-time pair in `ci.yml` may use only the exact trusted docs-only step guard `${{ needs.scope.outputs.docs_only != 'true' }}`, and `continue-on-error` remains forbidden everywhere;
+- the PR-time authority stays inside `ci.yml` job `deny` with status name `license`; its only conditional form is the exact fail-closed combination `needs: [scope]` plus job guard `${{ always() }}`, while `security-audit.yml` provides the unconditional read-only deep component reused by both canonical PR routing and the scheduled/manual wrapper; and
+- GitHub Actions cannot execute or package the `tools/spikes` root or descendants, except for exactly one literal cargo-deny `manifest-path` reference to the runnable Typst spike in each of `ci.yml` and `security-audit.yml`.
 
 The verifier and its adversarial self-tests run in the authoritative `fmt` component. They explicitly prove the one reviewed PR-time fast-path shape and reject missing/wrong scope prerequisites, arbitrary job or step conditions, conditional scheduled audits, and every `continue-on-error`. Adding an unregistered research manifest, making a spike publishable, committing a research lockfile, weakening a direct pin (including a partial exact pin such as `=0.15`), creating a production path dependency or path override into research, drifting the Typst security patch, changing the reviewed cargo-deny action identity, removing or soft-disabling a cargo-deny authority step or job, moving the Typst audit outside the authoritative `license` component, changing its component status name, adding another cargo-deny authority, duplicating the otherwise allowed research manifest reference, or introducing another workflow reference to the research root or descendants fails closed.
 
@@ -38,15 +38,15 @@ For substantive changes, the `license` component remains independently authorita
 
 ## Post-merge and scheduled detection
 
-The `audit` job in `.github/workflows/security.yml` mirrors merge-time supply-chain detection: it executes full configured cargo-deny checks for the production workspace plus `advisories` and `sources` for the directly runnable Typst research spike. It runs weekly, can be started manually, and runs when Cargo manifests/locks or the security workflow itself change.
+`.github/workflows/security-audit.yml` owns the unconditional read-only `audit` component that mirrors merge-time supply-chain detection: it executes full configured cargo-deny checks for the production workspace plus `advisories` and `sources` for the directly runnable Typst research spike. Canonical PR CI invokes this component only for the pre-existing dependency/security path class; uncertainty routes to execution.
 
-The scheduled `audit` job is deliberately outside the PR merge graph: the always-present `license` component supplies merge-time authority through `Merge Gate`.
+`.github/workflows/security.yml` remains the scheduled/manual wrapper. It invokes the same read-only audit component weekly or on manual dispatch, so scheduled evidence and PR deep evidence cannot drift into separate cargo-deny implementations. The scheduled caller remains outside the PR merge graph: the always-present `license` component supplies merge-time authority through `Merge Gate`.
 
 ## Scheduled failure ownership
 
 When a scheduled audit fails, `report-failure` owns one tracker issue titled `ci: scheduled supply-chain audit is failing`. The issue carries `type:bug`, `area:ci`, and `priority:normal` and contains an ownership marker so unrelated issues with a similar title are not mutated. A later failure comments on the existing issue; if the owned issue was closed, it is reopened before the new run is recorded. This keeps recurring failures visible without creating one issue per run.
 
-The reporter has `issues: write` only at the `report-failure` job. The audit job and workflow default remain read-only. A manual `workflow_dispatch` with `force_failure: true` deliberately fails the audit after the real cargo-deny checks so the create/reopen path can be validated without altering dependency policy.
+The reporter has `issues: write` only at the `report-failure` job in the scheduled/manual wrapper. The reusable `security-audit.yml` component is read-only and therefore safe to call from the read-only PR DAG; reusable workflow permissions cannot be used to elevate that caller. A manual `workflow_dispatch` with `force_failure: true` passes the flag into the shared audit component after the real cargo-deny checks so the create/reopen path can be validated without altering dependency policy.
 
 ## Policy ownership
 

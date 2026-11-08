@@ -279,10 +279,17 @@ class StaticAuthorityTests(unittest.TestCase):
             'sha256sum --check --strict\n',
             encoding="utf-8",
         )
+        component = root / ".github" / "workflows" / "security-audit.yml"
+        component.write_text(
+            "workflow_call:\nruns-on: ubuntu-24.04-arm\n"
+            "uses: ./.github/actions/cargo-deny-prebuilt\narguments: --all-features\n"
+            "force_failure\n",
+            encoding="utf-8",
+        )
         path = root / ".github" / "workflows" / "security.yml"
         path.write_text(
-            "schedule:\nworkflow_dispatch:\nruns-on: ubuntu-24.04-arm\n"
-            "uses: ./.github/actions/cargo-deny-prebuilt\narguments: --all-features\n",
+            "schedule:\nworkflow_dispatch:\n"
+            "uses: ./.github/workflows/security-audit.yml\nforce_failure\n",
             encoding="utf-8",
         )
         findings = AUDIT.check_supply_chain_authority(root)
@@ -301,16 +308,52 @@ class StaticAuthorityTests(unittest.TestCase):
             'sha256sum --check --strict\n',
             encoding="utf-8",
         )
+        component = root / ".github" / "workflows" / "security-audit.yml"
+        component.write_text(
+            "workflow_call:\nruns-on: ubuntu-24.04-arm\n"
+            "uses: ./.github/actions/cargo-deny-prebuilt\narguments: --all-features\n"
+            "force_failure\n",
+            encoding="utf-8",
+        )
         path = root / ".github" / "workflows" / "security.yml"
         path.write_text(
-            "schedule:\nworkflow_dispatch:\nruns-on: ubuntu-24.04-arm\n"
-            "uses: ./.github/actions/cargo-deny-prebuilt\narguments: --all-features\n"
+            "schedule:\nworkflow_dispatch:\nuses: ./.github/workflows/security-audit.yml\n"
             "report-failure:\nissues: write\n"
             "<!-- arkst-owned:scheduled-supply-chain-failure -->\nforce_failure\n",
             encoding="utf-8",
         )
         findings = AUDIT.check_supply_chain_authority(root)
         self.assertTrue(any("expected_sha256" in item.details for item in findings))
+
+    def test_supply_chain_reusable_component_cannot_request_issue_write(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        action = root / ".github" / "actions" / "cargo-deny-prebuilt" / "action.yml"
+        action.parent.mkdir(parents=True)
+        action.write_text(
+            'version="0.20.2"\n'
+            'target="aarch64-unknown-linux-musl"\n'
+            'expected_sha256="995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"\n'
+            'test "$RUNNER_ARCH" = "ARM64"\n'
+            'sha256sum --check --strict\n',
+            encoding="utf-8",
+        )
+        component = root / ".github" / "workflows" / "security-audit.yml"
+        component.write_text(
+            "workflow_call:\nruns-on: ubuntu-24.04-arm\n"
+            "uses: ./.github/actions/cargo-deny-prebuilt\narguments: --all-features\n"
+            "force_failure\nissues: write\n",
+            encoding="utf-8",
+        )
+        wrapper = root / ".github" / "workflows" / "security.yml"
+        wrapper.write_text(
+            "schedule:\nworkflow_dispatch:\nuses: ./.github/workflows/security-audit.yml\n"
+            "report-failure:\nissues: write\n"
+            "<!-- arkst-owned:scheduled-supply-chain-failure -->\nforce_failure\n",
+            encoding="utf-8",
+        )
+        findings = AUDIT.check_supply_chain_authority(root)
+        self.assertTrue(any("must not request issues: write" in item.details for item in findings))
 
     def test_codeowners_sensitive_path_removal_fails(self):
         temp, root = self.make_root()

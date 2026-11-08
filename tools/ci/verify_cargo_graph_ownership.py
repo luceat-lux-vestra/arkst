@@ -23,7 +23,7 @@ RESEARCH_MANIFESTS = {
 }
 SUPPLY_CHAIN_WORKFLOWS = {
     Path(".github/workflows/ci.yml"): ("deny", "license"),
-    Path(".github/workflows/security.yml"): ("audit", None),
+    Path(".github/workflows/security-audit.yml"): ("audit", None),
 }
 CARGO_DENY_ACTION_REF = "./.github/actions/cargo-deny-prebuilt"
 CARGO_DENY_LOCAL_ACTION = Path(".github/actions/cargo-deny-prebuilt/action.yml")
@@ -394,7 +394,7 @@ def verify_supply_chain_workflow(
     if required_name is None:
         if job_if is not None or job_needs is not None:
             raise CargoGraphOwnershipError(
-                f"{path.as_posix()}: scheduled supply-chain authority job must remain unconditional"
+                f"{path.as_posix()}: shared deep supply-chain authority job must remain unconditional"
             )
     elif job_if is None and job_needs is None:
         # Legacy/full-validation fixture: still valid and fully unconditional.

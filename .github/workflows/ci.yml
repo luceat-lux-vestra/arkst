@@ -81,7 +81,7 @@ jobs:
                         ;;
                     esac
                     case "$path" in
-                      Cargo.toml|*/Cargo.toml|Cargo.lock|*/Cargo.lock|.github/workflows/security.yml|.github/actions/cargo-deny-prebuilt/action.yml)
+                      Cargo.toml|*/Cargo.toml|Cargo.lock|*/Cargo.lock|.github/workflows/security.yml|.github/workflows/security-audit.yml|.github/actions/cargo-deny-prebuilt/action.yml)
                         run_security=true
                         ;;
                     esac
@@ -742,7 +742,7 @@ jobs:
     name: Security Audit
     needs: [scope]
     if: ${{ always() && (needs.scope.result != 'success' || needs.scope.outputs.run_security == 'true') }}
-    uses: ./.github/workflows/security.yml
+    uses: ./.github/workflows/security-audit.yml
 
   merge_gate:
     name: Merge Gate

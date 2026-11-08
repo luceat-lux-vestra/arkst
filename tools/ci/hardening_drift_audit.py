@@ -205,6 +205,7 @@ def check_codeql_authority(root: Path = ROOT) -> list[Finding]:
 
 def check_supply_chain_authority(root: Path = ROOT) -> list[Finding]:
     workflow_path = root / ".github" / "workflows" / "security.yml"
+    component_path = root / ".github" / "workflows" / "security-audit.yml"
     action_path = root / ".github" / "actions" / "cargo-deny-prebuilt" / "action.yml"
     findings: list[Finding] = []
 
@@ -216,9 +217,7 @@ def check_supply_chain_authority(root: Path = ROOT) -> list[Finding]:
     workflow_required = [
         "schedule:",
         "workflow_dispatch:",
-        "runs-on: ubuntu-24.04-arm",
-        "uses: ./.github/actions/cargo-deny-prebuilt",
-        "arguments: --all-features",
+        "uses: ./.github/workflows/security-audit.yml",
         "report-failure:",
         "issues: write",
         "<!-- arkst-owned:scheduled-supply-chain-failure -->",
@@ -229,6 +228,41 @@ def check_supply_chain_authority(root: Path = ROOT) -> list[Finding]:
         for fragment in workflow_required
         if fragment not in workflow
     )
+    if "pull_request:" in workflow or "workflow_call:" in workflow:
+        findings.append(
+            Finding(
+                "supply-chain-authority",
+                "privileged security wrapper must remain scheduled/manual only",
+            )
+        )
+
+    try:
+        component = component_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        findings.append(
+            Finding("supply-chain-authority", f"cannot read security audit component: {exc}")
+        )
+        component = ""
+
+    component_required = [
+        "workflow_call:",
+        "runs-on: ubuntu-24.04-arm",
+        "uses: ./.github/actions/cargo-deny-prebuilt",
+        "arguments: --all-features",
+        "force_failure",
+    ]
+    findings.extend(
+        Finding("supply-chain-authority", f"security audit component missing {fragment!r}")
+        for fragment in component_required
+        if fragment not in component
+    )
+    if "issues: write" in component:
+        findings.append(
+            Finding(
+                "supply-chain-authority",
+                "read-only security audit component must not request issues: write",
+            )
+        )
 
     try:
         action = action_path.read_text(encoding="utf-8")
