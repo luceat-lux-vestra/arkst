@@ -5825,6 +5825,13 @@ impl Evaluator {
         // resolved explicitly above because its inline body is contextual.
         if let Some(binding) = context.get_function(name).cloned() {
             if let Some(frontend) = frontend {
+                // Extension bindings still require evaluate_extension_call() to
+                // install the active super target and preserve extension-chain
+                // semantics. Phase 3A therefore falls back to the legacy bridge
+                // until extension invocation itself is migrated.
+                if binding.extension.is_some() {
+                    return CallOutcome::Unresolved;
+                }
                 if matches!(&binding.parameters, LambdaParameters::Explicit(_)) {
                     return self.evaluate_user_function_with_frontend_candidates(
                         &binding,
