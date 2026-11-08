@@ -1150,6 +1150,21 @@ fn inline_to_ir(
     }
 }
 
+/// Transitional selected-body bridge for evaluator-owned frontend candidates.
+///
+/// Phase 3B calls this only after structural binding has selected a block body.
+/// Unselected frontend bodies therefore never cross into executable IR.
+pub(crate) fn lower_frontend_block_body_for_runtime(
+    body: &[Block],
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> Vec<IrNode> {
+    body.iter()
+        .filter_map(|block| block_to_ir(block, source_id, diagnostics, source_mode, true))
+        .collect()
+}
+
 /// Transitional selected-value bridge for evaluator-owned frontend candidates.
 ///
 /// Phase 3A calls this only after structural binding has selected an argument.
