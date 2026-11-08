@@ -1150,6 +1150,19 @@ fn inline_to_ir(
     }
 }
 
+/// Transitional selected-value bridge for evaluator-owned frontend candidates.
+///
+/// Phase 3A calls this only after structural binding has selected an argument.
+/// Unselected frontend values therefore never cross into executable/value IR.
+pub(crate) fn lower_frontend_value_for_runtime(
+    value: &Value,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> Option<arkst_ir::IrValue> {
+    value_to_ir(value, source_id, diagnostics, source_mode)
+}
+
 fn value_to_ir(
     value: &Value,
     source_id: SourceId,
