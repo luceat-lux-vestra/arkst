@@ -398,13 +398,12 @@ impl<'a> FrontendInvocation<'a> {
         }
     }
 
-    /// Phase 3A may defer value lowering only when this syntax cannot be
-    /// claimed by an earlier native, variable, or implicit-parameter owner.
-    /// Function lookup is intentionally absent: the existing dispatcher still
-    /// decides whether a source-defined callable owns the invocation.
+    /// Phase 3A/3B may defer argument/body lowering only when this syntax
+    /// cannot be claimed by an earlier native, variable, or implicit-parameter
+    /// owner. Function lookup is intentionally absent: the existing dispatcher
+    /// still decides whether a source-defined callable owns the invocation.
     fn can_defer_phase3a_arguments(self, context: &EvaluationContext<'_>) -> bool {
         self.chain.is_empty()
-            && self.body.is_none()
             && self.lambda_header.is_none()
             && !matches!(self.name, "super" | "pageformat" | "code" | "extend")
             && !has_any_native_owner(self.name)
@@ -417,6 +416,7 @@ impl<'a> FrontendInvocation<'a> {
 #[derive(Clone, Copy)]
 struct FrontendCallInput<'a> {
     arguments: &'a [FrontendCallArgument],
+    body: Option<&'a [FrontendBlock]>,
     source_id: SourceId,
     source_mode: Mode,
 }
@@ -437,6 +437,13 @@ struct FrontendStructuralCall {
 enum ArgumentCandidate<'a> {
     FrontendExpression {
         value: &'a FrontendValue,
+        source_id: SourceId,
+        source_mode: Mode,
+        span: SourceSpan,
+        source_order: usize,
+    },
+    FrontendBlockBody {
+        nodes: &'a [FrontendBlock],
         source_id: SourceId,
         source_mode: Mode,
         span: SourceSpan,
@@ -465,6 +472,7 @@ impl ArgumentCandidate<'_> {
     fn source_order(&self) -> usize {
         match self {
             Self::FrontendExpression { source_order, .. }
+            | Self::FrontendBlockBody { source_order, .. }
             | Self::Expression { source_order, .. }
             | Self::BlockBody { source_order, .. }
             | Self::InlineBody { source_order, .. }
@@ -3854,6 +3862,7 @@ impl Evaluator {
                         &call_span,
                         FrontendCallInput {
                             arguments: invocation.arguments,
+                            body: invocation.body,
                             source_id,
                             source_mode,
                         },
@@ -18179,10 +18188,12 @@ impl Evaluator {
             })
             .collect::<Vec<_>>();
         let candidates = frontend_argument_candidates(frontend);
+        let body_candidate = frontend_body_candidate(frontend, span);
+        let body_shape = body_candidate.as_ref().map(candidate_shape);
         let plan = match invocation_binder::plan(
             &metadata,
             &candidate_shapes(&candidates),
-            None,
+            body_shape.as_ref(),
             BodyPolicy::BindFinal,
             span,
         ) {
@@ -18195,10 +18206,10 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
         };
-        let bound = match self.bind_explicit_callable_arguments(
+        let bound = match self.bind_explicit_callable_candidate_set(
             &plan,
             candidates,
-            None,
+            body_candidate,
             &span,
             diagnostics,
             context,
@@ -19270,6 +19281,33 @@ impl Evaluator {
                     Err(outcome) => Err(outcome),
                 }
             }
+            ArgumentCandidate::FrontendBlockBody {
+                nodes,
+                source_id,
+                source_mode,
+                span: candidate_span,
+                ..
+            } => {
+                let mut lowering_diagnostics = Vec::new();
+                let lowered = ast_to_ir::lower_frontend_block_body_for_runtime(
+                    nodes,
+                    *source_id,
+                    &mut lowering_diagnostics,
+                    *source_mode,
+                );
+                diagnostics.extend(lowering_diagnostics);
+                match self.evaluate_call_body_value_context(
+                    CallBody::Block(&lowered),
+                    candidate_span,
+                    diagnostics,
+                    context,
+                ) {
+                    CallOutcome::Value(value) => Ok(RuntimeValue::static_value(value)),
+                    CallOutcome::NoValue => Err(CallOutcome::NoValue),
+                    CallOutcome::Failed => Err(CallOutcome::Failed),
+                    CallOutcome::Unresolved => Err(CallOutcome::Unresolved),
+                }
+            }
             ArgumentCandidate::Expression { value, origin, .. } => {
                 let evaluated_value = match self.evaluate_value(value, diagnostics, context) {
                     CallOutcome::Value(value) => value,
@@ -19328,6 +19366,26 @@ impl Evaluator {
     ) -> Result<BoundLambdaArguments, CallOutcome> {
         let body_candidate =
             body.map(|body| argument_body_candidate(body, *span, candidates.len()));
+        self.bind_explicit_callable_candidate_set(
+            binding_plan,
+            candidates,
+            body_candidate,
+            span,
+            diagnostics,
+            context,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind_explicit_callable_candidate_set<'a>(
+        &self,
+        binding_plan: &BindingPlan,
+        candidates: Vec<Candidate<ArgumentCandidate<'a>>>,
+        body_candidate: Option<Candidate<ArgumentCandidate<'a>>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<BoundLambdaArguments, CallOutcome> {
         let bound = binding_plan
             .bind(&candidates, body_candidate.as_ref(), *span)
             .map_err(|error| {
@@ -25549,6 +25607,57 @@ fn frontend_argument_candidates<'a>(
     candidates
 }
 
+fn frontend_block_span(block: &FrontendBlock) -> &ByteSpan {
+    match block {
+        FrontendBlock::Heading { span, .. }
+        | FrontendBlock::Paragraph { span, .. }
+        | FrontendBlock::Blockquote { span, .. }
+        | FrontendBlock::UnorderedList { span, .. }
+        | FrontendBlock::OrderedList { span, .. }
+        | FrontendBlock::Table { span, .. }
+        | FrontendBlock::CodeBlock { span, .. }
+        | FrontendBlock::ThematicBreak { span }
+        | FrontendBlock::PageBreak { span }
+        | FrontendBlock::DirectiveCall { span, .. }
+        | FrontendBlock::Metadata { span, .. }
+        | FrontendBlock::RawHtml { span, .. }
+        | FrontendBlock::Unsupported { span, .. } => span,
+    }
+}
+
+fn frontend_body_source_span(
+    nodes: &[FrontendBlock],
+    source_id: SourceId,
+    fallback_span: SourceSpan,
+) -> SourceSpan {
+    match (nodes.first(), nodes.last()) {
+        (Some(first), Some(last)) => SourceSpan::new(
+            source_id,
+            frontend_block_span(first).start,
+            frontend_block_span(last).end,
+        ),
+        _ => fallback_span,
+    }
+}
+
+fn frontend_body_candidate<'a>(
+    frontend: FrontendCallInput<'a>,
+    fallback_span: SourceSpan,
+) -> Option<Candidate<ArgumentCandidate<'a>>> {
+    let nodes = frontend.body?;
+    let span = frontend_body_source_span(nodes, frontend.source_id, fallback_span);
+    Some(Candidate::Positional {
+        value: ArgumentCandidate::FrontendBlockBody {
+            nodes,
+            source_id: frontend.source_id,
+            source_mode: frontend.source_mode,
+            span,
+            source_order: frontend.arguments.len(),
+        },
+        span,
+    })
+}
+
 /// Build evaluator-owned callable candidates without evaluating expressions or
 /// bodies. The resulting vector preserves source order for later selected-slot
 /// evaluation after the binder has accepted the invocation shape.
@@ -28339,6 +28448,7 @@ mod tests {
         ];
         let candidates = frontend_argument_candidates(FrontendCallInput {
             arguments: &arguments,
+            body: None,
             source_id: SourceId(7),
             source_mode: Mode::Quarkdown,
         });
@@ -28387,6 +28497,7 @@ mod tests {
         ];
         let candidates = frontend_argument_candidates(FrontendCallInput {
             arguments: &arguments,
+            body: None,
             source_id: SourceId(8),
             source_mode: Mode::Quarkdown,
         });
@@ -28416,6 +28527,157 @@ mod tests {
                     if kind == "must-not-lower"
             )
         ));
+    }
+
+    #[test]
+    fn phase3b_frontend_body_candidate_preserves_ast_span_and_source_order() {
+        let arguments = vec![FrontendCallArgument::Positional {
+            value: FrontendValue::String("one".to_string()),
+            span: arkst_source::ByteSpan::new(2, 7),
+        }];
+        let body = vec![FrontendBlock::Paragraph {
+            content: vec![arkst_markdown::ast::Inline::Text {
+                content: "body".to_string(),
+                span: arkst_source::ByteSpan::new(20, 24),
+            }],
+            span: arkst_source::ByteSpan::new(20, 24),
+        }];
+        let frontend = FrontendCallInput {
+            arguments: &arguments,
+            body: Some(&body),
+            source_id: SourceId(9),
+            source_mode: Mode::Quarkdown,
+        };
+
+        let Candidate::Positional {
+            value:
+                ArgumentCandidate::FrontendBlockBody {
+                    nodes,
+                    span: body_span,
+                    source_order,
+                    ..
+                },
+            span: candidate_span,
+        } = frontend_body_candidate(frontend, SourceSpan::new(SourceId(9), 0, 30))
+            .expect("frontend block body candidate")
+        else {
+            panic!("expected frontend block body candidate");
+        };
+
+        assert_eq!(source_order, 1);
+        assert_eq!(body_span, SourceSpan::new(SourceId(9), 20, 24));
+        assert_eq!(candidate_span, body_span);
+        assert_eq!(nodes, body.as_slice());
+    }
+
+    #[test]
+    fn phase3b_binding_rejects_final_collision_before_frontend_body_lowering() {
+        let arguments = vec![FrontendCallArgument::Positional {
+            value: FrontendValue::String("explicit".to_string()),
+            span: arkst_source::ByteSpan::new(2, 12),
+        }];
+        let body = vec![FrontendBlock::Unsupported {
+            kind: "must-not-lower".to_string(),
+            span: arkst_source::ByteSpan::new(20, 34),
+        }];
+        let frontend = FrontendCallInput {
+            arguments: &arguments,
+            body: Some(&body),
+            source_id: SourceId(10),
+            source_mode: Mode::Quarkdown,
+        };
+        let candidates = frontend_argument_candidates(frontend);
+        let body_candidate =
+            frontend_body_candidate(frontend, SourceSpan::new(SourceId(10), 0, 34))
+                .expect("frontend block body candidate");
+        let body_shape = candidate_shape(&body_candidate);
+        let parameters = [ParameterMetadata::required("content")];
+
+        let error = invocation_binder::plan(
+            &parameters,
+            &candidate_shapes(&candidates),
+            Some(&body_shape),
+            BodyPolicy::BindFinal,
+            SourceSpan::new(SourceId(10), 0, 34),
+        )
+        .expect_err("explicit final argument and body fallback must collide");
+
+        assert_eq!(
+            error.message,
+            "parameter `content` collides with an already bound argument"
+        );
+        assert!(matches!(
+            body_candidate,
+            Candidate::Positional {
+                value: ArgumentCandidate::FrontendBlockBody { nodes, .. },
+                ..
+            } if matches!(
+                nodes,
+                [FrontendBlock::Unsupported { kind, .. }] if kind == "must-not-lower"
+            )
+        ));
+    }
+
+    #[test]
+    fn phase3b_selected_frontend_body_lowers_after_binding_selection() {
+        let body = vec![FrontendBlock::Paragraph {
+            content: vec![arkst_markdown::ast::Inline::Text {
+                content: "selected body".to_string(),
+                span: arkst_source::ByteSpan::new(20, 33),
+            }],
+            span: arkst_source::ByteSpan::new(20, 33),
+        }];
+        let frontend = FrontendCallInput {
+            arguments: &[],
+            body: Some(&body),
+            source_id: SourceId(11),
+            source_mode: Mode::Quarkdown,
+        };
+        let candidates = frontend_argument_candidates(frontend);
+        let body_candidate =
+            frontend_body_candidate(frontend, SourceSpan::new(SourceId(11), 0, 33))
+                .expect("frontend block body candidate");
+        let body_shape = candidate_shape(&body_candidate);
+        let parameters = [ParameterMetadata::required("content")];
+        let plan = invocation_binder::plan(
+            &parameters,
+            &candidate_shapes(&candidates),
+            Some(&body_shape),
+            BodyPolicy::BindFinal,
+            SourceSpan::new(SourceId(11), 0, 33),
+        )
+        .expect("body fills final callable parameter");
+
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let bound = evaluator
+            .bind_explicit_callable_candidate_set(
+                &plan,
+                candidates,
+                Some(body_candidate),
+                &SourceSpan::new(SourceId(11), 0, 33),
+                &mut diagnostics,
+                &mut context,
+            )
+            .expect("selected frontend body evaluates");
+
+        let BoundLambdaArguments::Explicit(values) = bound else {
+            panic!("expected explicit callable binding");
+        };
+        assert!(matches!(
+            values.as_slice(),
+            [IrValue::Content(nodes)]
+                if matches!(
+                    nodes.as_slice(),
+                    [IrNode::Paragraph { content, .. }]
+                        if matches!(
+                            content.as_slice(),
+                            [IrInline::Text { content, .. }] if content == "selected body"
+                        )
+                )
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
