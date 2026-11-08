@@ -466,9 +466,51 @@ pub(crate) fn lower_top_level_repeat(
     }
 }
 
+/// Recognize and lower only a non-chained top-level `.extend` call without
+/// constructing the executable FunctionCall carrier used by the legacy path.
+pub(crate) fn lower_top_level_extend(
+    block: &Block,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> TopLevelCallLowering {
+    let Block::DirectiveCall {
+        name,
+        arguments,
+        chain,
+        body,
+        raw_body,
+        lambda_header,
+        span,
+        ..
+    } = block
+    else {
+        return TopLevelCallLowering::NotSelected;
+    };
+
+    if name != "extend" || !chain.is_empty() {
+        return TopLevelCallLowering::NotSelected;
+    }
+
+    match lower_simple_block_call(
+        name,
+        arguments,
+        body.as_deref(),
+        raw_body.as_ref(),
+        lambda_header.as_ref(),
+        span,
+        source_id,
+        diagnostics,
+        source_mode,
+    ) {
+        Some(call) => TopLevelCallLowering::Call(Box::new(call)),
+        None => TopLevelCallLowering::Invalid,
+    }
+}
+
 /// Lower one non-selected top-level frontend block through the established IR
 /// bridge. The hybrid evaluator calls this only after excluding the direct
-/// `.function` declaration, ordinary-call, block-chain, `.let`, `.foreach`, and `.repeat` paths.
+/// `.function` declaration, ordinary-call, block-chain, `.let`, `.foreach`, `.repeat`, and `.extend` paths.
 pub(crate) fn lower_top_level_block(
     block: &Block,
     source_id: SourceId,
@@ -1991,6 +2033,74 @@ mod tests {
             let document = arkst_markdown::parse_qd(source);
             let mut diagnostics = Vec::new();
             let lowering = lower_top_level_repeat(
+                &document.nodes[0],
+                source_id(),
+                &mut diagnostics,
+                Mode::Quarkdown,
+            );
+            assert!(
+                matches!(lowering, TopLevelCallLowering::NotSelected),
+                "{source:?}"
+            );
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+        }
+    }
+
+    #[test]
+    fn top_level_extend_bridge_matches_legacy_function_call_shape() {
+        let source = ".extend {greet} where:{name: .name}\n    name:\n    extended .name\n";
+        let document = arkst_markdown::parse_qd(source);
+        let mut direct_diagnostics = Vec::new();
+        let lowering = lower_top_level_extend(
+            &document.nodes[0],
+            source_id(),
+            &mut direct_diagnostics,
+            Mode::Quarkdown,
+        );
+
+        assert!(direct_diagnostics.is_empty(), "{direct_diagnostics:?}");
+        let TopLevelCallLowering::Call(call) = lowering else {
+            panic!("expected direct top-level extend payload")
+        };
+        assert_eq!(call.name, "extend");
+        assert_eq!(call.positional_args.len(), 1);
+        assert_eq!(call.named_args.len(), 1);
+        assert_eq!(call.ordered_args.len(), 2);
+        assert_eq!(
+            call.lambda_parameters
+                .as_ref()
+                .expect("explicit extend wrapper parameters")
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            ["name"]
+        );
+        assert!(call.body.as_ref().is_some_and(|body| !body.is_empty()));
+
+        let direct_node = (*call).into_ir_node();
+        let mut legacy_diagnostics = Vec::new();
+        let legacy_node = lower_top_level_block(
+            &document.nodes[0],
+            source_id(),
+            &mut legacy_diagnostics,
+            Mode::Quarkdown,
+        )
+        .expect("legacy lowering");
+        assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
+        assert_eq!(direct_node, legacy_node);
+    }
+
+    #[test]
+    fn top_level_extend_bridge_leaves_other_contextual_directives_and_chains_unselected() {
+        for source in [
+            ".let {value}\n    body\n",
+            ".foreach {1..3}\n    item:\n    .item\n",
+            ".repeat {3}\n    item:\n    .item\n",
+            ".extend {greet}::uppercase\n",
+        ] {
+            let document = arkst_markdown::parse_qd(source);
+            let mut diagnostics = Vec::new();
+            let lowering = lower_top_level_extend(
                 &document.nodes[0],
                 source_id(),
                 &mut diagnostics,
