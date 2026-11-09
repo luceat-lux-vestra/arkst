@@ -19874,6 +19874,7 @@ impl Evaluator {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn continue_chain_from_value(
         &self,
         mut value: IrValue,
@@ -29500,7 +29501,6 @@ mod tests {
         assert!(evaluation_diagnostics.is_empty());
     }
 
-
     #[test]
     fn phase3h_gate_keeps_only_one_bodyless_zero_argument_tail() {
         let tail = || FrontendCallSegment {
@@ -29533,7 +29533,10 @@ mod tests {
             .can_defer_phase3h_tail(&context));
 
         let mut body = frontend_invocation_block("identity", vec![tail()], None);
-        let FrontendBlock::DirectiveCall { body: final_body, .. } = &mut body else {
+        let FrontendBlock::DirectiveCall {
+            body: final_body, ..
+        } = &mut body
+        else {
             panic!("chain directive");
         };
         *final_body = Some(Vec::new());
@@ -29570,9 +29573,14 @@ mod tests {
             evaluated_previous: Some((&previous, predecessor_span)),
         });
         let [Candidate::Positional {
-            value: ArgumentCandidate::Evaluated { value, source_order },
+            value:
+                ArgumentCandidate::Evaluated {
+                    value,
+                    source_order,
+                },
             span,
-        }] = candidates.as_slice() else {
+        }] = candidates.as_slice()
+        else {
             panic!("one evaluated positional predecessor candidate");
         };
         assert_eq!(*source_order, 0);
@@ -29652,18 +29660,19 @@ mod tests {
                     &mut selected_context,
                 )
                 .expect("selected Phase 3H chain");
-            assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+            assert!(
+                evaluation_diagnostics.is_empty(),
+                "{evaluation_diagnostics:?}"
+            );
             assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
 
             let mut legacy_lowering_diagnostics = Vec::new();
-            let ast_to_ir::TopLevelChainLowering::Chain(legacy) =
-                ast_to_ir::lower_top_level_chain(
-                    &block,
-                    SourceId(23),
-                    &mut legacy_lowering_diagnostics,
-                    Mode::Quarkdown,
-                )
-            else {
+            let ast_to_ir::TopLevelChainLowering::Chain(legacy) = ast_to_ir::lower_top_level_chain(
+                &block,
+                SourceId(23),
+                &mut legacy_lowering_diagnostics,
+                Mode::Quarkdown,
+            ) else {
                 panic!("legacy chain conversion");
             };
             assert!(legacy_lowering_diagnostics.is_empty());
@@ -29786,8 +29795,14 @@ mod tests {
         assert_eq!(selected_diagnostics.len(), 1);
         assert_eq!(legacy_diagnostics.len(), 1);
         assert_eq!(selected_diagnostics[0].code, legacy_diagnostics[0].code);
-        assert_eq!(selected_diagnostics[0].message, legacy_diagnostics[0].message);
-        assert_eq!(selected_diagnostics[0].primary, legacy_diagnostics[0].primary);
+        assert_eq!(
+            selected_diagnostics[0].message,
+            legacy_diagnostics[0].message
+        );
+        assert_eq!(
+            selected_diagnostics[0].primary,
+            legacy_diagnostics[0].primary
+        );
     }
 
     #[test]
