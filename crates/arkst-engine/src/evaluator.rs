@@ -28829,7 +28829,6 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn phase3f_gate_selects_only_one_tail_with_final_block_body() {
         let segment = || FrontendCallSegment {
@@ -28855,11 +28854,9 @@ mod tests {
             panic!("expected chain directive");
         };
         *body = Some(Vec::new());
-        assert!(
-            !FrontendInvocation::from_block(&long_chain)
-                .expect("directive")
-                .can_defer_phase3f_chain_head(&context)
-        );
+        assert!(!FrontendInvocation::from_block(&long_chain)
+            .expect("directive")
+            .can_defer_phase3f_chain_head(&context));
 
         let mut lambda_chain = frontend_invocation_block(
             "ordinary",
@@ -28873,22 +28870,18 @@ mod tests {
             panic!("expected chain directive");
         };
         *body = Some(Vec::new());
-        assert!(
-            !FrontendInvocation::from_block(&lambda_chain)
-                .expect("directive")
-                .can_defer_phase3f_chain_head(&context)
-        );
+        assert!(!FrontendInvocation::from_block(&lambda_chain)
+            .expect("directive")
+            .can_defer_phase3f_chain_head(&context));
 
         let mut native_chain = frontend_invocation_block("multiply", vec![segment()], None);
         let FrontendBlock::DirectiveCall { body, .. } = &mut native_chain else {
             panic!("expected chain directive");
         };
         *body = Some(Vec::new());
-        assert!(
-            !FrontendInvocation::from_block(&native_chain)
-                .expect("directive")
-                .can_defer_phase3f_chain_head(&context)
-        );
+        assert!(!FrontendInvocation::from_block(&native_chain)
+            .expect("directive")
+            .can_defer_phase3f_chain_head(&context));
     }
 
     #[test]
@@ -28966,18 +28959,19 @@ mod tests {
                 &mut selected_context,
             )
             .expect("selected Phase 3F chain");
-        assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+        assert!(
+            evaluation_diagnostics.is_empty(),
+            "{evaluation_diagnostics:?}"
+        );
         assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
 
         let mut legacy_lowering_diagnostics = Vec::new();
-        let ast_to_ir::TopLevelChainLowering::Chain(legacy) =
-            ast_to_ir::lower_top_level_chain(
-                &block,
-                SourceId(17),
-                &mut legacy_lowering_diagnostics,
-                Mode::Quarkdown,
-            )
-        else {
+        let ast_to_ir::TopLevelChainLowering::Chain(legacy) = ast_to_ir::lower_top_level_chain(
+            &block,
+            SourceId(17),
+            &mut legacy_lowering_diagnostics,
+            Mode::Quarkdown,
+        ) else {
             panic!("legacy chain conversion");
         };
         assert!(
