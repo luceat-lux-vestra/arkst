@@ -440,10 +440,18 @@ impl<'a> FrontendInvocation<'a> {
     }
 
     /// Phase 3F preserves frontend head arguments when a single terminal tail
-    /// owns a block body. Longer chains retain the transitional whole-chain path.
+    /// owns a block body.
     fn can_defer_phase3f_chain_head(self, context: &EvaluationContext<'_>) -> bool {
         self.body.is_some()
             && self.chain.len() == 1
+            && self.can_defer_source_defined_chain_head(context)
+    }
+
+    /// Phase 3G extends the same final block-body ownership across two or more
+    /// retained transitional tail segments.
+    fn can_defer_phase3g_chain_head(self, context: &EvaluationContext<'_>) -> bool {
+        self.body.is_some()
+            && self.chain.len() >= 2
             && self.can_defer_source_defined_chain_head(context)
     }
 }
@@ -3948,7 +3956,8 @@ impl Evaluator {
                 }
             }
             FrontendInvocationRoute::Chain => {
-                let terminal_block_body = invocation.can_defer_phase3f_chain_head(context);
+                let terminal_block_body = invocation.can_defer_phase3f_chain_head(context)
+                    || invocation.can_defer_phase3g_chain_head(context);
                 if invocation.can_defer_phase3e_chain_head(context) || terminal_block_body {
                     // Legacy whole-chain lowering visits the terminal body before
                     // tail arguments. Keep that preflight order without converting
@@ -29038,6 +29047,382 @@ mod tests {
             .evaluate_frontend_invocation(
                 invocation,
                 SourceId(18),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut context,
+            )
+            .expect("selected chain route");
+        assert!(output.is_empty());
+        assert!(!lowering_diagnostics.is_empty());
+        assert!(evaluation_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn phase3g_gate_selects_multitail_final_block_body_without_widening_phase3f() {
+        let segment = || FrontendCallSegment {
+            name: "tail".to_string(),
+            name_span: arkst_source::ByteSpan::new(10, 14),
+            arguments: Vec::new(),
+            span: arkst_source::ByteSpan::new(8, 14),
+        };
+        let context = EvaluationContext::new();
+
+        let mut multi_tail =
+            frontend_invocation_block("ordinary", vec![segment(), segment()], None);
+        let FrontendBlock::DirectiveCall { body, .. } = &mut multi_tail else {
+            panic!("expected chain directive");
+        };
+        *body = Some(Vec::new());
+        let selected = FrontendInvocation::from_block(&multi_tail).expect("directive");
+        assert!(selected.can_defer_phase3g_chain_head(&context));
+        assert!(!selected.can_defer_phase3f_chain_head(&context));
+
+        let mut one_tail = frontend_invocation_block("ordinary", vec![segment()], None);
+        let FrontendBlock::DirectiveCall { body, .. } = &mut one_tail else {
+            panic!("expected chain directive");
+        };
+        *body = Some(Vec::new());
+        let one_tail = FrontendInvocation::from_block(&one_tail).expect("directive");
+        assert!(one_tail.can_defer_phase3f_chain_head(&context));
+        assert!(!one_tail.can_defer_phase3g_chain_head(&context));
+
+        let bodyless =
+            frontend_invocation_block("ordinary", vec![segment(), segment()], None);
+        let bodyless = FrontendInvocation::from_block(&bodyless).expect("directive");
+        assert!(bodyless.can_defer_phase3e_chain_head(&context));
+        assert!(!bodyless.can_defer_phase3g_chain_head(&context));
+
+        let mut native =
+            frontend_invocation_block("multiply", vec![segment(), segment()], None);
+        let FrontendBlock::DirectiveCall { body, .. } = &mut native else {
+            panic!("expected chain directive");
+        };
+        *body = Some(Vec::new());
+        assert!(!FrontendInvocation::from_block(&native)
+            .expect("directive")
+            .can_defer_phase3g_chain_head(&context));
+    }
+
+    #[test]
+    fn phase3g_multitail_final_body_matches_legacy_chain_result() {
+        let block = FrontendBlock::DirectiveCall {
+            name: "identity".to_string(),
+            name_span: arkst_source::ByteSpan::new(1, 9),
+            head_span: arkst_source::ByteSpan::new(0, 13),
+            arguments: vec![FrontendCallArgument::Positional {
+                value: FrontendValue::Number(2.0),
+                span: arkst_source::ByteSpan::new(10, 13),
+            }],
+            chain: vec![
+                FrontendCallSegment {
+                    name: "multiply".to_string(),
+                    name_span: arkst_source::ByteSpan::new(15, 23),
+                    arguments: vec![FrontendCallArgument::Positional {
+                        value: FrontendValue::Number(3.0),
+                        span: arkst_source::ByteSpan::new(24, 27),
+                    }],
+                    span: arkst_source::ByteSpan::new(13, 27),
+                },
+                FrontendCallSegment {
+                    name: "tail".to_string(),
+                    name_span: arkst_source::ByteSpan::new(29, 33),
+                    arguments: Vec::new(),
+                    span: arkst_source::ByteSpan::new(27, 33),
+                },
+            ],
+            body: Some(vec![FrontendBlock::Paragraph {
+                content: vec![arkst_markdown::ast::Inline::Text {
+                    content: "terminal body".to_string(),
+                    span: arkst_source::ByteSpan::new(34, 47),
+                }],
+                span: arkst_source::ByteSpan::new(34, 47),
+            }]),
+            raw_body: None,
+            lambda_header: None,
+            span: arkst_source::ByteSpan::new(0, 47),
+        };
+        let invocation = FrontendInvocation::from_block(&block).expect("chain directive");
+        let evaluator = Evaluator::new();
+        let mut selected_context = EvaluationContext::new();
+        let mut legacy_context = EvaluationContext::new();
+        let return_parameter = |name: &str| {
+            vec![IrNode::FunctionCall {
+                name: name.to_string(),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(0, 8),
+            }]
+        };
+        for context in [&mut selected_context, &mut legacy_context] {
+            context.set_function_binding(
+                "identity".to_string(),
+                LambdaParameters::Explicit(vec![lambda_parameter("value", 0)]),
+                return_parameter("value"),
+                span(0, 8),
+                None,
+            );
+            context.set_function_binding(
+                "tail".to_string(),
+                LambdaParameters::Explicit(vec![
+                    lambda_parameter("previous", 0),
+                    lambda_parameter("content", 10),
+                ]),
+                return_parameter("content"),
+                span(0, 8),
+                None,
+            );
+        }
+        assert!(invocation.can_defer_phase3g_chain_head(&selected_context));
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let selected = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(19),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut selected_context,
+            )
+            .expect("selected Phase 3G chain");
+        assert!(
+            evaluation_diagnostics.is_empty(),
+            "{evaluation_diagnostics:?}"
+        );
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+
+        let mut legacy_lowering_diagnostics = Vec::new();
+        let ast_to_ir::TopLevelChainLowering::Chain(legacy) = ast_to_ir::lower_top_level_chain(
+            &block,
+            SourceId(19),
+            &mut legacy_lowering_diagnostics,
+            Mode::Quarkdown,
+        ) else {
+            panic!("legacy chain conversion");
+        };
+        assert!(
+            legacy_lowering_diagnostics.is_empty(),
+            "{legacy_lowering_diagnostics:?}"
+        );
+        let mut legacy_evaluation_diagnostics = Vec::new();
+        let outcome = evaluator.evaluate_block_chain(
+            &legacy.head,
+            &legacy.chain,
+            legacy.lambda_parameters.as_deref(),
+            &legacy.body,
+            legacy.raw_body.as_ref(),
+            &legacy.span,
+            &mut legacy_evaluation_diagnostics,
+            &mut legacy_context,
+        );
+        let CallOutcome::Value(IrValue::Content(legacy_nodes)) = outcome else {
+            panic!("legacy chain must materialize terminal content");
+        };
+        assert!(
+            legacy_evaluation_diagnostics.is_empty(),
+            "{legacy_evaluation_diagnostics:?}"
+        );
+        assert_eq!(selected, legacy_nodes);
+        assert!(matches!(
+            selected.as_slice(),
+            [IrNode::Paragraph { content, .. }]
+                if matches!(
+                    content.as_slice(),
+                    [IrInline::Text { content, .. }] if content == "terminal body"
+                )
+        ));
+    }
+
+    #[test]
+    fn phase3g_implicit_head_multitail_matches_legacy_result() {
+        let block = FrontendBlock::DirectiveCall {
+            name: "implicithead".to_string(),
+            name_span: arkst_source::ByteSpan::new(1, 13),
+            head_span: arkst_source::ByteSpan::new(0, 17),
+            arguments: vec![FrontendCallArgument::Positional {
+                value: FrontendValue::Number(2.0),
+                span: arkst_source::ByteSpan::new(14, 17),
+            }],
+            chain: vec![
+                FrontendCallSegment {
+                    name: "multiply".to_string(),
+                    name_span: arkst_source::ByteSpan::new(19, 27),
+                    arguments: vec![FrontendCallArgument::Positional {
+                        value: FrontendValue::Number(3.0),
+                        span: arkst_source::ByteSpan::new(28, 31),
+                    }],
+                    span: arkst_source::ByteSpan::new(17, 31),
+                },
+                FrontendCallSegment {
+                    name: "tail".to_string(),
+                    name_span: arkst_source::ByteSpan::new(33, 37),
+                    arguments: Vec::new(),
+                    span: arkst_source::ByteSpan::new(31, 37),
+                },
+            ],
+            body: Some(vec![FrontendBlock::Paragraph {
+                content: vec![arkst_markdown::ast::Inline::Text {
+                    content: "implicit terminal".to_string(),
+                    span: arkst_source::ByteSpan::new(38, 55),
+                }],
+                span: arkst_source::ByteSpan::new(38, 55),
+            }]),
+            raw_body: None,
+            lambda_header: None,
+            span: arkst_source::ByteSpan::new(0, 55),
+        };
+        let invocation = FrontendInvocation::from_block(&block).expect("chain directive");
+        let evaluator = Evaluator::new();
+        let mut selected_context = EvaluationContext::new();
+        let mut legacy_context = EvaluationContext::new();
+        let return_parameter = |name: &str| {
+            vec![IrNode::FunctionCall {
+                name: name.to_string(),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(0, 8),
+            }]
+        };
+        for context in [&mut selected_context, &mut legacy_context] {
+            context.set_function_binding(
+                "implicithead".to_string(),
+                LambdaParameters::Implicit,
+                return_parameter("1"),
+                span(0, 12),
+                None,
+            );
+            context.set_function_binding(
+                "tail".to_string(),
+                LambdaParameters::Explicit(vec![
+                    lambda_parameter("previous", 0),
+                    lambda_parameter("content", 10),
+                ]),
+                return_parameter("content"),
+                span(0, 8),
+                None,
+            );
+        }
+        assert!(invocation.can_defer_phase3g_chain_head(&selected_context));
+
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let selected = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(20),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut selected_context,
+            )
+            .expect("selected implicit Phase 3G chain");
+        assert!(
+            evaluation_diagnostics.is_empty(),
+            "{evaluation_diagnostics:?}"
+        );
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+
+        let mut legacy_lowering_diagnostics = Vec::new();
+        let ast_to_ir::TopLevelChainLowering::Chain(legacy) = ast_to_ir::lower_top_level_chain(
+            &block,
+            SourceId(20),
+            &mut legacy_lowering_diagnostics,
+            Mode::Quarkdown,
+        ) else {
+            panic!("legacy chain conversion");
+        };
+        assert!(
+            legacy_lowering_diagnostics.is_empty(),
+            "{legacy_lowering_diagnostics:?}"
+        );
+        let mut legacy_evaluation_diagnostics = Vec::new();
+        let outcome = evaluator.evaluate_block_chain(
+            &legacy.head,
+            &legacy.chain,
+            legacy.lambda_parameters.as_deref(),
+            &legacy.body,
+            legacy.raw_body.as_ref(),
+            &legacy.span,
+            &mut legacy_evaluation_diagnostics,
+            &mut legacy_context,
+        );
+        let CallOutcome::Value(IrValue::Content(legacy_nodes)) = outcome else {
+            panic!("legacy implicit chain must materialize terminal content");
+        };
+        assert!(
+            legacy_evaluation_diagnostics.is_empty(),
+            "{legacy_evaluation_diagnostics:?}"
+        );
+        assert_eq!(selected, legacy_nodes);
+        assert!(matches!(
+            selected.as_slice(),
+            [IrNode::Paragraph { content, .. }]
+                if matches!(
+                    content.as_slice(),
+                    [IrInline::Text { content, .. }] if content == "implicit terminal"
+                )
+        ));
+    }
+
+    #[test]
+    fn phase3g_invalid_transitional_tail_is_rejected_before_head_dispatch() {
+        let mut block = frontend_invocation_block(
+            "ordinary",
+            vec![
+                FrontendCallSegment {
+                    name: "multiply".to_string(),
+                    name_span: arkst_source::ByteSpan::new(12, 20),
+                    arguments: vec![FrontendCallArgument::Positional {
+                        value: FrontendValue::Content(vec![
+                            arkst_markdown::ast::Inline::Unsupported {
+                                kind: "tail-must-not-lower".to_string(),
+                                span: arkst_source::ByteSpan::new(21, 40),
+                            },
+                        ]),
+                        span: arkst_source::ByteSpan::new(21, 40),
+                    }],
+                    span: arkst_source::ByteSpan::new(10, 40),
+                },
+                FrontendCallSegment {
+                    name: "uppercase".to_string(),
+                    name_span: arkst_source::ByteSpan::new(42, 51),
+                    arguments: Vec::new(),
+                    span: arkst_source::ByteSpan::new(40, 51),
+                },
+            ],
+            None,
+        );
+        let FrontendBlock::DirectiveCall { body, .. } = &mut block else {
+            panic!("expected chain directive");
+        };
+        *body = Some(vec![FrontendBlock::Paragraph {
+            content: vec![arkst_markdown::ast::Inline::Text {
+                content: "terminal".to_string(),
+                span: arkst_source::ByteSpan::new(52, 60),
+            }],
+            span: arkst_source::ByteSpan::new(52, 60),
+        }]);
+        let invocation = FrontendInvocation::from_block(&block).expect("chain directive");
+        let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
+        context.set_function("ordinary".to_string(), vec!["first".to_string()]);
+        assert!(invocation.can_defer_phase3g_chain_head(&context));
+
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let output = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(21),
                 Mode::Quarkdown,
                 &mut evaluation_diagnostics,
                 &mut lowering_diagnostics,
