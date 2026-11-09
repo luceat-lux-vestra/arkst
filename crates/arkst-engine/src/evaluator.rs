@@ -29087,14 +29087,12 @@ mod tests {
         assert!(one_tail.can_defer_phase3f_chain_head(&context));
         assert!(!one_tail.can_defer_phase3g_chain_head(&context));
 
-        let bodyless =
-            frontend_invocation_block("ordinary", vec![segment(), segment()], None);
+        let bodyless = frontend_invocation_block("ordinary", vec![segment(), segment()], None);
         let bodyless = FrontendInvocation::from_block(&bodyless).expect("directive");
         assert!(bodyless.can_defer_phase3e_chain_head(&context));
         assert!(!bodyless.can_defer_phase3g_chain_head(&context));
 
-        let mut native =
-            frontend_invocation_block("multiply", vec![segment(), segment()], None);
+        let mut native = frontend_invocation_block("multiply", vec![segment(), segment()], None);
         let FrontendBlock::DirectiveCall { body, .. } = &mut native else {
             panic!("expected chain directive");
         };
