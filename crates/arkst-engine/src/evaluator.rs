@@ -458,6 +458,31 @@ impl<'a> FrontendInvocation<'a> {
             && self.chain.len() == 1
             && self.chain[0].arguments.is_empty()
     }
+
+    /// Phase 3I retains one flat authored positional tail argument through
+    /// source-defined binding alongside the already-evaluated predecessor.
+    fn can_defer_phase3i_tail(self, context: &EvaluationContext<'_>) -> bool {
+        self.can_defer_phase3e_chain_head(context)
+            && self.chain.len() == 1
+            && is_phase3i_flat_positional_tail(&self.chain[0].arguments)
+    }
+}
+
+/// Rich/nested syntax and named/multiple authored arguments keep the existing
+/// transitional tail dispatch. This gate never decides effective ownership.
+fn is_phase3i_flat_positional_tail(arguments: &[FrontendCallArgument]) -> bool {
+    matches!(
+        arguments,
+        [FrontendCallArgument::Positional { value, .. }]
+            if matches!(
+                value,
+                FrontendValue::String(_)
+                    | FrontendValue::Number(_)
+                    | FrontendValue::Boolean(_)
+                    | FrontendValue::Identifier(_)
+                    | FrontendValue::Range(_)
+            )
+    )
 }
 
 /// Shared conservative source-defined eligibility; dispatch still decides
@@ -3974,7 +3999,8 @@ impl Evaluator {
             FrontendInvocationRoute::Chain => {
                 let terminal_block_body = invocation.can_defer_phase3f_chain_head(context)
                     || invocation.can_defer_phase3g_chain_head(context);
-                let phase3h_tail = invocation.can_defer_phase3h_tail(context);
+                let frontend_candidate_tail = invocation.can_defer_phase3h_tail(context)
+                    || invocation.can_defer_phase3i_tail(context);
                 if invocation.can_defer_phase3e_chain_head(context) || terminal_block_body {
                     // Legacy whole-chain lowering visits the terminal body before
                     // tail arguments. Keep that preflight order without converting
@@ -4013,7 +4039,7 @@ impl Evaluator {
                         source_mode,
                         &chain,
                         final_body.as_deref(),
-                        phase3h_tail,
+                        frontend_candidate_tail,
                         evaluation_diagnostics,
                         context,
                     );
@@ -4073,7 +4099,7 @@ impl Evaluator {
         source_mode: Mode,
         chain: &[IrCallSegment],
         final_body: Option<&[IrNode]>,
-        phase3h_tail: bool,
+        frontend_candidate_tail: bool,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
@@ -4107,7 +4133,7 @@ impl Evaluator {
         if matches!(outcome, CallOutcome::Unresolved) {
             return outcome;
         }
-        let frontend_tail = phase3h_tail.then(|| FrontendCallInput {
+        let frontend_tail = frontend_candidate_tail.then(|| FrontendCallInput {
             arguments: &invocation.chain[0].arguments,
             body: None,
             source_id,
@@ -19942,7 +19968,8 @@ impl Evaluator {
                 .filter(|frontend| {
                     index == 0
                         && chain.len() == 1
-                        && frontend.arguments.is_empty()
+                        && (frontend.arguments.is_empty()
+                            || is_phase3i_flat_positional_tail(frontend.arguments))
                         && frontend.body.is_none()
                         && can_defer_source_defined_name(&source_segment.name, context)
                         && context
@@ -29805,6 +29832,431 @@ mod tests {
         );
     }
 
+
+    /// Reuse the same frontend syntax for selected Phase 3I and legacy parity.
+    fn phase3i_chain_with_argument(tail: &str, value: FrontendValue) -> FrontendBlock {
+        FrontendBlock::DirectiveCall {
+            name: "identity".to_string(),
+            name_span: arkst_source::ByteSpan::new(1, 9),
+            head_span: arkst_source::ByteSpan::new(0, 13),
+            arguments: vec![FrontendCallArgument::Positional {
+                value: FrontendValue::Number(7.0),
+                span: arkst_source::ByteSpan::new(10, 13),
+            }],
+            chain: vec![FrontendCallSegment {
+                name: tail.to_string(),
+                name_span: arkst_source::ByteSpan::new(15, 15 + tail.len()),
+                arguments: vec![FrontendCallArgument::Positional {
+                    value,
+                    span: arkst_source::ByteSpan::new(28, 34),
+                }],
+                span: arkst_source::ByteSpan::new(13, 34),
+            }],
+            body: None,
+            raw_body: None,
+            lambda_header: None,
+            span: arkst_source::ByteSpan::new(0, 34),
+        }
+    }
+
+    #[test]
+    fn phase3i_gate_accepts_only_one_flat_positional_bodyless_tail() {
+        let context = EvaluationContext::new();
+        let tail = |arguments| FrontendCallSegment {
+            name: "tail".to_string(),
+            name_span: arkst_source::ByteSpan::new(15, 19),
+            arguments,
+            span: arkst_source::ByteSpan::new(13, 34),
+        };
+        let positional = |value| FrontendCallArgument::Positional {
+            value,
+            span: arkst_source::ByteSpan::new(28, 34),
+        };
+        for value in [
+            FrontendValue::String("flat".to_string()),
+            FrontendValue::Number(9.0),
+            FrontendValue::Boolean(true),
+            FrontendValue::Identifier("variable".to_string()),
+        ] {
+            let block = frontend_invocation_block(
+                "identity",
+                vec![tail(vec![positional(value)])],
+                None,
+            );
+            let invocation = FrontendInvocation::from_block(&block).expect("flat tail");
+            assert!(invocation.can_defer_phase3i_tail(&context));
+            assert!(!invocation.can_defer_phase3h_tail(&context));
+        }
+
+        let zero = frontend_invocation_block("identity", vec![tail(Vec::new())], None);
+        assert!(!FrontendInvocation::from_block(&zero)
+            .expect("zero authored arguments")
+            .can_defer_phase3i_tail(&context));
+        assert!(FrontendInvocation::from_block(&zero)
+            .expect("Phase 3H remains selected")
+            .can_defer_phase3h_tail(&context));
+
+        let named = frontend_invocation_block(
+            "identity",
+            vec![tail(vec![FrontendCallArgument::Named(
+                arkst_markdown::ast::NamedArg {
+                    name: "second".to_string(),
+                    name_span: arkst_source::ByteSpan::new(20, 26),
+                    value: FrontendValue::Number(9.0),
+                    value_span: arkst_source::ByteSpan::new(28, 34),
+                    span: arkst_source::ByteSpan::new(20, 34),
+                },
+            )])],
+            None,
+        );
+        assert!(!FrontendInvocation::from_block(&named)
+            .expect("named tail")
+            .can_defer_phase3i_tail(&context));
+
+        let two = frontend_invocation_block(
+            "identity",
+            vec![tail(vec![
+                positional(FrontendValue::Number(9.0)),
+                positional(FrontendValue::Number(10.0)),
+            ])],
+            None,
+        );
+        assert!(!FrontendInvocation::from_block(&two)
+            .expect("two authored arguments")
+            .can_defer_phase3i_tail(&context));
+
+        let multi_tail = frontend_invocation_block(
+            "identity",
+            vec![
+                tail(vec![positional(FrontendValue::Number(9.0))]),
+                tail(Vec::new()),
+            ],
+            None,
+        );
+        assert!(!FrontendInvocation::from_block(&multi_tail)
+            .expect("multiple tails")
+            .can_defer_phase3i_tail(&context));
+
+        let rich = frontend_invocation_block(
+            "identity",
+            vec![tail(vec![positional(FrontendValue::Content(Vec::new()))])],
+            None,
+        );
+        assert!(!FrontendInvocation::from_block(&rich)
+            .expect("rich frontend content")
+            .can_defer_phase3i_tail(&context));
+
+        let mut body = phase3i_chain_with_argument("tail", FrontendValue::Number(9.0));
+        if let FrontendBlock::DirectiveCall { body, .. } = &mut body {
+            *body = Some(Vec::new());
+        }
+        assert!(!FrontendInvocation::from_block(&body)
+            .expect("terminal body")
+            .can_defer_phase3i_tail(&context));
+
+        let lambda = frontend_invocation_block(
+            "identity",
+            vec![tail(vec![positional(FrontendValue::Number(9.0))])],
+            Some(FrontendLambdaHeader {
+                parameters: Vec::new(),
+                span: arkst_source::ByteSpan::new(0, 1),
+            }),
+        );
+        assert!(!FrontendInvocation::from_block(&lambda)
+            .expect("lambda header")
+            .can_defer_phase3i_tail(&context));
+
+        let native = frontend_invocation_block(
+            "multiply",
+            vec![tail(vec![positional(FrontendValue::Number(9.0))])],
+            None,
+        );
+        assert!(!FrontendInvocation::from_block(&native)
+            .expect("native head")
+            .can_defer_phase3i_tail(&context));
+    }
+
+    #[test]
+    fn phase3i_previous_and_flat_authored_candidates_keep_order_origin_and_spans() {
+        let previous = InvocationValue::dynamic_value(IrValue::Number(7.0));
+        let predecessor_span = SourceSpan::new(SourceId(25), 13, 19);
+        let authored_span = SourceSpan::new(SourceId(25), 28, 34);
+        let arguments = [FrontendCallArgument::Positional {
+            value: FrontendValue::Number(9.0),
+            span: arkst_source::ByteSpan::new(28, 34),
+        }];
+        let candidates = frontend_argument_candidates(FrontendCallInput {
+            arguments: &arguments,
+            body: None,
+            source_id: SourceId(25),
+            source_mode: Mode::Quarkdown,
+            evaluated_previous: Some((&previous, predecessor_span)),
+        });
+        assert_eq!(candidates.len(), 2);
+        let Candidate::Positional {
+            value:
+                ArgumentCandidate::Evaluated {
+                    value: first,
+                    source_order: first_order,
+                },
+            span: first_span,
+        } = &candidates[0]
+        else {
+            panic!("predecessor must be an evaluated positional candidate");
+        };
+        assert_eq!(*first_order, 0);
+        assert_eq!(*first_span, predecessor_span);
+        assert_eq!(first.value, IrValue::Number(7.0));
+        assert_eq!(first.origin, ValueOrigin::Dynamic);
+
+        let Candidate::Positional {
+            value:
+                ArgumentCandidate::FrontendExpression {
+                    value: second,
+                    source_order: second_order,
+                    span: second_span,
+                    ..
+                },
+            span: authored_candidate_span,
+        } = &candidates[1]
+        else {
+            panic!("authored flat argument must remain an unevaluated candidate");
+        };
+        assert_eq!(*second_order, 1);
+        assert_eq!(*second_span, authored_span);
+        assert_eq!(*authored_candidate_span, authored_span);
+        assert!(matches!(second, FrontendValue::Number(n) if *n == 9.0));
+    }
+
+    #[test]
+    fn phase3i_single_flat_tail_matches_legacy_explicit_and_implicit_binding() {
+        let evaluator = Evaluator::new();
+        let return_parameter = |name: &str| {
+            vec![IrNode::FunctionCall {
+                name: name.to_string(),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(0, 8),
+            }]
+        };
+        for implicit_tail in [false, true] {
+            for (argument, expected) in [
+                (FrontendValue::Number(9.0), "9"),
+                (FrontendValue::String("second".to_string()), "second"),
+            ] {
+                let block = phase3i_chain_with_argument("tail", argument);
+                let invocation = FrontendInvocation::from_block(&block).expect("chain");
+                let mut selected_context = EvaluationContext::new();
+                let mut legacy_context = EvaluationContext::new();
+                for context in [&mut selected_context, &mut legacy_context] {
+                    context.set_function_binding(
+                        "identity".to_string(),
+                        LambdaParameters::Explicit(vec![lambda_parameter("value", 0)]),
+                        return_parameter("value"),
+                        span(0, 8),
+                        None,
+                    );
+                    context.set_function_binding(
+                        "tail".to_string(),
+                        if implicit_tail {
+                            LambdaParameters::Implicit
+                        } else {
+                            LambdaParameters::Explicit(vec![
+                                lambda_parameter("previous", 0),
+                                lambda_parameter("second", 9),
+                            ])
+                        },
+                        return_parameter(if implicit_tail { "2" } else { "second" }),
+                        span(0, 8),
+                        None,
+                    );
+                }
+                assert!(invocation.can_defer_phase3i_tail(&selected_context));
+
+                let mut selected_diagnostics = Vec::new();
+                let mut lowering_diagnostics = Vec::new();
+                let selected = evaluator
+                    .evaluate_frontend_invocation(
+                        invocation,
+                        SourceId(26),
+                        Mode::Quarkdown,
+                        &mut selected_diagnostics,
+                        &mut lowering_diagnostics,
+                        &mut selected_context,
+                    )
+                    .expect("selected Phase 3I chain");
+                assert!(selected_diagnostics.is_empty(), "{selected_diagnostics:?}");
+                assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+
+                let mut legacy_lowering_diagnostics = Vec::new();
+                let ast_to_ir::TopLevelChainLowering::Chain(legacy) =
+                    ast_to_ir::lower_top_level_chain(
+                        &block,
+                        SourceId(26),
+                        &mut legacy_lowering_diagnostics,
+                        Mode::Quarkdown,
+                    )
+                else {
+                    panic!("legacy chain conversion");
+                };
+                assert!(legacy_lowering_diagnostics.is_empty());
+                let mut legacy_diagnostics = Vec::new();
+                let outcome = evaluator.evaluate_block_chain(
+                    &legacy.head,
+                    &legacy.chain,
+                    legacy.lambda_parameters.as_deref(),
+                    &legacy.body,
+                    legacy.raw_body.as_ref(),
+                    &legacy.span,
+                    &mut legacy_diagnostics,
+                    &mut legacy_context,
+                );
+                let CallOutcome::Value(IrValue::Content(legacy_nodes)) = outcome else {
+                    panic!("legacy tail must materialize content");
+                };
+                assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
+                assert_eq!(selected, legacy_nodes);
+                assert!(matches!(
+                    selected.as_slice(),
+                    [IrNode::Paragraph { content, .. }]
+                        if matches!(
+                            content.as_slice(),
+                            [IrInline::Text { content, .. }] if content == expected
+                        )
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn phase3i_rejects_excess_positional_tail_before_evaluating_authored_identifier() {
+        let block = phase3i_chain_with_argument(
+            "tail",
+            FrontendValue::Identifier("not_registered".to_string()),
+        );
+        let evaluator = Evaluator::new();
+        let mut selected_context = EvaluationContext::new();
+        let mut legacy_context = EvaluationContext::new();
+        let return_previous = vec![IrNode::FunctionCall {
+            name: "value".to_string(),
+            positional_args: Vec::new(),
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(0, 8),
+        }];
+        for context in [&mut selected_context, &mut legacy_context] {
+            context.set_function_binding(
+                "identity".to_string(),
+                LambdaParameters::Explicit(vec![lambda_parameter("value", 0)]),
+                return_previous.clone(),
+                span(0, 8),
+                None,
+            );
+            context.set_function_binding(
+                "tail".to_string(),
+                LambdaParameters::Explicit(vec![lambda_parameter("previous", 0)]),
+                Vec::new(),
+                span(0, 8),
+                None,
+            );
+        }
+        let mut selected_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let selected = evaluator
+            .evaluate_frontend_invocation(
+                FrontendInvocation::from_block(&block).expect("chain"),
+                SourceId(27),
+                Mode::Quarkdown,
+                &mut selected_diagnostics,
+                &mut lowering_diagnostics,
+                &mut selected_context,
+            )
+            .expect("Phase 3I candidate selected");
+        assert!(selected.is_empty());
+        assert!(lowering_diagnostics.is_empty());
+        assert_eq!(selected_diagnostics.len(), 1);
+
+        let mut legacy_lowering_diagnostics = Vec::new();
+        let ast_to_ir::TopLevelChainLowering::Chain(legacy) = ast_to_ir::lower_top_level_chain(
+            &block,
+            SourceId(27),
+            &mut legacy_lowering_diagnostics,
+            Mode::Quarkdown,
+        ) else {
+            panic!("legacy chain conversion");
+        };
+        assert!(legacy_lowering_diagnostics.is_empty());
+        let mut legacy_diagnostics = Vec::new();
+        let legacy_outcome = evaluator.evaluate_block_chain(
+            &legacy.head,
+            &legacy.chain,
+            legacy.lambda_parameters.as_deref(),
+            &legacy.body,
+            legacy.raw_body.as_ref(),
+            &legacy.span,
+            &mut legacy_diagnostics,
+            &mut legacy_context,
+        );
+        assert!(matches!(legacy_outcome, CallOutcome::Failed));
+        assert_eq!(legacy_diagnostics.len(), 1);
+        assert_eq!(selected_diagnostics[0].code, legacy_diagnostics[0].code);
+        assert_eq!(selected_diagnostics[0].message, legacy_diagnostics[0].message);
+        assert_eq!(selected_diagnostics[0].primary, legacy_diagnostics[0].primary);
+    }
+
+    #[test]
+    fn phase3i_native_tail_falls_back_to_pre_lowered_chain_without_restarting_head() {
+        let block = phase3i_chain_with_argument("multiply", FrontendValue::Number(3.0));
+        let invocation = FrontendInvocation::from_block(&block).expect("chain");
+        let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
+        context.set_function_binding(
+            "identity".to_string(),
+            LambdaParameters::Explicit(vec![lambda_parameter("value", 0)]),
+            vec![IrNode::FunctionCall {
+                name: "value".to_string(),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(0, 8),
+            }],
+            span(0, 8),
+            None,
+        );
+        assert!(invocation.can_defer_phase3i_tail(&context));
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let selected = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(28),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut context,
+            )
+            .expect("shared continuation handles native fallback");
+        assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+        assert!(matches!(
+            selected.as_slice(),
+            [IrNode::Paragraph { content, .. }]
+                if matches!(
+                    content.as_slice(),
+                    [IrInline::Text { content, .. }] if content == "21"
+                )
+        ));
+    }
     #[test]
     fn phase3a_frontend_candidates_preserve_syntax_and_mixed_source_order() {
         let arguments = vec![
