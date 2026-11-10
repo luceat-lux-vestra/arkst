@@ -68,7 +68,7 @@ Source anchors:
 
 ## Open blockers for the **G0 gate** (no deferral or scope reduction)
 
-1. Trace every actual producer/consumer/call site of all ledger types, including nested/generative, extension/native precedence, legacy/core, WASM/host and test-only fixtures. Attach specific executable test IDs/results rather than treating path anchors as proof. The enum list is declaration-complete, not yet an exhaustive runtime branch proof.
+1. Continue tracing every actual producer/consumer/call site of all ledger types, including nested/generative, extension/native precedence, legacy/core, WASM/host and test-only fixtures. The first bounded dynamic-route slice below proves three concrete runtime routes with exact current-head execution; it does **not** make the remaining routes exhaustive. The enum list is declaration-complete, not yet an exhaustive runtime branch proof.
 2. Freeze independent clean-room representative inputs and byte-exact expected diagnostic code/message/span/order, effects, lazy branches/failed mutations, resource modes, source provenance, output and source-map behavior. Preserve known PARTIAL/unsupported/fail-closed cases.
 3. Decide public API and CLI/wire compatibility/version policy from consumer inventory; test legacy decoder behavior and invalid source refs rather than assuming compatibility.
 4. Review and accept [proposed ADR-0022](../adr/0022-runtime-final-document-ir.md); explicitly amend historical ADR-0020 and `docs/ARCHITECTURE.md` after acceptance, without silently rewriting their prior claims.
@@ -88,6 +88,20 @@ Companion [runtime test evidence matrix](719-g0-runtime-test-evidence.tsv) index
 4. Values and state: `value_conversion.rs:166-310` has `RuntimeValueKind::SemanticLeaf(IrValue)` and `InvocationValue`; `evaluator.rs:1641-1695,2188-2221` maintains cloned parent-scope/context and journal state. `final_document_guard_detects_nested_block_and_inline_executable_state` tests a **runtime guard**, not a final-only Rust type.
 5. Final consumers: `arkst-ir/src/lib.rs:33-79` serializes via unversioned `IrDocumentWire`; `arkst-cli/src/commands.rs:1599` writes `result.ir` JSON; `arkst-typst/src/lowering.rs:23` still accepts unqualified `&IrDocument`. No type-enforced final-only or versioned-wire contract exists.
 6. **Fixture entrypoint matters:** `arkst-engine/tests/{logger_diagnostics,loadable_library_dispatch,environment_inputs}.rs` call `ast_to_ir_with_diagnostics_for_mode` and `Evaluator::evaluate*(IrDocument)`. They test the **legacy executable IR entrypoint**, not normal frontend-AST execution. Other rows are separately marked parser-only, evaluator-private unit, normal `arkst-core::compile`, wire or backend.
+
+### Dynamic producer/consumer reachability — bounded slice A
+
+Companion [dynamic-route evidence ledger](719-g0-dynamic-route-evidence.tsv) closes a **bounded part** of G0 blocker 1 by tying three transitional runtime routes to exact production branches and exact current-head test execution. It does not promote the remaining inventory routes to proven status.
+
+Production authority for this slice is unchanged from the current PR candidate: `crates/arkst-engine/src/evaluator.rs` blob `217d3b4c107119c9ffe81daa303bcac0883d2675` and `crates/arkst-engine/src/ast_to_ir.rs` blob `54802c362b3d3584fc25a1527f781dc0fc8f6377`. Exact execution authority is CI run **#42901128320** at `e11e6362c1ae58b33eb63dfa505647f3b81f0464`, with test jobs macOS `130127146005`, Windows `130127146163`, and Ubuntu ARM64 `130127146132`.
+
+| Route | Production reachability established | Exact executable evidence | Current classification |
+|---|---|---|---|
+| **DYN01 direct source-defined call** | `evaluate_frontend_with_context` recognizes `FrontendInvocation`; the `DirectCall` branch attempts AST-backed `evaluate_frontend_block_call` before the explicit `lower_top_level_direct_call -> evaluate_block_call` fallback. | `g0_s04_source_defined_direct_calls_match_legacy_ir_entrypoint`; `phase3a_frontend_candidates_preserve_syntax_and_mixed_source_order` — both PASS on macOS/Windows/Ubuntu ARM64 at #42901128320. | **Branch-proven for the selected source-defined direct-call slice**, not all direct-call owners/shapes. |
+| **DYN02 chain head + executable IR tail** | The `Chain` branch can keep the selected head in frontend syntax while `lower_top_level_chain_tail` materializes `IrCallSegment`; `continue_chain_from_value` consumes those segments and explicitly retains pre-lowered/native fallback ownership. | Phase 3E/3F/3G/3H/3I tests for shared continuation, terminal body parity, multi-tail parity, binding failure parity, predecessor ordering, flat-tail parity and native fallback — **7/7 PASS on all three platforms**. | **Mixed AST/IR transitional route dynamically proven**; its existence is a G3 migration obligation, not final architecture. |
+| **DYN03 callable / selected body executable IR** | `FunctionBinding.body` is physically `Vec<IrNode>`; selected frontend block bodies cross `lower_frontend_block_body_for_runtime`; `evaluate_call_body` consumes block `IrNode` via `evaluate_node` and inline IR via `evaluate_inlines`. | First-class callable capture, two nested-body frontend tests, extension document rollback and lazy native raw-body tests — **5/5 PASS on all three platforms**. | **Executable IR body storage/consumption dynamically proven**; this directly demonstrates the remaining G4 body bridge. |
+
+This slice upgrades those three routes from lexical/path anchors to **source-traced + executable-current-head evidence**. It intentionally leaves open: exhaustive direct/native/unresolved invocation ownership, every chain argument/body/extension/resource combination, all nested/generative AST owners, value/runtime provenance paths, context/transaction routes, host/WASM routes, public API/wire consumers and backend consumers.
 
 ### CI provenance and interpretation
 
