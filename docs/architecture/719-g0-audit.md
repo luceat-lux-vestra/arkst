@@ -140,7 +140,7 @@ The S16 compatibility claim is deliberately **semantic**, not byte-identical dia
 Accordingly:
 - **S04:** upstream reference frozen as semantically compatible at the required/optional/named direct-call boundary.
 - **S16:** upstream reference frozen as semantically compatible at the dynamic-vs-static numeric conversion boundary.
-- Both rows remain pending exact-HEAD CI for this replacement documentation candidate; neither status closes wider G0 coverage.
+- Their independent-reference plus Arkst migration evidence was validated at exact HEAD `4ffe231011688997788c9fed751695201c0983bb` by CI run #42833994417: required Merge Gate succeeded and S04/S16 passed on macOS, Windows and Ubuntu ARM64. This freezes the evidence disposition; it does not close wider G0 coverage. Any later documentation candidate, including the commit that records this wording, still requires its own exact-HEAD CI before merge.
 
 ### S12 independent-reference disposition: intentional rollback divergence
 
@@ -156,6 +156,6 @@ Accordingly, S12 has two distinct authorities:
 - **Upstream compatibility reference:** official Quarkdown v2.5.1 non-strict preserves the failed invocation's prior document mutation (`changed`).
 - **Compatibility classification:** explicit intentional divergence. Upstream-output equality is not the S12 acceptance predicate.
 
-The S12 row in the differential-oracle contract is therefore frozen as an Arkst migration oracle with an explicit upstream divergence, pending exact-HEAD CI for this documentation candidate. This does not complete G0 or relax any remaining G0 proof requirement.
+The S12 row in the differential-oracle contract is therefore frozen as an Arkst migration oracle with an explicit upstream divergence. Exact HEAD `4ffe231011688997788c9fed751695201c0983bb` was validated by CI run #42833994417: required Merge Gate succeeded and S12 passed on macOS, Windows and Ubuntu ARM64. This freezes the S12 reference/migration evidence disposition; it does not complete G0 or relax any remaining G0 proof requirement. Any later documentation candidate, including the commit that records this wording, still requires its own exact-HEAD CI before merge.
 
-**STOP boundary:** S12 evidence-document reconciliation only. Exact-head CI, additional oracle fixtures, ADR acceptance, merge and later G0 work remain separate work units.
+**STOP boundary:** S04/S12/S16 evidence-status reconciliation only. CI for the replacement documentation HEAD, additional oracle fixtures, ADR acceptance, merge and later G0 work remain separate work units.
