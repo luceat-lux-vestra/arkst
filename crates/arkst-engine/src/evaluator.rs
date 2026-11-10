@@ -29832,7 +29832,6 @@ mod tests {
         );
     }
 
-
     /// Reuse the same frontend syntax for selected Phase 3I and legacy parity.
     fn phase3i_chain_with_argument(tail: &str, value: FrontendValue) -> FrontendBlock {
         FrontendBlock::DirectiveCall {
@@ -30089,7 +30088,10 @@ mod tests {
                         &mut selected_context,
                     )
                     .expect("selected Phase 3I chain");
-                assert!(selected_diagnostics.is_empty(), "{selected_diagnostics:?}");
+                assert!(
+                    selected_diagnostics.is_empty(),
+                    "{selected_diagnostics:?}"
+                );
                 assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
 
                 let mut legacy_lowering_diagnostics = Vec::new();
@@ -30133,7 +30135,7 @@ mod tests {
     }
 
     #[test]
-    fn phase3i_rejects_excess_positional_tail_before_evaluating_authored_identifier() {
+    fn phase3i_excess_positional_tail_matches_legacy_binding_error() {
         let block = phase3i_chain_with_argument(
             "tail",
             FrontendValue::Identifier("not_registered".to_string()),
@@ -30207,12 +30209,18 @@ mod tests {
         assert!(matches!(legacy_outcome, CallOutcome::Failed));
         assert_eq!(legacy_diagnostics.len(), 1);
         assert_eq!(selected_diagnostics[0].code, legacy_diagnostics[0].code);
-        assert_eq!(selected_diagnostics[0].message, legacy_diagnostics[0].message);
-        assert_eq!(selected_diagnostics[0].primary, legacy_diagnostics[0].primary);
+        assert_eq!(
+            selected_diagnostics[0].message,
+            legacy_diagnostics[0].message
+        );
+        assert_eq!(
+            selected_diagnostics[0].primary,
+            legacy_diagnostics[0].primary
+        );
     }
 
     #[test]
-    fn phase3i_native_tail_falls_back_to_pre_lowered_chain_without_restarting_head() {
+    fn phase3i_native_tail_falls_back_to_pre_lowered_chain() {
         let block = phase3i_chain_with_argument("multiply", FrontendValue::Number(3.0));
         let invocation = FrontendInvocation::from_block(&block).expect("chain");
         let evaluator = Evaluator::new();
@@ -30246,7 +30254,10 @@ mod tests {
                 &mut context,
             )
             .expect("shared continuation handles native fallback");
-        assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+        assert!(
+            evaluation_diagnostics.is_empty(),
+            "{evaluation_diagnostics:?}"
+        );
         assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
         assert!(matches!(
             selected.as_slice(),
@@ -30257,6 +30268,7 @@ mod tests {
                 )
         ));
     }
+
     #[test]
     fn phase3a_frontend_candidates_preserve_syntax_and_mixed_source_order() {
         let arguments = vec![
