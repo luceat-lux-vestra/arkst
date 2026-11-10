@@ -133,6 +133,14 @@ rationale = "Required diff-scoped dependency admission for non-docs-only changes
 
 [[producer]]
 workflow = ".github/workflows/ci.yml"
+job = "codeql_runtime"
+classification = "merge_component"
+contexts = ["codeql-runtime"]
+always_present = true
+rationale = "Always-present read-only PR compatibility adapter for the production-pinned CodeQL Actions runtime; trusted-base classification selects real execution while non-applicable changes succeed through an explicit no-op path."
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
 job = "merge_gate"
 classification = "required"
 contexts = ["Merge Gate"]
