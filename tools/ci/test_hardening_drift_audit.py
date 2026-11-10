@@ -187,85 +187,33 @@ class StaticAuthorityTests(unittest.TestCase):
         (root / ".github" / "workflows").mkdir(parents=True)
         return temp, root
 
-    def write_codeql_fixture(self, root, *, extra_scanner=False, pr_trigger=False, old_policy=False):
-        policy = "schema = 1\n"
+    def write_codeql_fixture(self, root, *, extra_scanner=False, pr_trigger=False, old_policy=False, adapter_upload="never", adapter_write=False, adapter_pin=None):
+        pin = "0123456789012345678901234567890123456789"
+        adapter_pin = adapter_pin or pin
+        policy = ("schema = 1\n[[producer]]\n" 'workflow = ".github/workflows/ci.yml"\n' 'job = "codeql_runtime"\n' 'classification = "merge_component"\n' 'contexts = ["codeql-runtime"]\n' "always_present = true\n")
         if old_policy:
-            policy += (
-                "[[producer]]\n"
-                'workflow = ".github/workflows/codeql.yml"\n'
-                'job = "analyze"\n'
-                'classification = "advisory"\n'
-            )
-        (root / ".github" / "gate-policy.toml").write_text(policy, encoding="utf-8")
-        (root / ".github" / "workflows" / "codeql.yml").write_text(
-            "\n".join(
-                [
-                    "run-name: CodeQL source",
-                    "on:",
-                    "  workflow_dispatch:",
-                    "    inputs:",
-                    "      candidate_sha:",
-                    "  schedule:",
-                    '    - cron: "23 3 * * 4"',
-                    "  pull_request:" if pr_trigger else "",
-                    "language: [actions, rust]",
-                    "build-mode: none",
-                    "security-events: write",
-                    "persist-credentials: false",
-                    'test "$GITHUB_REF" = "refs/heads/main"',
-                    'remote_main="$(gh api repos/...)"',
-                    'compare/${EXPECTED_SHA}...${remote_main}',
-                    "merge_base_commit.sha",
-                    "base_commit.sha",
-                    "source-identity.json",
-                    "codeql-source-",
-                    "cancel-in-progress: false",
-                    "path: ${{ steps.analyze.outputs.sarif-output }}",
-                    "release-codeql-verdict.py",
-                    "retention-days: 90",
-                    "uses: github/codeql-action/init@0123456789012345678901234567890123456789",
-                ]
-            ),
-            encoding="utf-8",
-        )
-        if extra_scanner:
-            (root / ".github" / "workflows" / "shadow.yml").write_text(
-                "uses: github/codeql-action/analyze@0123456789012345678901234567890123456789\n",
-                encoding="utf-8",
-            )
-
+            policy += ("[[producer]]\n" 'workflow = ".github/workflows/codeql.yml"\n' 'job = "analyze"\n' 'classification = "advisory"\n')
+        (root/".github/gate-policy.toml").write_text(policy,encoding="utf-8")
+        (root/".github/workflows/codeql.yml").write_text("\n".join(["run-name: CodeQL source","on:","  workflow_dispatch:","    inputs:","      candidate_sha:","  schedule:",'    - cron: "23 3 * * 4"',"  pull_request:" if pr_trigger else "","language: [actions, rust]","build-mode: none","security-events: write","upload: always","persist-credentials: false",'test "$GITHUB_REF" = "refs/heads/main"','remote_main="$(gh api repos/...)"','compare/${EXPECTED_SHA}...${remote_main}',"merge_base_commit.sha","base_commit.sha","source-identity.json","codeql-source-","cancel-in-progress: false","path: ${{ steps.analyze.outputs.sarif-output }}","release-codeql-verdict.py","retention-days: 90",f"uses: github/codeql-action/init@{pin}",f"uses: github/codeql-action/analyze@{pin}"]),encoding="utf-8")
+        write_permission = "      security-events: write\n" if adapter_write else ""
+        (root/".github/workflows/ci.yml").write_text("jobs:\n  scope:\n    name: docs-only-scope\n  codeql_runtime:\n    name: codeql-runtime\n    needs: [scope]\n    if: ${{ always() }}\n    permissions:\n      contents: read\n      pull-requests: read\n"+write_permission+"    steps:\n      - uses: actions/checkout@0123456789012345678901234567890123456789\n        with:\n          repository: ${{ github.event.pull_request.head.repo.full_name }}\n          ref: ${{ github.event.pull_request.head.sha }}\n          persist-credentials: false\n"+f"      - uses: github/codeql-action/init@{adapter_pin}\n        with:\n          languages: actions\n          build-mode: none\n"+f"      - uses: github/codeql-action/analyze@{adapter_pin}\n        with:\n          category: \"/language:actions\"\n          upload: {adapter_upload}\n          output: ${{ runner.temp }}/pr-codeql-runtime\n"+"      - run: python3 .github/scripts/trusted-codeql-runtime-validation.py verify\n  merge_gate:\n    name: Merge Gate\n    needs: [codeql_runtime]\n",encoding="utf-8")
+        if extra_scanner: (root/".github/workflows/shadow.yml").write_text(f"uses: github/codeql-action/analyze@{pin}\n",encoding="utf-8")
     def test_codeql_scheduled_exact_sha_authority_passes(self):
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        self.write_codeql_fixture(root)
-        self.assertEqual(AUDIT.check_codeql_authority(root), [])
-
-    def test_second_codeql_scanner_fails(self):
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        self.write_codeql_fixture(root, extra_scanner=True)
-        self.assertTrue(any("exactly codeql.yml" in x.details for x in AUDIT.check_codeql_authority(root)))
-
-    def test_stale_pr_codeql_producer_fails(self):
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        self.write_codeql_fixture(root, old_policy=True)
-        self.assertTrue(any("PR-time" in x.details for x in AUDIT.check_codeql_authority(root)))
-
-    def test_pr_codeql_trigger_reintroduction_fails(self):
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        self.write_codeql_fixture(root, pr_trigger=True)
-        self.assertTrue(any("trigger reintroduced" in x.details for x in AUDIT.check_codeql_authority(root)))
-
+        temp, root = self.make_root(); self.addCleanup(temp.cleanup); self.write_codeql_fixture(root); self.assertEqual(AUDIT.check_codeql_authority(root), [])
+    def test_third_codeql_consumer_fails(self):
+        temp, root = self.make_root(); self.addCleanup(temp.cleanup); self.write_codeql_fixture(root, extra_scanner=True); self.assertTrue(any("consumers must be exactly" in x.details for x in AUDIT.check_codeql_authority(root)))
+    def test_stale_production_pr_codeql_producer_fails(self):
+        temp, root = self.make_root(); self.addCleanup(temp.cleanup); self.write_codeql_fixture(root, old_policy=True); self.assertTrue(any("production CodeQL must not be" in x.details for x in AUDIT.check_codeql_authority(root)))
+    def test_production_pr_codeql_trigger_reintroduction_fails(self):
+        temp, root = self.make_root(); self.addCleanup(temp.cleanup); self.write_codeql_fixture(root, pr_trigger=True); self.assertTrue(any("trigger reintroduced" in x.details for x in AUDIT.check_codeql_authority(root)))
     def test_missing_exact_sha_artifact_contract_fails(self):
-        temp, root = self.make_root()
-        self.addCleanup(temp.cleanup)
-        self.write_codeql_fixture(root)
-        path = root / ".github" / "workflows" / "codeql.yml"
-        path.write_text(path.read_text(encoding="utf-8").replace("steps.analyze.outputs.sarif-output", "unverified-output"), encoding="utf-8")
-        self.assertTrue(any("sarif-output" in x.details for x in AUDIT.check_codeql_authority(root)))
-
+        temp, root = self.make_root(); self.addCleanup(temp.cleanup); self.write_codeql_fixture(root); path=root/".github/workflows/codeql.yml"; path.write_text(path.read_text(encoding="utf-8").replace("steps.analyze.outputs.sarif-output","unverified-output"),encoding="utf-8"); self.assertTrue(any("sarif-output" in x.details for x in AUDIT.check_codeql_authority(root)))
+    def test_pr_adapter_upload_must_never_promote(self):
+        temp, root = self.make_root(); self.addCleanup(temp.cleanup); self.write_codeql_fixture(root,adapter_upload="always"); self.assertTrue(any("upload: never" in x.details or "forbidden authority" in x.details for x in AUDIT.check_codeql_authority(root)))
+    def test_pr_adapter_write_permission_fails(self):
+        temp, root = self.make_root(); self.addCleanup(temp.cleanup); self.write_codeql_fixture(root,adapter_write=True); self.assertTrue(any("security-events: write" in x.details for x in AUDIT.check_codeql_authority(root)))
+    def test_pr_adapter_pin_drift_fails(self):
+        temp, root = self.make_root(); self.addCleanup(temp.cleanup); self.write_codeql_fixture(root,adapter_pin="f"*40); self.assertTrue(any("does not match production" in x.details for x in AUDIT.check_codeql_authority(root)))
     def test_supply_chain_reporter_removal_fails(self):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)

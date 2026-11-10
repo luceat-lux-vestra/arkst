@@ -139,68 +139,56 @@ def canonical_static_checks(
     return findings
 
 
+def _codeql_job_block(source: str, job: str) -> str:
+    match = re.search(rf"(?ms)^  {re.escape(job)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)", source)
+    return match.group(0) if match else ""
+
+def _codeql_action_pins(source: str) -> dict[str, list[str]]:
+    found = {"init": [], "analyze": []}
+    for match in re.finditer(r"github/codeql-action/(init|analyze)@([0-9a-f]{40})(?:\s+#.*)?", source):
+        found[match.group(1)].append(match.group(2))
+    return found
+
 def check_codeql_authority(root: Path = ROOT) -> list[Finding]:
-    """Require one scheduled/manual protected-main CodeQL scanner, never a PR producer."""
-    findings: list[Finding] = []
+    """Keep one production evidence authority plus one constrained PR runtime adapter."""
+    findings = []
     try:
         with (root / ".github" / "gate-policy.toml").open("rb") as stream:
             policy = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         return [Finding("codeql-authority", f"cannot load gate policy: {exc}")]
-    producers = [
-        item for item in policy.get("producer", [])
-        if item.get("workflow") == ".github/workflows/codeql.yml"
-    ]
-    if producers:
-        findings.append(Finding("codeql-authority", "CodeQL must not be a PR-time gate producer"))
-
-    scanners: list[str] = []
+    if [x for x in policy.get("producer", []) if x.get("workflow") == ".github/workflows/codeql.yml"]:
+        findings.append(Finding("codeql-authority", "production CodeQL must not be a PR-time gate producer"))
+    adapters = [x for x in policy.get("producer", []) if x.get("workflow") == ".github/workflows/ci.yml" and x.get("job") == "codeql_runtime"]
+    if len(adapters) != 1 or adapters[0].get("classification") != "merge_component" or adapters[0].get("contexts") != ["codeql-runtime"] or adapters[0].get("always_present") is not True:
+        findings.append(Finding("codeql-authority", "canonical PR CodeQL runtime adapter is not registered as one always-present merge component"))
+    consumers=[]
     for path in sorted((root / ".github" / "workflows").glob("*.y*ml")):
-        try:
-            source = path.read_text(encoding="utf-8")
+        try: workflow_source=path.read_text(encoding="utf-8")
         except OSError as exc:
-            findings.append(Finding("codeql-authority", f"cannot read {path}: {exc}"))
-            continue
-        if "github/codeql-action/" in source:
-            scanners.append(path.relative_to(root).as_posix())
-    if scanners != [".github/workflows/codeql.yml"]:
-        findings.append(
-            Finding("codeql-authority", f"checked-in CodeQL authority must be exactly codeql.yml, found {scanners!r}")
-        )
-
-    codeql_path = root / ".github" / "workflows" / "codeql.yml"
-    try:
-        source = codeql_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        return findings + [Finding("codeql-authority", f"cannot read codeql workflow: {exc}")]
-
-    if re.search(r"(?m)^  (?:pull_request|pull_request_target|push):", source):
-        findings.append(Finding("codeql-authority", "routine PR/push CodeQL trigger reintroduced"))
-    required_fragments = [
-        "run-name: CodeQL source",
-        "workflow_dispatch:",
-        "candidate_sha:",
-        "schedule:",
-        "language: [actions, rust]",
-        "build-mode: none",
-        "security-events: write",
-        "persist-credentials: false",
-        'GITHUB_REF" = "refs/heads/main',
-        "compare/${EXPECTED_SHA}...${remote_main}",
-        "merge_base_commit.sha",
-        "base_commit.sha",
-        "source-identity.json",
-        "codeql-source-",
-        "cancel-in-progress: false",
-        "steps.analyze.outputs.sarif-output",
-        "release-codeql-verdict.py",
-        "retention-days: 90",
-    ]
-    for fragment in required_fragments:
-        if fragment not in source:
-            findings.append(
-                Finding("codeql-authority", f"CodeQL exact-SHA evidence contract missing {fragment!r}")
-            )
+            findings.append(Finding("codeql-authority", f"cannot read {path}: {exc}")); continue
+        if "github/codeql-action/" in workflow_source: consumers.append(path.relative_to(root).as_posix())
+    if consumers != [".github/workflows/ci.yml", ".github/workflows/codeql.yml"]:
+        findings.append(Finding("codeql-authority", f"CodeQL consumers must be exactly production codeql.yml plus canonical ci.yml adapter, found {consumers!r}"))
+    try: source=(root/".github/workflows/codeql.yml").read_text(encoding="utf-8")
+    except OSError as exc: return findings+[Finding("codeql-authority",f"cannot read codeql workflow: {exc}")]
+    try: ci=(root/".github/workflows/ci.yml").read_text(encoding="utf-8")
+    except OSError as exc: return findings+[Finding("codeql-authority",f"cannot read canonical CI workflow: {exc}")]
+    if re.search(r"(?m)^  (?:pull_request|pull_request_target|push):",source): findings.append(Finding("codeql-authority","routine PR/push CodeQL trigger reintroduced"))
+    for fragment in ["run-name: CodeQL source","workflow_dispatch:","candidate_sha:","schedule:","language: [actions, rust]","build-mode: none","security-events: write","upload: always","persist-credentials: false",'GITHUB_REF" = "refs/heads/main',"compare/${EXPECTED_SHA}...${remote_main}","merge_base_commit.sha","base_commit.sha","source-identity.json","codeql-source-","cancel-in-progress: false","steps.analyze.outputs.sarif-output","release-codeql-verdict.py","retention-days: 90"]:
+        if fragment not in source: findings.append(Finding("codeql-authority",f"CodeQL exact-SHA evidence contract missing {fragment!r}"))
+    pp=_codeql_action_pins(source)
+    if len(pp["init"])!=1 or len(pp["analyze"])!=1 or pp["init"][0]!=pp["analyze"][0]: findings.append(Finding("codeql-authority","production CodeQL init/analyze immutable pin contract drifted"))
+    adapter=_codeql_job_block(ci,"codeql_runtime")
+    if not adapter: findings.append(Finding("codeql-authority","canonical ci.yml CodeQL runtime adapter is missing")); return findings
+    for fragment in ["name: codeql-runtime","needs: [scope]","contents: read","pull-requests: read","github.event.pull_request.head.repo.full_name","github.event.pull_request.head.sha","persist-credentials: false","languages: actions","build-mode: none",'category: "/language:actions"',"upload: never","runner.temp","trusted-codeql-runtime-validation.py verify"]:
+        if fragment not in adapter: findings.append(Finding("codeql-authority",f"PR CodeQL runtime adapter missing {fragment!r}"))
+    if ("if: "+"$"+"{{ always() }}") not in adapter: findings.append(Finding("codeql-authority","PR CodeQL runtime adapter must be always-present"))
+    for forbidden in ("security-events: write","actions: write","id-token: write","packages: write","pull_request_target","upload-artifact@","upload: always"):
+        if forbidden in adapter: findings.append(Finding("codeql-authority",f"PR CodeQL runtime adapter gained forbidden authority {forbidden!r}"))
+    ap=_codeql_action_pins(adapter)
+    if len(ap["init"])!=1 or len(ap["analyze"])!=1 or ap["init"][0]!=ap["analyze"][0] or len(pp["init"])!=1 or ap["init"][0]!=pp["init"][0]: findings.append(Finding("codeql-authority","PR CodeQL runtime immutable pin does not match production"))
+    if "codeql_runtime" not in _codeql_job_block(ci,"merge_gate"): findings.append(Finding("codeql-authority","Merge Gate does not directly depend on codeql_runtime"))
     return findings
 
 def check_supply_chain_authority(root: Path = ROOT) -> list[Finding]:
