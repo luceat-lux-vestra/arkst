@@ -29877,11 +29877,8 @@ mod tests {
             FrontendValue::Boolean(true),
             FrontendValue::Identifier("variable".to_string()),
         ] {
-            let block = frontend_invocation_block(
-                "identity",
-                vec![tail(vec![positional(value)])],
-                None,
-            );
+            let block =
+                frontend_invocation_block("identity", vec![tail(vec![positional(value)])], None);
             let invocation = FrontendInvocation::from_block(&block).expect("flat tail");
             assert!(invocation.can_defer_phase3i_tail(&context));
             assert!(!invocation.can_defer_phase3h_tail(&context));
@@ -30088,10 +30085,7 @@ mod tests {
                         &mut selected_context,
                     )
                     .expect("selected Phase 3I chain");
-                assert!(
-                    selected_diagnostics.is_empty(),
-                    "{selected_diagnostics:?}"
-                );
+                assert!(selected_diagnostics.is_empty(), "{selected_diagnostics:?}");
                 assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
 
                 let mut legacy_lowering_diagnostics = Vec::new();
