@@ -68,7 +68,7 @@ Source anchors:
 
 ## Open blockers for the **G0 gate** (no deferral or scope reduction)
 
-1. Continue tracing every actual producer/consumer/call site of all ledger types, including nested/generative, extension/native precedence, legacy/core, WASM/host and test-only fixtures. The first bounded dynamic-route slice below proves three concrete runtime routes with exact current-head execution; it does **not** make the remaining routes exhaustive. The enum list is declaration-complete, not yet an exhaustive runtime branch proof.
+1. Continue tracing every actual producer/consumer/call site of all ledger types, including nested/generative, extension/native precedence, legacy/core, WASM/host and test-only fixtures. Dynamic-route slices A and B below prove five concrete runtime routes with exact current-head execution evidence; they do **not** make the remaining routes exhaustive. The enum list is declaration-complete, not yet an exhaustive runtime branch proof.
 2. Freeze independent clean-room representative inputs and byte-exact expected diagnostic code/message/span/order, effects, lazy branches/failed mutations, resource modes, source provenance, output and source-map behavior. Preserve known PARTIAL/unsupported/fail-closed cases.
 3. Decide public API and CLI/wire compatibility/version policy from consumer inventory; test legacy decoder behavior and invalid source refs rather than assuming compatibility.
 4. Review and accept [proposed ADR-0022](../adr/0022-runtime-final-document-ir.md); explicitly amend historical ADR-0020 and `docs/ARCHITECTURE.md` after acceptance, without silently rewriting their prior claims.
@@ -102,6 +102,26 @@ Production authority for this slice is unchanged from the current PR candidate: 
 | **DYN03 callable / selected body executable IR** | `FunctionBinding.body` is physically `Vec<IrNode>`; selected frontend block bodies cross `lower_frontend_block_body_for_runtime`; `evaluate_call_body` consumes block `IrNode` via `evaluate_node` and inline IR via `evaluate_inlines`. | First-class callable capture, two nested-body frontend tests, extension document rollback and lazy native raw-body tests — **5/5 PASS on all three platforms**. | **Executable IR body storage/consumption dynamically proven**; this directly demonstrates the remaining G4 body bridge. |
 
 This slice upgrades those three routes from lexical/path anchors to **source-traced + executable-current-head evidence**. It intentionally leaves open: exhaustive direct/native/unresolved invocation ownership, every chain argument/body/extension/resource combination, all nested/generative AST owners, value/runtime provenance paths, context/transaction routes, host/WASM routes, public API/wire consumers and backend consumers.
+
+### Dynamic producer/consumer reachability — bounded slice B
+
+Slice B extends the same [dynamic-route evidence ledger](719-g0-dynamic-route-evidence.tsv) with two additional runtime routes: evaluator-owned runtime value/provenance and invocation-scoped context/transaction journaling. This is still a bounded proof slice, not exhaustive G0 reachability.
+
+Production authority used by this slice:
+- `crates/arkst-engine/src/value_conversion.rs` blob `c47164b1cc2524a3cf79c615e83058d8b6cd72a9`;
+- `crates/arkst-engine/src/evaluator.rs` blob `217d3b4c107119c9ffe81daa303bcac0883d2675`;
+- `crates/arkst-engine/src/builtins.rs` blob `35369890b3081c4e7359656f561f5369bb6d9333`.
+
+Execution authority is exact-head CI run **#42906026861** at `04a7ee7a56cb656a29edc7f1f4e25a930a607767`, with macOS job `130144201000`, Windows job `130144200964`, and Ubuntu ARM64 job `130144200908`.
+
+| Route | Production reachability established | Exact executable evidence | Current classification |
+|---|---|---|---|
+| **DYN04 runtime value / provenance** | `evaluate_argument_candidate` materializes evaluator-owned `RuntimeValue`; `RuntimeValue::collection` decomposes collection children so provenance is owned per element. Variables retain `RuntimeValue`; the direct logger route recovers it with `direct_variable_runtime_value` and `builtins::logger_string_conversion` consumes the bounded source-backed provenance. Operation-generated collections remain fail-closed. | RuntimeValue nested-collection provenance; logger dynamic-string boundary; direct Markdown-list source-origin conversion; generated-collection fail-closed behavior; provenance confinement; dynamic-vs-static conversion audit — **6/6 PASS on all three platforms** at #42906026861. | **Runtime provenance production/consumption dynamically proven for this bounded value/logger slice.** `SemanticLeaf(IrValue)` and `InvocationValue` remain transitional adapters, so G1 is not closed. |
+| **DYN05 context / transaction savepoint** | `evaluate_call_value_with_input` begins an invocation and captures `InvocationCheckpoint`; failure calls `checkpoint.restore -> rollback_transaction -> restore_undo`, success calls `checkpoint.commit -> commit_savepoint`. `record_variable_before` and `record_document_state_undo` journal first writes, while cloned scope trees share the transaction with distinct scope identity. | Nested candidate rollback; caller-variable rollback; document-state rollback; prior-success preservation; nested-super outer rollback; local/parent function-binding undo; unresolved-callable non-publication; bounded document append undo metadata; nested conversion rollback — **9/9 PASS on all three platforms**. | **Invocation savepoint/journal route dynamically proven for the tested variable/function/document-state boundaries.** This preserves the reviewed S12 invariant but does not finish the target EvalSession/stable-identity transaction design. |
+
+Across slice B, **15/15 exact tests pass on macOS, Windows and Ubuntu ARM64** at the cited exact execution HEAD.
+
+This slice upgrades the runtime-value and transaction routes from structural anchors to **source-traced + executable evidence**. It intentionally leaves open: full recursive provenance across every semantic category and consumer, #682/#718 integration closure, every conversion target, all scope/resource/capture combinations, all document-state fields, host/WASM boundaries, public API/wire consumers and backend consumers. The new documentation commit that records this slice still requires its own exact-head CI before merge.
 
 ### CI provenance and interpretation
 
