@@ -125,7 +125,22 @@ The bounded bundle implements three previously planned oracle rows:
 - **S12** failed extension mutation of document state, requiring rollback and identical diagnostic/output.
 - **S16** dynamic String-to-number conversion versus source-authored static String rejection.
 
-These fixtures establish **normal-vs-legacy differential assertions in executable test code**. They do **not** independently prove Quarkdown/reference correctness. S04 and S16 still require their independent-reference observations to be reconciled into this G0 contract before their final reference disposition is claimed. S12 is intentionally different: the independently observed upstream behavior conflicts with Arkst's accepted transactional invariant and is recorded below as an explicit compatibility divergence. These fixtures also do not close unimplemented S01–S32 cases or the G0 dynamic route census.
+These fixtures establish **normal-vs-legacy differential assertions in executable test code**. They do **not** by themselves prove Quarkdown/reference correctness. Disposable clean-room PR #748 now supplies the independent official-v2.5.1 observations for S04, S12 and S16: S04 and S16 are semantically compatible at the tested boundaries, while S12 intentionally diverges because Arkst preserves its accepted transactional rollback invariant. These fixtures still do not close unimplemented S01–S32 cases or the G0 dynamic route census.
+
+### S04 and S16 independent-reference disposition: semantically compatible
+
+The same disposable clean-room PR #748 at exact HEAD `347b5a155fdb5ed11e6113e9aa29cc7bfd2ec803`, workflow run #42825801315, used the official Quarkdown v2.5.1 Linux x64 archive with SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. The retained artifact is ID `13768992195`, digest `sha256:751d3386190fb2f5a33d702a2907a16321b87acb5eb1fcceddf96b8d785454a0`.
+
+For **S04**, official v2.5.1 default and strict modes both exit 0 with empty stderr and the same visible output: `Quarkdown Hello, world from None! Hello, world from Jane!`. The rendered HTML SHA-256 is `3f4c6d0db35eccc030dc107e0ded16fe6004e4b5aeb56c02c6aa37dc8cd010c8` in both modes. This independently supports the required/optional/named source-defined direct-call behavior exercised by Arkst's S04 differential fixture.
+
+For **S16 dynamic String**, official default and strict modes both exit 0, produce visible `Quarkdown 3.5`, and share HTML SHA-256 `97cbf5ab43bce37796fb200cab5635d83597fadd92b9df46a5a7943001510645`. For **S16 static String**, official non-strict mode reports that `abs(Number x)` received a `StringValue` instead of Number, renders an error document with SHA-256 `f2a72851f31038b0c44c786fd653571ec4a9120d6e36bc2a9014e8f42574dda6`, and strict mode exits 66 with no HTML. This independently supports the semantic conversion boundary: dynamically produced numeric text converts, while a statically typed String remains rejected by a Number target.
+
+The S16 compatibility claim is deliberately **semantic**, not byte-identical diagnostic-presentation parity. Arkst's diagnostic code/message/rendering contract remains its own tested interface; the official CLI presentation and JVM exception naming are not imported as Arkst's byte-for-byte oracle.
+
+Accordingly:
+- **S04:** upstream reference frozen as semantically compatible at the required/optional/named direct-call boundary.
+- **S16:** upstream reference frozen as semantically compatible at the dynamic-vs-static numeric conversion boundary.
+- Both rows remain pending exact-HEAD CI for this replacement documentation candidate; neither status closes wider G0 coverage.
 
 ### S12 independent-reference disposition: intentional rollback divergence
 
