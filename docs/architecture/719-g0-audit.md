@@ -278,7 +278,7 @@ evidence and CI obligations are complete.
 - The source-defined chain head increments a caller-visible numeric `count` and returns a numeric value. The success control continues through native `multiply {3}` and the terminal source-defined tail; the failure variant changes only the middle input to `multiply {true}`.
 - Required observation in both variants is final `count=1`. On success the visible result is `terminal body\n1`; on middle-tail failure the visible result is `1`, proving the already-successful head committed once while the terminal owner did not execute.
 - The test still performs exact normal-frontend vs legacy executable-IR equality and complete ordered diagnostic-signature equality, so a final count of 1 constrains both entrypoints.
-- **Evidence state:** candidate only until the exact new #746 HEAD completes required CI across the maintained platforms and Merge Gate.
+- **Execution evidence frozen:** exact execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` completed CI #43053491597 **SUCCESS**. Ubuntu ARM64, macOS, and Windows Typst-required test jobs all passed, as did the required Merge Gate. The S08 once-only fixture is therefore frozen for this bounded migration slice; #752 recovery-content debt remains separate.
 
 ### S08 default-mode recovery-content compatibility debt
 
@@ -306,15 +306,17 @@ The initial public S09 candidate incorrectly encoded an old **preflight-before-h
 
 That failure is evidence about the test expectation, **not a production regression**. The normal frontend and legacy evaluator had already passed exact IR and normalized diagnostic equality before the assertion. Current Arkst therefore matches the official reference ordering for the first bounded case.
 
-Commit `feb1537c58cb1160dd2e18bde2b690cf95cd3631` renames the fixture to `g0_s09_chain_tail_shape_errors_preserve_once_only_head_effect`, changes both bounded expected counters to `1`, and documents the correct order. The excess-tail case still requires the new exact-head CI because the prior test stopped at the first outdated assertion.
+Commit `feb1537c58cb1160dd2e18bde2b690cf95cd3631` renames the fixture to `g0_s09_chain_tail_shape_errors_preserve_once_only_head_effect`, changes both bounded expected counters to `1`, and documents the correct order.
 
-**Classification until requalification:** official S09 reference is frozen; current Arkst first-case ordering is observed compatible; the corrected two-case public differential candidate awaits final exact-head cross-platform CI and Merge Gate.
+**Execution evidence frozen:** exact execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` completed CI #43053491597 **SUCCESS**. The corrected two-case S09 public differential passed Ubuntu ARM64, macOS, and Windows Typst-required tests and the required Merge Gate. Both bounded cases therefore preserve exact normal-frontend vs legacy-evaluator IR/diagnostic parity while observing the same once-only committed head effect (`count=1`) as the official v2.5.1 default-mode reference.
+
+**Classification:** official S09 reference and Arkst cross-platform migration evidence are frozen as **bounded semantic-order compatible**. This does not claim byte-for-byte error rendering parity; default-mode recovery-content rendering remains governed by the separate S08/#752 compatibility debt.
 
 
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
 - **Observed error-recovery gap (OPEN, not accepted divergence):** official non-strict recovery emits an error panel and source/body in HTML while Arkst's bounded failure `IrDocument` path returns `before` and its own diagnostic. Classify separately as a compatibility behavior to investigate at G0; neither mask it by claiming full S08 compatibility nor change Arkst's accepted invocation-scoped rollback invariant without architecture review.
-- **Still open beyond the current candidates:** other middle-tail ownership/failure forms, multi-source/nested/host paths, complete G0 producer/consumer reachability, and cross-target output/diagnostic equivalence. The S08 true counter fixture is now present and has already passed in the Ubuntu ARM64/macOS portions of superseded CI #43052527482 before the intentional S09 expectation failure stopped those jobs; final combined exact-head qualification is still required. Strict upstream exit `66` is a reference observation, not an automatic Arkst CLI-exit matching requirement.
+- **Still open beyond the frozen S08/S09 slices:** other middle-tail ownership/failure forms, multi-source/nested/host paths, complete G0 producer/consumer reachability, and cross-target output/diagnostic equivalence. S08 once-only and corrected S09 two-case ordering are cross-platform frozen at execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` / CI #43053491597. Strict upstream exit `66` is a reference observation, not an automatic Arkst CLI-exit matching requirement.
 - **Checkpoint discipline:** this is an evidence-only update on PR #746 and requires its **own exact-HEAD CI** before qualification. Disposable PR #751 must be **closed unmerged** after these observations are durable. #719 remains OPEN; no G1 or #746 merge authorization.
 
