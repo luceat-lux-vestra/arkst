@@ -287,3 +287,59 @@ fn g0_s08_side_effectful_head_executes_once_on_success_and_middle_failure() {
     assert!(failure.diagnostics[0].message.contains("numeric arguments"));
     assert_eq!(paragraph_text(&failure), "1");
 }
+
+#[test]
+fn g0_s09_chain_shape_errors_preflight_before_side_effectful_head() {
+    // Both cases make head execution observable through a caller-visible
+    // counter. Chain-shape/binding errors must be discovered before the head
+    // can commit that side effect.
+    let prefix = concat!(
+        ".var {count} {0}\n",
+        ".function {counted}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .sum {1} {1}\n",
+        "\n",
+    );
+
+    // The implicit predecessor already occupies the terminal function's only
+    // parameter. Supplying a terminal block body therefore collides with that
+    // bound slot and must fail before dispatching the counted head.
+    let invalid_terminal_body = format!(
+        "{prefix}{}",
+        concat!(
+            ".function {tail}\n",
+            "    previous:\n",
+            "    .previous\n",
+            "\n",
+            ".counted::tail\n",
+            "    rejected body\n",
+            ".count\n",
+        )
+    );
+    let body_failure = compile_and_assert_legacy_parity(&invalid_terminal_body);
+    assert_eq!(body_failure.diagnostics.len(), 1, "{body_failure:?}");
+    assert_eq!(paragraph_text(&body_failure), "0");
+
+    // The implicit predecessor occupies previous and the first authored
+    // positional argument occupies second; one additional authored argument
+    // is therefore excess. Structural binding must reject it before the head
+    // commits count=1.
+    let excess_positional_tail = format!(
+        "{prefix}{}",
+        concat!(
+            ".function {tail}\n",
+            "    previous second:\n",
+            "    .second\n",
+            "\n",
+            ".counted::tail {9} {10}\n",
+            ".count\n",
+        )
+    );
+    let positional_failure = compile_and_assert_legacy_parity(&excess_positional_tail);
+    assert_eq!(
+        positional_failure.diagnostics.len(),
+        1,
+        "{positional_failure:?}"
+    );
+    assert_eq!(paragraph_text(&positional_failure), "0");
+}
