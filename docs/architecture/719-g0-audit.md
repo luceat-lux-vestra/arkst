@@ -338,6 +338,31 @@ Commit `feb1537c58cb1160dd2e18bde2b690cf95cd3631` renames the fixture to `g0_s09
 **Classification:** official S09 reference and Arkst cross-platform migration evidence are frozen as **bounded semantic-order compatible**. This does not claim byte-for-byte error rendering parity; default-mode recovery-content rendering remains governed by the separate S08/#752 compatibility debt.
 
 
+## S02 UTF-8 / CRLF source provenance — bounded official semantics + Arkst span freeze
+
+Disposable clean-room PR #756 is **evidence-only and must remain unmerged**. The final bounded probe HEAD is `64a2b784fef393705752a02602d3149a56f74ab0`; authoritative run #43103889446 completed **SUCCESS** against the exact official Quarkdown v2.5.1 Linux x64 archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. Retained artifact `g0-s02-quarkdown-v2.5.1` has ID `13893545643` and digest `sha256:cd97005a95d63a8b7ada89c7532302a7c4d00ac3132ea063d57c7a1cb3f6a4ea`.
+
+The final probe intentionally uses only native `.text` calls so it measures the S02 grammar surface itself rather than user-defined-function implementation details. Earlier #756 runs #43103559415 and #43103738073 are **NON-EVIDENCE**: those revisions included a broader user-defined-function CRLF fixture and were replaced before freezing S02.
+
+| Final fixture pair | Official v2.5.1 default + strict | Bounded conclusion |
+| --- | --- | --- |
+| tight nested UTF-8 native call, LF vs CRLF | all rc 0; stderr empty; visible text `앞 값 뒤` | LF and CRLF are semantically equivalent at this native nested-call boundary. LF HTML SHA-256 `a76536e4dcaf8adfddb1df3454c8688727603581c8f3ec533617809e575d78c8`; CRLF HTML SHA-256 `601075a1830a7bad6d023a6b86a72bc13a71d64a690a27a5613cdeca3102601b`. Different HTML bytes mean **do not claim byte-identical renderer output**. |
+| escaped closing delimiter spanning a line break, LF vs CRLF | all rc 0; stderr empty; visible text `prefix 한글 } text suffix` | LF and CRLF semantics match at this escaped-delimiter boundary. All four outputs share HTML SHA-256 `64c5d98fa611ecc673fae43fcf73203191e36efcc439c467842f94494ea81636`. |
+
+### Arkst source-provenance evidence
+
+PR #746 adds three public S02 tests:
+
+- `g0_s02_utf8_tight_nested_call_keeps_exact_source_spans_and_mode_isolation`: Quarkdown mode preserves the exact source-backed spans for the outer call, nested call, UTF-8 argument and surrounding text while all offsets remain UTF-8 character boundaries. The same source parsed in Markdown mode must not fabricate block or inline directive calls.
+- `g0_s02_crlf_escaped_delimiter_keeps_source_backing_and_markdown_literal`: the raw CRLF and escaped `\}` remain source-backed through the parsed content; Markdown mode again remains literal/non-directive.
+- `g0_s02_normal_compile_keeps_utf8_crlf_nested_failure_source_identity`: normal compilation of a nested failing call pins the diagnostic primary span to the exact `{true}` bytes in the original CRLF source and preserves the correct `SourceId`.
+
+The exact Arkst execution HEAD `67b192781620a03c8264a4d76491c67e377f2c9a` completed CI #43102574849 **SUCCESS**. Ubuntu ARM64, macOS and Windows Typst-required tests, compatibility/reference jobs, fmt/clippy/MSRV/WASM/docs/security-related jobs and the required Merge Gate all passed.
+
+**Classification:** official v2.5.1 is authority only for the bounded native LF/CRLF semantic observations above. Arkst's exact byte offsets, raw-CRLF provenance, SourceId mapping and Markdown-mode isolation are internal parser/compiler evidence and are **not inferred from black-box HTML output**. S02 is therefore frozen as `UPSTREAM_V251_NATIVE_LF_CRLF_SEMANTICS_AND_ARKST_SOURCE_PROVENANCE_CROSS_PLATFORM_FROZEN`; no compatibility debt was discovered in the final bounded S02 grammar.
+
+
+
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
