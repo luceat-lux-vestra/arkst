@@ -550,8 +550,15 @@ def verify_ruleset(policy: dict, ruleset: dict, required_contexts: set[str]) -> 
         raise PolicyError("ruleset must require extra approval for unattributed changes")
 
     checks = rule_by_type["required_status_checks"].get("parameters", {})
-    if checks.get("strict_required_status_checks_policy") is not True:
-        raise PolicyError("ruleset required status checks must remain strict")
+    configured_strict = expected.get("strict_required_status_checks_policy")
+    if type(configured_strict) is not bool:
+        raise PolicyError("ruleset strict_required_status_checks_policy must be an explicit boolean")
+    actual_strict = checks.get("strict_required_status_checks_policy")
+    if actual_strict is not configured_strict:
+        raise PolicyError(
+            "ruleset strict_required_status_checks_policy drift: "
+            f"expected {configured_strict}, got {actual_strict}"
+        )
     live_checks = checks.get("required_status_checks", [])
     integration_id = expected.get("required_check_integration_id")
     if integration_id is not None:

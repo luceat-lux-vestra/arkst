@@ -3,6 +3,11 @@ schema = 1
 [ruleset]
 name = "Protect main"
 required_check_integration_id = 15368
+# Maintainer intentionally disabled GitHub strict up-to-date status checks across the
+# portfolio to avoid redundant reruns. This allows a checked PR to lag new main;
+# exact-head tests, required Merge Gate components and explicit pre-merge
+# base reconciliation remain separate obligations.
+strict_required_status_checks_policy = false
 
 [docs_only_fast_path]
 exact_paths = [
