@@ -205,3 +205,15 @@ fn g0_s07_flat_argument_chain_tail_matches_legacy_ir_entrypoint() {
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(paragraph_text(&result), "9");
 }
+
+#[test]
+fn g0_s08_multitail_terminal_body_source_native_source_matches_legacy() {
+    // S08 / DYN02 bounded full-frontend proof: source-defined head,
+    // native multiply middle tail, and source-defined terminal body owner.
+    // Upstream Quarkdown reference is intentionally NOT claimed here.
+    let source = ".function {identity}\n    value:\n    .value\n\n.function {tail}\n    previous content:\n    .content\n\n.identity {2}::multiply {3}::tail\n    terminal body\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "terminal body");
+}
