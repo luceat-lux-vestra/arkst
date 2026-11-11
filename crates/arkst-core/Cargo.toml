@@ -24,4 +24,5 @@ tracing.workspace = true
 libm.workspace = true
 
 [dev-dependencies]
+arkst-typst.workspace = true
 insta.workspace = true
