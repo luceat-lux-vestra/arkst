@@ -480,24 +480,20 @@ fn g0_s02_utf8_tight_nested_call_keeps_exact_source_spans_and_mode_isolation() {
         "{앞{.inner {값}}뒤}"
     );
 
-    let [
-        Inline::Text {
-            content: prefix,
-            span: prefix_span,
-        },
-        Inline::DirectiveCall {
-            name: inner_name,
-            name_span,
-            head_span,
-            arguments: inner_arguments,
-            span: inner_span,
-            ..
-        },
-        Inline::Text {
-            content: suffix,
-            span: suffix_span,
-        },
-    ] = content.as_slice()
+    let [Inline::Text {
+        content: prefix,
+        span: prefix_span,
+    }, Inline::DirectiveCall {
+        name: inner_name,
+        name_span,
+        head_span,
+        arguments: inner_arguments,
+        span: inner_span,
+        ..
+    }, Inline::Text {
+        content: suffix,
+        span: suffix_span,
+    }] = content.as_slice()
     else {
         panic!("expected tight nested call surrounded by text: {content:?}");
     };
@@ -572,10 +568,7 @@ fn g0_s02_crlf_escaped_delimiter_keeps_source_backing_and_markdown_literal() {
         unreachable!()
     };
     assert_eq!(name, "foo");
-    assert_eq!(
-        &source[span.start..span.end],
-        ".foo {한글 \\}\r\ntext}"
-    );
+    assert_eq!(&source[span.start..span.end], ".foo {한글 \\}\r\ntext}");
     let [CallArgument::Positional {
         value: Value::Content(argument_content),
         span: argument_span,
@@ -590,9 +583,9 @@ fn g0_s02_crlf_escaped_delimiter_keeps_source_backing_and_markdown_literal() {
     let rebuilt = argument_content
         .iter()
         .map(|inline| match inline {
-            Inline::Text { span, .. }
-            | Inline::SoftBreak { span }
-            | Inline::HardBreak { span } => &source[span.start..span.end],
+            Inline::Text { span, .. } | Inline::SoftBreak { span } | Inline::HardBreak { span } => {
+                &source[span.start..span.end]
+            }
             other => panic!("unexpected escaped content node: {other:?}"),
         })
         .collect::<String>();
