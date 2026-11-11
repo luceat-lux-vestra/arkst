@@ -239,6 +239,31 @@ degradation of Quarkdown language compatibility, source maps, diagnostics,
 rollback semantics or security. Keep PR #746 unmerged until its G0
 evidence and CI obligations are complete.
 
+## S01 source-order and later binding failures — pinned official reference
+
+Disposable clean-room PR #754 is **CLOSED/UNMERGED**. Final probe HEAD `5866a0d6f538029de71c080afd7b4e11b2433953`; authoritative run #43057680381 completed **SUCCESS** using the exact official Quarkdown v2.5.1 Linux x64 archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. Retained artifact `g0-s01-quarkdown-v2.5.1`, ID `13872356098`, digest `sha256:69db66203158e2f5b96172b071557084258df8b8ccfe54452152bf190e4a34f4`.
+
+The fixtures are independently authored and intentionally make argument ordering observable rather than relying on the names of existing Arkst tests.
+
+| Fixture | Official default | Official strict | Bounded semantic observation |
+|---|---|---|---|
+| valid positional → named mixed call with two stateful nested `tick` calls | rc 0; stderr empty; visible target result `12`, then final `count=2`; HTML SHA-256 `73f3849d26bddb9e0d62261820b7514b02e2312da75a8d1fea715be4812d22a1` | rc 0; same HTML hash | ordinary eager candidates evaluate left-to-right in source order; first nested call returns 1, second returns 2 |
+| `first:{.sum {true} {2}} {.tick}` | rc 0; failure owned by nested `sum`; recoverable error HTML plus later visible `0`; SHA-256 `8fd250442b361d59715fc5d26e7ad6f790a5b01d59238e05a08ad28337f17d14` | rc 66; owner `sum`; no HTML | the earlier named candidate is evaluated and fails before the later positional-after-named defect becomes the first observable error |
+| `first:{.sum {true} {2}} first:{.tick}` | rc 0; same nested `sum` failure and later visible `0`; same bounded failure HTML hash | rc 66; owner `sum`; no HTML | the earlier candidate failure likewise precedes discovery of the later duplicate-name binding defect |
+
+### S01 Arkst reconciliation
+
+The prior ledger sentence **“preflight validation precedes argument effects” is not a valid universal Quarkdown-compatibility invariant**. It described current Arkst's shared structural-plan architecture, not the complete official v2.5.1 ordering contract.
+
+Current Arkst intentionally constructs a structural binding plan before eager candidate evaluation. The new #746 public differential candidates therefore separate two claims:
+
+- `g0_s01_mixed_arguments_evaluate_left_to_right_matches_legacy` expects the compatible valid-mixed observation: target `12`, final count `2`;
+- `g0_s01_positional_after_named_preflights_before_nested_failure_in_arkst` and `g0_s01_duplicate_named_preflights_before_nested_failure_in_arkst` freeze current Arkst's different failure ordering, exact source provenance and normal-frontend vs legacy-evaluator parity.
+
+Those tests were added at `b6cf594b46dfb4d529fb3020d070b32adf28c489`; exact-head CI is pending at this audit revision.
+
+**Compatibility owner:** #755, `compat(runtime): match source-ordered argument evaluation before later binding failures`. This is **compatibility debt, not an accepted divergence**. The required future change must preserve source-ordered/incremental regular argument processing without replacing it with a blanket “evaluate everything before validation” rule, and it must preserve #167 rollback/commit guarantees. Production semantics are intentionally not changed in evidence-only PR #746.
+
 ## S08 mixed-owner multitail + terminal body — bounded cross-platform proof (not G0 exit)
 
 - **New full-frontend fixture:** `g0_runtime_differential::g0_s08_multitail_terminal_body_source_native_source_matches_legacy` compiles parser-clean source containing a source-defined `identity` head, native `multiply` middle tail, and a source-defined `tail` owning the terminal indented body.
