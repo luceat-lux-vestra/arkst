@@ -289,10 +289,32 @@ evidence and CI obligations are complete.
 - This gap is **compatibility debt, not an accepted divergence**. #746 records evidence/classification only and must not change production behavior to make the ledger green.
 
 
+## S09 chain-tail binding errors — pinned official ordering evidence
+
+Disposable clean-room PR #753 is **CLOSED/UNMERGED**. Its final probe HEAD is `4266e88f98da26aff75a089bea64acce41d16cb8`; authoritative run #43052756497 completed **SUCCESS** against the exact official Quarkdown v2.5.1 Linux x64 archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. Retained artifact ID `13870690958`, digest `sha256:57c9b696dc9b3affe2aeb4410c2eb9e5dd338e099d591fb8b39f494141dab160`.
+
+The first probe run #43052656501 is explicitly **NON-EVIDENCE**: the generated workflow accidentally escaped the shell array expansion and passed literal `${args[@]}` to the Quarkdown CLI. Commit `4266e88f98da26aff75a089bea64acce41d16cb8` fixes only that harness defect; only run #43052756497 is authoritative.
+
+| Fixture | Official default | Official strict | Bounded semantic observation |
+|---|---|---|---|
+| terminal body collides with the terminal `tail(previous)` predecessor slot | rc 0; stderr owned by `tail` with ParameterAlreadyBound; one HTML page contains error recovery, literal failed chain/body, and final visible `1`; SHA-256 `78e5105e25a173706d83e214665f80d09708f1dc81b468f5ae7447f629f80a8f` | rc 66; `tail` failure; no HTML | source-defined head already executed once and committed `count=1` before terminal-tail binding failure |
+| excess authored tail positional argument after implicit predecessor | rc 0; stderr owned by `tail`, 3 arguments for 2 parameters; one HTML page contains error recovery, literal failed chain, and final visible `1`; SHA-256 `e14fec6e8102f3b9ed56a80463626a42a42d6afd8f2d70bd9fccdb073fde13f2` | rc 66; `tail` failure; no HTML | same ordering: head commits once, then terminal tail rejects excess binding; the head effect is neither duplicated nor rolled back |
+
+### Arkst reconciliation
+
+The initial public S09 candidate incorrectly encoded an old **preflight-before-head** interpretation and expected final `count=0`. CI #43052527482 disproved that interpretation on current Arkst: both Ubuntu ARM64 and macOS reached the new test after all preceding G0 differential fixtures passed, and the first S09 assertion reported actual `"1"` versus expected `"0"`.
+
+That failure is evidence about the test expectation, **not a production regression**. The normal frontend and legacy evaluator had already passed exact IR and normalized diagnostic equality before the assertion. Current Arkst therefore matches the official reference ordering for the first bounded case.
+
+Commit `feb1537c58cb1160dd2e18bde2b690cf95cd3631` renames the fixture to `g0_s09_chain_tail_shape_errors_preserve_once_only_head_effect`, changes both bounded expected counters to `1`, and documents the correct order. The excess-tail case still requires the new exact-head CI because the prior test stopped at the first outdated assertion.
+
+**Classification until requalification:** official S09 reference is frozen; current Arkst first-case ordering is observed compatible; the corrected two-case public differential candidate awaits final exact-head cross-platform CI and Merge Gate.
+
+
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
 - **Observed error-recovery gap (OPEN, not accepted divergence):** official non-strict recovery emits an error panel and source/body in HTML while Arkst's bounded failure `IrDocument` path returns `before` and its own diagnostic. Classify separately as a compatibility behavior to investigate at G0; neither mask it by claiming full S08 compatibility nor change Arkst's accepted invocation-scoped rollback invariant without architecture review.
-- **Not yet proved:** whether the head executes exactly once, other middle-tail ownership/failure forms, multi-source/nested/host paths, complete G0 producer/consumer reachability, and cross-target output/diagnostic equivalence. Strict upstream exit `66` is a reference observation, not an automatic Arkst CLI-exit matching requirement.
+- **Still open beyond the current candidates:** other middle-tail ownership/failure forms, multi-source/nested/host paths, complete G0 producer/consumer reachability, and cross-target output/diagnostic equivalence. The S08 true counter fixture is now present and has already passed in the Ubuntu ARM64/macOS portions of superseded CI #43052527482 before the intentional S09 expectation failure stopped those jobs; final combined exact-head qualification is still required. Strict upstream exit `66` is a reference observation, not an automatic Arkst CLI-exit matching requirement.
 - **Checkpoint discipline:** this is an evidence-only update on PR #746 and requires its **own exact-HEAD CI** before qualification. Disposable PR #751 must be **closed unmerged** after these observations are durable. #719 remains OPEN; no G1 or #746 merge authorization.
 
