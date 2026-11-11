@@ -45,6 +45,16 @@ profile per target.
 - Diagnostic codes may be added but not reassigned
 - Config schema version changes only with breaking config changes
 
+## Unreleased Arkst clean-break clarification — 2026-11-11
+
+The actively developed, unpublished workspace may replace older public Rust
+interfaces, mixed-executable IR models and unversioned CLI IR JSON without
+historical importers, deprecated fallback APIs or a compatibility window.
+This does not exempt **actual published releases** from SemVer/CHANGELOG
+requirements above, does not permit reusing existing public diagnostic codes
+within a major version, and does not narrow Quarkdown language compatibility,
+wire security or independent conformance obligations.
+
 ## Consequences
 
 ### Positive
