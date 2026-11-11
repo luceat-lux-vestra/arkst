@@ -345,3 +345,103 @@ fn g0_s09_chain_tail_shape_errors_preserve_once_only_head_effect() {
     );
     assert_eq!(paragraph_text(&positional_failure), "1");
 }
+
+#[test]
+fn g0_s01_mixed_arguments_evaluate_left_to_right_matches_legacy() {
+    // The two nested tick calls mutate one caller-visible counter and return
+    // the value after each increment. The target combines the first result as
+    // the tens digit and the second as the ones digit, so source-order
+    // evaluation is externally visible as 12 followed by final count 2.
+    let source = concat!(
+        ".var {count} {0}\n",
+        ".function {tick}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .count\n",
+        "\n",
+        ".function {target}\n",
+        "    first second:\n",
+        "    .sum {.multiply {.first} {10}} {.second}\n",
+        "\n",
+        ".target {.tick} second:{.tick}\n",
+        ".count\n",
+    );
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "12\n2");
+}
+
+#[test]
+fn g0_s01_positional_after_named_preflights_before_nested_failure_in_arkst() {
+    // Official Quarkdown v2.5.1 evaluates the earlier named candidate first
+    // and therefore reports the nested numeric failure. Current Arkst instead
+    // structurally rejects the later positional-after-named shape before
+    // evaluating either candidate. This test freezes only Arkst
+    // frontend-vs-legacy migration parity and the exact current provenance.
+    let source = concat!(
+        ".var {count} {0}\n",
+        ".function {tick}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .count\n",
+        "\n",
+        ".function {target}\n",
+        "    first second:\n",
+        "    .sum {.first} {.second}\n",
+        "\n",
+        ".target first:{.sum {true} {2}} {.tick}\n",
+        ".count\n",
+    );
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    let diagnostic = &result.diagnostics[0];
+    assert_eq!(diagnostic.code, "E3003");
+    assert_eq!(
+        diagnostic.message,
+        "positional argument after named argument is not allowed"
+    );
+    let primary = diagnostic.primary.expect("positional argument provenance");
+    assert_eq!(&source[primary.start..primary.end], "{.tick}");
+    let [secondary] = diagnostic.secondary.as_slice() else {
+        panic!("expected one named-argument conflict span: {diagnostic:?}");
+    };
+    assert!(source[secondary.start..secondary.end].starts_with("first:"));
+    assert_eq!(paragraph_text(&result), "0");
+}
+
+#[test]
+fn g0_s01_duplicate_named_preflights_before_nested_failure_in_arkst() {
+    // As above, official v2.5.1 surfaces the nested failure from the earlier
+    // candidate before it reaches the later duplicate binding. Arkst's current
+    // structural plan reports the duplicate first and does not evaluate either
+    // nested candidate.
+    let source = concat!(
+        ".var {count} {0}\n",
+        ".function {tick}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .count\n",
+        "\n",
+        ".function {target}\n",
+        "    first second?:\n",
+        "    .first\n",
+        "\n",
+        ".target first:{.sum {true} {2}} first:{.tick}\n",
+        ".count\n",
+    );
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    let diagnostic = &result.diagnostics[0];
+    assert_eq!(diagnostic.code, "E3003");
+    assert!(
+        diagnostic.message.contains("collides with an already bound argument"),
+        "{diagnostic:?}"
+    );
+    let primary = diagnostic.primary.expect("duplicate argument provenance");
+    assert_eq!(&source[primary.start..primary.end], "first");
+    let [secondary] = diagnostic.secondary.as_slice() else {
+        panic!("expected one prior-binding span: {diagnostic:?}");
+    };
+    assert!(source[secondary.start..secondary.end].starts_with("first:"));
+    assert_eq!(paragraph_text(&result), "0");
+}
