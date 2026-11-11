@@ -433,9 +433,9 @@ fn g0_s01_duplicate_named_preflights_before_nested_failure_in_arkst() {
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
     let diagnostic = &result.diagnostics[0];
     assert_eq!(diagnostic.code, "E3003");
-    assert!(
-        diagnostic.message.contains("collides with an already bound argument"),
-        "{diagnostic:?}"
+    assert_eq!(
+        diagnostic.message,
+        "named argument `first` was supplied more than once"
     );
     let primary = diagnostic.primary.expect("duplicate argument provenance");
     assert_eq!(&source[primary.start..primary.end], "first");
