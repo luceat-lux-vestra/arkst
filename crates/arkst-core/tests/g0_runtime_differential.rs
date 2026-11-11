@@ -289,10 +289,11 @@ fn g0_s08_side_effectful_head_executes_once_on_success_and_middle_failure() {
 }
 
 #[test]
-fn g0_s09_chain_shape_errors_preflight_before_side_effectful_head() {
+fn g0_s09_chain_tail_shape_errors_preserve_once_only_head_effect() {
     // Both cases make head execution observable through a caller-visible
-    // counter. Chain-shape/binding errors must be discovered before the head
-    // can commit that side effect.
+    // counter. Official Quarkdown v2.5.1 default-mode evidence shows the
+    // source-defined head executes once before the terminal-tail binding
+    // failure, so its committed effect remains visible as count=1.
     let prefix = concat!(
         ".var {count} {0}\n",
         ".function {counted}\n",
@@ -301,9 +302,10 @@ fn g0_s09_chain_shape_errors_preflight_before_side_effectful_head() {
         "\n",
     );
 
-    // The implicit predecessor already occupies the terminal function's only
-    // parameter. Supplying a terminal block body therefore collides with that
-    // bound slot and must fail before dispatching the counted head.
+    // The head first produces the implicit predecessor and commits count=1.
+    // The terminal function's only parameter is then occupied by that
+    // predecessor; supplying a terminal block body collides with the bound
+    // slot and fails at the terminal tail.
     let invalid_terminal_body = format!(
         "{prefix}{}",
         concat!(
@@ -318,12 +320,12 @@ fn g0_s09_chain_shape_errors_preflight_before_side_effectful_head() {
     );
     let body_failure = compile_and_assert_legacy_parity(&invalid_terminal_body);
     assert_eq!(body_failure.diagnostics.len(), 1, "{body_failure:?}");
-    assert_eq!(paragraph_text(&body_failure), "0");
+    assert_eq!(paragraph_text(&body_failure), "1");
 
-    // The implicit predecessor occupies previous and the first authored
+    // The committed head result occupies previous and the first authored
     // positional argument occupies second; one additional authored argument
-    // is therefore excess. Structural binding must reject it before the head
-    // commits count=1.
+    // is therefore excess. The terminal-tail failure must not duplicate or
+    // roll back the already-successful head effect.
     let excess_positional_tail = format!(
         "{prefix}{}",
         concat!(
@@ -341,5 +343,5 @@ fn g0_s09_chain_shape_errors_preflight_before_side_effectful_head() {
         1,
         "{positional_failure:?}"
     );
-    assert_eq!(paragraph_text(&positional_failure), "0");
+    assert_eq!(paragraph_text(&positional_failure), "1");
 }
