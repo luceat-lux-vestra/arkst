@@ -22,20 +22,16 @@ fn assert_s03_source_map(source: &str) {
     else {
         panic!("expected strong wrapper: {content:?}");
     };
-    let [
-        IrInline::Text {
-            content: prefix, ..
-        },
-        IrInline::Link {
-            content: link_content,
-            destination,
-            span: link_span,
-            ..
-        },
-        IrInline::Text {
-            content: suffix, ..
-        },
-    ] = strong_content.as_slice()
+    let [IrInline::Text {
+        content: prefix, ..
+    }, IrInline::Link {
+        content: link_content,
+        destination,
+        span: link_span,
+        ..
+    }, IrInline::Text {
+        content: suffix, ..
+    }] = strong_content.as_slice()
     else {
         panic!("expected text/link/text ordering: {strong_content:?}");
     };
@@ -62,11 +58,15 @@ fn assert_s03_source_map(source: &str) {
         "{typst:?}"
     );
     assert!(
-        source_map.iter().any(|entry| entry.original == *strong_span),
+        source_map
+            .iter()
+            .any(|entry| entry.original == *strong_span),
         "{source_map:?}"
     );
     assert!(
-        source_map.iter().any(|entry| entry.original == *link_span),
+        source_map
+            .iter()
+            .any(|entry| entry.original == *link_span),
         "{source_map:?}"
     );
     assert!(source_map.iter().all(|entry| {
@@ -76,6 +76,10 @@ fn assert_s03_source_map(source: &str) {
 
 #[test]
 fn g0_s03_normal_compile_to_typst_source_map_preserves_tight_and_indented_crlf_spans() {
-    assert_s03_source_map(".text {**앞 [.uppercase {world}](https://example.com) 뒤**}\r\n");
-    assert_s03_source_map(".text\r\n    **앞 [.uppercase {world}](https://example.com) 뒤**\r\n");
+    assert_s03_source_map(
+        ".text {**앞 [.uppercase {world}](https://example.com) 뒤**}\r\n",
+    );
+    assert_s03_source_map(
+        ".text\r\n    **앞 [.uppercase {world}](https://example.com) 뒤**\r\n",
+    );
 }
