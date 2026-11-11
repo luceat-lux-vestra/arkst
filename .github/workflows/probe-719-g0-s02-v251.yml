@@ -49,32 +49,38 @@ jobs:
           import sys
 
           root = Path(sys.argv[1])
-          nested = (
-              ".function {inner}\r\n"
-              "    value:\r\n"
-              "    .value\r\n"
-              "\r\n"
-              ".function {outer}\r\n"
-              "    value:\r\n"
-              "    .value\r\n"
-              "\r\n"
-              ".outer {앞{.inner {값}}뒤}\r\n"
+          nested_lf = (
+              ".function {inner}\n"
+              "    value:\n"
+              "    .value\n"
+              "\n"
+              ".function {outer}\n"
+              "    value:\n"
+              "    .value\n"
+              "\n"
+              ".outer {앞{.inner {값}}뒤}\n"
           )
-          escaped = (
-              ".function {foo}\r\n"
-              "    value:\r\n"
-              "    .value\r\n"
-              "\r\n"
-              "prefix .foo {한글 \\}\r\n"
-              "text} suffix\r\n"
+          escaped_lf = (
+              ".function {foo}\n"
+              "    value:\n"
+              "    .value\n"
+              "\n"
+              "prefix .foo {한글 \\}\n"
+              "text} suffix\n"
           )
-          (root / "s02-utf8-crlf-nested.qd").write_bytes(nested.encode("utf-8"))
-          (root / "s02-crlf-escaped-delimiter.qd").write_bytes(escaped.encode("utf-8"))
+          fixtures = {
+              "s02-utf8-lf-nested.qd": nested_lf,
+              "s02-utf8-crlf-nested.qd": nested_lf.replace("\n", "\r\n"),
+              "s02-lf-escaped-delimiter.qd": escaped_lf,
+              "s02-crlf-escaped-delimiter.qd": escaped_lf.replace("\n", "\r\n"),
+          }
+          for name, source in fixtures.items():
+              (root / name).write_bytes(source.encode("utf-8"))
           PY
 
           : > "$root/observations.jsonl"
 
-          for fixture in s02-utf8-crlf-nested s02-crlf-escaped-delimiter; do
+          for fixture in s02-utf8-lf-nested s02-utf8-crlf-nested s02-lf-escaped-delimiter s02-crlf-escaped-delimiter; do
             for mode in default strict; do
               out="$root/out-$fixture-$mode"
               stdout="$root/$fixture-$mode.stdout"
