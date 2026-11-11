@@ -125,6 +125,7 @@ dependencies = [
  "arkst-markdown",
  "arkst-project",
  "arkst-source",
+ "arkst-typst",
  "insta",
  "libm",
  "serde",
