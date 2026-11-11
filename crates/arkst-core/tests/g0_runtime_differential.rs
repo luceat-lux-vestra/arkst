@@ -680,22 +680,18 @@ fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_typst_map() {
         "**앞 [.uppercase {world}](https://example.com) 뒤**"
     );
 
-    let [
-        Inline::Text {
-            content: prefix,
-            span: prefix_span,
-        },
-        Inline::Link {
-            content: link_content,
-            destination,
-            span: link_span,
-            ..
-        },
-        Inline::Text {
-            content: suffix,
-            span: suffix_span,
-        },
-    ] = strong_content.as_slice()
+    let [Inline::Text {
+        content: prefix,
+        span: prefix_span,
+    }, Inline::Link {
+        content: link_content,
+        destination,
+        span: link_span,
+        ..
+    }, Inline::Text {
+        content: suffix,
+        span: suffix_span,
+    }] = strong_content.as_slice()
     else {
         panic!("expected text/link/text inside strong: {strong_content:?}");
     };
@@ -759,22 +755,18 @@ fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_typst_map() {
     else {
         panic!("expected final strong wrapper: {final_content:?}");
     };
-    let [
-        IrInline::Text {
-            content: final_prefix,
-            ..
-        },
-        IrInline::Link {
-            content: final_link,
-            destination: final_destination,
-            span: final_link_span,
-            ..
-        },
-        IrInline::Text {
-            content: final_suffix,
-            ..
-        },
-    ] = final_strong.as_slice()
+    let [IrInline::Text {
+        content: final_prefix,
+        ..
+    }, IrInline::Link {
+        content: final_link,
+        destination: final_destination,
+        span: final_link_span,
+        ..
+    }, IrInline::Text {
+        content: final_suffix,
+        ..
+    }] = final_strong.as_slice()
     else {
         panic!("expected final text/link/text ordering: {final_strong:?}");
     };
@@ -833,20 +825,16 @@ fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure_and_map() {
     else {
         panic!("expected CRLF body to retain strong structure: {content:?}");
     };
-    let [
-        IrInline::Text {
-            content: prefix, ..
-        },
-        IrInline::Link {
-            content: link_content,
-            destination,
-            span: link_span,
-            ..
-        },
-        IrInline::Text {
-            content: suffix, ..
-        },
-    ] = strong_content.as_slice()
+    let [IrInline::Text {
+        content: prefix, ..
+    }, IrInline::Link {
+        content: link_content,
+        destination,
+        span: link_span,
+        ..
+    }, IrInline::Text {
+        content: suffix, ..
+    }] = strong_content.as_slice()
     else {
         panic!("expected text/link/text ordering: {strong_content:?}");
     };
@@ -872,7 +860,9 @@ fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure_and_map() {
         "{typst:?}"
     );
     assert!(
-        source_map.iter().any(|entry| entry.original == *strong_span),
+        source_map
+            .iter()
+            .any(|entry| entry.original == *strong_span),
         "{source_map:?}"
     );
     assert!(
