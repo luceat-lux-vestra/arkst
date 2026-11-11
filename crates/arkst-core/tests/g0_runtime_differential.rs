@@ -637,7 +637,6 @@ fn g0_s02_normal_compile_keeps_utf8_crlf_nested_failure_source_identity() {
     assert!(source.is_char_boundary(primary.end));
 }
 
-
 #[test]
 fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_typst_map() {
     use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
@@ -807,7 +806,6 @@ fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_typst_map() {
         entry.generated_start < entry.generated_end && entry.generated_end <= typst.len()
     }));
 }
-
 
 #[test]
 fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure_and_map() {
