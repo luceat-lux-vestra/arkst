@@ -144,3 +144,31 @@ fn g0_s16_dynamic_and_static_string_conversion_match_legacy_ir_entrypoint() {
     assert_eq!(static_result.diagnostics[0].code, "E3001");
     assert!(static_result.ir.nodes.is_empty(), "{static_result:?}");
 }
+
+#[test]
+fn g0_s13_nested_super_success_rolls_back_after_outer_failure() {
+    let source = ".var {state} {before}\n.function {greet}\n    name:\n    base .name\n\n.extend {greet}\n    name:\n    .state {changed}\n    .super\n\n.function {outer}\n    name:\n    .greet {.name}\n    .sum {true} {2}\n\n.outer {world}\n.state\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(result.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(paragraph_text(&result), "before");
+}
+
+#[test]
+fn g0_s14_extended_native_raw_body_stays_lazy_and_matches_legacy() {
+    let source = ".var {state} {before}\n.extend {lowercase}\n    .super\n\n.lowercase\n    .state {changed}\n\n.state\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), ".state {changed}\nbefore");
+}
+
+#[test]
+fn g0_s15_source_defined_nested_body_matches_legacy() {
+    let source = ".function {echo}\n    value:\n    .value\n.text {.echo\n    nested}\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "nested");
+}
