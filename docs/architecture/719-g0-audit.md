@@ -363,6 +363,50 @@ The exact Arkst execution HEAD `67b192781620a03c8264a4d76491c67e377f2c9a` comple
 
 
 
+## S03 nested rich inlines — official cross-version reference + Arkst provenance debt
+
+Disposable clean-room PR #757 is **CLOSED/UNMERGED**. Its final probe HEAD is \`ba44fe89d7c97920635c59b21bdf74fb67f07734\`. The independently authored fixture nests Strong text, a Markdown link and an inline \`.uppercase {world}\` call, then exercises the same authored content as tight/indented LF/CRLF in default and strict modes.
+
+### Official Quarkdown reference
+
+Two release binaries were pinned because the repository's verified compatibility baseline is v2.6.0 while historical G0 slices also use v2.5.1:
+
+- **v2.5.1:** run #43115604496 **SUCCESS**; artifact \`g0-s03-quarkdown-v2.5.1\` ID \`13899065329\`, digest \`sha256:8ed9f11543f0da38ce2e764035a64e284832e0e91f1a99b1a7494f07ce2109d8\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **v2.6.0 verified baseline:** run #43115604769 **SUCCESS**; artifact \`g0-s03-quarkdown-v2.6.0\` ID \`13898221999\`, digest \`sha256:ce0692de74edfeb67fe90cc63e20d6e3a1e3584b1bce4e5b97240d2249a42c6e\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+Both releases show the same bounded behavior in default and strict modes:
+
+| Source shape | rc / stderr | Rich-inline observation |
+| --- | --- | --- |
+| tight LF | rc 0 / empty | one Strong element; link href \`https://example.com\`; inline call renders \`WORLD\`; visible \`앞 WORLD 뒤\` |
+| tight CRLF | rc 0 / empty | same semantics |
+| indented LF | rc 0 / empty | same semantics |
+| indented CRLF | rc 0 / empty | link and inline call still work, but Strong count is 0 and the authored \`**\` markers remain visible as literal text |
+
+The indented-CRLF Strong loss is reproducible in both binaries, but it is **not automatically a required Arkst behavior**. ADR-0016 targets public document-language semantics and explicitly excludes undocumented upstream bugs; Arkst's documented syntax contract states that CRLF is accepted with LF-normalized semantics. Reproducing the binary quirk would therefore weaken Arkst's documented CRLF contract without a compatibility decision.
+
+### Arkst migration/source-map evidence
+
+PR #746 adds bounded public evidence across parser/evaluator/backend ownership without introducing a forbidden core → Typst dependency:
+
+- \`g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_legacy_parity\` proves tight-CRLF parser ordering/spans, Markdown-mode isolation, exact normal-frontend vs legacy final-IR/diagnostic parity, and final Strong → Text/Link(\`WORLD\`)/Text ordering.
+- \`g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure\` proves current Arkst preserves the intended Strong/link/inline-call semantics for the indented CRLF source and that normal frontend vs legacy evaluator remain exactly aligned.
+- \`crates/arkst-cli/tests/g0_s03_source_map.rs\` exercises the real normal compile → final IR → Typst lowering boundary for tight and indented CRLF without adding any new core dependency edge. It requires the generated Typst to retain Strong + link + \`WORLD\` and requires the source map to carry the final IR Strong/link spans.
+
+The audit found one real Arkst provenance defect. Tight CRLF retains the full authored Strong span. For the indented CRLF source, current final \`IrInline::Strong.span\` slices only:
+
+\`**앞 [.uppercase {world}](https://example.com) 뒤\`
+
+and omits the authored closing \`**\`. The Typst source map correctly reflects that current final-IR span, so the defect belongs to frontend/final-IR provenance rather than the lowering mapper itself. **#758** owns restoring the closing delimiter while preserving current semantic structure, UTF-8/CRLF source backing and mode isolation.
+
+This is **compatibility/provenance debt, not an accepted divergence**. Evidence-only #746 freezes current behavior and must not implement the production fix.
+
+**Execution authority:** exact evidence HEAD \`329935ada00ca416cdc96a0aa321d53d1c17642e\` completed CI #43116791006 **SUCCESS**. Ubuntu ARM64, macOS and Windows Typst-required tests, compatibility/reference checks, fmt/clippy/MSRV/WASM/docs/security-related jobs and required Merge Gate all succeeded.
+
+**Classification:** \`UPSTREAM_V251_V260_RICH_INLINE_REFERENCE_FROZEN_ARKST_CRLF_SEMANTICS_PRESERVED_SPAN_DEBT_758_OPEN\`. S03 is evidenced/classified, but source-provenance completion remains blocked by #758.
+
+
+
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
