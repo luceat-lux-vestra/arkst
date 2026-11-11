@@ -1,0 +1,164 @@
+name: Quarkdown G0 S02 clean-room probe
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: official-v2.5.1-black-box
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official Quarkdown v2.5.1 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9'
+          archive='/tmp/quarkdown-v2.5.1.zip'
+          root='/tmp/quarkdown-v2.5.1'
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.5.1/quarkdown-linux-x64.zip'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          rm -rf "$root"
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Run independently authored G0 S02 probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='/tmp/arkst-g0-s02-reference-v251'
+          rm -rf "$root"
+          mkdir -p "$root"
+
+          python3 - "$root" <<'PY'
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          nested = (
+              ".function {inner}\r\n"
+              "    value:\r\n"
+              "    .value\r\n"
+              "\r\n"
+              ".function {outer}\r\n"
+              "    value:\r\n"
+              "    .value\r\n"
+              "\r\n"
+              ".outer {앞{.inner {값}}뒤}\r\n"
+          )
+          escaped = (
+              ".function {foo}\r\n"
+              "    value:\r\n"
+              "    .value\r\n"
+              "\r\n"
+              "prefix .foo {한글 \\}\r\n"
+              "text} suffix\r\n"
+          )
+          (root / "s02-utf8-crlf-nested.qd").write_bytes(nested.encode("utf-8"))
+          (root / "s02-crlf-escaped-delimiter.qd").write_bytes(escaped.encode("utf-8"))
+          PY
+
+          : > "$root/observations.jsonl"
+
+          for fixture in s02-utf8-crlf-nested s02-crlf-escaped-delimiter; do
+            for mode in default strict; do
+              out="$root/out-$fixture-$mode"
+              stdout="$root/$fixture-$mode.stdout"
+              stderr="$root/$fixture-$mode.stderr"
+              rm -rf "$out"
+              set +e
+              if [ "$mode" = strict ]; then
+                "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe --strict >"$stdout" 2>"$stderr"
+              else
+                "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe >"$stdout" 2>"$stderr"
+              fi
+              rc=$?
+              set -e
+
+              python3 - "$root" "$fixture" "$mode" "$rc" "$stdout" "$stderr" "$out" <<'PY'
+          from __future__ import annotations
+          from hashlib import sha256
+          from html.parser import HTMLParser
+          import json
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          fixture = sys.argv[2]
+          mode = sys.argv[3]
+          rc = int(sys.argv[4])
+          stdout_path = Path(sys.argv[5])
+          stderr_path = Path(sys.argv[6])
+          out_dir = Path(sys.argv[7])
+          source_path = root / f"{fixture}.qd"
+          source_bytes = source_path.read_bytes()
+
+          class VisibleText(HTMLParser):
+              def __init__(self) -> None:
+                  super().__init__()
+                  self.parts: list[str] = []
+                  self.skip = 0
+              def handle_starttag(self, tag: str, attrs) -> None:
+                  if tag in ("script", "style"):
+                      self.skip += 1
+              def handle_endtag(self, tag: str) -> None:
+                  if tag in ("script", "style") and self.skip:
+                      self.skip -= 1
+              def handle_data(self, data: str) -> None:
+                  if not self.skip:
+                      self.parts.append(data)
+
+          html_files = sorted(out_dir.rglob("*.html")) if out_dir.is_dir() else []
+          html_texts = []
+          html_hashes = []
+          for path in html_files:
+              data = path.read_bytes()
+              parser = VisibleText()
+              parser.feed(data.decode("utf-8", errors="replace"))
+              html_texts.append(" ".join(" ".join(parser.parts).split()))
+              html_hashes.append(sha256(data).hexdigest())
+
+          observation = {
+              "reference": "official-quarkdown-v2.5.1-linux-x64",
+              "archive_sha256": "5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9",
+              "fixture": fixture,
+              "fixture_sha256": sha256(source_bytes).hexdigest(),
+              "crlf_count": source_bytes.count(b"\r\n"),
+              "bare_lf_count": source_bytes.replace(b"\r\n", b"").count(b"\n"),
+              "utf8_roundtrip": source_bytes.decode("utf-8").encode("utf-8") == source_bytes,
+              "mode": mode,
+              "rc": rc,
+              "stdout": stdout_path.read_text(encoding="utf-8", errors="replace"),
+              "stderr": stderr_path.read_text(encoding="utf-8", errors="replace"),
+              "html_count": len(html_files),
+              "html_text": html_texts,
+              "html_sha256": html_hashes,
+          }
+          with (root / "observations.jsonl").open("a", encoding="utf-8") as stream:
+              stream.write(json.dumps(observation, ensure_ascii=False, sort_keys=True) + "\n")
+          print(json.dumps(observation, ensure_ascii=False, sort_keys=True))
+          PY
+            done
+          done
+
+      - name: Upload clean-room observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g0-s02-quarkdown-v2.5.1
+          path: /tmp/arkst-g0-s02-reference-v251
+          if-no-files-found: error
