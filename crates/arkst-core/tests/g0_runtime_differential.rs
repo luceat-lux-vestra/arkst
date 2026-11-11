@@ -250,3 +250,40 @@ fn g0_s08_middle_tail_failure_does_not_dispatch_stateful_terminal_tail() {
     assert!(failure.diagnostics[0].message.contains("numeric arguments"));
     assert_eq!(paragraph_text(&failure), "before");
 }
+
+#[test]
+fn g0_s08_side_effectful_head_executes_once_on_success_and_middle_failure() {
+    // A caller-visible numeric counter makes duplicate head evaluation
+    // observable. The source-defined head succeeds and commits count=1 before
+    // either the successful or failing native middle tail runs.
+    //
+    // Exact frontend-vs-legacy IR equality below means the final visible count
+    // proves once-only execution in both entrypoints, not only in the normal
+    // frontend path.
+    let success = concat!(
+        ".var {count} {0}\n",
+        ".function {counted}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .sum {1} {1}\n",
+        "\n",
+        ".function {tail}\n",
+        "    previous content:\n",
+        "    .content\n",
+        "\n",
+        ".counted::multiply {3}::tail\n",
+        "    terminal body\n",
+        ".count\n",
+    );
+    let successful = compile_and_assert_legacy_parity(success);
+    assert!(successful.diagnostics.is_empty(), "{successful:?}");
+    assert_eq!(paragraph_text(&successful), "terminal body\n1");
+
+    // Keep the same side-effectful head and terminal body, changing only the
+    // native middle-tail input. The already-successful head invocation must
+    // remain committed exactly once; the terminal owner must not run.
+    let failed = success.replace("::multiply {3}::tail", "::multiply {true}::tail");
+    let failure = compile_and_assert_legacy_parity(&failed);
+    assert_eq!(failure.diagnostics.len(), 1, "{failure:?}");
+    assert!(failure.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(paragraph_text(&failure), "1");
+}
