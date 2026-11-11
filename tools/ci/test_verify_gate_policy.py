@@ -33,6 +33,7 @@ schema = 1
 [ruleset]
 name = "Protect main"
 required_check_integration_id = 15368
+strict_required_status_checks_policy = false
 [compatibility_scope]
 run = ["crates/**", "tools/**", "tests/**", "docs/compatibility/**"]
 skip = ["docs/**", "*.md", ".github/**", ".cargo/config.toml", ".mailmap", "clippy.toml"]
@@ -68,7 +69,7 @@ def ruleset(contexts: list[str]) -> dict:
             {
                 "type": "required_status_checks",
                 "parameters": {
-                    "strict_required_status_checks_policy": True,
+                    "strict_required_status_checks_policy": False,
                     "required_status_checks": [
                         {"context": value, "integration_id": 15368}
                         for value in contexts
@@ -93,6 +94,22 @@ class GatePolicyNegativeTests(unittest.TestCase):
             textwrap.dedent(policy).lstrip(), encoding="utf-8"
         )
         return tmp, root, mod.load_policy(root / ".github" / "gate-policy.toml")
+
+    def test_live_strict_true_mismatches_committed_false_policy(self):
+        tmp, root, policy = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        live = ruleset(["fmt"])
+        checks = next(rule for rule in live["rules"] if rule["type"] == "required_status_checks")
+        checks["parameters"]["strict_required_status_checks_policy"] = True
+        with self.assertRaisesRegex(mod.PolicyError, "strict_required_status_checks_policy drift"):
+            mod.verify_repository(root, policy, live)
+
+    def test_missing_committed_strict_policy_rejected(self):
+        broken = POLICY.replace("strict_required_status_checks_policy = false\n", "", 1)
+        tmp, root, policy = self.make_repo(policy=broken)
+        self.addCleanup(tmp.cleanup)
+        with self.assertRaisesRegex(mod.PolicyError, "must be an explicit boolean"):
+            mod.verify_repository(root, policy, ruleset(["fmt"]))
 
     def test_clean_fixture_passes(self):
         tmp, root, policy = self.make_repo()
@@ -258,6 +275,7 @@ schema = 1
 [ruleset]
 name = "Protect main"
 required_check_integration_id = 15368
+strict_required_status_checks_policy = false
 [compatibility_scope]
 run = ["crates/**"]
 skip = ["docs/**"]
@@ -358,6 +376,7 @@ schema = 1
 [ruleset]
 name = "Protect main"
 required_check_integration_id = 15368
+strict_required_status_checks_policy = false
 [compatibility_scope]
 run = ["crates/**"]
 skip = ["docs/**"]
@@ -417,6 +436,7 @@ schema = 1
 [ruleset]
 name = "Protect main"
 required_check_integration_id = 15368
+strict_required_status_checks_policy = false
 [compatibility_scope]
 run = ["crates/**"]
 skip = ["docs/**"]
@@ -473,6 +493,7 @@ schema = 1
 [ruleset]
 name = "Protect main"
 required_check_integration_id = 15368
+strict_required_status_checks_policy = false
 [compatibility_scope]
 run = ["crates/**"]
 skip = ["docs/**"]
@@ -514,6 +535,7 @@ schema = 1
 [ruleset]
 name = "Protect main"
 required_check_integration_id = 15368
+strict_required_status_checks_policy = false
 [compatibility_scope]
 run = ["crates/**"]
 skip = ["docs/**"]
@@ -564,6 +586,7 @@ schema = 1
 [ruleset]
 name = "Protect main"
 required_check_integration_id = 15368
+strict_required_status_checks_policy = false
 [compatibility_scope]
 run = ["crates/**"]
 skip = ["docs/**"]
