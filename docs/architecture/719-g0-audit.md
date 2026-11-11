@@ -224,12 +224,17 @@ At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional p
 
 **G0 exit remains blocked:** additional dynamic route closure, remaining S01–S32 oracles, public API/CLI/versioned wire decision, proposed ADR-0022 acceptance, ADR-0020/architecture reconciliation and final CI/merge acceptance are still outstanding. No G1 authorization or merge claim is made by this evidence slice.
 
-## Maintainer decision brief (not yet approved)
+## Maintainer decision approved — 2026-11-11
 
-Before marking G0 accepted, review [#719 G0 maintainer decision brief](719-g0-maintainer-decision-brief.md), which separates:
-- proposed ADR-0022 architectural acceptance and its limited supersession of ADR-0020;
-- versioned final-only wire / explicitly validated read-only legacy import;
-- pre-1.0 CLI and public Rust facade migration / deprecation timing; and
-- unresolved syntax diagnostic vs final-only publication behavior.
+The [G0 maintainer decision record](719-g0-maintainer-decision-brief.md)
+replaces the earlier compatibility-preserving proposal. ADR-0022 is
+accepted as the target: **do not maintain historical Arkst Rust API/IR JSON
+backward compatibility**; remove old public executable-IR interfaces,
+reject old unversioned JSON, emit only the new strictly validated wire v1,
+and carry out all G0–G8 work without cost-based scope reduction.
 
-Recommendations there are **proposed**, not maintainer-approved decisions or implementation evidence. Continue objective source/route/oracle validation independently. The evidence brief itself does not authorize G1, release-policy changes, ADR acceptance or PR merge.
+This is an **architecture decision, not a completed implementation or G0
+gate exit**. Do not confuse Arkst historical API breakage with permitted
+degradation of Quarkdown language compatibility, source maps, diagnostics,
+rollback semantics or security. Keep PR #746 unmerged until its G0
+evidence and CI obligations are complete.
