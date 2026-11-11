@@ -217,3 +217,36 @@ fn g0_s08_multitail_terminal_body_source_native_source_matches_legacy() {
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(paragraph_text(&result), "terminal body");
 }
+
+#[test]
+fn g0_s08_middle_tail_failure_does_not_dispatch_stateful_terminal_tail() {
+    // Successful terminal-tail dispatch is a control: this mutation must happen
+    // when the native middle tail succeeds, and must not happen on failure.
+    // This tests only Arkst frontend-vs-legacy parity, not official Quarkdown.
+    let success = concat!(
+        ".var {state} {before}\n",
+        ".function {identity}\n",
+        "    value:\n",
+        "    .value\n",
+        "\n",
+        ".function {tail}\n",
+        "    previous content:\n",
+        "    .state {changed}\n",
+        "    .content\n",
+        "\n",
+        ".identity {2}::multiply {3}::tail\n",
+        "    terminal body\n",
+        ".state\n",
+    );
+    let successful = compile_and_assert_legacy_parity(success);
+    assert!(successful.diagnostics.is_empty(), "{successful:?}");
+    assert_eq!(paragraph_text(&successful), "terminal body\nchanged");
+
+    // The failing middle tail must stop before the state-mutating final
+    // source-defined tail. Keep the same terminal body and control source.
+    let failed = success.replace("::multiply {3}::tail", "::multiply {true}::tail");
+    let failure = compile_and_assert_legacy_parity(&failed);
+    assert_eq!(failure.diagnostics.len(), 1, "{failure:?}");
+    assert!(failure.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(paragraph_text(&failure), "before");
+}
