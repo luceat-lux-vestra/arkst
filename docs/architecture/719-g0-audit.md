@@ -209,7 +209,7 @@ Three additional executable migration oracles were added to `crates/arkst-core/t
 **Classification:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15 only. These test inputs are adapted from already-established Arkst regression cases; there is **no independent official Quarkdown reference observation** for these three scenarios, and no new upstream compatibility claim. S13's accepted Arkst failure-atomic policy remains distinct from the upstream divergence already documented for S12.
 
 **G0 remains incomplete:** this slice does not resolve remaining S01–S32 oracle rows, exhaustive dynamic producer/consumer reachability, public API / versioned wire / CLI policy, proposed ADR-0022 acceptance, or ADR-0020 / architecture reconciliation. No G1 or merge authorization follows from the green CI run.
- 
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
