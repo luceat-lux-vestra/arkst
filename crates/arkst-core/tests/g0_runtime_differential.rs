@@ -636,3 +636,182 @@ fn g0_s02_normal_compile_keeps_utf8_crlf_nested_failure_source_identity() {
     assert!(source.is_char_boundary(primary.start));
     assert!(source.is_char_boundary(primary.end));
 }
+
+
+#[test]
+fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_typst_map() {
+    use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
+
+    fn contains_directive(inline: &Inline) -> bool {
+        match inline {
+            Inline::DirectiveCall { .. } => true,
+            Inline::Emphasis { content, .. }
+            | Inline::Strong { content, .. }
+            | Inline::Link { content, .. }
+            | Inline::Image { content, .. }
+            | Inline::Strikethrough { content, .. } => content.iter().any(contains_directive),
+            _ => false,
+        }
+    }
+
+    let source = ".text {**앞 [.uppercase {world}](https://example.com) 뒤**}\r\n";
+    let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+    assert!(parsed.diagnostics.is_empty(), "{parsed:?}");
+
+    let [Block::DirectiveCall { arguments, .. }] = parsed.document.nodes.as_slice() else {
+        panic!("expected one top-level text call: {parsed:?}");
+    };
+    let [CallArgument::Positional {
+        value: Value::Content(content),
+        ..
+    }] = arguments.as_slice()
+    else {
+        panic!("expected one rich content argument: {arguments:?}");
+    };
+    let [Inline::Strong {
+        content: strong_content,
+        span: strong_span,
+    }] = content.as_slice()
+    else {
+        panic!("expected one strong wrapper: {content:?}");
+    };
+    assert_eq!(
+        &source[strong_span.start..strong_span.end],
+        "**앞 [.uppercase {world}](https://example.com) 뒤**"
+    );
+
+    let [
+        Inline::Text {
+            content: prefix,
+            span: prefix_span,
+        },
+        Inline::Link {
+            content: link_content,
+            destination,
+            span: link_span,
+            ..
+        },
+        Inline::Text {
+            content: suffix,
+            span: suffix_span,
+        },
+    ] = strong_content.as_slice()
+    else {
+        panic!("expected text/link/text inside strong: {strong_content:?}");
+    };
+    assert_eq!(prefix, "앞 ");
+    assert_eq!(&source[prefix_span.start..prefix_span.end], "앞 ");
+    assert_eq!(destination, "https://example.com");
+    assert_eq!(
+        &source[link_span.start..link_span.end],
+        "[.uppercase {world}](https://example.com)"
+    );
+    assert_eq!(suffix, " 뒤");
+    assert_eq!(&source[suffix_span.start..suffix_span.end], " 뒤");
+
+    let [Inline::DirectiveCall {
+        name,
+        arguments: inner_arguments,
+        span: inner_span,
+        ..
+    }] = link_content.as_slice()
+    else {
+        panic!("expected inline directive as link label: {link_content:?}");
+    };
+    assert_eq!(name, "uppercase");
+    assert_eq!(
+        &source[inner_span.start..inner_span.end],
+        ".uppercase {world}"
+    );
+    let [CallArgument::Positional {
+        span: inner_argument_span,
+        ..
+    }] = inner_arguments.as_slice()
+    else {
+        panic!("expected one uppercase argument: {inner_arguments:?}");
+    };
+    assert_eq!(
+        &source[inner_argument_span.start..inner_argument_span.end],
+        "{world}"
+    );
+
+    let markdown = arkst_markdown::parse_with_mode(source, Mode::Markdown);
+    assert!(markdown.diagnostics.is_empty(), "{markdown:?}");
+    assert!(markdown.document.nodes.iter().all(|node| match node {
+        Block::DirectiveCall { .. } => false,
+        Block::Paragraph { content, .. } => !content.iter().any(contains_directive),
+        _ => true,
+    }));
+
+    let result = compile_and_assert_legacy_parity(source);
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    let [IrNode::Paragraph {
+        content: final_content,
+        ..
+    }] = result.ir.nodes.as_slice()
+    else {
+        panic!("expected one final paragraph: {result:?}");
+    };
+    let [IrInline::Strong {
+        content: final_strong,
+        span: final_strong_span,
+    }] = final_content.as_slice()
+    else {
+        panic!("expected final strong wrapper: {final_content:?}");
+    };
+    let [
+        IrInline::Text {
+            content: final_prefix,
+            ..
+        },
+        IrInline::Link {
+            content: final_link,
+            destination: final_destination,
+            span: final_link_span,
+            ..
+        },
+        IrInline::Text {
+            content: final_suffix,
+            ..
+        },
+    ] = final_strong.as_slice()
+    else {
+        panic!("expected final text/link/text ordering: {final_strong:?}");
+    };
+    assert_eq!(final_prefix, "앞 ");
+    assert_eq!(final_destination, "https://example.com");
+    assert!(matches!(
+        final_link.as_slice(),
+        [IrInline::Text { content, .. }] if content == "WORLD"
+    ));
+    assert_eq!(final_suffix, " 뒤");
+    assert_eq!(
+        &source[final_strong_span.start..final_strong_span.end],
+        "**앞 [.uppercase {world}](https://example.com) 뒤**"
+    );
+    assert_eq!(
+        &source[final_link_span.start..final_link_span.end],
+        "[.uppercase {world}](https://example.com)"
+    );
+
+    let (typst, source_map) = arkst_typst::lower_to_typst(&result.ir);
+    assert!(
+        typst.contains("*앞 #link(\"https://example.com\")[WORLD] 뒤*"),
+        "{typst:?}"
+    );
+    assert!(
+        source_map
+            .iter()
+            .any(|entry| entry.original == *final_strong_span),
+        "{source_map:?}"
+    );
+    assert!(
+        source_map
+            .iter()
+            .any(|entry| entry.original == *final_link_span),
+        "{source_map:?}"
+    );
+    assert!(source_map.iter().all(|entry| {
+        entry.generated_start < entry.generated_end && entry.generated_end <= typst.len()
+    }));
+}
