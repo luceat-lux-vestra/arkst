@@ -445,3 +445,201 @@ fn g0_s01_duplicate_named_preflights_before_nested_failure_in_arkst() {
     assert!(source[secondary.start..secondary.end].starts_with("first:"));
     assert_eq!(paragraph_text(&result), "0");
 }
+
+#[test]
+fn g0_s02_utf8_tight_nested_call_keeps_exact_source_spans_and_mode_isolation() {
+    use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
+
+    let source = ".outer {앞{.inner {값}}뒤}\r\n";
+    let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+    assert!(parsed.diagnostics.is_empty(), "{parsed:?}");
+
+    let [Block::DirectiveCall {
+        name,
+        arguments,
+        span,
+        ..
+    }] = parsed.document.nodes.as_slice()
+    else {
+        panic!("expected one Quarkdown block call: {parsed:?}");
+    };
+    assert_eq!(name, "outer");
+    assert_eq!(&source[span.start..span.end], ".outer {앞{.inner {값}}뒤}");
+    assert!(source.is_char_boundary(span.start));
+    assert!(source.is_char_boundary(span.end));
+
+    let [CallArgument::Positional {
+        value: Value::Content(content),
+        span: argument_span,
+    }] = arguments.as_slice()
+    else {
+        panic!("expected one source-backed content argument: {arguments:?}");
+    };
+    assert_eq!(
+        &source[argument_span.start..argument_span.end],
+        "{앞{.inner {값}}뒤}"
+    );
+
+    let [
+        Inline::Text {
+            content: prefix,
+            span: prefix_span,
+        },
+        Inline::DirectiveCall {
+            name: inner_name,
+            name_span,
+            head_span,
+            arguments: inner_arguments,
+            span: inner_span,
+            ..
+        },
+        Inline::Text {
+            content: suffix,
+            span: suffix_span,
+        },
+    ] = content.as_slice()
+    else {
+        panic!("expected tight nested call surrounded by text: {content:?}");
+    };
+    assert_eq!(prefix, "앞");
+    assert_eq!(&source[prefix_span.start..prefix_span.end], "앞");
+    assert_eq!(inner_name, "inner");
+    assert_eq!(&source[name_span.start..name_span.end], ".inner");
+    assert_eq!(&source[head_span.start..head_span.end], ".inner {값}");
+    assert_eq!(&source[inner_span.start..inner_span.end], "{.inner {값}}");
+    let [CallArgument::Positional {
+        value,
+        span: inner_argument_span,
+    }] = inner_arguments.as_slice()
+    else {
+        panic!("expected one inner argument: {inner_arguments:?}");
+    };
+    assert_eq!(
+        &source[inner_argument_span.start..inner_argument_span.end],
+        "{값}"
+    );
+    match value {
+        Value::Identifier(value) => assert_eq!(value, "값"),
+        Value::Content(content) => {
+            let [Inline::Text {
+                content: value,
+                span,
+            }] = content.as_slice()
+            else {
+                panic!("expected one UTF-8 inner text value: {content:?}");
+            };
+            assert_eq!(value, "값");
+            assert_eq!(&source[span.start..span.end], "값");
+        }
+        other => panic!("unexpected inner value: {other:?}"),
+    }
+    assert_eq!(suffix, "뒤");
+    assert_eq!(&source[suffix_span.start..suffix_span.end], "뒤");
+
+    let markdown = arkst_markdown::parse_with_mode(source, Mode::Markdown);
+    assert!(markdown.diagnostics.is_empty(), "{markdown:?}");
+    assert!(markdown.document.nodes.iter().all(|node| match node {
+        Block::DirectiveCall { .. } => false,
+        Block::Paragraph { content, .. } => content
+            .iter()
+            .all(|inline| !matches!(inline, Inline::DirectiveCall { .. })),
+        _ => true,
+    }));
+}
+
+#[test]
+fn g0_s02_crlf_escaped_delimiter_keeps_source_backing_and_markdown_literal() {
+    use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
+
+    let source = "prefix .foo {한글 \\}\r\ntext} suffix\r\n";
+    assert!(source.as_bytes().windows(2).any(|pair| pair == b"\r\n"));
+
+    let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+    assert!(parsed.diagnostics.is_empty(), "{parsed:?}");
+    let [Block::Paragraph { content, .. }] = parsed.document.nodes.as_slice() else {
+        panic!("expected one inline paragraph: {parsed:?}");
+    };
+    let Inline::DirectiveCall {
+        name,
+        arguments,
+        span,
+        ..
+    } = content
+        .iter()
+        .find(|inline| matches!(inline, Inline::DirectiveCall { name, .. } if name == "foo"))
+        .expect("escaped-delimiter Quarkdown call")
+    else {
+        unreachable!()
+    };
+    assert_eq!(name, "foo");
+    assert_eq!(
+        &source[span.start..span.end],
+        ".foo {한글 \\}\r\ntext}"
+    );
+    let [CallArgument::Positional {
+        value: Value::Content(argument_content),
+        span: argument_span,
+    }] = arguments.as_slice()
+    else {
+        panic!("expected source-backed escaped content: {arguments:?}");
+    };
+    assert_eq!(
+        &source[argument_span.start..argument_span.end],
+        "{한글 \\}\r\ntext}"
+    );
+    let rebuilt = argument_content
+        .iter()
+        .map(|inline| match inline {
+            Inline::Text { span, .. }
+            | Inline::SoftBreak { span }
+            | Inline::HardBreak { span } => &source[span.start..span.end],
+            other => panic!("unexpected escaped content node: {other:?}"),
+        })
+        .collect::<String>();
+    assert_eq!(rebuilt, "한글 \\}\r\ntext");
+    assert!(source.is_char_boundary(span.start));
+    assert!(source.is_char_boundary(span.end));
+
+    let markdown = arkst_markdown::parse_with_mode(source, Mode::Markdown);
+    assert!(markdown.diagnostics.is_empty(), "{markdown:?}");
+    assert!(markdown.document.nodes.iter().all(|node| match node {
+        Block::DirectiveCall { .. } => false,
+        Block::Paragraph { content, .. } => content
+            .iter()
+            .all(|inline| !matches!(inline, Inline::DirectiveCall { .. })),
+        _ => true,
+    }));
+}
+
+#[test]
+fn g0_s02_normal_compile_keeps_utf8_crlf_nested_failure_source_identity() {
+    let source = "앞\r\n\r\n.sum {1} {.multiply {true} {2}}\r\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let result = compile(&project, &CompileOptions::default());
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    let failure_start = source.find("{true}").expect("nested boolean candidate");
+    assert_eq!(
+        result.diagnostics[0].primary,
+        Some(arkst_source::SourceSpan::new(
+            source_id,
+            failure_start,
+            failure_start + "{true}".len(),
+        ))
+    );
+    let primary = result.diagnostics[0].primary.expect("primary source span");
+    assert_eq!(&source[primary.start..primary.end], "{true}");
+    assert!(source.is_char_boundary(primary.start));
+    assert!(source.is_char_boundary(primary.end));
+}
