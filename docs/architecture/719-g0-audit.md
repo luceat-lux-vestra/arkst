@@ -193,3 +193,19 @@ Accordingly, S12 has two distinct authorities:
 The S12 row in the differential-oracle contract is therefore frozen as an Arkst migration oracle with an explicit upstream divergence. Exact HEAD `4ffe231011688997788c9fed751695201c0983bb` was validated by CI run #42833994417: required Merge Gate succeeded and S12 passed on macOS, Windows and Ubuntu ARM64. This freezes the S12 reference/migration evidence disposition; it does not complete G0 or relax any remaining G0 proof requirement. Any later documentation candidate, including the commit that records this wording, still requires its own exact-HEAD CI before merge.
 
 **STOP boundary:** S04/S12/S16 evidence-status reconciliation only. CI for the replacement documentation HEAD, additional oracle fixtures, ADR acceptance, merge and later G0 work remain separate work units.
+
+## S13/S14/S15 executable migration differential — bounded G0 evidence
+
+Three additional executable migration oracles were added to `crates/arkst-core/tests/g0_runtime_differential.rs` at candidate `802d92bae540d23b17772f36031aafbb6992f97f`. As for S04/S12/S16, the helper compiles exactly the same parser-clean source through normal public `arkst_core::compile` and the legacy `parse_with_mode -> ast_to_ir_with_diagnostics_for_mode -> Evaluator::evaluate_project(IrDocument)` entrypoint, requiring exact final `IrDocument` equality and normalized diagnostic equality including code, severity, message, primary/secondary spans and hints.
+
+| Scenario | New differential test | Bounded observed assertion |
+| --- | --- | --- |
+| **S13** nested transaction rollback | `g0_s13_nested_super_success_rolls_back_after_outer_failure` | A nested successful `.super` side effect is undone after its outer invocation fails, with exactly one numeric-argument diagnostic and final visible state `before`. |
+| **S14** native raw body laziness | `g0_s14_extended_native_raw_body_stays_lazy_and_matches_legacy` | Apparent `.state {changed}` source inside an extended native `.lowercase` raw body stays opaque text, and the later state remains `before`, without diagnostics. |
+| **S15** nested source-defined body | `g0_s15_source_defined_nested_body_matches_legacy` | A nested indented body passed to a source-defined `.echo` inside `.text` yields exactly `nested`, without diagnostics. |
+
+**Execution evidence:** [CI #42952023697](https://github.com/luceat-lux-vestra/arkst/actions/runs/42952023697), exact `head_sha=802d92bae540d23b17772f36031aafbb6992f97f`, completed **SUCCESS**. The macOS, Windows and Ubuntu ARM64 `test` jobs each completed successfully, including `Test (Typst required)` (full workspace `cargo test --locked --workspace --all-targets --all-features`). Required `Merge Gate` also succeeded. These three newly added, non-ignored integration tests were included in that full-workspace test run.
+
+**Classification:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15 only. These test inputs are adapted from already-established Arkst regression cases; there is **no independent official Quarkdown reference observation** for these three scenarios, and no new upstream compatibility claim. S13's accepted Arkst failure-atomic policy remains distinct from the upstream divergence already documented for S12.
+
+**G0 remains incomplete:** this slice does not resolve remaining S01–S32 oracle rows, exhaustive dynamic producer/consumer reachability, public API / versioned wire / CLI policy, proposed ADR-0022 acceptance, or ADR-0020 / architecture reconciliation. No G1 or merge authorization follows from the green CI run.
