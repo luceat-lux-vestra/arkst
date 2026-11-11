@@ -223,3 +223,13 @@ At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional p
 **Classification:** S05–S07 = `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING`. No fresh independent official Quarkdown black-box reference has been captured for these three test cases, so they do not establish new upstream semantic compatibility. S05 is not an exhaustive native-call matrix; S06/S07 do not exhaust all chain owners, side effects, rich bodies, named/multiple authored arguments, source modes or resource contexts. DYN06 in the route ledger records only the native-direct fallback; S06/S07 extend the already-recognized DYN02 chain route rather than inventing a new architectural owner.
 
 **G0 exit remains blocked:** additional dynamic route closure, remaining S01–S32 oracles, public API/CLI/versioned wire decision, proposed ADR-0022 acceptance, ADR-0020/architecture reconciliation and final CI/merge acceptance are still outstanding. No G1 authorization or merge claim is made by this evidence slice.
+
+## Maintainer decision brief (not yet approved)
+
+Before marking G0 accepted, review [#719 G0 maintainer decision brief](719-g0-maintainer-decision-brief.md), which separates:
+- proposed ADR-0022 architectural acceptance and its limited supersession of ADR-0020;
+- versioned final-only wire / explicitly validated read-only legacy import;
+- pre-1.0 CLI and public Rust facade migration / deprecation timing; and
+- unresolved syntax diagnostic vs final-only publication behavior.
+
+Recommendations there are **proposed**, not maintainer-approved decisions or implementation evidence. Continue objective source/route/oracle validation independently. The evidence brief itself does not authorize G1, release-policy changes, ADR acceptance or PR merge.
