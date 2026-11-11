@@ -49,25 +49,8 @@ jobs:
           import sys
 
           root = Path(sys.argv[1])
-          nested_lf = (
-              ".function {inner}\n"
-              "    value:\n"
-              "    .value\n"
-              "\n"
-              ".function {outer}\n"
-              "    value:\n"
-              "    .value\n"
-              "\n"
-              ".outer {앞{.inner {값}}뒤}\n"
-          )
-          escaped_lf = (
-              ".function {foo}\n"
-              "    value:\n"
-              "    .value\n"
-              "\n"
-              "prefix .foo {한글 \\}\n"
-              "text} suffix\n"
-          )
+          nested_lf = ".text {앞{.text {값}}뒤}\n"
+          escaped_lf = "prefix .text {한글 \\}\ntext} suffix\n"
           fixtures = {
               "s02-utf8-lf-nested.qd": nested_lf,
               "s02-utf8-crlf-nested.qd": nested_lf.replace("\n", "\r\n"),
