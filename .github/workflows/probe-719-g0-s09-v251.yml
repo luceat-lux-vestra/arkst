@@ -90,7 +90,7 @@ jobs:
               fi
 
               set +e
-              "$QD" "\${args[@]}" >"$stdout" 2>"$stderr"
+              "$QD" "${args[@]}" >"$stdout" 2>"$stderr"
               rc=$?
               set -e
 
