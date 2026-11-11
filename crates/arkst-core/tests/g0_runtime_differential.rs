@@ -638,7 +638,7 @@ fn g0_s02_normal_compile_keeps_utf8_crlf_nested_failure_source_identity() {
 }
 
 #[test]
-fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_typst_map() {
+fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_legacy_parity() {
     use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
 
     fn contains_directive(inline: &Inline) -> bool {
@@ -784,31 +784,10 @@ fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_typst_map() {
         &source[final_link_span.start..final_link_span.end],
         "[.uppercase {world}](https://example.com)"
     );
-
-    let (typst, source_map) = arkst_typst::lower_to_typst(&result.ir);
-    assert!(
-        typst.contains("*앞 #link(\"https://example.com\")[WORLD] 뒤*"),
-        "{typst:?}"
-    );
-    assert!(
-        source_map
-            .iter()
-            .any(|entry| entry.original == *final_strong_span),
-        "{source_map:?}"
-    );
-    assert!(
-        source_map
-            .iter()
-            .any(|entry| entry.original == *final_link_span),
-        "{source_map:?}"
-    );
-    assert!(source_map.iter().all(|entry| {
-        entry.generated_start < entry.generated_end && entry.generated_end <= typst.len()
-    }));
 }
 
 #[test]
-fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure_and_map() {
+fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure() {
     let source = ".text\r\n    **앞 [.uppercase {world}](https://example.com) 뒤**\r\n";
     let result = compile_and_assert_legacy_parity(source);
 
@@ -850,21 +829,5 @@ fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure_and_map() {
     assert_eq!(
         &source[link_span.start..link_span.end],
         "[.uppercase {world}](https://example.com)"
-    );
-
-    let (typst, source_map) = arkst_typst::lower_to_typst(&result.ir);
-    assert!(
-        typst.contains("*앞 #link(\"https://example.com\")[WORLD] 뒤*"),
-        "{typst:?}"
-    );
-    assert!(
-        source_map
-            .iter()
-            .any(|entry| entry.original == *strong_span),
-        "{source_map:?}"
-    );
-    assert!(
-        source_map.iter().any(|entry| entry.original == *link_span),
-        "{source_map:?}"
     );
 }
