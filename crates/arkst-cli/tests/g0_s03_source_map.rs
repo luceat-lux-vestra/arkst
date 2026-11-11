@@ -64,9 +64,7 @@ fn assert_s03_source_map(source: &str, expected_strong_source: &str) {
         "{source_map:?}"
     );
     assert!(
-        source_map
-            .iter()
-            .any(|entry| entry.original == *link_span),
+        source_map.iter().any(|entry| entry.original == *link_span),
         "{source_map:?}"
     );
     assert!(source_map.iter().all(|entry| {
