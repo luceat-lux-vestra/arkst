@@ -239,11 +239,11 @@ degradation of Quarkdown language compatibility, source maps, diagnostics,
 rollback semantics or security. Keep PR #746 unmerged until its G0
 evidence and CI obligations are complete.
 
-## S08 mixed-owner multitail + terminal body — bounded candidate (not G0 exit)
+## S08 mixed-owner multitail + terminal body — bounded cross-platform proof (not G0 exit)
 
 - **New full-frontend fixture:** `g0_runtime_differential::g0_s08_multitail_terminal_body_source_native_source_matches_legacy` compiles parser-clean source containing a source-defined `identity` head, native `multiply` middle tail, and a source-defined `tail` owning the terminal indented body.
 - **Oracle comparison implemented:** `compile_and_assert_legacy_parity` checks exact `IrDocument` plus ordered diagnostics (`code`, `severity`, `message`, primary/secondary source spans, `hints`) against the separate legacy AST-to-executable-IR evaluator path. The tested visible terminal content is `terminal body`.
 - **Precise dynamic claim if CI passes:** normal public source compilation traverses a multi-tail, mixed-owner continuation and binds the terminal block body at the final source-defined owner without a frontend/legacy output difference. This extends the already known **DYN02** path; it is **not** a new architecture route ID.
-- **Authority limit:** the existing engine-internal `phase3g_multitail_final_body_matches_legacy_chain_result` is a useful bounded unit anchor but is *not* public full-frontend nor independent Quarkdown black-box evidence. This candidate requires exact new HEAD CI before any PASS status. No pinned upstream S08 default/strict observation, error-first-tail permutation, once-only-effect proof, rich terminal body or resource context matrix is asserted.
-- **G0 state:** pending exact-HEAD CI and independent upstream/reference work; #719 G0–G8 and final-only target unchanged. Do not merge #746 or start G1 merely because this slice passes.
+- **Authority limit:** the engine-internal `phase3g_multitail_final_body_matches_legacy_chain_result` remains a bounded unit anchor, not an independent upstream oracle. The new public full-frontend S08 path passed [CI #43039010366](https://github.com/luceat-lux-vestra/arkst/actions/runs/43039010366) at exact HEAD `6b945dcd45266ab9d80b6e796edcca603417fdd9`: all three OS full test jobs and required Merge Gate **SUCCESS**. No pinned official Quarkdown S08 default/strict observation, error-first-tail permutation, once-only-effect proof, rich body or resource-context matrix is asserted.
+- **G0 state:** *bounded Arkst migration proof PASS at the exact S08 test HEAD*, independent upstream/reference and adversarial/once-only-effect matrix still PENDING. This follow-up **evidence-status commit requires its own exact-HEAD CI**, and the earlier successful run alone is not authority for the documentation commit. #719 G0–G8 and final-only target unchanged; do not merge #746 or start G1.
 
