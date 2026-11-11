@@ -172,3 +172,36 @@ fn g0_s15_source_defined_nested_body_matches_legacy() {
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(paragraph_text(&result), "nested");
 }
+
+#[test]
+fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
+    let success = ".sum {1} {2}\n";
+    let success_result = compile_and_assert_legacy_parity(success);
+    assert!(success_result.diagnostics.is_empty(), "{success_result:?}");
+    assert_eq!(paragraph_text(&success_result), "3");
+
+    let invalid_body = ".sum {1}\n    invalid\n";
+    let invalid_result = compile_and_assert_legacy_parity(invalid_body);
+    assert_eq!(invalid_result.diagnostics.len(), 1, "{invalid_result:?}");
+    assert!(invalid_result.diagnostics[0]
+        .message
+        .contains("numeric arguments"));
+}
+
+#[test]
+fn g0_s06_zero_argument_chain_tail_matches_legacy_ir_entrypoint() {
+    let source = ".function {identity}\n    value:\n    .value\n\n.function {tail}\n    previous:\n    .previous\n\n.identity {7}::tail\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "7");
+}
+
+#[test]
+fn g0_s07_flat_argument_chain_tail_matches_legacy_ir_entrypoint() {
+    let source = ".function {identity}\n    value:\n    .value\n\n.function {tail}\n    previous second:\n    .second\n\n.identity {7}::tail {9}\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "9");
+}
