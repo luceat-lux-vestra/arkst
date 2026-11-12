@@ -443,6 +443,57 @@ This yields a bounded compatibility conclusion for **binding, conversion ownersh
 
 
 
+## S06 zero-authored tail — predecessor slot + once-only head freeze
+
+Disposable clean-room PR #761 is **CLOSED/UNMERGED**. Final probe HEAD \`b82872891ce93f55a771b60373705159778cd17f\`; authoritative matrix run #43216405262 completed **SUCCESS**.
+
+Pinned official distributions:
+
+- **Quarkdown v2.5.1:** artifact \`g0-s06-quarkdown-v2.5.1\`, ID \`13942668602\`, digest \`sha256:feb8beb0852f61572347931141d6fd06ef6647db7e8f0ab83a50b95a41c77be8\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **Quarkdown v2.6.0 verified baseline:** artifact \`g0-s06-quarkdown-v2.6.0\`, ID \`13944036277\`, digest \`sha256:cb0e09c5ff384f0b45c47813ea89fd5f951dd12f86b6b3e80cae118539d78444\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+Both official releases behave identically in default and strict modes:
+
+| Fixture | Official observation | Bounded conclusion |
+| --- | --- | --- |
+| source-defined \`identity {7}::tail\`, where \`tail\` declares only \`previous:\` | rc 0, empty stderr, visible \`7\`; HTML SHA-256 \`8ce36f5ab06821d0ab99b883925c6865b3ca5321a37e88bda0d6061c6db982e4\` | evaluated head result is available to the zero-authored tail as its implicit predecessor |
+| side-effectful \`counted::tail\` control | head increments caller-visible \`count\`, returns numeric \`7\`; tail returns predecessor; later count is \`1\`; visible \`7 1\`; HTML SHA-256 \`3b7ef4df402f04618e144e20363d062190ed825c026771e9204fd1d84ba93376\` | successful head executes exactly once before zero-authored tail binding/dispatch |
+
+### Arkst reconciliation
+
+The existing S06 public differential already compares the same baseline source through normal frontend evaluation and the legacy whole-call IR evaluator with exact final \`IrDocument\` and normalized diagnostic equality.
+
+The evidence update extends \`g0_s06_zero_argument_chain_tail_matches_legacy_ir_entrypoint\` with the independently authored once-only control used by the official probe. It therefore freezes all of the following in both Arkst entrypoints:
+
+- head-side mutation commits exactly once;
+- the head result \`7\` becomes the zero-authored tail's predecessor;
+- the tail returns that predecessor without requiring an authored argument;
+- the later caller-visible counter remains \`1\`;
+- final visible semantic output is \`7\\n1\`.
+
+Exact S06 execution HEAD \`4c1ae8aee02f2e4c803135d99f322e5ade370e82\` completed CI #43216634805 **SUCCESS**. Ubuntu ARM64, macOS and Windows Typst-required tests, Reference JVM, compatibility, fmt/clippy/MSRV/WASM/docs/security-related jobs and required Merge Gate all succeeded.
+
+The official black-box HTML is authority only for the bounded semantic ordering/once-only observations. Exact Arkst source spans, value origin metadata and transitional evaluator representation remain internal implementation evidence and are not inferred from rendered HTML.
+
+### Protected-main synchronization
+
+While S06 was being frozen, protected \`main\` advanced from \`40b5659053dd61567646bed8daeff6259e2a8e93\` to \`8b9d347e82001a790baf1dfcf83267c378abd5f3\` via merged #760, which only adopts mold for the Ubuntu ARM64 CI/cache path.
+
+PR #746 was explicitly synchronized after the S06 executable run:
+
+- synchronization merge commit: \`aa252bc5a0accfd67af9f38d8d3c4bb6308a8316\`;
+- parents: S06 evidence HEAD \`4c1ae8aee02f2e4c803135d99f322e5ade370e82\` + protected main \`8b9d347e82001a790baf1dfcf83267c378abd5f3\`;
+- the merged tree preserves #746 evidence plus the two #760 workflow files;
+- compare against protected main reports \`ahead_by=61\`, \`behind_by=0\`, merge base = current protected main.
+
+This removes the prior base drift before the S06 docs are qualified.
+
+**Architecture disposition:** current chain execution still continues through a transitional executable-IR tail path. S06 freezes the public predecessor/once-only contract that G3 must preserve while removing that bridge; the bridge itself is not endorsed as final architecture.
+
+**Classification:** \`UPSTREAM_V251_V260_ZERO_AUTHORED_TAIL_PREDECESSOR_ONCE_ONLY_FROZEN_ARKST_CROSS_PLATFORM_PROVEN\`. No new S06 compatibility debt was discovered in this bounded semantic surface.
+
+
+
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
