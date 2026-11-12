@@ -494,6 +494,50 @@ This removes the prior base drift before the S06 docs are qualified.
 
 
 
+## S07 flat tail — predecessor/authored slot order + evaluation-order freeze
+
+Disposable clean-room PR #762 is **CLOSED/UNMERGED**. Final probe HEAD \`0446da6c3015d8f1e5346c61cbaa2bb15b4788e8\`; authoritative matrix run #43233514212 completed **SUCCESS**.
+
+Pinned official distributions:
+
+- **Quarkdown v2.5.1:** artifact \`g0-s07-quarkdown-v2.5.1\`, ID \`13950044069\`, digest \`sha256:ce5ac56c445da30b820e0e87ab74d8f0cf0cecde0a1a31c2182506c14f1c90d3\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **Quarkdown v2.6.0 verified baseline:** artifact \`g0-s07-quarkdown-v2.6.0\`, ID \`13951237487\`, digest \`sha256:d3822acd6464945f29cf9faa85c114f59d5ed4d7ed694e53bd1b7f11f508dbd9\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+Both official releases behave identically in default and strict modes:
+
+| Fixture | Official observation | Bounded conclusion |
+| --- | --- | --- |
+| \`.identity {7}::tail {9}\`, where \`tail(previous, second)\` returns \`second\` | rc 0, empty stderr, visible \`9\`; HTML SHA-256 \`42904ad40d1e7212944e515c9997d297cb35b037d73951bdc3eb39aab66cc884\` | one authored positional tail candidate follows the implicit predecessor and binds to the second parameter |
+| same call with tail returning \`.sum {.previous} {.second}\` | visible \`16\`; HTML SHA-256 \`d69b14097f932ac0f271302fe7d27ae7df48fe0f6afeead3d12d2098823d69be\` | predecessor \`7\` and authored positional \`9\` occupy distinct ordered slots 0 and 1 |
+| side-effect/read order control \`.counted::tail {.count}\` | head increments caller-visible count from 0 to 1 and returns 7; authored argument reads count; tail returns authored value; later count remains 1; visible \`1 1\`; HTML SHA-256 \`bdee750b99434d4f8df2f3db6f4a7567479c154a75874e0b098287fcf853c5f3\` | head executes exactly once **before** authored tail-argument evaluation |
+
+### Arkst reconciliation
+
+The existing S07 public differential compared the baseline flat-tail source through normal frontend evaluation and the legacy whole-call IR evaluator with exact final \`IrDocument\` and normalized diagnostic equality.
+
+The S07 evidence update extends that same differential with two independent controls matching the official probe:
+
+- a slot-identity control requiring \`sum(previous, second) == 16\`;
+- an evaluation-order control requiring final visible \`1\\n1\`, which would become \`0\\n1\` if the authored \`.count\` candidate were evaluated before the side-effectful head.
+
+Exact S07 execution HEAD \`1e0f2e48a173b9d0e951345e7170fec14e7970bf\` completed CI #43233772000 **SUCCESS**. Ubuntu ARM64, macOS and Windows Typst-required tests, Reference JVM, compatibility, fmt/clippy/MSRV/WASM/docs/security-related jobs and required Merge Gate all succeeded.
+
+The bounded public contract is therefore:
+
+1. execute the chain head exactly once;
+2. commit/evaluate that head before evaluating the authored tail candidate;
+3. bind the evaluated predecessor to slot 0;
+4. bind the authored positional candidate to the next positional slot;
+5. dispatch the tail with those ordered bindings.
+
+The official black-box output is semantic authority for those observations only. Exact Arkst source spans/origin metadata remain internal evaluator evidence and are not inferred from rendered HTML.
+
+**Architecture disposition:** Arkst still represents this route through the transitional executable-IR chain-tail bridge. S07 freezes behavior that G3 must preserve while removing that bridge; the bridge itself is not part of the ADR-0022 target.
+
+**Classification:** \`UPSTREAM_V251_V260_FLAT_TAIL_PREDECESSOR_THEN_AUTHORED_ORDER_ONCE_ONLY_FROZEN_ARKST_CROSS_PLATFORM_PROVEN\`. No new S07 compatibility debt was found in this bounded semantic surface.
+
+
+
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
