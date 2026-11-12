@@ -892,7 +892,6 @@ fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure() {
     );
 }
 
-
 #[test]
 fn g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint() {
     let definition_then_caller = concat!(
@@ -904,8 +903,7 @@ fn g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint() {
         ".var {value} {caller}\n",
         ".captured\n",
     );
-    let definition_then_caller_result =
-        compile_and_assert_legacy_parity(definition_then_caller);
+    let definition_then_caller_result = compile_and_assert_legacy_parity(definition_then_caller);
     assert!(
         definition_then_caller_result.diagnostics.is_empty(),
         "{definition_then_caller_result:?}"
@@ -924,8 +922,7 @@ fn g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint() {
         ".var {value} {caller}\n",
         ".show {parameter}\n",
     );
-    let parameter_precedence_result =
-        compile_and_assert_legacy_parity(parameter_precedence);
+    let parameter_precedence_result = compile_and_assert_legacy_parity(parameter_precedence);
     assert!(
         parameter_precedence_result.diagnostics.is_empty(),
         "{parameter_precedence_result:?}"
@@ -949,5 +946,8 @@ fn g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint() {
         nested_overlay_result.diagnostics.is_empty(),
         "{nested_overlay_result:?}"
     );
-    assert_eq!(paragraph_text(&nested_overlay_result), "caller\nnext caller");
+    assert_eq!(
+        paragraph_text(&nested_overlay_result),
+        "caller\nnext caller"
+    );
 }
