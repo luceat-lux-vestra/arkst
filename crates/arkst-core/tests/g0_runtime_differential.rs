@@ -183,9 +183,11 @@ fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
     let invalid_body = ".sum {1}\n    invalid\n";
     let invalid_result = compile_and_assert_legacy_parity(invalid_body);
     assert_eq!(invalid_result.diagnostics.len(), 1, "{invalid_result:?}");
+    assert_eq!(invalid_result.diagnostics[0].code, "E3001");
     assert!(invalid_result.diagnostics[0]
         .message
         .contains("numeric arguments"));
+    assert!(invalid_result.ir.nodes.is_empty(), "{invalid_result:?}");
 }
 
 #[test]
