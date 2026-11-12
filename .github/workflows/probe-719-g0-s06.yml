@@ -1,0 +1,173 @@
+name: Quarkdown G0 S06 clean-room probe
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: official-${{ matrix.version }}-black-box
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        env:
+          QD_VERSION: ${{ matrix.version }}
+          QD_SHA256: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          archive="/tmp/quarkdown-${QD_VERSION}.zip"
+          root="/tmp/quarkdown-${QD_VERSION}"
+          url="https://github.com/iamgio/quarkdown/releases/download/${QD_VERSION}/quarkdown-linux-x64.zip"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$QD_SHA256" "$archive" | sha256sum -c -
+          rm -rf "$root"
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Run independently authored one-tail probes
+        shell: bash
+        env:
+          QD_VERSION: ${{ matrix.version }}
+          QD_SHA256: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          root="/tmp/arkst-g0-s06-${QD_VERSION}"
+          rm -rf "$root"
+          mkdir -p "$root"
+
+          cat > "$root/baseline.qd" <<'EOF'
+          .function {identity}
+              value:
+              .value
+
+          .function {tail}
+              previous:
+              .previous
+
+          .identity {7}::tail
+          EOF
+
+          cat > "$root/once-only.qd" <<'EOF'
+          .var {count} {0}
+          .function {counted}
+              .var {count} {.count::sum {1}}
+              .sum {3} {4}
+
+          .function {tail}
+              previous:
+              .previous
+
+          .counted::tail
+          .count
+          EOF
+
+          : > "$root/observations.jsonl"
+
+          for fixture in baseline once-only; do
+            for mode in default strict; do
+              out="$root/out-$fixture-$mode"
+              stdout="$root/$fixture-$mode.stdout"
+              stderr="$root/$fixture-$mode.stderr"
+              rm -rf "$out"
+              set +e
+              if [ "$mode" = strict ]; then
+                "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe --strict >"$stdout" 2>"$stderr"
+              else
+                "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe >"$stdout" 2>"$stderr"
+              fi
+              rc=$?
+              set -e
+
+              python3 - "$root" "$fixture" "$mode" "$rc" "$stdout" "$stderr" "$out" "$QD_VERSION" "$QD_SHA256" <<'PY'
+          from hashlib import sha256
+          from html.parser import HTMLParser
+          import json
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          fixture = sys.argv[2]
+          mode = sys.argv[3]
+          rc = int(sys.argv[4])
+          stdout_path = Path(sys.argv[5])
+          stderr_path = Path(sys.argv[6])
+          out_dir = Path(sys.argv[7])
+          version = sys.argv[8]
+          archive_sha256 = sys.argv[9]
+
+          class VisibleHTML(HTMLParser):
+              def __init__(self) -> None:
+                  super().__init__()
+                  self.parts = []
+                  self.skip = 0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script", "style"):
+                      self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script", "style") and self.skip:
+                      self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.parts.append(data)
+
+          html_files = sorted(out_dir.rglob("*.html")) if out_dir.is_dir() else []
+          html_text = []
+          html_hashes = []
+          for path in html_files:
+              data = path.read_bytes()
+              parser = VisibleHTML()
+              parser.feed(data.decode("utf-8", errors="replace"))
+              html_text.append(" ".join(" ".join(parser.parts).split()))
+              html_hashes.append(sha256(data).hexdigest())
+
+          source = (root / f"{fixture}.qd").read_bytes()
+          observation = {
+              "reference": f"official-quarkdown-{version}-linux-x64",
+              "archive_sha256": archive_sha256,
+              "fixture": fixture,
+              "fixture_sha256": sha256(source).hexdigest(),
+              "mode": mode,
+              "rc": rc,
+              "stdout": stdout_path.read_text(encoding="utf-8", errors="replace"),
+              "stderr": stderr_path.read_text(encoding="utf-8", errors="replace"),
+              "html_count": len(html_files),
+              "html_text": html_text,
+              "html_sha256": html_hashes,
+          }
+          with (root / "observations.jsonl").open("a", encoding="utf-8") as stream:
+              stream.write(json.dumps(observation, ensure_ascii=False, sort_keys=True) + "\n")
+          print(json.dumps(observation, ensure_ascii=False, sort_keys=True))
+          PY
+            done
+          done
+
+      - name: Upload clean-room observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g0-s06-quarkdown-${{ matrix.version }}
+          path: /tmp/arkst-g0-s06-${{ matrix.version }}
+          if-no-files-found: error
