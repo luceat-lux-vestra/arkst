@@ -568,10 +568,13 @@ The frozen public lookup layering is therefore:
 
 This does not imply that caller overlay becomes a mutation owner or that definition capture is rewritten. Those ownership rules remain internal evaluator-state semantics and broader mutable-scope parity remains outside this bounded S10 observation.
 
-Initial execution HEAD \`b5d6384dd811d2f0265797321a84e60d6d156987\` passed the Ubuntu ARM64/macOS/Windows semantic test jobs but failed only the repository rustfmt gate. No semantic assertion failed. The formatting-only correction is HEAD \`2b75929942b1de5f3db7942f9cf2df27692d756a\`; final execution/final-head authority is recorded only after its CI completes.
+Initial execution HEAD `b5d6384dd811d2f0265797321a84e60d6d156987` passed the Ubuntu ARM64/macOS/Windows semantic test jobs but failed only the repository rustfmt gate. No semantic assertion failed. After formatting and evidence reconciliation, HEAD `e60d13a0f92e296a13df21648e3309b3aed5c017` completed CI #43239940174 with Ubuntu ARM64/macOS/Windows tests, Reference JVM, compatibility, fmt/clippy/MSRV/WASM/docs/security-related jobs and required Merge Gate all **SUCCESS**.
 
-**Architecture disposition:** \`IrCallable\` / callable capture and runtime scope composition remain G2/G4 migration ownership. The public definition/caller/parameter lookup semantics must survive clean-break removal of legacy executable/runtime bridges; rendered HTML is not authority for Arkst's capture representation, owner identity or source provenance.
+The first #43239940174 attempt hit a transient GitHub API **HTTP 503** while the trusted docs-only scope job fetched PR metadata; CodeQL runtime and Merge Gate consequently failed only because they depend on that classification. Failed jobs were re-run **without any source change**. The rerun completed docs-only scope, CodeQL runtime and Merge Gate successfully, so the transient infrastructure failure is not classified as product or policy debt.
 
+**Architecture disposition:** `IrCallable` / callable capture and runtime scope composition remain G2/G4 migration ownership. The public definition/caller/parameter lookup semantics must survive clean-break removal of legacy executable/runtime bridges; rendered HTML is not authority for Arkst's capture representation, owner identity or source provenance.
+
+**Classification:** `UPSTREAM_V251_V260_CALLABLE_DEFINITION_CALLER_PARAMETER_LAYERING_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. No new S10 compatibility debt was discovered in this bounded scope surface.
 
 
 ### Compatibility disposition and remaining G0 blockers
