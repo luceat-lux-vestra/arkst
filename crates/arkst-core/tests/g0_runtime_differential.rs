@@ -230,6 +230,36 @@ fn g0_s07_flat_argument_chain_tail_matches_legacy_ir_entrypoint() {
 
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(paragraph_text(&result), "9");
+
+    // Official Quarkdown v2.5.1/v2.6.0 independently proves the evaluated
+    // predecessor occupies slot 0 and the authored positional tail argument
+    // follows in slot 1.
+    let slots = ".function {identity}\n    value:\n    .value\n\n.function {tail}\n    previous second:\n    .sum {.previous} {.second}\n\n.identity {7}::tail {9}\n";
+    let slots_result = compile_and_assert_legacy_parity(slots);
+
+    assert!(slots_result.diagnostics.is_empty(), "{slots_result:?}");
+    assert_eq!(paragraph_text(&slots_result), "16");
+
+    // Make evaluation order observable. The head must commit count=1 before
+    // the authored tail argument reads .count; evaluating the authored
+    // candidate first would return 0 instead.
+    let order = concat!(
+        ".var {count} {0}\n",
+        ".function {counted}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .sum {3} {4}\n",
+        "\n",
+        ".function {tail}\n",
+        "    previous second:\n",
+        "    .second\n",
+        "\n",
+        ".counted::tail {.count}\n",
+        ".count\n",
+    );
+    let order_result = compile_and_assert_legacy_parity(order);
+
+    assert!(order_result.diagnostics.is_empty(), "{order_result:?}");
+    assert_eq!(paragraph_text(&order_result), "1\n1");
 }
 
 #[test]
