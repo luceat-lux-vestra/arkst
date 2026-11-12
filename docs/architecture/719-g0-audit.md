@@ -407,6 +407,42 @@ This is **compatibility/provenance debt, not an accepted divergence**. Evidence-
 
 
 
+## S05 native direct fallback — cross-version binding/conversion reference
+
+Disposable clean-room PR #759 is **CLOSED/UNMERGED**. Its final probe HEAD is \`f7c8f3d774d9c1160d91e5f2a387825b1dc08448\`; authoritative matrix run #43146982448 completed **SUCCESS**.
+
+The probe pins both official binaries used by this repository's compatibility evidence:
+
+- **v2.5.1:** artifact \`g0-s05-quarkdown-v2.5.1\`, ID \`13912021800\`, digest \`sha256:cde05d6cb692aaa90491606edc5f26d3420d2be9d9aca042d9a3548f19a936f9\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **v2.6.0 verified baseline:** artifact \`g0-s05-quarkdown-v2.6.0\`, ID \`13912316262\`, digest \`sha256:0bea018cc182142f22e4b53c3f03430f8eaef5bd8c6aade2c88e849585781194\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+The two releases behave identically for the bounded direct-native cases in both default and strict modes.
+
+| Fixture | Official observation | Bounded conclusion |
+| --- | --- | --- |
+| \`.sum {1} {2}\` | rc 0, empty stderr, visible result \`3\`; HTML SHA-256 \`8cc1ff7a706fd342dbb6961a9d7a151b567635d98269dafa82108f80639e605b\` | ordinary direct native binding/conversion is stable across v2.5.1/v2.6.0 |
+| \`.sum {1}\\n    invalid\` default | rc 0; stderr says \`sum(Number a, Number b)\` received \`(1, invalid)\` and \`invalid\` is not numeric; one recoverable error HTML artifact, SHA-256 \`fbde998724e0638b00b0461a5ba3cd98dbb61cfc3e0254792b8b829ea5b98141\` | the indented body is the second argument, not an ignored body; numeric coercion owns the failure |
+| same source, strict | rc 66; stderr identifies originating function \`sum\`; no HTML artifact | strict failure owner is the same direct native call |
+
+### Arkst reconciliation
+
+The S05 route exists because the current direct-AST evaluator does not yet own every native-call shape and can fall back to the transitional pre-lowered chain path. That route is **migration architecture**, not a compatibility contract and not an end-state endorsement.
+
+Public differential \`g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint\` already proves exact normal-frontend vs legacy-evaluator parity for the same two authored cases. The S05 evidence update additionally pins:
+
+- success has no diagnostics and final visible semantic output \`3\`;
+- the indented-body failure emits exactly one \`E3001\` numeric-argument diagnostic;
+- the failed invocation produces no ordinary final content node, preventing silent success;
+- existing \`direct_and_extended_native_raw_body_calls_keep_call_span_provenance\` evidence keeps the direct failed call source-backed through the body text.
+
+Exact Arkst evidence HEAD \`e57bc32241baf36e2bc670313a97bc154ad9c649\` completed CI #43147132829 **SUCCESS** across Ubuntu ARM64, macOS and Windows Typst-required tests plus required Merge Gate.
+
+This yields a bounded compatibility conclusion for **binding, conversion ownership, success output and failure ownership**. It does **not** claim default-mode recovery-content parity: official Quarkdown materializes recoverable failed-call content while current Arkst does not yet have the equivalent backend-neutral representation. #752 already owns that failed-call recovery-content contract and has been updated with this direct-call corroboration; no duplicate debt issue is created.
+
+**Classification:** \`UPSTREAM_V251_V260_DIRECT_NATIVE_BINDING_CONVERSION_FROZEN_ARKST_FALLBACK_CROSS_PLATFORM_PROVEN_RECOVERY_DEBT_752_OPEN\`. S05's public call semantics are evidenced; the fallback implementation remains transitional and G3 must remove it without changing these observations.
+
+
+
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
