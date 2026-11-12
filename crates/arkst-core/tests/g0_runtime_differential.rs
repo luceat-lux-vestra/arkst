@@ -891,3 +891,63 @@ fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure() {
         "[.uppercase {world}](https://example.com)"
     );
 }
+
+
+#[test]
+fn g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint() {
+    let definition_then_caller = concat!(
+        ".var {value} {definition}\n",
+        ".function {captured}\n",
+        "    .value\n",
+        "\n",
+        ".captured\n",
+        ".var {value} {caller}\n",
+        ".captured\n",
+    );
+    let definition_then_caller_result =
+        compile_and_assert_legacy_parity(definition_then_caller);
+    assert!(
+        definition_then_caller_result.diagnostics.is_empty(),
+        "{definition_then_caller_result:?}"
+    );
+    assert_eq!(
+        paragraph_text(&definition_then_caller_result),
+        "definition\ncaller"
+    );
+
+    let parameter_precedence = concat!(
+        ".var {value} {definition}\n",
+        ".function {show}\n",
+        "    value:\n",
+        "    .value\n",
+        "\n",
+        ".var {value} {caller}\n",
+        ".show {parameter}\n",
+    );
+    let parameter_precedence_result =
+        compile_and_assert_legacy_parity(parameter_precedence);
+    assert!(
+        parameter_precedence_result.diagnostics.is_empty(),
+        "{parameter_precedence_result:?}"
+    );
+    assert_eq!(paragraph_text(&parameter_precedence_result), "parameter");
+
+    let nested_overlay = concat!(
+        ".function {inner}\n",
+        "    .value\n",
+        "\n",
+        ".function {outer}\n",
+        "    .inner\n",
+        "\n",
+        ".var {value} {caller}\n",
+        ".outer\n",
+        ".var {value} {next caller}\n",
+        ".outer\n",
+    );
+    let nested_overlay_result = compile_and_assert_legacy_parity(nested_overlay);
+    assert!(
+        nested_overlay_result.diagnostics.is_empty(),
+        "{nested_overlay_result:?}"
+    );
+    assert_eq!(paragraph_text(&nested_overlay_result), "caller\nnext caller");
+}
