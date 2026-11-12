@@ -538,6 +538,42 @@ The official black-box output is semantic authority for those observations only.
 
 
 
+## S10 callable identity — definition capture, caller overlay, parameter precedence
+
+Disposable clean-room PR #763 is **CLOSED/UNMERGED**. Final probe HEAD \`4980f28fc7ef90c4bc341d52ddf347fa59cfb15e\`; authoritative matrix run #43238226209 completed **SUCCESS**.
+
+Pinned official distributions:
+
+- **Quarkdown v2.5.1:** artifact \`g0-s10-quarkdown-v2.5.1\`, ID \`13953472202\`, digest \`sha256:f892286616678d23b6e6a35a708413af22c28a8a1e0b92df7bc9d111c0465a0a\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **Quarkdown v2.6.0 verified baseline:** artifact \`g0-s10-quarkdown-v2.6.0\`, ID \`13954161200\`, digest \`sha256:4320dceebf7d77ca091bfc8a6defc450028b7e1e4ecfec5798ae8cd449d7ca63\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+Both releases behave identically in default and strict modes:
+
+| Fixture | Official observation | Bounded conclusion |
+| --- | --- | --- |
+| definition value \`definition\`; callable returns \`.value\`; invoke before and after caller sets \`value=caller\` | rc 0, empty stderr, visible \`definition caller\`; HTML SHA-256 \`1148644bf3dcc34ea87ad8309bec82261fc1596575347108e3532a4f8513a3da\` | definition capture supplies fallback when no caller binding exists; current caller-visible value overlays it at invocation |
+| definition \`value=definition\`, caller \`value=caller\`, callable parameter also named \`value\`, invoke with \`parameter\` | rc 0, empty stderr, visible \`parameter\`; HTML SHA-256 \`3861de905485dd8eb6e2cd28469310e9f70c24e776f7d24c9c2645fe761cd0de\` | invocation parameter shadows caller overlay and definition capture |
+| outer callable invokes inner callable reading \`.value\`; caller changes \`value\` between invocations | rc 0, empty stderr, visible \`caller next caller\`; HTML SHA-256 \`f25cd12c7a8ce17b627f28b57dd3fdaeda24cd8b230541bfc3234373f09d615b\` | current caller overlay propagates through nested callable invocation and is refreshed for each call |
+
+### Arkst reconciliation
+
+The existing product tests already covered the individual callable scope behaviors. S10 adds a single G0 public differential, \`g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint\`, containing the same three independently authored controls. Each source is compiled through both the normal frontend and the legacy whole-call evaluator, requiring exact final \`IrDocument\` and normalized diagnostic equality before its visible result is asserted.
+
+The frozen public lookup layering is therefore:
+
+1. immutable **definition capture** as fallback;
+2. current **caller-visible overlay** for permitted caller context;
+3. invocation child scope with **parameters installed last**, so parameters shadow both outer layers;
+4. nested callable invocation receives the current caller overlay rather than a stale invocation snapshot.
+
+This does not imply that caller overlay becomes a mutation owner or that definition capture is rewritten. Those ownership rules remain internal evaluator-state semantics and broader mutable-scope parity remains outside this bounded S10 observation.
+
+Initial execution HEAD \`b5d6384dd811d2f0265797321a84e60d6d156987\` passed the Ubuntu ARM64/macOS/Windows semantic test jobs but failed only the repository rustfmt gate. No semantic assertion failed. The formatting-only correction is HEAD \`2b75929942b1de5f3db7942f9cf2df27692d756a\`; final execution/final-head authority is recorded only after its CI completes.
+
+**Architecture disposition:** \`IrCallable\` / callable capture and runtime scope composition remain G2/G4 migration ownership. The public definition/caller/parameter lookup semantics must survive clean-break removal of legacy executable/runtime bridges; rendered HTML is not authority for Arkst's capture representation, owner identity or source provenance.
+
+
+
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
