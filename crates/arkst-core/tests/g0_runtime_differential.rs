@@ -197,6 +197,30 @@ fn g0_s06_zero_argument_chain_tail_matches_legacy_ir_entrypoint() {
 
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(paragraph_text(&result), "7");
+
+    // Official Quarkdown v2.5.1/v2.6.0 evidence also makes head execution
+    // observable: the zero-authored tail consumes the implicit predecessor,
+    // while the successful head-side mutation commits exactly once.
+    let once_only = concat!(
+        ".var {count} {0}\n",
+        ".function {counted}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .sum {3} {4}\n",
+        "\n",
+        ".function {tail}\n",
+        "    previous:\n",
+        "    .previous\n",
+        "\n",
+        ".counted::tail\n",
+        ".count\n",
+    );
+    let once_only_result = compile_and_assert_legacy_parity(once_only);
+
+    assert!(
+        once_only_result.diagnostics.is_empty(),
+        "{once_only_result:?}"
+    );
+    assert_eq!(paragraph_text(&once_only_result), "7\n1");
 }
 
 #[test]
