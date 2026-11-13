@@ -294,6 +294,34 @@ Within **v2.5.1**, all six generated documents are byte-identical with HTML SHA-
 
 **Classification:** `UPSTREAM_V251_V260_S15_NESTED_SOURCE_BODY_PUBLIC_SEMANTICS_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. This does not claim generalized callable precedence, exact provenance/source-span equivalence, AST/IR representation, renderer byte parity across releases, all nested-body forms, G0 completion, #746 merge authorization or G1 readiness.
 
+## S17 logger collection provenance boundary — Arkst migration candidate with frozen upstream divergence
+
+**Bounded migration target.** S17 protects evaluator-owned collection provenance at the logger/String conversion boundary while final-document IR replaces the legacy execution bridge. The new `g0_s17_logger_collection_provenance_boundary_matches_legacy` test at candidate `424681095ce3ffc265ce4f6709984bc130361366` runs three parser-clean sources through both the normal public frontend and the legacy pre-lowered evaluator, requiring exact final `IrDocument` equality and ordered diagnostic-signature equality:
+
+| Case | Bounded Arkst result |
+| --- | --- |
+| direct source-backed Markdown list → `.debug {.values}` | accepted conversion validation, no diagnostics, no document nodes |
+| same list after `::reversed` materialization → `.debug` | exactly one `E3001` conversion diagnostic mentioning `.debug`, no document nodes |
+| source-backed list with nested rich Markdown child → `.debug` | exactly one `E3001` conversion diagnostic mentioning `.debug`, no document nodes |
+
+These cases are adapted directly from established `arkst-engine/tests/logger_diagnostics.rs` evidence, including `operation_generated_collections_remain_fail_closed_at_logger_string_boundary` and the source-provenance boundary tests. They freeze the migration invariant that **evidenced source origin may enable a bounded logger projection, but materialization or unevidenced recursive/rich children must not inherit that authority through an origin heuristic**.
+
+### Independent upstream evidence and intentional scope
+
+Open compatibility decision [#682](https://github.com/luceat-lux-vestra/arkst/issues/682) already records independently authored black-box observations against official Quarkdown **v2.7.0** macOS aarch64 asset SHA-256 `60afe5ab3d2dad10355eea2ec9ca477f229c6f4c5be27a4d0338b5ed00add919`. That evidence shows the current upstream String target is broader than Arkst's stable adapter: operation-generated collections can be projected into JVM-shaped `DynamicValue(... evaluationContext=...)` text, and producer/provenance affects public String projection.
+
+Arkst intentionally does **not** fabricate or persist those runtime-identity-bearing projections today. #682 remains OPEN and explicitly blocks widening the shared String contract until the supported/normalized/divergent categories are reviewed. Therefore S17 is **not an upstream-parity claim**. The frozen reference establishes a known upstream-v2.7 divergence/decision dependency, while this G0 slice only proves that the **current Arkst fail-closed provenance boundary survives the frontend migration unchanged**.
+
+This distinction is required:
+
+- do not add runtime/JVM identity text to durable IR or wire provenance;
+- do not widen generic String conversion as a side effect of G0;
+- do not infer source authority from collection shape after operation materialization;
+- do not treat an accepted direct Markdown-list logger projection as permission for nested rich/generated values;
+- leave the broader structured-String compatibility decision and future `split` work owned by #682.
+
+**Candidate classification:** `ARKST_S17_MIGRATION_PROVENANCE_BOUNDARY_CANDIDATE_UPSTREAM_V27_RUNTIME_IDENTITY_DIVERGENCE_DECISION_OPEN_CI_PENDING`. Exact-head CI and Merge Gate for the final S17 evidence HEAD are still required before this candidate is qualified. This slice does not resolve #682, S18+, generalized provenance, G0 completion, #746 merge authorization or G1 readiness.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
