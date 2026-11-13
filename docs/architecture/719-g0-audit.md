@@ -577,9 +577,9 @@ The first #43239940174 attempt hit a transient GitHub API **HTTP 503** while the
 **Classification:** `UPSTREAM_V251_V260_CALLABLE_DEFINITION_CALLER_PARAMETER_LAYERING_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. No new S10 compatibility debt was discovered in this bounded scope surface.
 
 
-## S11 extension-super — pinned official v2.5.1 / v2.6.0 reference (Arkst differential pending)
+## S11 extension-super — pinned official reference and Arkst cross-platform differential (bounded frozen)
 
-Disposable independent [PR #764](https://github.com/luceat-lux-vestra/arkst/pull/764) is an evidence-only draft probe, **NOT FOR MERGE**, at exact HEAD `7064d2c158de4889684d04b23cbc726331834001` based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. [Run #43348831761](https://github.com/luceat-lux-vestra/arkst/actions/runs/43348831761) completed **SUCCESS** with both official-version jobs. Separate probe-PR CI #43348831681 also succeeded. This does **not** prove Arkst product behavior.
+Disposable independent [PR #764](https://github.com/luceat-lux-vestra/arkst/pull/764) is **CLOSED/UNMERGED** and was evidence-only, at exact HEAD `7064d2c158de4889684d04b23cbc726331834001` based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. [Run #43348831761](https://github.com/luceat-lux-vestra/arkst/actions/runs/43348831761) completed **SUCCESS** with both official-version jobs. Separate probe-PR CI #43348831681 also succeeded. This does **not** prove Arkst product behavior.
 
 The official Linux x64 distributions were fetched with pinned archive hashes:
 
@@ -602,9 +602,24 @@ Both ZIP archives were opened, and all **16** JSONL observations (four distinct 
 3. A nested call into independently extended `echo` emits `echo-wrapper → echo-root hello`; calling `echo` again after returning emits `echo-wrapper → echo-root after`. This supports bounded restoration/selection of active extension context, not proof of internal stack representation.
 4. The tested finite recursion through `.super` reaches `done`; it does **not** establish a universal recursion limit, exact invocation count, or internal callable identity semantics.
 
-These are **upstream black-box public semantic observations only**. The HTML bytes/hashes do not establish Arkst's renderer parity, diagnostic parity, `IrCallable` identity, source provenance, or exception/rollback behavior. Existing Arkst extension tests are behavioral anchors, not an S11 normal-frontend-vs-legacy differential. G2/G3 must preserve the frozen public extension semantics while eliminating transitional executable-IR bridges.
+These are **upstream black-box public semantic observations only**. The independent official HTML bytes/hashes do not establish Arkst's renderer parity or internal `IrCallable` identity, source provenance, exception/rollback behavior, or universal recursion semantics. G2/G3 must preserve the frozen public extension semantics while eliminating transitional executable-IR bridges.
 
-**Classification:** `UPSTREAM_V251_V260_S11_EXTENSION_SUPER_PUBLIC_SEMANTICS_FROZEN_ARKST_DIFFERENTIAL_PENDING`. The next separate G0 work unit must add the bounded `g0_s11_...` public differential in #746 and qualify its exact HEAD on Ubuntu ARM64/macOS/Windows + Merge Gate. S11 is **not compatibility-complete** on reference evidence alone; #719 remains open, #746 remains unmerged, and G1 remains blocked.
+### Arkst S11 normal-vs-legacy execution proof
+
+The independently authored official S11 source bytes for all four bounded fixtures were copied into `crates/arkst-core/tests/g0_runtime_differential.rs` on #746 without changing their input syntax. The test `g0_s11_extension_super_order_owner_and_recursion_match_legacy_ir_entrypoint` calls `compile_and_assert_legacy_parity` for **each** source; that shared helper requires exact final `IrDocument` equality and ordered diagnostic signature equality between the normal compiler and the legacy AST-to-IR evaluator before S11 asserts **empty diagnostics** and the official output paragraphs in source order.
+
+| Verified input | Required Arkst visible paragraph order |
+| --- | --- |
+| `three-layer` | `middle` → `outer` → `root Ada` |
+| `override-ownership` | `middle initial` → `outer middle-owner` → `root outer-owner` |
+| `nested-super` | `invoke-wrapper` → `echo-wrapper` → `echo-root hello` → `echo-wrapper` → `echo-root after` |
+| `recursive-super` | `done` |
+
+**Execution authority:** S11 product-test implementation commit `fc6ec100e3f2149efcbb45063426750573e68226`, [exact-head CI #43430559795](https://github.com/luceat-lux-vestra/arkst/actions/runs/43430559795) **COMPLETED SUCCESS**. Required semantic test jobs `test (ubuntu-24.04-arm)`, `test (macos-latest)`, and `test (windows-latest)` each **SUCCESS**. Compatibility, pinned Reference JVM, fmt, Clippy, MSRV, WASM, docs/spelling, dependency review, license, CodeQL runtime, trusted docs-only scope, and required `Merge Gate` all **SUCCESS**. `Security Audit` was **SKIPPED**, not counted as a successful job. The product-test commit was synchronized with protected `main` at verification (`behind_by=0`, merge base `8b9d347e82001a790baf1dfcf83267c378abd5f3`). Subsequent evidence-only documentation commits require their own exact-HEAD CI; the product-test CI is not automatically transferable to a later HEAD.
+
+**Architecture disposition:** This is a bounded public-language extension/super compatibility slice and a cross-platform final-IR/diagnostic migration proof. It is not byte-for-byte HTML renderer parity with Quarkdown, a proof about internal callable identity/provenance, failure handling, or an authorization to remove the legacy evaluator. G2/G3 migration obligations remain, as do the other G0 unresolved slices/debts.
+
+**Classification:** `UPSTREAM_V251_V260_S11_EXTENSION_SUPER_PUBLIC_SEMANTICS_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. S11 is **bounded frozen**, not an assertion that G0 overall is complete. #719 stays open; #746 stays unmerged; G1 remains blocked.
 
 
 ### Compatibility disposition and remaining G0 blockers
