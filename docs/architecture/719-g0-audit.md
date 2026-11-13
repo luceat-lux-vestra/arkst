@@ -206,7 +206,7 @@ Three additional executable migration oracles were added to `crates/arkst-core/t
 
 **Execution evidence:** [CI #42952023697](https://github.com/luceat-lux-vestra/arkst/actions/runs/42952023697), exact `head_sha=802d92bae540d23b17772f36031aafbb6992f97f`, completed **SUCCESS**. The macOS, Windows and Ubuntu ARM64 `test` jobs each completed successfully, including `Test (Typst required)` (full workspace `cargo test --locked --workspace --all-targets --all-features`). Required `Merge Gate` also succeeded. These three newly added, non-ignored integration tests were included in that full-workspace test run.
 
-**Classification at the original Arkst migration-test work unit:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15. The tests originated from established Arkst regressions, with **no independent official reference available at that earlier checkpoint**. S15 remains reference-pending; S13 and S14 now have later independent evidence, recorded below. Arkst's accepted failure-atomic policy must not be silently recast as official Quarkdown parity.
+**Classification at the original Arkst migration-test work unit:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15. The tests originated from established Arkst regressions, with **no independent official reference available at that earlier checkpoint**. S13, S14 and S15 now have later independent evidence, recorded below; S15's official proof is intentionally bounded to the authored nested-body public behavior and does not establish generalized callable-precedence/provenance internals. Arkst's accepted failure-atomic policy must not be silently recast as official Quarkdown parity.
 
 **G0 remains incomplete:** this slice does not resolve remaining S01–S32 oracle rows, exhaustive dynamic producer/consumer reachability, public API / versioned wire / CLI policy, proposed ADR-0022 acceptance, or ADR-0020 / architecture reconciliation. No G1 or merge authorization follows from the green CI run.
 
@@ -264,6 +264,35 @@ All **12 JSONL observations** (3 authored sources × default/strict × 2 release
 5. **Arkst migration proof aligns with the bounded reference.** Existing `g0_s14_extended_native_raw_body_stays_lazy_and_matches_legacy` requires exact final `IrDocument` and ordered diagnostic parity between Arkst normal frontend and legacy evaluator, empty diagnostics, and paragraph output `.state {changed}\nbefore`. Its exact migration-test candidate `802d92bae540d23b17772f36031aafbb6992f97f` passed macOS/Windows/Ubuntu ARM64 plus Merge Gate in CI #42952023697. Combined with the independent official observation above, S14's **bounded public native raw-body laziness contract is compatible and frozen**.
 
 **Classification:** `UPSTREAM_V251_V260_S14_NATIVE_RAW_BODY_OPAQUE_SEMANTICS_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. This classification is limited to the three bounded fixtures and public raw-body/state behavior. It does not claim renderer byte parity, complete native-body provenance equivalence, all native builtins, G0 completion, #746 merge authorization or G1 readiness. S15 official reference remains pending.
+
+## S15 independent official Quarkdown nested source-body reference — bounded semantic parity
+
+**Scope and provenance.** Disposable [draft PR #767](https://github.com/luceat-lux-vestra/arkst/pull/767) is an evidence-only workflow `.github/workflows/probe-719-g0-s15.yml` at exact HEAD `1681a7191e3064b05909e22c2c2a932fe4260b9a`, based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. Official [run #43468848884](https://github.com/luceat-lux-vestra/arkst/actions/runs/43468848884) completed **SUCCESS** for both pinned releases; separate probe PR [CI #43468849293](https://github.com/luceat-lux-vestra/arkst/actions/runs/43468849293) and required Merge Gate also completed **SUCCESS**. Green collection alone was not used as semantic proof; both archived ZIPs were independently downloaded and all records inspected.
+
+Pinned official Linux x64 distributions and downloaded artifacts:
+
+- **v2.5.1:** distribution SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`; artifact `g0-s15-quarkdown-v2.5.1` ID `14058424137`, ZIP SHA-256 `a0a95ec49e71c7bfee3f2fcd702070e52fe90ead07bf9b6e691d9a3b37ab4796`.
+- **v2.6.0:** distribution SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`; artifact `g0-s15-quarkdown-v2.6.0` ID `14059478572`, ZIP SHA-256 `ab5cd92633369abc5b5732205ee350d1d8e96a46a5baf06c98eff4f7033511d0`.
+
+All **12 JSONL observations** (3 authored sources × default/strict × 2 releases) were reconciled against exact fixture bytes/hashes, rc/stdout/stderr, HTML count, rendered text and HTML SHA-256.
+
+| Fixture | Source SHA-256 | v2.5.1 default/strict | v2.6.0 default/strict |
+| --- | --- | --- | --- |
+| `nested-source` — byte-exact Arkst S15 source | `3d972d602d34d61846e3a419393328a4ea01bce9f3b3e0b599a6ccc2f787f0ed` | rc **0**, empty stderr, one HTML, visible document text `nested` | same semantic result |
+| `inline-source` — same source-defined `.echo` with explicit `{nested}` | `95c07db8f369fc3f5b3347bd3ba07551a4700ae1642149194e6260ecd36dd099` | rc **0**, empty stderr, one HTML, visible document text `nested` | same semantic result |
+| `text-literal` — outer `.text {nested}` control | `60e21967a3524770edce121459eec2ed2cc3bd956355e2242f174d1d2dc9d1c5` | rc **0**, empty stderr, one HTML, visible document text `nested` | same semantic result |
+
+Within **v2.5.1**, all six generated documents are byte-identical with HTML SHA-256 `7f13d0eabd119e52cbee06fc19d145595ff49430c4d8ea418198b33fca71b734`. Within **v2.6.0**, all six are byte-identical with HTML SHA-256 `554ca6534e1decfb51484f70fee83d3c250b26f3d28f3c979e409560caadbd43`. The differing release-level HTML hashes therefore reflect release output bytes/chrome, not a semantic difference among the three bounded fixtures. Successful CLI stdout also differs only in ANSI reset spelling between releases.
+
+### Interpretation and compatibility disposition
+
+1. **The exact S15 nested source shape is accepted in both pinned releases and modes.** A source-defined `.echo` called inside `.text` with its final value supplied by an indented continuation compiles successfully and yields public visible text `nested`, with no stderr.
+2. **Nested and inline source-defined calls agree publicly.** Replacing the indented continuation with explicit inline `{nested}` yields the same visible document and release-local HTML bytes. This supports the bounded public conclusion that the indented continuation supplies the value expected by this source-defined callable in this nested content position.
+3. **The literal control bounds the inference.** Because the direct `.text {nested}` control is also byte-identical within each release, these records do **not** independently identify generalized callable-precedence rules, exact AST/IR body ownership, source-span provenance, or evaluator dispatch. Those internals must not be inferred from renderer equality.
+4. **Existing project evidence is consistent but separate.** Closed issue #690 documents an independently verified official v2.7.0 nested-call-body acceptance case and the required parser/evaluator contract, including source-defined precedence as an acceptance dimension. The current S15 v2.5.1/v2.6.0 probe does not broaden itself to that generalized precedence proof; it freezes only this authored source-defined nested-body public result.
+5. **Arkst migration proof aligns with the bounded reference.** `g0_s15_source_defined_nested_body_matches_legacy` requires exact final `IrDocument` and ordered diagnostic parity between the normal frontend and legacy evaluator, no diagnostics, and public paragraph text `nested`. Its migration-test candidate `802d92bae540d23b17772f36031aafbb6992f97f` passed Ubuntu ARM64/macOS/Windows and required Merge Gate in CI #42952023697. Combined with the independent official observation above, the **bounded S15 nested source-body public semantics are compatible and frozen**.
+
+**Classification:** `UPSTREAM_V251_V260_S15_NESTED_SOURCE_BODY_PUBLIC_SEMANTICS_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. This does not claim generalized callable precedence, exact provenance/source-span equivalence, AST/IR representation, renderer byte parity across releases, all nested-body forms, G0 completion, #746 merge authorization or G1 readiness.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
