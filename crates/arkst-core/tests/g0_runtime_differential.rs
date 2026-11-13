@@ -951,3 +951,108 @@ fn g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint() {
         "caller\nnext caller"
     );
 }
+
+#[test]
+fn g0_s11_extension_super_order_owner_and_recursion_match_legacy_ir_entrypoint() {
+    // Each parser-clean source is byte-for-byte copied from the independently
+    // executed official Quarkdown v2.5.1/v2.6.0 S11 probe (#764).
+    // The oracle is the public output order; the migration invariant is exact
+    // final IrDocument plus ordered diagnostic parity between entrypoints.
+    let cases = [
+        (
+            "three-layer",
+            r#".function {greet}
+    name:
+    root .name
+
+.extend {greet}
+    name:
+    middle
+    .super
+
+.extend {greet}
+    name:
+    outer
+    .super
+
+.greet {Ada}
+"#,
+            "middle\nouter\nroot Ada",
+        ),
+        (
+            "override-ownership",
+            r#".function {greet}
+    name:
+    root .name
+
+.extend {greet}
+    name:
+    middle .name
+    .super name:{middle-owner}
+
+.extend {greet}
+    name:
+    outer .name
+    .super name:{outer-owner}
+
+.greet {initial}
+"#,
+            "middle initial\nouter middle-owner\nroot outer-owner",
+        ),
+        (
+            "nested-super",
+            r#".function {echo}
+    name:
+    echo-root .name
+
+.extend {echo}
+    name:
+    echo-wrapper
+    .super
+
+.function {invoke}
+    name:
+    .echo {.name}
+
+.extend {invoke}
+    name:
+    invoke-wrapper
+    .super
+
+.invoke {hello}
+.echo {after}
+"#,
+            "invoke-wrapper\necho-wrapper\necho-root hello\necho-wrapper\necho-root after",
+        ),
+        (
+            "recursive-super",
+            r#".function {walk}
+    remaining:
+    .if {.remaining::equals {0}}
+        done
+    .ifnot {.remaining::equals {0}}
+        .walk {.remaining::subtract {1}}
+
+.extend {walk}
+    remaining:
+    .super
+
+.walk {2}
+"#,
+            "done",
+        ),
+    ];
+
+    for (name, source, expected_output) in cases {
+        let result = compile_and_assert_legacy_parity(source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "S11 {name} unexpectedly emitted diagnostics: {result:?}"
+        );
+        assert_eq!(
+            paragraph_text(&result),
+            expected_output,
+            "S11 {name} must preserve official extension dispatch, .super owner and output order"
+        );
+    }
+}
