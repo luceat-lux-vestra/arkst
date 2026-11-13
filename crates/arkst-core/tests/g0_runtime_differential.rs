@@ -220,6 +220,22 @@ fn g0_s17_logger_collection_provenance_boundary_matches_legacy() {
 }
 
 #[test]
+fn g0_s18_source_backed_rich_table_callback_matches_legacy() {
+    let source = ".var {catalog}\n    | Signal | Code |\n    |--------|------|\n    | Aurora | **keep-2** |\n    | Boreal | skip-1 |\n\n.tablecompute column:{2} compute:{values: .values::size} table:{.catalog}\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    let [IrNode::Table { rows, .. }] = result.ir.nodes.as_slice() else {
+        panic!("expected one table: {:?}", result.ir.nodes);
+    };
+    assert_eq!(rows.len(), 3);
+    assert!(matches!(
+        rows[0].cells[1].content.as_slice(),
+        [IrInline::Strong { .. }]
+    ));
+}
+
+#[test]
 fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
     let success = ".sum {1} {2}\n";
     let success_result = compile_and_assert_legacy_parity(success);
