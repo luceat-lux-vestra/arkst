@@ -174,6 +174,44 @@ fn g0_s15_source_defined_nested_body_matches_legacy() {
 }
 
 #[test]
+fn g0_s17_logger_collection_provenance_boundary_matches_legacy() {
+    let source_backed =
+        ".var {values}\n    - alpha\n    - beta\n.debug {.values}\n";
+    let source_backed_result = compile_and_assert_legacy_parity(source_backed);
+    assert!(
+        source_backed_result.diagnostics.is_empty(),
+        "{source_backed_result:?}"
+    );
+    assert!(source_backed_result.ir.nodes.is_empty(), "{source_backed_result:?}");
+
+    let generated =
+        ".var {values}\n    - alpha\n    - beta\n.debug {.values::reversed}\n";
+    let generated_result = compile_and_assert_legacy_parity(generated);
+    assert_eq!(generated_result.diagnostics.len(), 1, "{generated_result:?}");
+    assert_eq!(generated_result.diagnostics[0].code, "E3001");
+    assert!(
+        generated_result.diagnostics[0].message.contains(".debug"),
+        "{generated_result:?}"
+    );
+    assert!(generated_result.ir.nodes.is_empty(), "{generated_result:?}");
+
+    let nested_rich =
+        ".var {values}\n    - alpha\n        - **nested-rich**\n    - beta\n.debug {.values}\n";
+    let nested_rich_result = compile_and_assert_legacy_parity(nested_rich);
+    assert_eq!(
+        nested_rich_result.diagnostics.len(),
+        1,
+        "{nested_rich_result:?}"
+    );
+    assert_eq!(nested_rich_result.diagnostics[0].code, "E3001");
+    assert!(
+        nested_rich_result.diagnostics[0].message.contains(".debug"),
+        "{nested_rich_result:?}"
+    );
+    assert!(nested_rich_result.ir.nodes.is_empty(), "{nested_rich_result:?}");
+}
+
+#[test]
 fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
     let success = ".sum {1} {2}\n";
     let success_result = compile_and_assert_legacy_parity(success);
