@@ -206,7 +206,7 @@ Three additional executable migration oracles were added to `crates/arkst-core/t
 
 **Execution evidence:** [CI #42952023697](https://github.com/luceat-lux-vestra/arkst/actions/runs/42952023697), exact `head_sha=802d92bae540d23b17772f36031aafbb6992f97f`, completed **SUCCESS**. The macOS, Windows and Ubuntu ARM64 `test` jobs each completed successfully, including `Test (Typst required)` (full workspace `cargo test --locked --workspace --all-targets --all-features`). Required `Merge Gate` also succeeded. These three newly added, non-ignored integration tests were included in that full-workspace test run.
 
-**Classification at the original Arkst migration-test work unit:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15. The tests originated from established Arkst regressions, with **no independent official reference available at that earlier checkpoint**. S14/S15 remain reference-pending; S13 now has later independent evidence, recorded below. Arkst's accepted failure-atomic policy must not be silently recast as official Quarkdown parity.
+**Classification at the original Arkst migration-test work unit:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15. The tests originated from established Arkst regressions, with **no independent official reference available at that earlier checkpoint**. S15 remains reference-pending; S13 and S14 now have later independent evidence, recorded below. Arkst's accepted failure-atomic policy must not be silently recast as official Quarkdown parity.
 
 **G0 remains incomplete:** this slice does not resolve remaining S01–S32 oracle rows, exhaustive dynamic producer/consumer reachability, public API / versioned wire / CLI policy, proposed ADR-0022 acceptance, or ADR-0020 / architecture reconciliation. No G1 or merge authorization follows from the green CI run.
 
@@ -237,6 +237,33 @@ All **12 JSONL records** (3 sources × 2 modes × 2 official versions) were inde
 6. **Separate recovery-content debt:** default-mode error-panel/source retention is related to the unresolved recoverable failure-content contract in [#752](https://github.com/luceat-lux-vestra/arkst/issues/752). #752 does **not** itself authorize changing failure-atomic semantics or a second HTML renderer. Any proposal to reconcile upstream mutation persistence with Arkst's accepted rollback policy needs explicit architecture disposition; neither behavior should be silently masked by green migration CI.
 
 **Classification:** `ARKST_S13_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_POST_FAILURE_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN`. This is a **frozen bounded upstream observation plus an open compatibility/policy reconciliation**, not S13 full parity, not G0 exit, not #746 merge authorization and not permission to begin G1. S14 and S15 official references remain pending.
+
+## S14 independent official Quarkdown native raw-body reference — bounded semantic parity
+
+**Scope and provenance.** Disposable [draft PR #766](https://github.com/luceat-lux-vestra/arkst/pull/766) is an evidence-only workflow `.github/workflows/probe-719-g0-s14.yml` at exact HEAD `7229d621876177e4f530d082c5cdbd554af55b7d`, based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. Official [run #43456000605](https://github.com/luceat-lux-vestra/arkst/actions/runs/43456000605) completed **SUCCESS** for both pinned releases; separate probe PR [CI #43456000645](https://github.com/luceat-lux-vestra/arkst/actions/runs/43456000645) and required Merge Gate also completed **SUCCESS**. A green collection workflow is not itself semantic proof; the archived records below were independently inspected.
+
+Pinned official Linux x64 distributions and downloaded artifacts:
+
+- **v2.5.1:** distribution SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`; artifact `g0-s14-quarkdown-v2.5.1` ID `14053628440`, ZIP SHA-256 `ea669e5b30c18b485cc0a7a2cb52079a97a3e39fd57273eb7647df5674bdc824`.
+- **v2.6.0:** distribution SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`; artifact `g0-s14-quarkdown-v2.6.0` ID `14053813014`, ZIP SHA-256 `0df85158a4bedbb3433eebe251df30b0fcb08bcc46627e3228e3ef8cf61283d9`.
+
+All **12 JSONL observations** (3 authored sources × default/strict × 2 releases) were reconciled against exact source bytes, process rc/stdout/stderr, generated HTML count, HTML SHA-256 and extracted visible text. For each fixture, v2.5.1 and v2.6.0 produced the same semantic result; default and strict also matched. The two releases differ only in ANSI reset spelling in successful CLI stdout, not in the observed document output.
+
+| Fixture | Source SHA-256 | Result in v2.5.1 and v2.6.0, default and strict | HTML SHA-256 |
+| --- | --- | --- | --- |
+| `extended-raw` — byte-exact Arkst S14 source | `8ab0a63fcf94452f73a5ee306ea67d9312aacac7240d22c8ec8fb5e885905c11` | rc **0**, empty stderr, one HTML; visible body contains literal `.state {changed}` followed by **`before`** | `002a8d71e37e0482836bd5fcabe2eeac76d42c36dec722e7d7f50d0c7fa5f6f6` |
+| `native-raw` — same raw body without `.extend` | `1bcfdf4106c9c6bf0b778c0e8217db1040a9ecb6d2a5e83d1f9e0f4918d7200b` | rc **0**, empty stderr, same literal `.state {changed}` then **`before`** | `002a8d71e37e0482836bd5fcabe2eeac76d42c36dec722e7d7f50d0c7fa5f6f6` |
+| `explicit-state` — executable positive control | `edd536fdb0d0ef12a170ce8126e25873d421924e3bdf105840f12c8e0a15b95d` | rc **0**, empty stderr; subsequent state is **`changed`** and the directive source is not rendered literally | `4413ef9892cdb2cff83c5919b95be812c9ffc879fa3e43a4b0776377a6ed828b` |
+
+### Interpretation and compatibility disposition
+
+1. **Native raw-body opaqueness is directly observable.** In both releases and both modes, the indented `.state {changed}` passed as the body of native `.lowercase` appears as literal output and does not mutate the later top-level state; that state remains `before`.
+2. **Extension does not change that body contract.** The extended-native source and the direct-native control produce identical HTML bytes and visible output. This supports the bounded public conclusion that the `.extend {lowercase} / .super` wrapper does not cause the native raw body to be reparsed as executable Quarkdown.
+3. **The positive control distinguishes opaqueness from a broken state primitive.** Executing `.state {changed}` directly changes the later state to `changed` in all four official version/mode combinations.
+4. **Do not overclaim internal representation.** The official HTML does not prove Arkst's parser node type, source-span storage, raw byte ownership, internal evaluator dispatch or renderer byte parity. It supports only the public semantic result: this native body remains opaque/literal rather than executing the apparent directive.
+5. **Arkst migration proof aligns with the bounded reference.** Existing `g0_s14_extended_native_raw_body_stays_lazy_and_matches_legacy` requires exact final `IrDocument` and ordered diagnostic parity between Arkst normal frontend and legacy evaluator, empty diagnostics, and paragraph output `.state {changed}\nbefore`. Its exact migration-test candidate `802d92bae540d23b17772f36031aafbb6992f97f` passed macOS/Windows/Ubuntu ARM64 plus Merge Gate in CI #42952023697. Combined with the independent official observation above, S14's **bounded public native raw-body laziness contract is compatible and frozen**.
+
+**Classification:** `UPSTREAM_V251_V260_S14_NATIVE_RAW_BODY_OPAQUE_SEMANTICS_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. This classification is limited to the three bounded fixtures and public raw-body/state behavior. It does not claim renderer byte parity, complete native-body provenance equivalence, all native builtins, G0 completion, #746 merge authorization or G1 readiness. S15 official reference remains pending.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
