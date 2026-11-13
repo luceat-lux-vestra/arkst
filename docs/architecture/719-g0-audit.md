@@ -206,9 +206,37 @@ Three additional executable migration oracles were added to `crates/arkst-core/t
 
 **Execution evidence:** [CI #42952023697](https://github.com/luceat-lux-vestra/arkst/actions/runs/42952023697), exact `head_sha=802d92bae540d23b17772f36031aafbb6992f97f`, completed **SUCCESS**. The macOS, Windows and Ubuntu ARM64 `test` jobs each completed successfully, including `Test (Typst required)` (full workspace `cargo test --locked --workspace --all-targets --all-features`). Required `Merge Gate` also succeeded. These three newly added, non-ignored integration tests were included in that full-workspace test run.
 
-**Classification:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15 only. These test inputs are adapted from already-established Arkst regression cases; there is **no independent official Quarkdown reference observation** for these three scenarios, and no new upstream compatibility claim. S13's accepted Arkst failure-atomic policy remains distinct from the upstream divergence already documented for S12.
+**Classification at the original Arkst migration-test work unit:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15. The tests originated from established Arkst regressions, with **no independent official reference available at that earlier checkpoint**. S14/S15 remain reference-pending; S13 now has later independent evidence, recorded below. Arkst's accepted failure-atomic policy must not be silently recast as official Quarkdown parity.
 
 **G0 remains incomplete:** this slice does not resolve remaining S01–S32 oracle rows, exhaustive dynamic producer/consumer reachability, public API / versioned wire / CLI policy, proposed ADR-0022 acceptance, or ADR-0020 / architecture reconciliation. No G1 or merge authorization follows from the green CI run.
+
+## S13 independent official Quarkdown nested-failure reference — rollback divergence
+
+**Scope and provenance.** Disposable [draft PR #765](https://github.com/luceat-lux-vestra/arkst/pull/765) is an evidence-only workflow `.github/workflows/probe-719-g0-s13.yml` at exact HEAD `7c4117b5a55e82950f002ba0c036db5f4f5068b9` based on `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. Official [run #43436415448](https://github.com/luceat-lux-vestra/arkst/actions/runs/43436415448) completed **SUCCESS** in both versions, and separate PR CI #43436415132 completed **SUCCESS**. The workflow's green result means **collection completed**, not that Arkst and Quarkdown agree on failure recovery.
+
+Pinned official Linux x64 distributions and independently inspected ZIP artifacts:
+
+- **v2.5.1:** distribution SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`; artifact `g0-s13-quarkdown-v2.5.1` ID `14043523099`, downloaded ZIP SHA-256 `443783a27b0dd7c802fdd4c86080be8c1d82b8c52b32b7cb03ad96659fda7d60`.
+- **v2.6.0:** distribution SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`; artifact `g0-s13-quarkdown-v2.6.0` ID `14042159098`, downloaded ZIP SHA-256 `96a89b207beca83e1cce053f3a9c303fbd979c38515b1d02c01281720629c236`.
+
+All **12 JSONL records** (3 sources × 2 modes × 2 official versions) were independently inspected against the ZIP's exact source bytes, stdout/stderr bytes, HTML file counts, HTML SHA-256, and extracted visible HTML text. Each version's results agree for the same fixture/mode. Strict-mode stack-trace implementation lines differ across versions, but the error category and exit behavior are the same.
+
+| Fixture | Input SHA-256 | Default result, both versions | Strict result, both versions | HTML SHA-256 where generated |
+| --- | --- | --- | --- | --- |
+| `nested-failure` (same public source as Arkst S13 regression) | `0ddcfe9e3c631d30d5c7ac0bc820530c6ee0dd728839d3ca978da9cdaa1c0155` | rc **0**, one HTML, stderr `sum` numeric coercion error, rendered error box retains failing `.sum {true} {2}` source, **later state `changed`**; no `base world` paragraph | rc **66**, `sum` exception on stderr, zero HTML | `562a29f15bcaa1aac46904178ca320c8d6f1142c66b69415dbf0df1068584789` (default) |
+| `nested-success` (failure removed) | `23fb108d639b1e23c31aaa2d9ad69eeafb513b693d468058ead8ce040e68b4a6` | rc **0**, no stderr, `base world` then `changed` | rc **0**, no stderr, same output | `16e4db039159cd22c6ceb07c22162328287e4b1f56f100c016ad01b3efee2ce3` (both modes) |
+| `direct-failure` (no nested `.super`) | `aaf5cdb3bef4ea21ce52a37e05d8704222343429e020c6c5aafc7a0c4fdf9f37` | rc **0**, one HTML, same error box and **later state `changed`**; HTML byte-identical to `nested-failure` default | rc **66**, `sum` exception on stderr, zero HTML | `562a29f15bcaa1aac46904178ca320c8d6f1142c66b69415dbf0df1068584789` (default) |
+
+### Interpretation and compatibility disposition
+
+1. **Official default-mode public behavior:** the failing `sum` is reported in stderr and represented by a source-backed error panel in the output; compilation returns process rc 0 and subsequent top-level `.state` renders `changed`, **not `before`**, after either nested or direct failed invocation. This is a directly observed retained mutation, **not** evidence that a nested transaction journal commits or rolls back in any particular internal way.
+2. **Success control:** the nested `.greet` → extended `.super` path produces `base world`, then the persisted state `changed`. This confirms the mutation is effective on a successful path.
+3. **Direct-failure control:** the identical default-mode post-failure state and HTML error output without nested `.super` establishes that the observed persistence cannot be attributed exclusively to extension dispatch. Do not conflate call-stack ownership with global failure recovery policy.
+4. **Strict-mode boundary:** the official `sum` exception exits with rc 66 and creates no HTML; the post-failure state is **not observable** in strict mode. Do not infer rollback/persistence from absent output or automatically require identical Arkst CLI exit codes.
+5. **Arkst policy difference:** the existing `g0_s13_nested_super_success_rolls_back_after_outer_failure` normal-vs-legacy final-`IrDocument` differential, cross-platform proven at CI #42952023697 / `802d92bae540d23b17772f36031aafbb6992f97f`, requires one numeric-argument diagnostic and **`before`** after outer failure. This preserves Arkst's accepted invocation-scoped failure-atomic invariant, which differs from both pinned official **default-mode** public outputs in this bounded scenario. The independent upstream reference is frozen; **S13 end-to-end upstream compatibility is not established**.
+6. **Separate recovery-content debt:** default-mode error-panel/source retention is related to the unresolved recoverable failure-content contract in [#752](https://github.com/luceat-lux-vestra/arkst/issues/752). #752 does **not** itself authorize changing failure-atomic semantics or a second HTML renderer. Any proposal to reconcile upstream mutation persistence with Arkst's accepted rollback policy needs explicit architecture disposition; neither behavior should be silently masked by green migration CI.
+
+**Classification:** `ARKST_S13_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_POST_FAILURE_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN`. This is a **frozen bounded upstream observation plus an open compatibility/policy reconciliation**, not S13 full parity, not G0 exit, not #746 merge authorization and not permission to begin G1. S14 and S15 official references remain pending.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
