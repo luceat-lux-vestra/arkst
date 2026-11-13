@@ -577,6 +577,36 @@ The first #43239940174 attempt hit a transient GitHub API **HTTP 503** while the
 **Classification:** `UPSTREAM_V251_V260_CALLABLE_DEFINITION_CALLER_PARAMETER_LAYERING_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. No new S10 compatibility debt was discovered in this bounded scope surface.
 
 
+## S11 extension-super — pinned official v2.5.1 / v2.6.0 reference (Arkst differential pending)
+
+Disposable independent [PR #764](https://github.com/luceat-lux-vestra/arkst/pull/764) is an evidence-only draft probe, **NOT FOR MERGE**, at exact HEAD `7064d2c158de4889684d04b23cbc726331834001` based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. [Run #43348831761](https://github.com/luceat-lux-vestra/arkst/actions/runs/43348831761) completed **SUCCESS** with both official-version jobs. Separate probe-PR CI #43348831681 also succeeded. This does **not** prove Arkst product behavior.
+
+The official Linux x64 distributions were fetched with pinned archive hashes:
+
+- **Quarkdown v2.5.1:** distribution SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`; retained `g0-s11-quarkdown-v2.5.1` artifact ID `14002787390`, independently downloaded artifact ZIP SHA-256 `ebf6d996b83ef1f25d2f5d3ef3cb8a0c2e28d8917b2c5f27c78422ed2c7782ec`.
+- **Quarkdown v2.6.0 verified baseline:** distribution SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`; retained `g0-s11-quarkdown-v2.6.0` artifact ID `14002503548`, independently downloaded ZIP SHA-256 `039a1ea2a5ffdf6487f52cecdd4546e3b95bcd1ac1d188a284aab75874fe776c`.
+
+Both ZIP archives were opened, and all **16** JSONL observations (four distinct authored fixtures × two modes × two versions) were reconciled against the archived input bytes and generated HTML bytes. Every run exited **0**, produced exactly **one HTML file**, and had **empty stderr**. Both releases and default/strict modes produced identical per-fixture visible paragraphs and identical per-fixture HTML SHA-256 values.
+
+| Independent fixture | Verified rendered paragraph text in source/output order | HTML SHA-256 (same across releases and modes) |
+| --- | --- | --- |
+| `three-layer` | `middle` → `outer` → `root Ada` | `0ab6819e714f4f7ebc9b7c3507b1b1772a604965ee0531c876f6c0c4f19511aa` |
+| `override-ownership` | `middle initial` → `outer middle-owner` → `root outer-owner` | `4955b8d2ed393ada86215b4dcba9d6e3ec16818646b0ac5492ef18d9a714a134` |
+| `nested-super` | First paragraph: `invoke-wrapper` → `echo-wrapper` → `echo-root hello`; second independent call: `echo-wrapper` → `echo-root after` | `cc210826db9ba06c9dbc929260e3bf87d6788ed804dc72df098f29f713517051` |
+| `recursive-super` | `done` for finite input `remaining=2` | `d79d721707b0e695cb0ded072da88e9e487729f54c6122f38aad3a243162de29` |
+
+### Bounded public-language conclusions
+
+1. In this three-layer declaration, execution is **first-authored extension (`middle`) → next-authored extension (`outer`) → original callable (`root`)**, not an assumed latest-authored-first output order.
+2. The first layer's `.super name:{middle-owner}` supplies the argument visible to the next `outer` layer; the next layer's `.super name:{outer-owner}` supplies the argument visible to `root`. Local output before each `.super` observes its own invocation parameter. No blanket shared-parameter mutation is inferred.
+3. A nested call into independently extended `echo` emits `echo-wrapper → echo-root hello`; calling `echo` again after returning emits `echo-wrapper → echo-root after`. This supports bounded restoration/selection of active extension context, not proof of internal stack representation.
+4. The tested finite recursion through `.super` reaches `done`; it does **not** establish a universal recursion limit, exact invocation count, or internal callable identity semantics.
+
+These are **upstream black-box public semantic observations only**. The HTML bytes/hashes do not establish Arkst's renderer parity, diagnostic parity, `IrCallable` identity, source provenance, or exception/rollback behavior. Existing Arkst extension tests are behavioral anchors, not an S11 normal-frontend-vs-legacy differential. G2/G3 must preserve the frozen public extension semantics while eliminating transitional executable-IR bridges.
+
+**Classification:** `UPSTREAM_V251_V260_S11_EXTENSION_SUPER_PUBLIC_SEMANTICS_FROZEN_ARKST_DIFFERENTIAL_PENDING`. The next separate G0 work unit must add the bounded `g0_s11_...` public differential in #746 and qualify its exact HEAD on Ubuntu ARM64/macOS/Windows + Merge Gate. S11 is **not compatibility-complete** on reference evidence alone; #719 remains open, #746 remains unmerged, and G1 remains blocked.
+
+
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
