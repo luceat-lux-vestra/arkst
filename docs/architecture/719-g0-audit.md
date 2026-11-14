@@ -322,34 +322,42 @@ This distinction is required:
 
 **Candidate classification:** `ARKST_S17_MIGRATION_PROVENANCE_BOUNDARY_CANDIDATE_UPSTREAM_V27_RUNTIME_IDENTITY_DIVERGENCE_DECISION_OPEN_CI_PENDING`. Exact-head CI and Merge Gate for the final S17 evidence HEAD are still required before this candidate is qualified. This slice does not resolve #682, S18+, generalized provenance, G0 completion, #746 merge authorization or G1 readiness.
 
-## S18 source-backed rich table callback migration boundary — partial candidate only
+## S18 table-input boundary — partial migration qualified, provenance foundation proven, consumer pending
 
-**Why this slice is partial.** The S18 oracle row originally groups table input provenance, rich cells, generated values and callback behavior. Its reference owner [#718](https://github.com/luceat-lux-vestra/arkst/issues/718) now tracks the current Quarkdown v2.7 `.table subTables:{Iterable<Any>}` callable, whose bounded official evidence distinguishes source-backed Markdown subtables from already-materialized generated Table values. The existing Arkst regression named by the oracle, `quarkdown_table_compute_712`, exercises an adjacent but different implemented table-input/callback path. Therefore this work unit does **not** claim full S18 closure or `.table` upstream parity.
+**Implemented migration proof.** `g0_s18_source_backed_rich_table_callback_matches_legacy` preserves the already-implemented source-backed rich-table/callback path across normal frontend ↔ legacy evaluator. The final evidence HEAD `56abda214fbac9a7eda56f38e49aed0491e63f16` passed exact-head CI #43528790105 with fmt, Ubuntu ARM64/macOS/Windows and required Merge Gate. That proof remains intentionally bounded to:
 
-**Bounded migration proof added.** `g0_s18_source_backed_rich_table_callback_matches_legacy` at candidate `9b1a7f8343d15acfdd47d4a710207bc919ae2457` reuses the existing `tablecompute_named_variable_input_preserves_rich_cells_and_collects_all_rows_once` source shape:
+- Markdown table stored in `.var {catalog}`;
+- named `table:{.catalog}` input to `.tablecompute`;
+- nested callback `values: .values::size`;
+- exact final `IrDocument` + ordered diagnostic parity;
+- three final rows and preserved `IrInline::Strong` rich-cell content.
 
-- a Markdown table is first stored in `.var {catalog}`;
-- a rich strong-marked cell `**keep-2**` must survive;
-- `.tablecompute` consumes that source-backed table via named `table:{.catalog}`;
-- a nested callback `values: .values::size` produces the appended aggregate row;
-- normal public frontend and legacy pre-lowered evaluator must produce **exactly equal final `IrDocument` and ordered diagnostic signatures**;
-- the result must contain one Table, three rows, and retain `IrInline::Strong` in the original rich cell.
+**The #718 provenance discriminator itself is already proven.** Merged [PR #721](https://github.com/luceat-lux-vestra/arkst/pull/721), exact HEAD `46410de34144ce5b592e9b29807cab2923310c01`, added evaluator regression `repeat_runtime_provenance_distinguishes_source_tables_from_generated_tables`. Its proof exercises the exact semantic distinction required by #718 before output shape erases provenance:
 
-This is the smallest already-implemented S18-adjacent boundary that simultaneously exercises source-backed table transport, rich-cell IR preservation and callback evaluation without inventing the not-yet-implemented v2.7 `.table` production path.
+- direct authored Markdown-table elements produced through native `.repeat` retain per-child `ValueProvenance::SourceBackedMarkdown`;
+- the same runtime iterable/coercion boundary preserves that provenance;
+- a `.tablebyrows` call used as the repeat body produces Table-shaped semantic content whose runtime children remain `Materialized`;
+- classification is made at the authored callable-statement boundary, not from Table node shape, source spans, renderer bytes or producer-name heuristics.
 
-### #718 boundary retained
+PR #721 is merged. Its CI #42086226953 completed **SUCCESS**, including Ubuntu ARM64/macOS/Windows and required Merge Gate; Reference JVM run #42086226637 also completed **SUCCESS**.
 
-#718's independent official v2.7 evidence remains authoritative for the future `.table subTables` implementation: documented source-backed Markdown subtables are accepted, while an already materialized generated Table value such as a `.tablebyrows` result is **not** interchangeable with an independent Markdown table source. The merged RuntimeValue/provenance foundation can represent that distinction, but the #718 production callable has not been implemented by this G0 evidence slice.
+### What remains unresolved
 
-Accordingly:
+The remaining S18 gap is **not** an inability to represent or prove source-backed-vs-materialized table provenance. That foundation exists and is qualified. The remaining gap is the actual current-v2.7 consumer owned by [#718](https://github.com/luceat-lux-vestra/arkst/issues/718):
 
-- do not infer #718 source-backed-vs-materialized `.table` parity from this `.tablecompute` test;
-- do not add a `.table`-local parser or source reconstruction heuristic;
-- do not collapse table provenance to node shape or source-span heuristics;
-- do not claim CSV/resource variants, generalized table conversion, renderer parity or G1 readiness;
-- keep the generated/materialized rejection side of S18 explicitly pending until the owning callable/path is executable in the migration evidence.
+`.table subTables:{Iterable<Any>}`
 
-**Candidate classification:** `ARKST_S18_SOURCE_BACKED_RICH_TABLE_CALLBACK_MIGRATION_CANDIDATE_TABLE_PROVENANCE_COMPLETION_PENDING_CI_PENDING`. Exact-head CI/Merge Gate and the remaining #718 materialized-table distinction are both required before S18 can be considered complete.
+Repository read-back found no executable native `.table subTables` path on current main; code search finds the callable only in compatibility/audit metadata, and the compatibility gap inventory still lists `.table` as unsupported/open while bounded `.tablebyrows`, `.tablecolumn(s)`, `.tablesort`, `.tablefilter` and `.tablecompute` exist separately.
+
+Therefore S18 must not be marked complete yet. What is established is:
+
+1. the implemented adjacent source-backed rich-table/callback migration path is exact-head qualified;
+2. the evaluator runtime provenance discriminator required by #718 is independently merged and exact-head qualified;
+3. the missing piece is wiring that already-proven discriminator into the actual `.table subTables` consumer and then testing its accepted source-backed inputs versus rejected materialized generated Tables.
+
+No new architecture carrier, local parser, source reconstruction or shape heuristic is justified by this evidence. G0 must not implement #718 production behavior as a side effect.
+
+**Classification:** `ARKST_S18_PARTIAL_MIGRATION_PROVENANCE_FOUNDATION_PROVEN_TABLE_CONSUMER_PENDING_CI_PENDING`. The semantic/provenance evidence is established, but this updated evidence-document HEAD still requires its own exact-head CI, and full S18 closure remains blocked on the #718 production consumer rather than on provenance architecture.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
