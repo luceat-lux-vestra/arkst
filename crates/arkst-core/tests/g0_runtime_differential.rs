@@ -304,6 +304,40 @@ fn g0_s20_nested_include_resource_context_matches_legacy() {
 }
 
 #[test]
+fn g0_s20_include_scope_and_share_visibility_match_legacy() {
+    let scope_entry =
+        ".var {value} {main}\n.include {part.qd} sandbox:{scope}\n.value\n";
+    let scope_project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", scope_entry)
+        .expect("valid entry source")
+        .add_source("part.qd", ".var {value} {part}\n.value\n")
+        .expect("valid included source")
+        .build()
+        .expect("valid virtual project");
+    let scope_result = compile_project_and_assert_legacy_parity(&scope_project, scope_entry);
+
+    assert!(scope_result.diagnostics.is_empty(), "{scope_result:?}");
+    assert_eq!(paragraph_text(&scope_result), "part\nmain");
+
+    let share_entry = ".var {value} {main}\n.include {part.qd}\n.value\n";
+    let share_project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", share_entry)
+        .expect("valid entry source")
+        .add_source("part.qd", ".var {value} {part}\n")
+        .expect("valid included source")
+        .build()
+        .expect("valid virtual project");
+    let share_result = compile_project_and_assert_legacy_parity(&share_project, share_entry);
+
+    assert!(share_result.diagnostics.is_empty(), "{share_result:?}");
+    assert_eq!(paragraph_text(&share_result), "part");
+}
+
+#[test]
 fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
     let success = ".sum {1} {2}\n";
     let success_result = compile_and_assert_legacy_parity(success);
