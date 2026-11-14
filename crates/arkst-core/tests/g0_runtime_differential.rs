@@ -88,6 +88,29 @@ fn compile_and_assert_legacy_parity(source: &str) -> CompileResult {
     frontend
 }
 
+fn compile_project_and_assert_legacy_parity(
+    project: &arkst_core::VirtualProject,
+    entry_source: &str,
+) -> CompileResult {
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let frontend = compile(project, &CompileOptions::default());
+    let legacy = legacy_compile(project, entry_source, source_id);
+
+    assert_eq!(
+        frontend.ir, legacy.ir,
+        "normal direct-frontend project result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy.diagnostics),
+        "normal direct-frontend project diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+    frontend
+}
+
 fn paragraph_text(result: &CompileResult) -> String {
     result
         .ir
@@ -254,6 +277,30 @@ fn g0_s19_nested_doclang_conversion_rollback_matches_legacy() {
             .map(|locale| locale.tag.as_str()),
         Some("en")
     );
+}
+
+#[test]
+fn g0_s20_nested_include_resource_context_matches_legacy() {
+    let entry = ".include {partials/child.qd}\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("valid entry")
+        .add_source("docs/main.qd", entry)
+        .expect("valid entry source")
+        .add_source(
+            "docs/partials/child.qd",
+            ".function {render}\n    text:\n    .ifpresent {.text} {@lambda value: .uppercase {.value}}\n\n.render {.read {data/value.txt}}\n",
+        )
+        .expect("valid child source")
+        .add_asset("docs/partials/data/value.txt", b"nested".to_vec())
+        .expect("valid nested resource")
+        .build()
+        .expect("valid virtual project");
+
+    let result = compile_project_and_assert_legacy_parity(&project, entry);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "NESTED");
 }
 
 #[test]
