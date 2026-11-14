@@ -597,75 +597,56 @@ defining exact Rust structs.
 Arkst IR is a backend-neutral document representation. Its purpose is to
 separate Arkst language semantics from any concrete output backend.
 
-The pipeline has one IR model in the current target architecture:
+The **accepted target** is governed by [ADR-0022](adr/0022-runtime-final-document-ir.md).
+The old single mixed executable/final IR is a **transitional implementation**,
+not the target architecture:
 
-```
-Markdown frontend AST
-        ↓
-arkst-engine
-        ↓
-initial IrDocument
-        ↓
-semantic / evaluation / normalization
-        ↓
-normalized IrDocument
-        ↓
-backend lowering
-```
-
-An `IrDocument` may therefore be at an earlier or later stage of semantic
-normalization; IR values are not inherently all already evaluated. In
-particular, a resolved call may materialize a semantic value while an
-unsupported call may remain as an explicitly unresolved structural call. The
-target architecture does not introduce HIR/MIR or separate evaluated and
-unevaluated IR crates. The component/value and unresolved-call boundary is
-defined by [ADR-0020](adr/0020-programmable-document-semantic-model.md).
-
-`arkst-ir` owns the backend-neutral IR model, including the architectural
-equivalents of `IrDocument`, `IrMetadata`, `IrNode`, `IrInline`, `IrListItem`,
-and `IrValue`. Illustrative Arkst semantic/document concepts represented by
-the IR include:
-
-- headings and paragraphs;
-- ordered and unordered lists;
-- code blocks and thematic breaks;
-- math and links;
-- inline formatting;
-- semantic function/component calls;
-- resolved values; and
-- document metadata.
-
-This list is illustrative, not a requirement to add missing variants. The
-target IR contains Arkst semantics, not backend-specific output fragments:
-
-```
-IrDocument
-├── IrMetadata
-└── semantic content
-    ├── IrNode
-    ├── IrInline
-    ├── IrListItem
-    └── IrValue
+```text
+VirtualProject + SourceStore -> frontend AST (source-backed)
+  -> arkst-engine EvalSession / context frames / binding store
+       -> evaluator-owned ArgumentCandidate (unevaluated input)
+       -> RuntimeValue (typed values, per-child provenance/origin)
+       -> direct AST evaluation of calls, controls, bodies and nested content
+       -> lazy binding, explicit host/resource access, atomic journal
+  -> immutable evaluation-complete Document IR + DocumentConfig
+       -> pure Typst lowering + source maps / host adapters
+       -> separately versioned final-document wire v1 / inspect
 ```
 
-A semantic function/component result is constructed by the evaluator as a
-backend-neutral value and is materialized into a document node only at the
-document output boundary. `IrValue::Content` remains structured content, while
-an unresolved `FunctionCall` remains structural unresolved syntax. A future
-component value may contain semantic layout properties and children, but never
-Typst names or Typst source. The Typst backend may lower the materialized
-semantic node into an appropriate Typst construct; this does not make the IR
-Typst-specific.
+`arkst-engine` exclusively owns executable calls, callables/captures,
+mutable scopes, evaluation context, origin, conversions and transaction state.
+`arkst-ir` owns only completed backend-neutral document semantics and
+immutable configuration: headings, paragraphs, lists, tables, components,
+inline formatting, semantic document values and source locations.
+Executable `FunctionCall`, `ChainedFunctionCall`, `FunctionDeclaration`,
+inline `DirectiveCall`/chains, `Callable`, `InlineBody` and unevaluated
+bodies **must not** inhabit final document types or their wire.
+Unsupported/unresolved source syntax remains a source-backed diagnostic,
+not executable output or renderer replay. The backend cannot accept
+unevaluated AST/evaluator state through a final-only type.
 
-Call nodes retain their source-ordered argument shape in lightweight
-`IrCallArgument` references alongside the legacy positional and named value
-projections used by existing
-adapters. `arkst-engine` owns the shared invocation binder that consumes
-that ordered shape for native builtins, source-defined functions, and callback
-invocations. It assigns slots and applies required/optional/default/body
-policy before target-driven conversion; transient evaluator data such as
-`ValueOrigin` is not stored in the IR. Legacy projections are an adapter for
-older manually constructed IR, not a source-order reconstruction mechanism.
+**Greenfield clean-break policy:** this in-development Arkst version is
+not required to decode old unversioned IR JSON, retain old Rust executable-IR
+facades or keep the previous `inspect --emit ir` output format.
+The new v1 wire has a required schema version and strict structural,
+source/span and recursion/resource validation; historical unversioned
+payloads are rejected, not imported or converted. Remove obsolete public
+`ast_to_ir` and `evaluator::evaluate(IrDocument)` once replaced; no
+deprecated/dual-format compatibility layer is required.
+Actual published releases still follow ADR-0010 bookkeeping.
+
+**Non-negotiable compatibility:** this permission concerns earlier *Arkst*
+interfaces only. Public Quarkdown language semantics, explicit approved
+divergences, clean-room oracle proof, diagnostics, rollback, resource
+capabilities, source-map parity and full G0–G8 verification are preserved.
+High implementation cost does not justify shrinking the redesign.
+
+**Physical state, not target:** normal compilation still uses executable
+`ast_to_ir::lower_top_level_block`, chain tails and nested callable bodies
+on certain paths; `RuntimeValue::SemanticLeaf(IrValue)` is transitional;
+`arkst-typst` still receives mixed `IrDocument` and CLI still emits
+unversioned JSON. #719 owns the exhaustive migration; no claim of completed
+final-only enforcement is made until G8 passes.
 
 IR nodes preserve their original `SourceSpan`, but generated-output source-map
 entries are not stored in `IrDocument` or `IrNode`:
@@ -688,8 +669,8 @@ Arkst semantics and `arkst-typst` translates those semantics into Typst.
 
 ### Migration Note
 
-The physically extracted `arkst-ir` contains only backend-neutral semantic
-nodes. R9 removed the transitional `IrNode::RawTypst` escape hatch and its
+The physically extracted `arkst-ir` has backend-neutral semantic nodes but
+still contains transitional executable variants pending ADR-0022 migration. R9 removed the transitional `IrNode::RawTypst` escape hatch and its
 Typst lowering branch. The repository inventory found no supported persisted
 serialized artifact containing that variant, so removal required no
 compatibility decoder, migration layer, or IR versioning change. PR #46 did
