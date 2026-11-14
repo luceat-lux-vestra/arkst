@@ -359,9 +359,11 @@ No new architecture carrier, local parser, source reconstruction or shape heuris
 
 **Classification:** `ARKST_S18_PARTIAL_MIGRATION_PROVENANCE_FOUNDATION_PROVEN_TABLE_CONSUMER_PENDING_CI_PENDING`. The semantic/provenance evidence is established, but this updated evidence-document HEAD still requires its own exact-head CI, and full S18 closure remains blocked on the #718 production consumer rather than on provenance architecture.
 
-## S19 nested document-state conversion rollback — Arkst migration candidate, upstream failure-effect reference pending
+## S19 nested document-state conversion rollback — Arkst migration qualified, official default-mode rollback divergence frozen
 
-**Bounded migration target.** S19 freezes the existing #167/#152 document-state atomicity invariant while final-document IR replaces the legacy execution bridge. The new `g0_s19_nested_doclang_conversion_rollback_matches_legacy` test at candidate `1cffc1b17209915c93070e947a4df0b7d42d0ef4` reuses the established `quarkdown_value_model_audit::audit_nested_candidate_conversion_is_before_state_commit_and_rolls_back` fixture byte-for-byte:
+**Arkst migration invariant.** `g0_s19_nested_doclang_conversion_rollback_matches_legacy` preserves the existing #167/#152 document-state atomicity contract while final-document IR replaces the legacy execution bridge. Exact Arkst evidence HEAD `d7354bc7a1d1b541414ed65d79fe6b4b4773efec` passed CI #43541989460 with fmt, Ubuntu ARM64/macOS/Windows, Reference JVM and required Merge Gate.
+
+The exact fixture is:
 
 ```quarkdown
 .doclang {en}
@@ -369,31 +371,51 @@ No new architecture carrier, local parser, source reconstruction or shape heuris
 .doclang
 ```
 
-The fixture makes the transaction boundary observable:
+Arkst requires one `E3001`, rollback of the nested temporary `it` write, retention of the previously committed `en`, visible getter text `English`, and final `IrDocument.metadata.document_state.locale.tag == "en"`. Normal public frontend and legacy pre-lowered evaluator must produce exactly equal final `IrDocument` and ordered diagnostic signatures.
 
-1. the first `.doclang {en}` succeeds and commits locale `en`;
-2. evaluation of the second setter's nested candidate executes `.doclang {it}`;
-3. the enclosing candidate ultimately cannot convert to the setter's locale target and produces one `E3001`;
-4. the failed invocation must roll back the nested `it` mutation but retain the prior successful `en` commit;
-5. the later zero-argument getter must render `English`, and final `IrDocument.metadata.document_state.locale.tag` must remain `en`.
+### Independent official Quarkdown exact-fixture reference
 
-The G0 differential requires **exact final `IrDocument` equality and ordered diagnostic-signature equality** between normal public frontend compilation and the legacy pre-lowered evaluator before asserting the visible getter/state result. This therefore exercises both execution-time savepoint rollback and the final immutable document-state snapshot.
+Disposable clean-room draft PR #768 is **CLOSED/UNMERGED** after evidence preservation. Its exact probe HEAD is `54309b19124762b51551d368d908ec810d889752`, based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`, with exactly one workflow file. Official collection run #43543462450 completed **SUCCESS** for both pinned releases; separate PR CI #43543462409 completed **SUCCESS**.
 
-### Compatibility boundary
+Pinned official Linux x64 distributions:
 
-This is currently an **Arkst migration invariant**, not an upstream-output equality claim. #167 explicitly owns conversion diagnostics and commit atomicity, and #152 owns the document-state surface. Existing `VALUE_MODEL_AUDIT.md` records validate-before-commit and rollback as the accepted Arkst invariant for audited document-state consumers.
+- **v2.5.1:** archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`
+- **v2.6.0:** archive SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`
 
-However, the exact S19 fixture does not yet have an independently archived official Quarkdown black-box observation. Existing S12/S13 official probes already show that pinned Quarkdown default mode can preserve mutations performed before a later failure in other callable/failure shapes. Those observations prevent extrapolating a universal upstream rollback rule from Arkst's transaction design, but they also do **not** prove the exact `.doclang` nested-candidate fixture diverges.
+The exact fixture bytes were identical in both artifacts and match the Arkst S19 source byte-for-byte. Fixture SHA-256:
 
-Accordingly:
+`f3831dc17d272145754fbf148d7968b8a2517dee54b700cce272f84c0573d503`
 
-- preserve Arkst's accepted #167 invocation-savepoint behavior during G0;
-- do not weaken document-state atomicity merely to resemble S12/S13 upstream failure effects;
-- do not classify S19 as upstream-compatible or upstream-divergent until the exact fixture is independently observed;
-- keep diagnostic source provenance and final immutable document-state snapshot in the acceptance predicate;
-- do not broaden this proof to every document-state field or every nested conversion target.
+Retained/downloaded artifact ZIPs were independently hashed and exactly match GitHub's recorded artifact digests:
 
-**Candidate classification:** `ARKST_S19_DOCUMENT_STATE_ATOMICITY_MIGRATION_CANDIDATE_UPSTREAM_POST_FAILURE_STATE_REFERENCE_PENDING_CI_PENDING`. Exact-head CI/Merge Gate for the final S19 evidence HEAD and an independent exact-fixture upstream reference remain separate requirements.
+- **v2.5.1:** artifact ID `14091949667`, ZIP SHA-256 `e6626b474748a14bc7f1afecdca61013b5ec8db6242c6c62b3fddf3c35d06525`
+- **v2.6.0:** artifact ID `14092811866`, ZIP SHA-256 `475cf7ec8fb2dbc321fe4b248d978ecb16b91e40f05e02b8f8fab4350faf7fd5`
+
+Four observations were inspected independently:
+
+| Release | Mode | rc | HTML | Bounded post-failure observation |
+| --- | --- | ---: | --- | --- |
+| v2.5.1 | default | 0 | 1 file, SHA-256 `d3deeb94dd6d43954fce22b78dfc4ac9fd8fe434866d106af73b89ee7e788634` | Error panel is emitted and the later zero-argument `.doclang` getter renders **`italiano`**. The nested `.doclang {it}` mutation therefore remains observable after the enclosing conversion failure. |
+| v2.5.1 | strict | 66 | none | Strict compilation aborts at the failing outer `.doclang`; no post-failure getter output is published, so rollback/persistence cannot be inferred from strict output. |
+| v2.6.0 | default | 0 | 1 file, SHA-256 `016689f78c8358dd96488a443a93b7d18f00be19dba170a9f4982ea6d00963a8` | Error panel is emitted and the later getter renders **`Italian`**. The same nested `it` mutation remains observable after the enclosing conversion failure. |
+| v2.6.0 | strict | 66 | none | Strict compilation aborts at the failing outer `.doclang`; no post-failure getter output is published. |
+
+Both default-mode runs report the same failing outer conversion shape in stderr: the `.pair` value contains the nested `.doclang` result plus `invalid1`, the locale conversion fails, but the nested locale mutation has already been published and remains visible to the later getter. The v2.5.1/v2.6.0 visible locale spelling differs only because the releases localize the locale name differently; both identify the effective locale as Italian rather than English.
+
+### Disposition
+
+This exact-fixture evidence confirms the same failure-effect direction already observed in S12/S13: official Quarkdown **default mode publishes the nested document-state mutation performed before the later enclosing failure**, while Arkst's accepted #167 invocation-savepoint policy rolls it back.
+
+Therefore:
+
+- **Arkst migration acceptance remains rollback-based:** after the failed outer conversion, locale stays `en` and the getter remains `English`;
+- **official v2.5.1/v2.6.0 default-mode behavior diverges:** locale `it` remains observable after the failure;
+- **strict mode is not evidence of rollback or persistence** because rc 66 prevents publication of the later getter;
+- do not weaken #167 document-state atomicity automatically to match the official default-mode side effect;
+- any future compatibility reconciliation is an explicit architecture/policy decision, not a G0 evidence patch;
+- this proof remains bounded to the exact S19 `.doclang` nested-candidate fixture and does not claim universal behavior for every document-state setter or failure shape.
+
+**Classification:** `ARKST_S19_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_NESTED_DOCLANG_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN_CI_PENDING`. The migration proof and official reference are frozen; only the new documentation/classification HEAD still requires exact-head CI before qualification.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
