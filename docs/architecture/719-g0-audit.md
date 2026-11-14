@@ -417,7 +417,7 @@ Therefore:
 
 **Classification:** `ARKST_S19_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_NESTED_DOCLANG_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN_CI_PENDING`. The migration proof and official reference are frozen; only the new documentation/classification HEAD still requires exact-head CI before qualification.
 
-## S20 nested include resource context — source-relative path qualified, sandbox visibility candidate, capability/reference pending
+## S20 nested include resource context — source-relative + sandbox visibility qualified, capability boundary frozen as legacy-IR-only, reference pending
 
 **Qualified source-relative migration proof.** `g0_s20_nested_include_resource_context_matches_legacy` proves the implemented nested file-include + included-source-relative resource path across the normal frontend and legacy pre-lowered evaluator. Exact HEAD `84ba18bd10a7721fcab8e50842803d0d59fad957` passed CI #43553576223 including fmt, Ubuntu ARM64/macOS/Windows, Reference JVM and required Merge Gate.
 
@@ -429,29 +429,40 @@ That fixture keeps one `VirtualProject` across both execution paths:
 - the only resource is `docs/partials/data/value.txt`, so success requires the included source's resource base rather than the entry source base;
 - exact final `IrDocument` and ordered diagnostics match, and the visible output is `NESTED`.
 
-**Additional bounded sandbox-visibility candidate.** The new `g0_s20_include_scope_and_share_visibility_match_legacy` at candidate `1f77d839539ac7fb06bb2fb15de22b0b8908a7bb` reuses the existing `quarkdown_resource_builtins::include_sandbox_modes_match_share_and_scope_visibility` source-level regression and compares both variants through the same multi-source differential helper:
+**Qualified SHARE/SCOPE migration proof.** `g0_s20_include_scope_and_share_visibility_match_legacy` is exact-head qualified at `714ce02c94dce076716984376a4843e4af33391c` / CI #43568771942:
 
-- `sandbox:{scope}`: the included source writes `value=part` inside isolated include scope, emits `part`, and the caller's prior `value=main` remains visible afterwards, producing `part\nmain`;
-- default SHARE: the included source writes `value=part` into shared caller-visible state and the later caller getter observes `part`;
-- both cases require exact final `IrDocument` and ordered diagnostic parity between normal frontend and legacy evaluator.
+- `sandbox:{scope}` isolates the included write and yields `part\nmain`;
+- default SHARE keeps the included write caller-visible and yields `part`;
+- both variants preserve exact final `IrDocument` and ordered diagnostics parity between normal frontend and legacy evaluator.
 
-This closes only the **migration preservation of the already-implemented SHARE/SCOPE visibility distinction** if its final evidence HEAD receives exact-head CI qualification. It does not generalize sandboxing into a host-security mechanism.
+This proof is a visibility/ownership migration check, not a claim that include sandbox modes are a host-security boundary.
 
-### Existing ownership and remaining boundary
+### Capability non-escalation disposition
 
-#155 owns the filesystem/project/data/resource audit. Completed #188 owns the common logical resolver prerequisite for source-relative bases, nested identity, normalization, cycles and resource-provider boundaries. The canonical resource manifest keeps `.include` partial because resource permission policy, WASM bindings, graph/output integration and wider upstream behavior remain separately owned.
+The remaining capability half is **not a missing source fixture**. It is a runtime/wire fail-closed invariant whose negative state cannot be authored through current public Quarkdown source syntax.
 
-The remaining S20 architecture/evidence gap after this sandbox slice is narrower:
+The evidence is consistent across the public construction and runtime boundaries:
 
-- `legacy_callable_capture_cannot_gain_caller_resource_capability` already proves at engine level that an `IrCallableCapture` with no resource context cannot acquire the caller's resource capability; however, there is no equivalent **public source-level executable G0 differential** that independently demonstrates capability non-escalation without fabricating an impossible source construct;
-- loadable-library detached provenance/caller-resource-base semantics remain separately covered by `loadable_library_dispatch`;
-- upstream absolute/global resource permission behavior is an accepted fail-closed policy divergence and must not be widened here;
-- public WASM resource-binding parity and graph/output owners remain outside S20's bounded migration evidence;
-- no independently archived official Quarkdown black-box fixture covering the complete S20 nested callable/resource + sandbox visibility boundary is frozen yet.
+1. frontend `Value::Lambda` and callable-target conversion produce an `IrCallable` with `capture: None` before evaluator materialization; this is only an unevaluated structural representation, not a request to strip resource authority;
+2. the resource audit records that a source-defined callable materialized under resource access retains the lexical resource-base `SourceId`, optional subdocument root and loadable-library availability as **evaluator-runtime metadata**;
+3. that runtime metadata deliberately omits provider objects and is never serialized;
+4. `PROGRAMMABLE_DOCUMENT_SEMANTICS.md` fixes the caller overlay as lookup-only and explicitly states that it does not copy host/provider runtime objects into the callable;
+5. IR serialization intentionally drops `IrCallableCapture.resource_context`; `callable_resource_context_is_runtime_only_and_fails_closed_after_wire_roundtrip` proves decoded callables cannot reconstruct resource authority from wire data;
+6. `legacy_callable_capture_cannot_gain_caller_resource_capability` manually constructs exactly that decoded/legacy shape—an `IrCallableCapture` with `resource_context: None`—and proves that invoking it under a resource-capable caller performs no resource read.
 
-Therefore **capability non-escalation remains evidence-complete at the engine regression level but not yet duplicated as a public source-level G0 differential**. Do not manufacture a source syntax merely to turn the engine-only capability regression into a frontend fixture. A later S20 unit may either identify an authentic public executable route or record that the capability half is blocked at the legacy-IR-only boundary.
+There is no source-language operation that serializes/decodes a callable in place, clears its runtime resource marker, or directly constructs an `IrCallableCapture`. Consequently, a public source-level G0 test for this exact negative capability shape would require invented syntax or an artificial frontend hook and would no longer be evidence of the public language path.
 
-**Candidate classification:** `ARKST_S20_NESTED_INCLUDE_SOURCE_RELATIVE_QUALIFIED_SANDBOX_VISIBILITY_MIGRATION_CANDIDATE_CAPABILITY_SOURCE_ROUTE_PENDING_REFERENCE_PENDING_CI_PENDING`. The source-relative slice is already qualified; the new sandbox candidate still needs exact-head CI, while capability public-route disposition and exact official reference remain pending.
+**Disposition:** the capability non-escalation half is therefore frozen as an **engine/legacy-IR-only security boundary**, not a pending public-source migration scenario. The existing engine regression is the correct executable owner. G0 must not fabricate source syntax solely to duplicate it.
+
+### Remaining S20 boundary
+
+#155 owns the filesystem/project/data/resource audit. Completed #188 owns the common logical resolver prerequisite. The remaining S20 work after this disposition is now limited to reference closure:
+
+- no independently archived official Quarkdown black-box fixture covering the complete bounded S20 nested resource/include behavior is frozen yet;
+- upstream absolute/global resource permission behavior remains an intentional fail-closed policy divergence and is not widened here;
+- public WASM resource-binding parity and graph/output ownership remain separately tracked outside this bounded G0 migration slice.
+
+**Classification:** `ARKST_S20_SOURCE_RELATIVE_AND_SANDBOX_VISIBILITY_MIGRATION_QUALIFIED_CAPABILITY_LEGACY_IR_ONLY_BOUNDARY_FROZEN_REFERENCE_PENDING_CI_PENDING`. The two public migration proofs are qualified; the capability boundary is disposition-frozen at engine/legacy-IR level; only the updated documentation/classification HEAD and exact official reference remain to close this S20 evidence slice.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
