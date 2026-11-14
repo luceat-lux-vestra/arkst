@@ -417,6 +417,37 @@ Therefore:
 
 **Classification:** `ARKST_S19_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_NESTED_DOCLANG_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN_CI_PENDING`. The migration proof and official reference are frozen; only the new documentation/classification HEAD still requires exact-head CI before qualification.
 
+## S20 nested include resource context — partial migration candidate, sandbox/capability closure pending
+
+**Bounded migration target.** S20 covers the resource/include execution surface while the final-document frontend replaces the legacy pre-lowered execution bridge. The oracle row names the existing `quarkdown_resource_builtins::nested_include_reuses_function_lambda_and_resource_context` regression. The new `g0_s20_nested_include_resource_context_matches_legacy` candidate at `f81f2ae358ea6a0ea3fa70f131cf09738e4f7a60` reuses that source/resource shape:
+
+- entry source: `docs/main.qd` includes `partials/child.qd`;
+- included source `docs/partials/child.qd` defines and invokes `.render`;
+- `.render` invokes an `.ifpresent` lambda and performs `.read {data/value.txt}`;
+- the only matching resource is `docs/partials/data/value.txt`, so successful output requires the included source's resource base rather than the entry source's base;
+- callback/function execution must preserve that resource context through the nested callable path;
+- final visible paragraph text is exactly `NESTED`.
+
+A dedicated multi-source differential helper feeds the **same `VirtualProject`** to the public normal frontend and the legacy pre-lowered evaluator, then requires exact final `IrDocument` equality and ordered diagnostic-signature equality before the bounded output assertion. No host filesystem, temporary-directory resource root or second provider is introduced.
+
+### Existing ownership and evidence
+
+#155 owns the filesystem/project/data/resource audit. Completed #188 is the common logical resolver prerequisite for source-relative bases, nested identity, normalization, cycles and resource-provider boundaries. The canonical resource manifest records `.include` as a `PARTIAL` source-relative surface whose file fallback retains canonical target `SourceId`/path and whose nested resource reads use the included source base. The same audit separately records loadable-library dispatch and callable resource-base rules.
+
+This migration slice intentionally does **not** claim the entire S20 oracle row:
+
+- `sandbox:{scope}` versus default SHARE visibility is already regression-tested in `include_sandbox_modes_match_share_and_scope_visibility`, but is not added as a second G0 differential scenario here;
+- `legacy_callable_capture_cannot_gain_caller_resource_capability` independently proves the fail-closed legacy capability boundary, but this source-level fixture does not re-prove every capability-escalation shape;
+- loadable-library detached provenance/caller-resource-base semantics remain separately evidenced by `loadable_library_dispatch`;
+- upstream absolute/global resource permission behavior is an accepted fail-closed policy divergence and is not widened in G0;
+- public WASM resource-binding parity and graph/output owners remain outside this slice.
+
+Accordingly, this candidate proves only the **implemented nested file-include + included-source-relative read + function/lambda context migration path**. It does not close SHARE/SCOPE sandbox parity, arbitrary capability transfer, library dispatch, WASM binding, remote/global reads or every resource diagnostic.
+
+No independent black-box official Quarkdown fixture matching this complete nested callable/resource source has been archived for S20 in this unit, so upstream end-to-end parity is not inferred from the source audit alone.
+
+**Candidate classification:** `ARKST_S20_NESTED_INCLUDE_SOURCE_RELATIVE_CALLABLE_RESOURCE_MIGRATION_CANDIDATE_SANDBOX_CAPABILITY_COMPLETION_PENDING_REFERENCE_PENDING_CI_PENDING`. Exact-head CI/Merge Gate for the final evidence HEAD, plus any later bounded sandbox/capability and exact-reference disposition, remain separate requirements.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
