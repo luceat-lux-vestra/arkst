@@ -236,6 +236,27 @@ fn g0_s18_source_backed_rich_table_callback_matches_legacy() {
 }
 
 #[test]
+fn g0_s19_nested_doclang_conversion_rollback_matches_legacy() {
+    let source = ".doclang {en}\n.doclang {.pair {.doclang {it}} {invalid1}}\n.doclang\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    assert!(result.diagnostics[0].primary.is_some(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "English");
+    assert_eq!(
+        result
+            .ir
+            .metadata
+            .document_state
+            .locale
+            .as_ref()
+            .map(|locale| locale.tag.as_str()),
+        Some("en")
+    );
+}
+
+#[test]
 fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
     let success = ".sum {1} {2}\n";
     let success_result = compile_and_assert_legacy_parity(success);
