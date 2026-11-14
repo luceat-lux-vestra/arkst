@@ -417,36 +417,41 @@ Therefore:
 
 **Classification:** `ARKST_S19_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_NESTED_DOCLANG_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN_CI_PENDING`. The migration proof and official reference are frozen; only the new documentation/classification HEAD still requires exact-head CI before qualification.
 
-## S20 nested include resource context — partial migration candidate, sandbox/capability closure pending
+## S20 nested include resource context — source-relative path qualified, sandbox visibility candidate, capability/reference pending
 
-**Bounded migration target.** S20 covers the resource/include execution surface while the final-document frontend replaces the legacy pre-lowered execution bridge. The oracle row names the existing `quarkdown_resource_builtins::nested_include_reuses_function_lambda_and_resource_context` regression. The new `g0_s20_nested_include_resource_context_matches_legacy` candidate at `f81f2ae358ea6a0ea3fa70f131cf09738e4f7a60` reuses that source/resource shape:
+**Qualified source-relative migration proof.** `g0_s20_nested_include_resource_context_matches_legacy` proves the implemented nested file-include + included-source-relative resource path across the normal frontend and legacy pre-lowered evaluator. Exact HEAD `84ba18bd10a7721fcab8e50842803d0d59fad957` passed CI #43553576223 including fmt, Ubuntu ARM64/macOS/Windows, Reference JVM and required Merge Gate.
 
-- entry source: `docs/main.qd` includes `partials/child.qd`;
-- included source `docs/partials/child.qd` defines and invokes `.render`;
-- `.render` invokes an `.ifpresent` lambda and performs `.read {data/value.txt}`;
-- the only matching resource is `docs/partials/data/value.txt`, so successful output requires the included source's resource base rather than the entry source's base;
-- callback/function execution must preserve that resource context through the nested callable path;
-- final visible paragraph text is exactly `NESTED`.
+That fixture keeps one `VirtualProject` across both execution paths:
 
-A dedicated multi-source differential helper feeds the **same `VirtualProject`** to the public normal frontend and the legacy pre-lowered evaluator, then requires exact final `IrDocument` equality and ordered diagnostic-signature equality before the bounded output assertion. No host filesystem, temporary-directory resource root or second provider is introduced.
+- `docs/main.qd` includes `docs/partials/child.qd`;
+- the child defines/invokes `.render`;
+- `.render` executes an `.ifpresent` lambda and `.read {data/value.txt}`;
+- the only resource is `docs/partials/data/value.txt`, so success requires the included source's resource base rather than the entry source base;
+- exact final `IrDocument` and ordered diagnostics match, and the visible output is `NESTED`.
 
-### Existing ownership and evidence
+**Additional bounded sandbox-visibility candidate.** The new `g0_s20_include_scope_and_share_visibility_match_legacy` at candidate `1f77d839539ac7fb06bb2fb15de22b0b8908a7bb` reuses the existing `quarkdown_resource_builtins::include_sandbox_modes_match_share_and_scope_visibility` source-level regression and compares both variants through the same multi-source differential helper:
 
-#155 owns the filesystem/project/data/resource audit. Completed #188 is the common logical resolver prerequisite for source-relative bases, nested identity, normalization, cycles and resource-provider boundaries. The canonical resource manifest records `.include` as a `PARTIAL` source-relative surface whose file fallback retains canonical target `SourceId`/path and whose nested resource reads use the included source base. The same audit separately records loadable-library dispatch and callable resource-base rules.
+- `sandbox:{scope}`: the included source writes `value=part` inside isolated include scope, emits `part`, and the caller's prior `value=main` remains visible afterwards, producing `part\nmain`;
+- default SHARE: the included source writes `value=part` into shared caller-visible state and the later caller getter observes `part`;
+- both cases require exact final `IrDocument` and ordered diagnostic parity between normal frontend and legacy evaluator.
 
-This migration slice intentionally does **not** claim the entire S20 oracle row:
+This closes only the **migration preservation of the already-implemented SHARE/SCOPE visibility distinction** if its final evidence HEAD receives exact-head CI qualification. It does not generalize sandboxing into a host-security mechanism.
 
-- `sandbox:{scope}` versus default SHARE visibility is already regression-tested in `include_sandbox_modes_match_share_and_scope_visibility`, but is not added as a second G0 differential scenario here;
-- `legacy_callable_capture_cannot_gain_caller_resource_capability` independently proves the fail-closed legacy capability boundary, but this source-level fixture does not re-prove every capability-escalation shape;
-- loadable-library detached provenance/caller-resource-base semantics remain separately evidenced by `loadable_library_dispatch`;
-- upstream absolute/global resource permission behavior is an accepted fail-closed policy divergence and is not widened in G0;
-- public WASM resource-binding parity and graph/output owners remain outside this slice.
+### Existing ownership and remaining boundary
 
-Accordingly, this candidate proves only the **implemented nested file-include + included-source-relative read + function/lambda context migration path**. It does not close SHARE/SCOPE sandbox parity, arbitrary capability transfer, library dispatch, WASM binding, remote/global reads or every resource diagnostic.
+#155 owns the filesystem/project/data/resource audit. Completed #188 owns the common logical resolver prerequisite for source-relative bases, nested identity, normalization, cycles and resource-provider boundaries. The canonical resource manifest keeps `.include` partial because resource permission policy, WASM bindings, graph/output integration and wider upstream behavior remain separately owned.
 
-No independent black-box official Quarkdown fixture matching this complete nested callable/resource source has been archived for S20 in this unit, so upstream end-to-end parity is not inferred from the source audit alone.
+The remaining S20 architecture/evidence gap after this sandbox slice is narrower:
 
-**Candidate classification:** `ARKST_S20_NESTED_INCLUDE_SOURCE_RELATIVE_CALLABLE_RESOURCE_MIGRATION_CANDIDATE_SANDBOX_CAPABILITY_COMPLETION_PENDING_REFERENCE_PENDING_CI_PENDING`. Exact-head CI/Merge Gate for the final evidence HEAD, plus any later bounded sandbox/capability and exact-reference disposition, remain separate requirements.
+- `legacy_callable_capture_cannot_gain_caller_resource_capability` already proves at engine level that an `IrCallableCapture` with no resource context cannot acquire the caller's resource capability; however, there is no equivalent **public source-level executable G0 differential** that independently demonstrates capability non-escalation without fabricating an impossible source construct;
+- loadable-library detached provenance/caller-resource-base semantics remain separately covered by `loadable_library_dispatch`;
+- upstream absolute/global resource permission behavior is an accepted fail-closed policy divergence and must not be widened here;
+- public WASM resource-binding parity and graph/output owners remain outside S20's bounded migration evidence;
+- no independently archived official Quarkdown black-box fixture covering the complete S20 nested callable/resource + sandbox visibility boundary is frozen yet.
+
+Therefore **capability non-escalation remains evidence-complete at the engine regression level but not yet duplicated as a public source-level G0 differential**. Do not manufacture a source syntax merely to turn the engine-only capability regression into a frontend fixture. A later S20 unit may either identify an authentic public executable route or record that the capability half is blocked at the legacy-IR-only boundary.
+
+**Candidate classification:** `ARKST_S20_NESTED_INCLUDE_SOURCE_RELATIVE_QUALIFIED_SANDBOX_VISIBILITY_MIGRATION_CANDIDATE_CAPABILITY_SOURCE_ROUTE_PENDING_REFERENCE_PENDING_CI_PENDING`. The source-relative slice is already qualified; the new sandbox candidate still needs exact-head CI, while capability public-route disposition and exact official reference remain pending.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
