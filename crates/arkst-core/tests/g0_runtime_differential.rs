@@ -305,8 +305,7 @@ fn g0_s20_nested_include_resource_context_matches_legacy() {
 
 #[test]
 fn g0_s20_include_scope_and_share_visibility_match_legacy() {
-    let scope_entry =
-        ".var {value} {main}\n.include {part.qd} sandbox:{scope}\n.value\n";
+    let scope_entry = ".var {value} {main}\n.include {part.qd} sandbox:{scope}\n.value\n";
     let scope_project = VirtualProjectBuilder::new()
         .entry("main.qd")
         .expect("valid entry")
