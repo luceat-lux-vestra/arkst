@@ -359,6 +359,42 @@ No new architecture carrier, local parser, source reconstruction or shape heuris
 
 **Classification:** `ARKST_S18_PARTIAL_MIGRATION_PROVENANCE_FOUNDATION_PROVEN_TABLE_CONSUMER_PENDING_CI_PENDING`. The semantic/provenance evidence is established, but this updated evidence-document HEAD still requires its own exact-head CI, and full S18 closure remains blocked on the #718 production consumer rather than on provenance architecture.
 
+## S19 nested document-state conversion rollback — Arkst migration candidate, upstream failure-effect reference pending
+
+**Bounded migration target.** S19 freezes the existing #167/#152 document-state atomicity invariant while final-document IR replaces the legacy execution bridge. The new `g0_s19_nested_doclang_conversion_rollback_matches_legacy` test at candidate `1cffc1b17209915c93070e947a4df0b7d42d0ef4` reuses the established `quarkdown_value_model_audit::audit_nested_candidate_conversion_is_before_state_commit_and_rolls_back` fixture byte-for-byte:
+
+```quarkdown
+.doclang {en}
+.doclang {.pair {.doclang {it}} {invalid1}}
+.doclang
+```
+
+The fixture makes the transaction boundary observable:
+
+1. the first `.doclang {en}` succeeds and commits locale `en`;
+2. evaluation of the second setter's nested candidate executes `.doclang {it}`;
+3. the enclosing candidate ultimately cannot convert to the setter's locale target and produces one `E3001`;
+4. the failed invocation must roll back the nested `it` mutation but retain the prior successful `en` commit;
+5. the later zero-argument getter must render `English`, and final `IrDocument.metadata.document_state.locale.tag` must remain `en`.
+
+The G0 differential requires **exact final `IrDocument` equality and ordered diagnostic-signature equality** between normal public frontend compilation and the legacy pre-lowered evaluator before asserting the visible getter/state result. This therefore exercises both execution-time savepoint rollback and the final immutable document-state snapshot.
+
+### Compatibility boundary
+
+This is currently an **Arkst migration invariant**, not an upstream-output equality claim. #167 explicitly owns conversion diagnostics and commit atomicity, and #152 owns the document-state surface. Existing `VALUE_MODEL_AUDIT.md` records validate-before-commit and rollback as the accepted Arkst invariant for audited document-state consumers.
+
+However, the exact S19 fixture does not yet have an independently archived official Quarkdown black-box observation. Existing S12/S13 official probes already show that pinned Quarkdown default mode can preserve mutations performed before a later failure in other callable/failure shapes. Those observations prevent extrapolating a universal upstream rollback rule from Arkst's transaction design, but they also do **not** prove the exact `.doclang` nested-candidate fixture diverges.
+
+Accordingly:
+
+- preserve Arkst's accepted #167 invocation-savepoint behavior during G0;
+- do not weaken document-state atomicity merely to resemble S12/S13 upstream failure effects;
+- do not classify S19 as upstream-compatible or upstream-divergent until the exact fixture is independently observed;
+- keep diagnostic source provenance and final immutable document-state snapshot in the acceptance predicate;
+- do not broaden this proof to every document-state field or every nested conversion target.
+
+**Candidate classification:** `ARKST_S19_DOCUMENT_STATE_ATOMICITY_MIGRATION_CANDIDATE_UPSTREAM_POST_FAILURE_STATE_REFERENCE_PENDING_CI_PENDING`. Exact-head CI/Merge Gate for the final S19 evidence HEAD and an independent exact-fixture upstream reference remain separate requirements.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
