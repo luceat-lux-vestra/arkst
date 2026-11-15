@@ -50,8 +50,9 @@ fn g0_s26_current_public_ir_types_still_admit_executable_state_at_backend_bounda
         metadata: IrMetadata::default(),
     };
 
-    let _backend_still_accepts_the_mixed_lifecycle_type:
-        fn(&IrDocument) -> (String, Vec<SourceMapEntry>) = lower_to_typst;
+    let _backend_still_accepts_the_mixed_lifecycle_type: fn(
+        &IrDocument,
+    ) -> (String, Vec<SourceMapEntry>) = lower_to_typst;
 
     let IrNode::FunctionCall {
         positional_args,
