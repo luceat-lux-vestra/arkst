@@ -903,7 +903,22 @@ API-boundary/compile-fail proof that these executable carriers cannot inhabit
 the final document and that the backend does not accept the mixed-lifecycle
 type. No compile-fail harness or dependency is introduced during G0.
 
-**Classification candidate:** `CURRENT_PUBLIC_EXECUTABLE_IR_TYPE_GAP_NEW_EXECUTION_CANDIDATE_CI_PENDING_G6_TYPE_REJECTION_PENDING`. This candidate freezes the current architectural defect precisely enough for later migration verification; it does not satisfy G6, complete G0, authorize G1, or permit #746 to merge.
+### Exact-head execution qualification
+
+The first NEW_EXECUTION candidate at `9b6954b98f3194b6efed211be8ec97680972b27f`
+completed CI #43683571081 with all semantic/platform jobs green but failed
+`fmt` on the newly added function-pointer declaration. That observation was
+classified as a test-source formatting defect, not a semantic, evidence,
+workflow-policy, or environment failure.
+
+Formatting-only remediation HEAD
+`f8b4a07b63960b50b12f44bc652a44c3f17b965d` then completed CI
+#43684839827 with `fmt`, compatibility, Reference JVM, MSRV, WASM, Clippy,
+docs, CodeQL runtime, dependency review, license, spelling, Ubuntu ARM64,
+macOS, Windows, and the required `Merge Gate` all **SUCCESS**. Security
+Audit was scope-skipped.
+
+**Classification:** `CURRENT_PUBLIC_EXECUTABLE_IR_TYPE_GAP_FROZEN_G6_TYPE_REJECTION_PENDING`. S26 now freezes the current public mixed-lifecycle type admission as G0 negative-baseline evidence. This is not approval of that API shape: G6 must remove the executable carriers from final document/backend types and replace this compile-pass baseline with compile-time rejection evidence. S26 does not complete G0, authorize G1, or permit #746 to merge.
 
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
