@@ -920,6 +920,77 @@ Audit was scope-skipped.
 
 **Classification:** `CURRENT_PUBLIC_EXECUTABLE_IR_TYPE_GAP_FROZEN_G6_TYPE_REJECTION_PENDING`. S26 now freezes the current public mixed-lifecycle type admission as G0 negative-baseline evidence. This is not approval of that API shape: G6 must remove the executable carriers from final document/backend types and replace this compile-pass baseline with compile-time rejection evidence. S26 does not complete G0, authorize G1, or permit #746 to merge.
 
+## S27 versioned wire — current negative baseline candidate
+
+S27 is an Arkst-internal public-wire migration proof. ADR-0022 already fixes
+the target policy: the replacement is a separately versioned, strictly
+validated, final-document-only wire v1. Historical unversioned/mixed Arkst JSON
+is rejected outright; there is no legacy importer, dual-format output, or
+deprecation window to preserve.
+
+### Current public wire boundary
+
+Exact pre-S27 read-back at #746 HEAD
+`2d6c3307dd2225f9b18c92edf534135cf670aa62` establishes the current gap:
+
+- `IrDocument` itself implements public `Serialize` and `Deserialize`;
+- private `IrDocumentWire { nodes, metadata, sources? }` has no required
+  schema-version field and does not deny unknown top-level fields;
+- executable `WireNode::{FunctionCall, ChainedFunctionCall,
+  FunctionDeclaration}`, `WireInline::{DirectiveCall,
+  ChainedDirectiveCall}`, and `WireValue::{Callable, InlineBody}` are
+  serialized and recursively reconstructed;
+- the public IR node/inline/value/callable types retain serde and
+  `arkst-core::ir` re-exports those physical types;
+- CLI `inspect --emit ir` pretty-serializes `result.ir` directly.
+
+Current source-table handling is partially fail-closed but is not the G7
+contract. Raw-body decoding already rejects a `source_ref` without a document
+source table, an out-of-range reference, both `source` and `source_ref`,
+neither field, and a raw-body span outside its selected buffer. Callable
+`resource_context` is deliberately omitted from JSON and remains absent after
+decode. Those are useful positive safety anchors.
+
+The current decoder nevertheless has no document version gate, no recursive
+executable-variant rejection, no rejection of duplicate/noncanonical source
+tables, no final-document validation tying ordinary `SourceSpan` identities
+and ranges to an authoritative source table, and no explicit Arkst wire
+depth/size/cardinality resource-limit contract. Generic derived-serde shape
+errors are not a substitute for deterministic G7 domain validation.
+
+### G0 NEW_EXECUTION candidate
+
+`crates/arkst-ir/tests/g0_s27_versioned_wire_gap.rs` uses only the public
+`arkst_ir`, `arkst_source`, and serde JSON surfaces. Its bounded matrix:
+
+1. constructs a representative mixed executable document with a block
+   `FunctionCall`, nested inline `DirectiveCall`, `Callable`,
+   `InlineBody`, and source-backed raw body;
+2. proves the emitted top-level document is unversioned and the current
+   `IrDocument` decoder accepts the executable document without invoking an
+   evaluator or backend;
+3. injects an unknown `version` field and proves the current decoder ignores
+   it;
+4. rewrites the source table into duplicate/noncanonical form and proves it is
+   accepted, then observes ordinary reserialization canonicalizing the table;
+5. corrupts the executable callable body's structural JSON shape and proves
+   derived serde rejects it before IR construction, without freezing incidental
+   complete serde error text.
+
+Existing internal tests remain the positive anchors for missing/out-of-range
+raw-body references and runtime resource-context non-escalation; the external
+test does not duplicate those cases.
+
+**Classification candidate:**
+`CURRENT_UNVERSIONED_MIXED_EXECUTABLE_WIRE_GAP_NEW_EXECUTION_CANDIDATE_CI_PENDING_G7_V1_STRICT_REJECTION_PENDING`.
+This freezes only the current wire defect and limited existing fail-closed
+behavior. G7 must replace it with required v1 discrimination, final-only DTOs,
+strict/canonical source and span validation, recursive executable rejection,
+deterministic domain errors, resource limits, and the clean-break CLI/public
+facade migration required by ADR-0022. S27 does not implement G7, complete G0,
+authorize G1, or permit #746 to merge.
+
+
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
