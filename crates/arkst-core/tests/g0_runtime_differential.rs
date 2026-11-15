@@ -439,8 +439,7 @@ fn g0_s22_environment_boundary_matches_legacy() {
         .get_id(denied_project.entry())
         .expect("entry source id");
 
-    let denied_result =
-        compile_project_and_assert_legacy_parity(&denied_project, denied_source);
+    let denied_result = compile_project_and_assert_legacy_parity(&denied_project, denied_source);
 
     assert_eq!(denied_result.diagnostics.len(), 1, "{denied_result:?}");
     assert_eq!(denied_result.diagnostics[0].code, "E3004");
