@@ -1,10 +1,11 @@
-use arkst_core::ir::{IrDocument, IrInline, IrNode};
+use arkst_core::ir::{IrComponent, IrDocument, IrInline, IrNode};
 use arkst_core::{
-    compile, compile_with_environment, CompileOptions, CompileResult, Diagnostic,
-    EnvironmentInputs, SourceId, VirtualProjectBuilder,
+    compile, compile_with_environment, compile_with_log_sink, CompileOptions, CompileResult,
+    Diagnostic, EnvironmentInputs, LogEvent, LogLevel, LogSink, SourceId, VirtualProjectBuilder,
 };
 use arkst_engine::DocumentMetadataDefaults;
 use arkst_markdown::Mode;
+use std::cell::RefCell;
 
 struct LegacyResult {
     ir: IrDocument,
@@ -154,6 +155,71 @@ fn compile_project_with_environment_and_assert_legacy_parity(
         "normal direct-frontend environment diagnostics diverged from the legacy pre-lowered IR evaluator"
     );
     frontend
+}
+
+#[derive(Default)]
+struct CollectingSink {
+    events: RefCell<Vec<LogEvent>>,
+}
+
+impl LogSink for CollectingSink {
+    fn emit(&self, event: &LogEvent) {
+        self.events.borrow_mut().push(event.clone());
+    }
+}
+
+fn compile_project_with_log_sink_and_assert_legacy_parity(
+    project: &arkst_core::VirtualProject,
+    entry_source: &str,
+) -> (CompileResult, Vec<LogEvent>) {
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let parsed = arkst_markdown::parse_with_mode(entry_source, Mode::Quarkdown);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "G0 differential fixtures must start from parser-clean source: {:?}",
+        parsed.diagnostics
+    );
+
+    let (lowered, lowering_diagnostics) =
+        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            source_id,
+            &DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+    assert!(
+        lowering_diagnostics.is_empty(),
+        "G0 differential fixture must be representable by the legacy AST-to-IR bridge: {lowering_diagnostics:?}"
+    );
+
+    let frontend_sink = CollectingSink::default();
+    let frontend =
+        compile_with_log_sink(project, &CompileOptions::default(), &frontend_sink);
+    let legacy_sink = CollectingSink::default();
+    let (legacy_ir, legacy_diagnostics) =
+        arkst_engine::evaluator::Evaluator::new().evaluate_with_log_sink(&lowered, &legacy_sink);
+
+    assert_eq!(
+        frontend.ir, legacy_ir,
+        "normal direct-frontend logger result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy_diagnostics),
+        "normal direct-frontend logger diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+
+    let frontend_events = frontend_sink.events.into_inner();
+    let legacy_events = legacy_sink.events.into_inner();
+    assert_eq!(
+        frontend_events, legacy_events,
+        "normal direct-frontend logger events diverged from the legacy pre-lowered IR evaluator"
+    );
+
+    (frontend, frontend_events)
 }
 
 fn paragraph_text(result: &CompileResult) -> String {
@@ -471,6 +537,49 @@ fn g0_s22_environment_boundary_matches_legacy() {
 
     assert!(empty_result.diagnostics.is_empty(), "{empty_result:?}");
     assert_eq!(paragraph_text(&empty_result), "true");
+}
+
+#[test]
+fn g0_s23_logger_side_effects_survive_later_explicit_error_matches_legacy() {
+    let source = concat!(
+        ".function {boom}\n",
+        "    .log {.pair {left} {right}}\n",
+        "    .debug {second}\n",
+        "    .error {boom}\n",
+        "\n",
+        "before\n",
+        "\n",
+        ".boom\n",
+        "\n",
+        "after\n",
+    );
+    let (project, _) = build_project(source);
+    let (result, events) = compile_project_with_log_sink_and_assert_legacy_parity(&project, source);
+
+    let pair =
+        "[DynamicValue(unwrappedValue=left, evaluationContext=null), DynamicValue(unwrappedValue=right, evaluationContext=null)]";
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.diagnostics[0].code, "E3011");
+    assert!(result.diagnostics[0].message.contains("boom"));
+    assert_eq!(paragraph_text(&result), "before\nafter");
+    assert!(matches!(
+        result.ir.nodes.as_slice(),
+        [
+            IrNode::Paragraph { .. },
+            IrNode::Component {
+                component: IrComponent::ExplicitError(_)
+            },
+            IrNode::Paragraph { .. }
+        ]
+    ));
+
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events[0].level, LogLevel::Log);
+    assert_eq!(events[0].message, pair);
+    assert_eq!(events[1].level, LogLevel::Debug);
+    assert_eq!(events[1].message, "second");
+    assert!(events[0].span.start < events[1].span.start);
 }
 
 #[test]
