@@ -565,7 +565,7 @@ Using `PATH` is deliberate: CI runners have ambient process state, so the explic
 
 After the rustfmt-only follow-up, exact execution HEAD `5afd35c332becb6dd350cfc71aca1b4e34b4154d` passed CI #43661962464. `fmt`, Ubuntu ARM64/macOS/Windows tests, Reference JVM, compatibility, clippy, wasm, msrv, docs, CodeQL runtime and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
 
-**Classification:** `UPSTREAM_V251_V260_ENV_PERMISSION_PRESENT_ABSENT_REFERENCE_FROZEN_ARKST_EXPLICIT_SNAPSHOT_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+**Classification:** `UPSTREAM_V251_V260_ENV_PERMISSION_PRESENT_ABSENT_REFERENCE_FROZEN_ARKST_EXPLICIT_SNAPSHOT_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION, and this oracle/audit reconciliation are exact-head qualified on #746 by CI #43662649388.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
