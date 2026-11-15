@@ -42,8 +42,7 @@ fn g0_s28_inspect_ir_publishes_public_core_serialization_without_version_envelop
     let result = compile(&project, &CompileOptions::default());
     assert!(result.diagnostics.is_empty(), "{result:?}");
 
-    let public_core_json =
-        serde_json::to_value(&result.ir).expect("public core IR must serialize");
+    let public_core_json = serde_json::to_value(&result.ir).expect("public core IR must serialize");
     assert_eq!(cli_json, public_core_json);
 
     let [IrNode::Paragraph { span, .. }] = result.ir.nodes.as_slice() else {
