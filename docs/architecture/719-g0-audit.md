@@ -616,6 +616,118 @@ After correcting only that host equivalence, exact execution HEAD `e77aaffee570c
 
 **Classification:** `UPSTREAM_V251_V260_S23_LOGGER_ERROR_REFERENCE_FROZEN_ARKST_ORDER_NONROLLBACK_SOURCE_ECHO_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION, and this oracle/audit reconciliation are exact-head qualified on #746 by CI #43664735698.
 
+## S24 raw HTML policy and native-content capability boundary — official reference frozen, Arkst migration qualified with explicit policy divergence
+
+S24 has two distinct semantic questions that must not be collapsed:
+
+1. what ordinary parser-exposed raw HTML means in Quarkdown source; and
+2. what the explicit Quarkdown `.html` builtin may publish when the `native-content` capability is available or denied.
+
+The official clean-room result and Arkst's accepted #58 policy agree on the ownership boundary—ordinary mixed raw markup must not silently become native HTML—but they intentionally differ on how unowned markup is surfaced.
+
+### Independent official v2.5.1/v2.6.0 reference
+
+Disposable PR #772 remains **OPEN/DRAFT/UNMERGED** at exact HEAD `f3881c6d5e3676781b167c0701d698f95a2f01aa`. Probe workflow run #43669812707 completed **SUCCESS** and retained artifact `g0-s24-quarkdown-v251-v260` (artifact ID `14143647092`).
+
+The workflow SHA-verified the official Linux x64 archives before execution:
+
+- v2.5.1: `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`;
+- v2.6.0: `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`.
+
+The three independently authored source fixtures were also retained and hashed:
+
+- mixed raw `before <em>S24_RAW</em> after`: `892a67a3a565d24adc1d7a05e18750d1868bb7058485eeef17dc4da2d06ffb98`;
+- explicit `.html {<em>S24_OWNED</em>}`: `16916685ce0d8d41c1881aea295e34f00d3fc144602172e4fe6f7c934b6cd5e8`;
+- explicit denied `.html {<em>S24_DENIED</em>}`: `6fd56ad01a043086128c08a0954f0321cc1242215075b9c6fc8a167d81e3bd3b`.
+
+All **12/12** version × fixture × mode observations were present, and v2.5.1/v2.6.0 behaved identically for this bounded surface.
+
+**Ordinary mixed raw markup**
+
+- default and strict both return `rc=0` with empty stderr;
+- one HTML document is produced as part of the normal output bundle;
+- the authored `<em>S24_RAW</em>` is **not** emitted as a native `<em>` element;
+- visible output is `before < em > S24_RAW < /em > after`;
+- `index.html` SHA-256 is `8dbaf022fcce2ac3b9a37bd2ffea7ea8653662716823637384bb80dc757fb245`.
+
+This freezes the official language observation: ordinary mixed raw markup is not native-content authority, but the bounded source is literalized rather than rejected.
+
+**Explicit `.html` with default permission**
+
+- default and strict both return `rc=0` with empty stderr;
+- raw output contains exact native `<em>S24_OWNED</em>`;
+- visible output is `S24_OWNED`;
+- `index.html` SHA-256 is `d015d6f9e272257d70f9665c7e809fad2bf13ee7a140bb1ecc34a8d256240f11`.
+
+This is the positive ownership control: native HTML appears only through the explicit Quarkdown builtin when the capability is available.
+
+**Explicit `.html` with `--deny native-content`**
+
+- default mode returns `rc=0`, writes the stable missing-permission message to stderr, emits a rendered error artifact, and emits no denied sentinel/native HTML; `index.html` SHA-256 is `fe8f0041f0fc03b0c735c548bb5d94455677e0eab403755a7c51a1a13ca9b900`;
+- strict mode returns `rc=72`, emits no output artifact, and stderr begins with `An error occurred while in strict mode (error code 72)` followed by the `MissingPermissionException`.
+
+The semantic boundary is therefore permission denial **before native HTML publication**. Default-vs-strict artifact recovery and process exit behavior are host/CLI finalization policy and are not requirements for Arkst's platform-neutral core evaluator.
+
+### Arkst policy disposition for ordinary mixed raw HTML
+
+Closed #58 and `docs/compatibility/RAW_HTML_POLICY.md` intentionally reject ordinary mixed raw HTML in `.qd` / `.arkst` instead of adopting a backend-specific or HTML-parser interpretation.
+
+That accepted Arkst policy is now explicitly classified as a bounded divergence from the frozen official literalization behavior:
+
+- parser-owned Quarkdown raw tags fail closed with source-backed `E8001`;
+- ordinary non-HTML text around and between rejected raw tags remains ordinary paragraph text;
+- rejected raw tags never become `TargetSpecificContent`;
+- `.html` remains a separate, explicitly owned language feature.
+
+The divergence must remain visible in the oracle. It is not permissible to describe current Arkst `E8001` behavior as byte-for-byte or semantic parity with the official mixed-raw fixture merely because both sides avoid native HTML publication.
+
+### Arkst NEW_EXECUTION proof
+
+`g0_s24_raw_html_and_native_content_denial_match_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` adds a capability-aware normal-frontend vs legacy-evaluator proof.
+
+The helper compares:
+
+- normal `compile_with_capabilities`;
+- the same parser-clean source lowered through the legacy AST→IR bridge;
+- `arkst_core::evaluator::Evaluator::with_capabilities(...).evaluate_project(...)` with the same capability set.
+
+Legacy lowering diagnostics are appended after evaluator diagnostics so the ordered diagnostic contract matches the normal frontend's published order.
+
+**Arkst mixed-raw policy case**
+
+Source: `before <em>S24_RAW</em> after`.
+
+The oracle requires:
+
+- exact final `IrDocument` equality between normal frontend and legacy evaluator;
+- exact ordered diagnostic-signature equality;
+- exactly two source-backed `E8001` diagnostics, one for `<em>` and one for `</em>`;
+- visible paragraph text `before S24_RAW after`;
+- no `TargetSpecificContent`.
+
+This is migration parity for Arkst's accepted #58 policy, not a claim of official mixed-raw semantic compatibility.
+
+**Arkst native-content denial case**
+
+Source: `.html {<em>denied</em>}` with `Capabilities::none()`.
+
+The oracle requires:
+
+- exact final `IrDocument` equality;
+- exact ordered diagnostic-signature equality;
+- exactly one source-backed `E3004` whose message names `NativeContent`;
+- the primary span covers the explicit `.html` call;
+- zero final output nodes;
+- no `TargetSpecificContent`.
+
+Existing authorized `.html` regressions remain the positive control and are not duplicated in the G0 differential.
+
+The first execution HEAD `d617174802424c147f58beb2db6cf32d0835229c` failed CI #43670487879 before semantic parity could be classified: the denied fixture used underscore-bearing sentinel `S24_DENIED`, which produced parser diagnostic `E3010` inside the Quarkdown content argument, and one rustfmt wrapping difference remained. The semantic assertions were not weakened.
+
+After replacing only that sentinel with the already-established parser-clean `denied` spelling and applying rustfmt, corrected exact HEAD `64ea463bae32626c7a0d2dad2329d1982848553c` passed CI #43671340151. `fmt`, compatibility, Reference JVM, Ubuntu ARM64/macOS/Windows tests, clippy, wasm, msrv, docs, CodeQL runtime, dependency review, license, spelling and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
+
+**Classification:** `UPSTREAM_V251_V260_S24_NATIVE_CONTENT_REFERENCE_FROZEN_ARKST_POLICY_DIVERGENCE_AND_CAPABILITY_BOUNDARY_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
