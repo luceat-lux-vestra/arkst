@@ -3,7 +3,10 @@ use arkst_core::{
     compile, compile_with_environment, compile_with_log_sink, CompileOptions, CompileResult,
     Diagnostic, EnvironmentInputs, LogEvent, LogLevel, LogSink, SourceId, VirtualProjectBuilder,
 };
-use arkst_engine::DocumentMetadataDefaults;
+use arkst_engine::{
+    DocumentMetadataDefaults, IncludedSource, LoadableLibraryProvider, LoadableLibrarySource,
+    ResourceAccessError, ResourceProvider, ResourceText,
+};
 use arkst_markdown::Mode;
 use std::cell::RefCell;
 
@@ -157,6 +160,47 @@ fn compile_project_with_environment_and_assert_legacy_parity(
     frontend
 }
 
+struct FixtureSourceProvider<'a> {
+    source_id: SourceId,
+    source: &'a str,
+}
+
+impl ResourceProvider for FixtureSourceProvider<'_> {
+    fn source_path(&self, source_id: SourceId) -> Option<String> {
+        (source_id == self.source_id).then(|| "main.qd".to_string())
+    }
+
+    fn source_text(&self, source_id: SourceId) -> Option<&str> {
+        (source_id == self.source_id).then_some(self.source)
+    }
+
+    fn read_text(
+        &self,
+        _source_id: SourceId,
+        reference: &str,
+    ) -> Result<ResourceText, ResourceAccessError> {
+        Err(ResourceAccessError::NotFound {
+            path: reference.to_string(),
+        })
+    }
+
+    fn read_source(
+        &self,
+        _source_id: SourceId,
+        reference: &str,
+    ) -> Result<IncludedSource, ResourceAccessError> {
+        Err(ResourceAccessError::NotFound {
+            path: reference.to_string(),
+        })
+    }
+}
+
+impl LoadableLibraryProvider for FixtureSourceProvider<'_> {
+    fn loadable_library(&self, _name: &str) -> Option<LoadableLibrarySource> {
+        None
+    }
+}
+
 #[derive(Default)]
 struct CollectingSink {
     events: RefCell<Vec<LogEvent>>,
@@ -198,8 +242,20 @@ fn compile_project_with_log_sink_and_assert_legacy_parity(
     let frontend_sink = CollectingSink::default();
     let frontend = compile_with_log_sink(project, &CompileOptions::default(), &frontend_sink);
     let legacy_sink = CollectingSink::default();
-    let (legacy_ir, legacy_diagnostics) =
-        arkst_engine::evaluator::Evaluator::new().evaluate_with_log_sink(&lowered, &legacy_sink);
+    let legacy_host = FixtureSourceProvider {
+        source_id,
+        source: entry_source,
+    };
+    let (legacy_ir, legacy_diagnostics) = arkst_engine::evaluator::Evaluator::new()
+        .evaluate_with_resources_and_libraries_and_log_sink_for_mode(
+            &legacy_host,
+            &legacy_host,
+            &legacy_sink,
+            source_id,
+            Mode::Quarkdown,
+            &lowered,
+            &DocumentMetadataDefaults::default(),
+        );
 
     assert_eq!(
         frontend.ir, legacy_ir,
