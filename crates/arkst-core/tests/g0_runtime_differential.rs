@@ -1,6 +1,7 @@
 use arkst_core::ir::{IrDocument, IrInline, IrNode};
 use arkst_core::{
-    compile, CompileOptions, CompileResult, Diagnostic, SourceId, VirtualProjectBuilder,
+    compile, compile_with_environment, CompileOptions, CompileResult, Diagnostic,
+    EnvironmentInputs, SourceId, VirtualProjectBuilder,
 };
 use arkst_engine::DocumentMetadataDefaults;
 use arkst_markdown::Mode;
@@ -107,6 +108,50 @@ fn compile_project_and_assert_legacy_parity(
         diagnostic_signature(&frontend.diagnostics),
         diagnostic_signature(&legacy.diagnostics),
         "normal direct-frontend project diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+    frontend
+}
+
+fn compile_project_with_environment_and_assert_legacy_parity(
+    project: &arkst_core::VirtualProject,
+    entry_source: &str,
+    environment: &EnvironmentInputs,
+) -> CompileResult {
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let parsed = arkst_markdown::parse_with_mode(entry_source, Mode::Quarkdown);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "G0 differential fixtures must start from parser-clean source: {:?}",
+        parsed.diagnostics
+    );
+
+    let (lowered, lowering_diagnostics) =
+        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            source_id,
+            &DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+    assert!(
+        lowering_diagnostics.is_empty(),
+        "G0 differential fixture must be representable by the legacy AST-to-IR bridge: {lowering_diagnostics:?}"
+    );
+
+    let frontend = compile_with_environment(project, &CompileOptions::default(), environment);
+    let (legacy_ir, legacy_diagnostics) = arkst_core::evaluator::Evaluator::new()
+        .evaluate_project_with_environment(project, source_id, &lowered, environment);
+
+    assert_eq!(
+        frontend.ir, legacy_ir,
+        "normal direct-frontend environment result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy_diagnostics),
+        "normal direct-frontend environment diagnostics diverged from the legacy pre-lowered IR evaluator"
     );
     frontend
 }
@@ -377,6 +422,56 @@ fn g0_s21_delayed_resource_base_routes_match_legacy() {
 
     assert!(library_result.diagnostics.is_empty(), "{library_result:?}");
     assert_eq!(paragraph_text(&library_result), "CALLER_LIBRARY_BASE");
+}
+
+#[test]
+fn g0_s22_environment_boundary_matches_legacy() {
+    let denied_source = ".env {PATH}";
+    let denied_project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", denied_source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let denied_source_id = denied_project
+        .sources()
+        .get_id(denied_project.entry())
+        .expect("entry source id");
+
+    let denied_result =
+        compile_project_and_assert_legacy_parity(&denied_project, denied_source);
+
+    assert_eq!(denied_result.diagnostics.len(), 1, "{denied_result:?}");
+    assert_eq!(denied_result.diagnostics[0].code, "E3004");
+    assert_eq!(
+        denied_result.diagnostics[0].primary,
+        Some(arkst_source::SourceSpan::new(
+            denied_source_id,
+            0,
+            denied_source.len(),
+        ))
+    );
+    assert!(denied_result.ir.nodes.is_empty(), "{denied_result:?}");
+
+    let empty_source = ".string {.isnone {.env {PATH}}}";
+    let empty_project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", empty_source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let environment = EnvironmentInputs::default();
+
+    let empty_result = compile_project_with_environment_and_assert_legacy_parity(
+        &empty_project,
+        empty_source,
+        &environment,
+    );
+
+    assert!(empty_result.diagnostics.is_empty(), "{empty_result:?}");
+    assert_eq!(paragraph_text(&empty_result), "true");
 }
 
 #[test]
