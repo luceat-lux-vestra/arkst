@@ -958,7 +958,7 @@ and ranges to an authoritative source table, and no explicit Arkst wire
 depth/size/cardinality resource-limit contract. Generic derived-serde shape
 errors are not a substitute for deterministic G7 domain validation.
 
-### G0 NEW_EXECUTION candidate
+### G0 NEW_EXECUTION frozen evidence
 
 `crates/arkst-ir/tests/g0_s27_versioned_wire_gap.rs` uses only the public
 `arkst_ir`, `arkst_source`, and serde JSON surfaces. Its bounded matrix:
@@ -981,8 +981,23 @@ Existing internal tests remain the positive anchors for missing/out-of-range
 raw-body references and runtime resource-context non-escalation; the external
 test does not duplicate those cases.
 
-**Classification candidate:**
-`CURRENT_UNVERSIONED_MIXED_EXECUTABLE_WIRE_GAP_NEW_EXECUTION_CANDIDATE_CI_PENDING_G7_V1_STRICT_REJECTION_PENDING`.
+### Exact-head execution qualification
+
+Initial NEW_EXECUTION candidate
+`1650d8cca5265cca25b3a262ddd2e0ad38b080bf` completed CI #43687066755
+with all semantic/platform jobs green but failed `fmt` on one newly added
+constructor expression. That observation was classified as a test-source
+formatting defect.
+
+Formatting-only remediation HEAD
+`e939524a8fb5e3b02940865eedd3aaa9b79c57ec` then completed exact-head CI
+#43687865039 with `fmt`, compatibility, Reference JVM, MSRV, WASM, Clippy,
+docs, CodeQL runtime, dependency review, license, spelling, Ubuntu ARM64,
+macOS, Windows, and the required `Merge Gate` all **SUCCESS**. Security
+Audit was scope-skipped.
+
+**Classification:**
+`CURRENT_UNVERSIONED_MIXED_EXECUTABLE_WIRE_GAP_FROZEN_G7_V1_STRICT_REJECTION_PENDING`.
 This freezes only the current wire defect and limited existing fail-closed
 behavior. G7 must replace it with required v1 discrimination, final-only DTOs,
 strict/canonical source and span validation, recursive executable rejection,
