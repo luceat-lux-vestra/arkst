@@ -728,6 +728,122 @@ After replacing only that sentinel with the already-established parser-clean `de
 
 **Classification:** `UPSTREAM_V251_V260_S24_NATIVE_CONTENT_REFERENCE_FROZEN_ARKST_POLICY_DIVERGENCE_AND_CAPABILITY_BOUNDARY_CROSS_PLATFORM_PROVEN`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
 
+## S25 inline explicit-error rendered-owner boundary — existing official reference reused, Arkst migration qualified
+
+S25 does **not** require another upstream probe. The exact public owner behavior needed by this migration slice was already frozen by the #197 clean-room evidence series against the pinned Quarkdown v2.5.1/v2.6.0 binaries.
+
+The bounded question is narrower than the whole native `.error` host contract: when an explicit error appears inside an already-supported ordinary rendered owner, does evaluation preserve the owner and its surrounding siblings, or does migration accidentally hoist/drop/fabricate output?
+
+### Reused official v2.5.1/v2.6.0 reference
+
+All referenced probes used the same SHA-verified official Linux x64 archives:
+
+- v2.5.1: `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`;
+- v2.6.0: `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`.
+
+**Blockquote owner — #392**
+
+Disposable #392 is **CLOSED/DRAFT/UNMERGED** at exact HEAD `b933c59a925e6a4c0e9ec2fe38c5cda4356c441d`. Probe run #35470944959 completed **SUCCESS**:
+
+- v2.5.1 job `105971681630`;
+- v2.6.0 job `105971681518`.
+
+For the blockquote fixture, both releases agree:
+
+- default/non-strict returns `rc=0` and publishes output;
+- independent outer content before/after the blockquote remains;
+- local `quote-before` / `quote-after` siblings remain around the rendered error;
+- the error stays structurally nested under the blockquote rather than being hoisted to top level;
+- the rendered component contains the literal source call `.error {<marker>}`;
+- strict returns `rc=66` and publishes no artifact.
+
+**Direct emphasis and link owners — #431**
+
+Disposable #431 is **CLOSED/UNMERGED** at exact HEAD `ba6967abf7b8db33676e1792a05faa7794d11467`. Probe run #35960370518 completed **SUCCESS**:
+
+- v2.5.1 job `107507446189`;
+- v2.6.0 job `107507445946`.
+
+For both direct emphasis and direct link fixtures, both versions show the same bounded behavior:
+
+- default mode returns `rc=0`;
+- visible order is outer-before → local-before → rendered error → local-after → outer-after;
+- the rendered error DOM remains under the corresponding `em` or `a` owner;
+- the literal `.error {...}` source spelling is present in the rendered error;
+- strict returns `rc=66` with no HTML artifact.
+
+This is the direct owner evidence S25 needs. #382/#385/#386 remain baseline authority for explicit-error presentation, body replacement/caller continuation and strict first-error finalization, but they are not substitutes for these owner-local observations.
+
+**Representative rendered-owner composition — #433**
+
+Disposable #433 is **CLOSED/UNMERGED** at exact HEAD `4105ef2d9c349c96d84e9ca65997f58684fdaead`. Probe run #35961838890 completed **SUCCESS**:
+
+- v2.5.1 job `107511884469`;
+- v2.6.0 job `107511884449`.
+
+The independently authored matrix covers:
+
+- unordered-list → emphasis;
+- ordered-list → link;
+- blockquote → strong;
+- emphasis → link;
+- link → strong;
+- table-cell → strong.
+
+Every fixture is default `rc=0` with output present and one exact source-echo occurrence, while strict is `rc=66` with no HTML artifact in both releases.
+
+Canonical #197 source review explains why this representative matrix is sufficient for the already-supported ordinary rendered-owner tree: in both pinned upstream tags `FunctionCallNode` is an `ErrorCapableNode`, failed expansion is rendered by replacing the call node with `Box.error`, and `NestableNode` renderers recurse through children without an artificial owner-depth counter.
+
+That recursion rule is deliberately **not** generalized to distinct semantic owners. Image-alt, directive bodies, value/callable boundaries, and other independently different/cross-owned contexts remain fail-closed or owned elsewhere.
+
+### Arkst NEW_EXECUTION proof
+
+`g0_s25_inline_error_owner_siblings_match_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` adds one bounded core migration test with exactly three parser-clean fixtures:
+
+1. direct emphasis:
+   `outer-before *em-before .error {emphasis-error} em-after* outer-after`;
+2. direct link:
+   `outer-before [link-before .error {link-error} link-after](https://example.com) outer-after`;
+3. blockquote with independent outer paragraphs and local
+   `quote-before .error {quote-error} quote-after` siblings.
+
+The test compares the ordinary normal frontend `compile` path with the same source lowered through the legacy AST→IR bridge and evaluated through `evaluate_with_resources_and_libraries_for_mode`.
+
+The legacy side receives the existing test-local `FixtureSourceProvider` so both paths have equivalent #398 source-text provenance. That provider exposes only the known fixture's logical source path/text; resource reads fail closed and loadable-library lookup returns none. It does not grant new resource/library authority.
+
+For each fixture the oracle requires:
+
+- exact final `IrDocument` equality;
+- exact ordered diagnostic-signature equality;
+- exactly one source-backed `E3011`;
+- exact `.error {...}` `ExplicitError.source_echo`;
+- explicit-error component provenance tied to the fixture source;
+- preservation and ordering of all evidenced siblings.
+
+The owner-local shape is also explicit:
+
+- emphasis keeps the inline error inside `IrInline::Emphasis`;
+- link keeps it inside `IrInline::Link`;
+- blockquote keeps paragraph → explicit-error component → paragraph inside `IrNode::Blockquote`, between independent outer paragraphs.
+
+The first execution HEAD `4b007b1b310ace361a7b97d12558636ca61df8ae` completed all three semantic platform jobs successfully in CI #43680414824 but failed required `fmt`; Merge Gate therefore failed. No semantic assertion failed.
+
+Formatting-only HEAD `e541deb71b892ea44fbbff8a2f1732021ab6e4fb` then passed CI #43681039624. `fmt`, compatibility, Reference JVM, Ubuntu ARM64/macOS/Windows tests, clippy, wasm, msrv, docs, CodeQL runtime, dependency review, license, spelling and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
+
+### Boundary of the S25 claim
+
+This G0 test is a **core migration equivalence** proof. It intentionally does not duplicate already-frozen native host behavior:
+
+- default/non-strict recoverable rendering and process return code;
+- strict exit 66 / no-artifact finalization;
+- exact Quarkdown HTML DOM/CSS presentation.
+
+Those remain compatibility/host-finalization evidence owned by the existing logger/error probes and native CLI tests.
+
+Likewise, S25 does not broaden ordinary rendered-owner recursion into image-alt, directive-body, value/callable or other distinct semantic boundaries.
+
+**Classification:** `UPSTREAM_V251_V260_S25_INLINE_ERROR_OWNER_REFERENCE_FROZEN_ARKST_OWNER_LOCAL_SIBLING_PRESERVATION_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
