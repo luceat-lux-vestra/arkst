@@ -337,6 +337,56 @@ fn g0_s20_include_scope_and_share_visibility_match_legacy() {
 }
 
 #[test]
+fn g0_s21_delayed_resource_base_routes_match_legacy() {
+    let file_entry = ".include {parts/defs.qd}\n.readlater\n";
+    let file_project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("valid entry")
+        .add_source("docs/main.qd", file_entry)
+        .expect("valid entry source")
+        .add_source(
+            "docs/parts/defs.qd",
+            ".function {readlater}\n    .read {data.txt}\n",
+        )
+        .expect("valid definitions source")
+        .add_asset("docs/data.txt", b"CALLER_FILE_BASE".to_vec())
+        .expect("valid caller resource")
+        .add_asset(
+            "docs/parts/data.txt",
+            b"DEFINITION_FILE_BASE".to_vec(),
+        )
+        .expect("valid definition resource")
+        .build()
+        .expect("valid file-include project");
+
+    let file_result = compile_project_and_assert_legacy_parity(&file_project, file_entry);
+
+    assert!(file_result.diagnostics.is_empty(), "{file_result:?}");
+    assert_eq!(paragraph_text(&file_result), "DEFINITION_FILE_BASE");
+
+    let library_entry = ".include {reader}\n.readlater\n";
+    let library_project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("valid entry")
+        .add_source("docs/main.qd", library_entry)
+        .expect("valid entry source")
+        .add_asset("docs/data.txt", b"CALLER_LIBRARY_BASE".to_vec())
+        .expect("valid caller resource")
+        .add_loadable_library(
+            "reader",
+            ".function {readlater}\n    .read {data.txt}\n",
+        )
+        .build()
+        .expect("valid loadable-library project");
+
+    let library_result =
+        compile_project_and_assert_legacy_parity(&library_project, library_entry);
+
+    assert!(library_result.diagnostics.is_empty(), "{library_result:?}");
+    assert_eq!(paragraph_text(&library_result), "CALLER_LIBRARY_BASE");
+}
+
+#[test]
 fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
     let success = ".sum {1} {2}\n";
     let success_result = compile_and_assert_legacy_parity(success);
