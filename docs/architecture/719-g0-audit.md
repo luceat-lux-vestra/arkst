@@ -500,7 +500,7 @@ The existing engine regressions remain the detailed request/provenance anchors:
 - `included_file_functions_keep_their_definition_resource_base`;
 - `library_functions_keep_includer_resource_base_and_detached_provenance`.
 
-**Classification:** `UPSTREAM_V251_V260_S21_TWO_ROUTE_RESOURCE_BASE_REFERENCE_FROZEN_ARKST_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION evidence are frozen; only this documentation/oracle reconciliation HEAD still requires exact-head CI before the classification text itself is qualified on #746.
+**Classification:** `UPSTREAM_V251_V260_S21_TWO_ROUTE_RESOURCE_BASE_REFERENCE_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION evidence, and this documentation/oracle reconciliation are exact-head qualified on #746 by CI #43659502201.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
