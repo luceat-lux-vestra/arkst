@@ -502,6 +502,71 @@ The existing engine regressions remain the detailed request/provenance anchors:
 
 **Classification:** `UPSTREAM_V251_V260_S21_TWO_ROUTE_RESOURCE_BASE_REFERENCE_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION evidence, and this documentation/oracle reconciliation are exact-head qualified on #746 by CI #43659502201.
 
+## S22 environment input boundary — upstream reference reused, explicit-snapshot migration qualified
+
+S22 does not require a new clean-room probe. Issue #190 already closed the process/environment boundary using independently authored official Quarkdown evidence from disposable PR #374 plus a deterministic Arkst host contract.
+
+### Existing official reference
+
+`docs/compatibility/quarkdown/ENVIRONMENT_INPUTS.md` records the clean-room observations from disposable PR #374, which is **CLOSED/DRAFT/UNMERGED** at exact HEAD `499114ff56e500e27710021a5cacefdb6ca2412a`. The official Linux x64 archives were pinned before execution:
+
+- Quarkdown v2.5.1 SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`;
+- Quarkdown v2.6.0 SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`.
+
+Both releases established the same bounded public behavior:
+
+1. without explicit `process` permission, `.env` is denied before variable presence matters;
+2. with `--allow process`, a present variable returns the exact host-provided String;
+3. with `--allow process`, an absent variable returns `none`;
+4. allowed present/absent cases succeed in both normal and strict modes.
+
+This is public-language evidence for permission gating and present/absent values. It is **not** a requirement that Arkst expose ambient process state.
+
+### Arkst host-boundary decision
+
+Closed issue #190 intentionally replaces upstream ambient process lookup with an explicit deterministic capability boundary. The reviewed implementation PR #375 was green at exact HEAD `f4f8e86b69e53c8da86cb02ea59af2ab520f908e` and merged as main commit `8e1c692e39ebcbf09a49229385ef4169bb55b56c`.
+
+The accepted Arkst contract is:
+
+- `EnvironmentInputs` is an immutable caller-supplied snapshot for one evaluation;
+- supplying a snapshot authorizes `.env` and defines the **complete** visible environment;
+- a present key returns the exact injected String;
+- an absent key returns `None`;
+- omitting the snapshot fails closed with source-backed `E3004`;
+- an explicit empty snapshot authorizes lookup while making every key absent;
+- production engine/core paths do not call `std::env` and do not fall back to cwd/process state;
+- public WASM/embedder exposure remains separately owned by #191.
+
+This is an intentional host-authority distinction while preserving the bounded language-level present/absent semantics.
+
+### Fresh G0 NEW_EXECUTION proof
+
+`g0_s22_environment_boundary_matches_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` adds two bounded normal-frontend vs legacy-evaluator cases.
+
+**Case A — no snapshot**
+
+- source: `.env {PATH}`;
+- normal frontend uses the ordinary `compile` path;
+- legacy path uses the existing project-backed evaluator without environment authority;
+- exact final `IrDocument` and ordered diagnostic signatures must match;
+- exactly one source-backed `E3004` is required;
+- no output nodes are allowed.
+
+**Case B — explicit empty snapshot**
+
+- source: `.string {.isnone {.env {PATH}}}`;
+- normal frontend uses `compile_with_environment(..., EnvironmentInputs::default())`;
+- legacy path uses `Evaluator::evaluate_project_with_environment` with the same empty snapshot;
+- exact final `IrDocument` and ordered diagnostic signatures must match;
+- diagnostics must be empty;
+- visible output must be `true`.
+
+Using `PATH` is deliberate: CI runners have ambient process state, so the explicit-empty case proves that the snapshot is complete authority rather than an overlay onto the host process environment.
+
+After the rustfmt-only follow-up, exact execution HEAD `5afd35c332becb6dd350cfc71aca1b4e34b4154d` passed CI #43661962464. `fmt`, Ubuntu ARM64/macOS/Windows tests, Reference JVM, compatibility, clippy, wasm, msrv, docs, CodeQL runtime and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
+
+**Classification:** `UPSTREAM_V251_V260_ENV_PERMISSION_PRESENT_ABSENT_REFERENCE_FROZEN_ARKST_EXPLICIT_SNAPSHOT_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
