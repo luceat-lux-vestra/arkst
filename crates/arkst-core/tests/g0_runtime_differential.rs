@@ -196,8 +196,7 @@ fn compile_project_with_log_sink_and_assert_legacy_parity(
     );
 
     let frontend_sink = CollectingSink::default();
-    let frontend =
-        compile_with_log_sink(project, &CompileOptions::default(), &frontend_sink);
+    let frontend = compile_with_log_sink(project, &CompileOptions::default(), &frontend_sink);
     let legacy_sink = CollectingSink::default();
     let (legacy_ir, legacy_diagnostics) =
         arkst_engine::evaluator::Evaluator::new().evaluate_with_log_sink(&lowered, &legacy_sink);
