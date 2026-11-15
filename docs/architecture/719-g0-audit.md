@@ -842,7 +842,7 @@ Those remain compatibility/host-finalization evidence owned by the existing logg
 
 Likewise, S25 does not broaden ordinary rendered-owner recursion into image-alt, directive-body, value/callable or other distinct semantic boundaries.
 
-**Classification:** `UPSTREAM_V251_V260_S25_INLINE_ERROR_OWNER_REFERENCE_FROZEN_ARKST_OWNER_LOCAL_SIBLING_PRESERVATION_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+**Classification:** `UPSTREAM_V251_V260_S25_INLINE_ERROR_OWNER_REFERENCE_FROZEN_ARKST_OWNER_LOCAL_SIBLING_PRESERVATION_CROSS_PLATFORM_PROVEN`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
