@@ -1154,6 +1154,75 @@ merge.
 
 
 
+
+## S30 native backend parity — frozen current baseline
+
+S30 freezes the current native backend boundary after Arkst semantic evaluation
+and pure Typst lowering are complete. It does not require both native adapters
+to expose identical implementation details or identical diagnostic types.
+
+At exact #746 HEAD
+`83b564dc0615483711cc78dd3b428221d74465ae`,
+`backend_parity_corpus_has_one_semantic_oracle_for_both_native_adapters`
+constructs each logical fixture once as a `VirtualProject`, runs the public
+Arkst `compile` path and `arkst_typst::lower_to_typst`, then gives the same
+generated Typst input to both `SubprocessBackend` and `InProcessBackend`.
+The frontend/evaluator is therefore fixture construction before the backend
+boundary, not work performed by either adapter.
+
+The production dependency boundary reinforces that contract:
+`arkst-typst-subprocess` and `arkst-typst-inprocess` do not depend on
+`arkst-core` or `arkst-engine`. The subprocess adapter invokes the installed
+Typst executable; the in-process adapter invokes Typst's compiler/PDF APIs over
+its `VirtualProject`-backed world. Neither native backend has an Arkst
+evaluator call path.
+
+The existing parity oracle covers:
+
+- generated-source semantic markers before backend execution;
+- shared observable success/failure classification where the adapter contracts
+  are intended to agree;
+- non-empty PDF, `%PDF-` header, `%%EOF`, observable page count, equal page
+  count across adapters, and a two-page minimum for the multi-page fixture;
+- logical diagnostic paths and no native/temp path leakage;
+- package-diagnostic remote-URL hygiene;
+- reliable unique original `SourceSpan` handoff only in the in-process
+  adapter;
+- no fabricated original `SourceSpan` when mapping is unavailable or
+  ambiguous, and no structured subprocess original span; and
+- the reviewed package-capability divergence: subprocess best-effort static
+  preflight versus the in-process hard package/network capability boundary.
+
+PDF byte identity, object ordering, metadata/compression identity, and exact
+backend-specific diagnostic wording are deliberately not parity requirements.
+
+### Exact-head execution qualification
+
+The parity suite itself verifies the external Typst executable is version
+`0.15.1`; with `ARKST_REQUIRE_TYPST=1` a missing executable is a failure, not
+a skip. The production CI workflow installs pinned Typst 0.15.1 and runs the
+workspace `Test (Typst required)` step with that requirement enabled.
+
+At exact current #746 HEAD
+`83b564dc0615483711cc78dd3b428221d74465ae`, CI #43724517447 completed
+**SUCCESS**. The Typst-required test step succeeded on Ubuntu ARM64, macOS, and
+Windows, and the required `Merge Gate` succeeded. Security Audit was
+scope-skipped.
+
+No new S30 test was necessary: the already-existing corpus plus this current
+exact-head cross-platform execution closes the bounded G0 evidence requirement.
+
+G6 must preserve the completed final semantic input boundary when executable
+state is removed from final IR. G8 must requalify the same adapter-specific
+observable parity after integration; it must not fabricate evaluator work,
+subprocess structured source spans, or stronger subprocess package isolation.
+
+**Classification:**
+`CURRENT_PINNED_TYPST_NATIVE_BACKEND_PARITY_CORPUS_FROZEN_G6_G8_PENDING`.
+
+S30 does not implement G6/G8, complete G0, authorize G1, or permit #746 to
+merge.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
