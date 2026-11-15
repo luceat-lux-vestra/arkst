@@ -729,6 +729,218 @@ fn g0_s24_raw_html_and_native_content_denial_match_legacy() {
 }
 
 #[test]
+fn g0_s25_inline_error_owner_siblings_match_legacy() {
+    fn compile_source_aware_and_assert_legacy_parity(source: &str) -> (CompileResult, SourceId) {
+        let (project, source_id) = build_project(source);
+        let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "G0 differential fixtures must start from parser-clean source: {:?}",
+            parsed.diagnostics
+        );
+
+        let (lowered, lowering_diagnostics) =
+            arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+                &parsed.document,
+                source_id,
+                &DocumentMetadataDefaults::default(),
+                Mode::Quarkdown,
+            );
+        assert!(
+            lowering_diagnostics.is_empty(),
+            "G0 differential fixture must be representable by the legacy AST-to-IR bridge: {lowering_diagnostics:?}"
+        );
+
+        let frontend = compile(&project, &CompileOptions::default());
+        let legacy_host = FixtureSourceProvider { source_id, source };
+        let (legacy_ir, legacy_diagnostics) =
+            arkst_engine::evaluator::Evaluator::new()
+                .evaluate_with_resources_and_libraries_for_mode(
+                    &legacy_host,
+                    &legacy_host,
+                    source_id,
+                    Mode::Quarkdown,
+                    &lowered,
+                    &DocumentMetadataDefaults::default(),
+                );
+
+        assert_eq!(
+            frontend.ir, legacy_ir,
+            "normal direct-frontend explicit-error result diverged from the legacy pre-lowered IR evaluator"
+        );
+        assert_eq!(
+            diagnostic_signature(&frontend.diagnostics),
+            diagnostic_signature(&legacy_diagnostics),
+            "normal direct-frontend explicit-error diagnostics diverged from the legacy pre-lowered IR evaluator"
+        );
+
+        (frontend, source_id)
+    }
+
+    fn inline_text(inlines: &[IrInline]) -> String {
+        inlines
+            .iter()
+            .filter_map(|inline| match inline {
+                IrInline::Text { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<String>()
+            .trim()
+            .to_string()
+    }
+
+    fn assert_error_provenance(
+        result: &CompileResult,
+        source: &str,
+        source_id: SourceId,
+        message: &str,
+    ) {
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3011");
+        assert!(diagnostic.message.contains(message));
+        assert_eq!(
+            diagnostic.primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+
+        let source_echo = format!(".error {{{message}}}");
+        assert!(
+            source.contains(&source_echo),
+            "fixture must contain the expected explicit-error spelling"
+        );
+    }
+
+    fn assert_inline_owner(
+        result: &CompileResult,
+        source: &str,
+        source_id: SourceId,
+        owner: &str,
+        before: &str,
+        message: &str,
+        after: &str,
+    ) {
+        assert_error_provenance(result, source, source_id, message);
+        let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
+            panic!("{owner}: expected one paragraph, got {:?}", result.ir.nodes);
+        };
+        assert_eq!(inline_text(&content[..1]), "outer-before", "{owner}");
+
+        let owner_content = match (owner, &content[1]) {
+            ("emphasis", IrInline::Emphasis { content, .. })
+            | ("link", IrInline::Link { content, .. }) => content,
+            (_, other) => panic!("{owner}: unexpected inline owner {other:?}"),
+        };
+        let [before_inline, error_inline, after_inline] = owner_content.as_slice() else {
+            panic!("{owner}: expected text/error/text, got {owner_content:?}");
+        };
+        assert_eq!(
+            inline_text(std::slice::from_ref(before_inline)),
+            before,
+            "{owner}"
+        );
+
+        let IrInline::ExplicitError { component } = error_inline else {
+            panic!("{owner}: expected inline explicit error, got {error_inline:?}");
+        };
+        assert_eq!(component.message, message, "{owner}");
+        assert_eq!(
+            component.source_echo.as_deref(),
+            Some(format!(".error {{{message}}}").as_str()),
+            "{owner}"
+        );
+        assert_eq!(component.span.source_id, source_id, "{owner}");
+
+        assert_eq!(
+            inline_text(std::slice::from_ref(after_inline)),
+            after,
+            "{owner}"
+        );
+        assert_eq!(inline_text(&content[2..]), "outer-after", "{owner}");
+    }
+
+    for (source, owner, before, message, after) in [
+        (
+            "outer-before *em-before .error {emphasis-error} em-after* outer-after\n",
+            "emphasis",
+            "em-before",
+            "emphasis-error",
+            "em-after",
+        ),
+        (
+            "outer-before [link-before .error {link-error} link-after](https://example.com) outer-after\n",
+            "link",
+            "link-before",
+            "link-error",
+            "link-after",
+        ),
+    ] {
+        let (result, source_id) = compile_source_aware_and_assert_legacy_parity(source);
+        assert_inline_owner(&result, source, source_id, owner, before, message, after);
+    }
+
+    let blockquote_source =
+        "outer-before\n\n> quote-before .error {quote-error} quote-after\n\nouter-after\n";
+    let (blockquote, source_id) =
+        compile_source_aware_and_assert_legacy_parity(blockquote_source);
+    assert_error_provenance(&blockquote, blockquote_source, source_id, "quote-error");
+
+    let [
+        IrNode::Paragraph {
+            content: outer_before,
+            ..
+        },
+        IrNode::Blockquote { content, .. },
+        IrNode::Paragraph {
+            content: outer_after,
+            ..
+        },
+    ] = blockquote.ir.nodes.as_slice()
+    else {
+        panic!(
+            "blockquote: expected outer paragraph / blockquote / outer paragraph, got {:?}",
+            blockquote.ir.nodes
+        );
+    };
+    assert_eq!(inline_text(outer_before), "outer-before");
+    assert_eq!(inline_text(outer_after), "outer-after");
+
+    let [before, error, after] = content.as_slice() else {
+        panic!("blockquote: expected paragraph/error/paragraph, got {content:?}");
+    };
+    let IrNode::Paragraph {
+        content: before_content,
+        ..
+    } = before
+    else {
+        panic!("blockquote: expected before paragraph, got {before:?}");
+    };
+    assert_eq!(inline_text(before_content), "quote-before");
+
+    let IrNode::Component {
+        component: IrComponent::ExplicitError(component),
+    } = error
+    else {
+        panic!("blockquote: expected nested explicit-error component, got {error:?}");
+    };
+    assert_eq!(component.message, "quote-error");
+    assert_eq!(
+        component.source_echo.as_deref(),
+        Some(".error {quote-error}")
+    );
+    assert_eq!(component.span.source_id, source_id);
+
+    let IrNode::Paragraph {
+        content: after_content,
+        ..
+    } = after
+    else {
+        panic!("blockquote: expected after paragraph, got {after:?}");
+    };
+    assert_eq!(inline_text(after_content), "quote-after");
+}
+
+#[test]
 fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
     let success = ".sum {1} {2}\n";
     let success_result = compile_and_assert_legacy_parity(success);
