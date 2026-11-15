@@ -567,6 +567,55 @@ After the rustfmt-only follow-up, exact execution HEAD `5afd35c332becb6dd350cfc7
 
 **Classification:** `UPSTREAM_V251_V260_ENV_PERMISSION_PRESENT_ABSENT_REFERENCE_FROZEN_ARKST_EXPLICIT_SNAPSHOT_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION, and this oracle/audit reconciliation are exact-head qualified on #746 by CI #43662649388.
 
+## S23 logger side effects and explicit-error boundary — existing clean-room reference reused, sink-aware migration qualified
+
+S23 does not require a new clean-room probe. Closed issue #197 already assembled independent official Quarkdown v2.5.1/v2.6.0 logger/error evidence, and merged #398 separately owns the source-echo provenance needed for exact explicit-error IR comparison.
+
+### Existing official reference
+
+The canonical evidence remains `docs/compatibility/quarkdown/LOGGER_DIAGNOSTICS.md`.
+
+- Disposable PR #378 is **CLOSED/DRAFT/UNMERGED** at exact HEAD `82885148091846b7f7bb4e33611d6738a5953727`; probe run #35426565850 completed **SUCCESS** and freezes the bounded DynamicValue Pair projection used by direct `.log` / `.debug`.
+- Disposable #382 exact HEAD `aa1e3d48a67b3655bd0660ff328b7d03301f27a1` / run #35432948304 **SUCCESS** and #385 exact HEAD `d60bed38621ae4bb0fad5812ba4c8d526eecede1` / run #35436686190 **SUCCESS** freeze non-strict explicit-error continuation: the selected local body stops/replaces at `.error`, while caller/top-level continuation proceeds.
+- Disposable #386 exact HEAD `360150d0d4532cb6178e493297f5cb18c84bafe6` / run #35445609185 **SUCCESS** freezes logger/error evaluation ordering and the fact that already-emitted logger side effects are not retroactively rolled back merely because a later selected explicit error finalizes strict publication.
+- Merged PR #398, `compat(logger): preserve evidenced explicit-error source echo`, exact reviewed HEAD `2b1770a7452194e486bfe4fbb3d083ee89a4fdd1`, owns the bounded source-spelling provenance contract. It captures the original `.error {...}` call spelling through `ResourceProvider::source_text` before callable-result span rebasing and fails closed to `None` if the host does not expose source text.
+
+The last point is a provenance capability, not ambient resource discovery. Exact final-IR comparison must therefore compare execution paths with equivalent source-text availability; normal frontend evidence must not be normalized to erase `source_echo`.
+
+### Fresh G0 NEW_EXECUTION proof
+
+`g0_s23_logger_side_effects_survive_later_explicit_error_matches_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` uses a source-defined callable whose body executes, in order:
+
+1. `.log {.pair {left} {right}}`;
+2. `.debug {second}`;
+3. `.error {boom}`.
+
+The callable is invoked between caller-visible `before` and `after` content.
+
+The sink-specific parity helper compares:
+
+- normal `compile_with_log_sink`;
+- the same parser-clean source lowered through the legacy AST-to-IR bridge and evaluated with `Evaluator::evaluate_with_resources_and_libraries_and_log_sink_for_mode`.
+
+The legacy side receives a test-local fail-closed host adapter that exposes only the already-known fixture entry's stable logical `source_path` and exact `source_text`. It returns no loadable libraries and rejects resource reads/includes. This is required only to match the normal frontend's #398 provenance capability; it does not add resource or library authority.
+
+The oracle remains strict:
+
+- exact final `IrDocument` equality, including `ExplicitError.source_echo`;
+- exact ordered diagnostic-signature equality;
+- exact ordered `LogEvent` equality;
+- first event is `Log` with the reviewed Pair projection;
+- second event is `Debug("second")`;
+- one `E3011` explicit-error boundary is present;
+- final document shape is caller `before` → explicit-error component → caller `after`;
+- both already-emitted events survive the later callable failure.
+
+The initial execution HEAD `371f84a7a9136dabd1f14d09fc3497be722ddaf0` deliberately failed the exact IR oracle because the legacy comparator incorrectly used provider-less `evaluate_with_log_sink`: normal frontend produced `source_echo: Some(".error {boom}")`, while the lower-capability legacy host correctly failed closed to `None`. That failure exposed a harness asymmetry, not a product semantic divergence, so the exact IR assertion was retained.
+
+After correcting only that host equivalence, exact execution HEAD `e77aaffee570c56827db073d908b77fd3eb95efd` passed CI #43664217853. `fmt`, compatibility, Reference JVM, Ubuntu ARM64/macOS/Windows tests, clippy, wasm, msrv, docs, CodeQL runtime, dependency review, license, spelling and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
+
+**Classification:** `UPSTREAM_V251_V260_S23_LOGGER_ERROR_REFERENCE_FROZEN_ARKST_ORDER_NONROLLBACK_SOURCE_ECHO_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
