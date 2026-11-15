@@ -119,6 +119,70 @@ fn source_map_is_independent_of_source_insertion_order() {
 }
 
 #[test]
+fn nested_include_source_map_is_independent_of_source_insertion_order() {
+    const MAIN: &str = ".include {partials/child.qd}\n";
+    const CHILD: &str = "child text\n";
+    const CHILD_PATH: &str = "docs/partials/child.qd";
+
+    let project1 = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("valid path")
+        .add_source("docs/main.qd", MAIN)
+        .expect("valid path")
+        .add_source(CHILD_PATH, CHILD)
+        .expect("valid path")
+        .build()
+        .expect("valid project");
+
+    let project2 = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("valid path")
+        .add_source(CHILD_PATH, CHILD)
+        .expect("valid path")
+        .add_source("docs/main.qd", MAIN)
+        .expect("valid path")
+        .build()
+        .expect("valid project");
+
+    let result1 = compile(&project1, &CompileOptions::default());
+    let result2 = compile(&project2, &CompileOptions::default());
+    assert!(result1.diagnostics.is_empty(), "{result1:?}");
+    assert!(result2.diagnostics.is_empty(), "{result2:?}");
+
+    let child_id1 = project1
+        .sources()
+        .iter()
+        .find_map(|(source_id, path, _)| (path.as_str() == CHILD_PATH).then_some(source_id))
+        .expect("child source id");
+    let child_id2 = project2
+        .sources()
+        .iter()
+        .find_map(|(source_id, path, _)| (path.as_str() == CHILD_PATH).then_some(source_id))
+        .expect("child source id");
+
+    let (typst1, map1) = lower_to_typst(&result1.ir);
+    let (typst2, map2) = lower_to_typst(&result2.ir);
+    assert_eq!(typst1, typst2);
+    assert_eq!(map1, map2);
+
+    for (child_id, typst, source_map) in [
+        (child_id1, typst1.as_str(), map1.as_slice()),
+        (child_id2, typst2.as_str(), map2.as_slice()),
+    ] {
+        let child_entry = source_map
+            .iter()
+            .find(|entry| entry.original.source_id == child_id)
+            .expect("nested child must own a generated source-map range");
+        assert!(child_entry.original.start < child_entry.original.end);
+        assert!(child_entry.original.end <= CHILD.len());
+        assert!(child_entry.generated_start < child_entry.generated_end);
+        assert!(child_entry.generated_end <= typst.len());
+        assert!(!typst[child_entry.generated_start..child_entry.generated_end].is_empty());
+        assert!(!CHILD[child_entry.original.start..child_entry.original.end].is_empty());
+    }
+}
+
+#[test]
 fn conditional_evaluation_before_lowering() {
     let compile_typst = |source: &str| {
         let project = VirtualProjectBuilder::new()

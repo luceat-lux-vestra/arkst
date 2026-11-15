@@ -1078,6 +1078,71 @@ Audit was scope-skipped.
 `CURRENT_CLI_INSPECT_IR_DIRECT_UNVERSIONED_CORE_SERIALIZATION_FROZEN_G7_VERSIONED_CLI_FACADE_PENDING`.
 S28 does not implement G7, complete G0, authorize G1, or permit #746 to merge.
 
+## S29 source map — current nested-include provenance candidate
+
+S29 owns the current source-identity and pure lowering provenance baseline, not
+an artificial requirement that both native Typst adapters expose identical
+structured original-source diagnostics.
+
+At exact pre-S29 #746 HEAD
+`d1b09428af47512c127c5c2c146ada2da8c7416e`,
+`VirtualProjectBuilder::build` sorts ordinary sources by canonical logical
+path before insertion into `SourceStore`. `SourceStore` then allocates
+monotonic `SourceId` values, so ordinary project IDs are stable against the
+caller's `add_source` order. Detached loadable-library provenance is allocated
+only after ordinary sources.
+
+Existing
+`source_map_is_independent_of_source_insertion_order` already compiles two
+projects with reversed source-add order and requires identical generated Typst
+plus identical complete `SourceMapEntry` vectors. Existing core resource
+coverage separately proves nested include/resource evaluation retains the
+included source identity. The remaining bounded S29 gap is therefore successful
+composition of those two facts: a nested included child must actually own an
+emitted lowering mapping while the complete output/map remain insertion-order
+stable.
+
+`arkst_typst::lower_to_typst` is a pure host-independent lowering boundary.
+It records emitted generated ranges against the `SourceSpan` already carried
+by final semantic nodes/inline values. Host behavior is intentionally
+asymmetric: the optional in-process adapter accepts the lowering-owned map and
+maps a Typst diagnostic back only when one unique validated mapping covers the
+generated range, while the subprocess adapter does not accept a source map and
+returns sanitized textual generated-source diagnostics. Existing in-process
+reliable/incomplete/ambiguous mapping tests and the cross-backend parity corpus
+freeze that distinction. S29 therefore does not fabricate subprocess
+structured spans merely to satisfy the old shorthand "both hosts" wording.
+
+### G0 NEW_EXECUTION candidate
+
+`lowering_integration::nested_include_source_map_is_independent_of_source_insertion_order`
+adds one focused real frontend-to-lowering proof. It builds two equivalent
+projects whose `docs/main.qd` performs
+`.include {partials/child.qd}`, reverses only source-add order, and:
+
+1. requires both public `compile` results to be diagnostic-free;
+2. resolves the child source identity by logical path rather than hard-coding a
+   numeric `SourceId`;
+3. requires identical generated Typst and identical complete source-map vectors;
+4. requires the nested child to own at least one non-empty generated mapping;
+   and
+5. validates both the child's original byte range against the actual child
+   source and the generated range against the generated Typst.
+
+The test does not add a raw Typst escape, invoke either native backend, or
+duplicate the existing host diagnostic-handoff tests.
+
+G6 must preserve this source provenance when executable state is removed from
+final IR. G8 owns backend-specific source-map/diagnostic acceptance and must
+respect the already-evidenced adapter asymmetry rather than require fabricated
+subprocess `SourceSpan` parity.
+
+**Classification candidate:**
+`CURRENT_PATH_SORTED_SOURCE_IDS_AND_TYPST_SOURCE_MAP_NESTED_INCLUDE_MAPPING_NEW_EXECUTION_CANDIDATE_CI_PENDING_G6_G8`.
+S29 does not implement G6/G8, complete G0, authorize G1, or permit #746 to
+merge.
+
+
 
 
 
