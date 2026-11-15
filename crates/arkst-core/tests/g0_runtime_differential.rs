@@ -704,7 +704,7 @@ fn g0_s24_raw_html_and_native_content_denial_match_legacy() {
     assert_eq!(paragraph_text(&raw_result), "before S24_RAW after");
     assert!(!format!("{:?}", raw_result.ir).contains("TargetSpecificContent"));
 
-    let denied_source = ".html {<em>S24_DENIED</em>}\n";
+    let denied_source = ".html {<em>denied</em>}\n";
     let (denied_project, denied_source_id) = build_project(denied_source);
     let denied_result = compile_project_with_capabilities_and_assert_legacy_parity(
         &denied_project,
@@ -716,11 +716,13 @@ fn g0_s24_raw_html_and_native_content_denial_match_legacy() {
     let diagnostic = &denied_result.diagnostics[0];
     assert_eq!(diagnostic.code, "E3004");
     assert!(diagnostic.message.contains("NativeContent"));
-    let span = diagnostic.primary.expect("native-content denial primary span");
+    let span = diagnostic
+        .primary
+        .expect("native-content denial primary span");
     assert_eq!(span.source_id, denied_source_id);
     assert_eq!(
         denied_source.get(span.start..span.end),
-        Some(".html {<em>S24_DENIED</em>}")
+        Some(".html {<em>denied</em>}")
     );
     assert!(denied_result.ir.nodes.is_empty(), "{denied_result:?}");
     assert!(!format!("{:?}", denied_result.ir).contains("TargetSpecificContent"));
