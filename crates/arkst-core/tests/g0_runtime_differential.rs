@@ -185,8 +185,7 @@ fn compile_project_with_capabilities_and_assert_legacy_parity(
             Mode::Quarkdown,
         );
 
-    let frontend =
-        compile_with_capabilities(project, &CompileOptions::default(), capabilities);
+    let frontend = compile_with_capabilities(project, &CompileOptions::default(), capabilities);
     let (legacy_ir, mut legacy_diagnostics) =
         arkst_core::evaluator::Evaluator::with_capabilities(capabilities)
             .evaluate_project(project, source_id, &lowered);
@@ -726,7 +725,6 @@ fn g0_s24_raw_html_and_native_content_denial_match_legacy() {
     assert!(denied_result.ir.nodes.is_empty(), "{denied_result:?}");
     assert!(!format!("{:?}", denied_result.ir).contains("TargetSpecificContent"));
 }
-
 
 #[test]
 fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
