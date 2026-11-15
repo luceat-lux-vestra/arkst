@@ -351,10 +351,7 @@ fn g0_s21_delayed_resource_base_routes_match_legacy() {
         .expect("valid definitions source")
         .add_asset("docs/data.txt", b"CALLER_FILE_BASE".to_vec())
         .expect("valid caller resource")
-        .add_asset(
-            "docs/parts/data.txt",
-            b"DEFINITION_FILE_BASE".to_vec(),
-        )
+        .add_asset("docs/parts/data.txt", b"DEFINITION_FILE_BASE".to_vec())
         .expect("valid definition resource")
         .build()
         .expect("valid file-include project");
@@ -372,15 +369,11 @@ fn g0_s21_delayed_resource_base_routes_match_legacy() {
         .expect("valid entry source")
         .add_asset("docs/data.txt", b"CALLER_LIBRARY_BASE".to_vec())
         .expect("valid caller resource")
-        .add_loadable_library(
-            "reader",
-            ".function {readlater}\n    .read {data.txt}\n",
-        )
+        .add_loadable_library("reader", ".function {readlater}\n    .read {data.txt}\n")
         .build()
         .expect("valid loadable-library project");
 
-    let library_result =
-        compile_project_and_assert_legacy_parity(&library_project, library_entry);
+    let library_result = compile_project_and_assert_legacy_parity(&library_project, library_entry);
 
     assert!(library_result.diagnostics.is_empty(), "{library_result:?}");
     assert_eq!(paragraph_text(&library_result), "CALLER_LIBRARY_BASE");
