@@ -726,7 +726,7 @@ The first execution HEAD `d617174802424c147f58beb2db6cf32d0835229c` failed CI #4
 
 After replacing only that sentinel with the already-established parser-clean `denied` spelling and applying rustfmt, corrected exact HEAD `64ea463bae32626c7a0d2dad2329d1982848553c` passed CI #43671340151. `fmt`, compatibility, Reference JVM, Ubuntu ARM64/macOS/Windows tests, clippy, wasm, msrv, docs, CodeQL runtime, dependency review, license, spelling and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
 
-**Classification:** `UPSTREAM_V251_V260_S24_NATIVE_CONTENT_REFERENCE_FROZEN_ARKST_POLICY_DIVERGENCE_AND_CAPABILITY_BOUNDARY_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+**Classification:** `UPSTREAM_V251_V260_S24_NATIVE_CONTENT_REFERENCE_FROZEN_ARKST_POLICY_DIVERGENCE_AND_CAPABILITY_BOUNDARY_CROSS_PLATFORM_PROVEN`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
