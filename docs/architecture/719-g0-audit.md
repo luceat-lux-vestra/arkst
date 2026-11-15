@@ -464,6 +464,44 @@ There is no source-language operation that serializes/decodes a callable in plac
 
 **Classification:** `ARKST_S20_SOURCE_RELATIVE_AND_SANDBOX_VISIBILITY_MIGRATION_QUALIFIED_CAPABILITY_LEGACY_IR_ONLY_BOUNDARY_FROZEN_REFERENCE_PENDING_CI_PENDING`. The two public migration proofs are qualified; the capability boundary is disposition-frozen at engine/legacy-IR level; only the updated documentation/classification HEAD and exact official reference remain to close this S20 evidence slice.
 
+## S21 delayed callable resource-base routes — official two-route reference frozen, NEW_EXECUTION qualified
+
+The original S21 oracle wording conflated two different resource-base routes. The frozen contract is now explicit:
+
+1. **Path-backed file include:** an ordinary included source owns a real source-relative base. A callable defined in that included file and invoked later resolves nested resources from the **defining included source**.
+2. **External loadable library:** a library supplied through the external-library registry is evaluated with detached library provenance but keeps the **caller/includer resource base** for nested resource access. It does not acquire the library directory as a language-level resource base.
+
+### Independent official reference
+
+Disposable clean-room draft PR #771 was closed **UNMERGED** at exact HEAD `71f9179fe48caaa53bda1eac105396a9138ff1ee`. Probe run #43657450168 completed **SUCCESS** for both pinned releases:
+
+- Quarkdown v2.5.1 artifact `14139041481`, digest / downloaded ZIP SHA-256 `8da915f7820b0cc389358c44ad59e7dfaa5c114cbbb493a8e6bad899383af884`;
+- Quarkdown v2.6.0 artifact `14137969953`, digest / downloaded ZIP SHA-256 `ae56184c3810cfb2d168c3f3d0d4225abfcae36d4151d85f6bf64ab7d6b90285`.
+
+All **8/8** version/mode/fixture observations were independently reconciled against the archived source/input hashes, stdout/stderr, generated HTML count and HTML hashes. Both releases in default and strict mode produced `rc=0`, empty stderr and exactly one HTML output per fixture.
+
+- **Path-backed include delayed callable:** visible sentinel `DEFINITION_FILE_BASE`; HTML SHA-256 `1d8f202153bfdba36388a12ae394448e2c4c5012c84b7ea1ccdca326339d64e7`.
+- **External `--libs` delayed callable:** visible sentinel `CALLER_LIBRARY_BASE`; HTML SHA-256 `cc33004a5ce0764e443dd4aecf74cef80c70f803f187205de5a764050804900a`.
+
+This freezes the public upstream distinction. It is not evidence that every callable uses a definition base, and it does not widen any provider/capability authority.
+
+### Arkst NEW_EXECUTION proof
+
+`g0_s21_delayed_resource_base_routes_match_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` contains two independent `VirtualProject` subfixtures and reuses the existing `compile_project_and_assert_legacy_parity` helper:
+
+- the file-include subfixture uses conflicting `docs/data.txt=CALLER_FILE_BASE` and `docs/parts/data.txt=DEFINITION_FILE_BASE` resources and requires visible `DEFINITION_FILE_BASE`;
+- the loadable-library subfixture registers `reader` with `add_loadable_library`, uses caller resource `docs/data.txt=CALLER_LIBRARY_BASE`, and requires visible `CALLER_LIBRARY_BASE`;
+- both require exact final `IrDocument` equality and ordered diagnostic-signature equality between normal frontend compilation and the legacy pre-lowered evaluator, with empty diagnostics.
+
+After the rustfmt-only follow-up, exact execution HEAD `d9a128c03097739d258a5ad2036b46d6316efd69` passed CI #43658830869: `fmt`, Ubuntu ARM64/macOS/Windows tests, Reference JVM, compatibility, clippy, wasm, msrv, docs and required `Merge Gate` all completed **SUCCESS**.
+
+The existing engine regressions remain the detailed request/provenance anchors:
+
+- `included_file_functions_keep_their_definition_resource_base`;
+- `library_functions_keep_includer_resource_base_and_detached_provenance`.
+
+**Classification:** `UPSTREAM_V251_V260_S21_TWO_ROUTE_RESOURCE_BASE_REFERENCE_FROZEN_ARKST_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION evidence are frozen; only this documentation/oracle reconciliation HEAD still requires exact-head CI before the classification text itself is qualified on #746.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
