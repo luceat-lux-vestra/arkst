@@ -1078,7 +1078,7 @@ Audit was scope-skipped.
 `CURRENT_CLI_INSPECT_IR_DIRECT_UNVERSIONED_CORE_SERIALIZATION_FROZEN_G7_VERSIONED_CLI_FACADE_PENDING`.
 S28 does not implement G7, complete G0, authorize G1, or permit #746 to merge.
 
-## S29 source map — current nested-include provenance candidate
+## S29 source map — frozen current nested-include provenance baseline
 
 S29 owns the current source-identity and pure lowering provenance baseline, not
 an artificial requirement that both native Typst adapters expose identical
@@ -1113,7 +1113,7 @@ reliable/incomplete/ambiguous mapping tests and the cross-backend parity corpus
 freeze that distinction. S29 therefore does not fabricate subprocess
 structured spans merely to satisfy the old shorthand "both hosts" wording.
 
-### G0 NEW_EXECUTION candidate
+### G0 NEW_EXECUTION frozen evidence
 
 `lowering_integration::nested_include_source_map_is_independent_of_source_insertion_order`
 adds one focused real frontend-to-lowering proof. It builds two equivalent
@@ -1137,8 +1137,16 @@ final IR. G8 owns backend-specific source-map/diagnostic acceptance and must
 respect the already-evidenced adapter asymmetry rather than require fabricated
 subprocess `SourceSpan` parity.
 
-**Classification candidate:**
-`CURRENT_PATH_SORTED_SOURCE_IDS_AND_TYPST_SOURCE_MAP_NESTED_INCLUDE_MAPPING_NEW_EXECUTION_CANDIDATE_CI_PENDING_G6_G8`.
+### Exact-head execution qualification
+
+Fresh NEW_EXECUTION exact HEAD
+`c3dd272666253c9444506685f6010fb02f6bc2e3` completed CI #43714679761
+with `fmt`, compatibility, Reference JVM, MSRV, WASM, Clippy, docs, CodeQL
+runtime, dependency review, license, spelling, Ubuntu ARM64, macOS, Windows,
+and the required `Merge Gate` all **SUCCESS**. Security Audit was scope-skipped.
+
+**Classification:**
+`CURRENT_PATH_SORTED_SOURCE_IDS_AND_TYPST_SOURCE_MAP_NESTED_INCLUDE_MAPPING_FROZEN_G6_G8_PENDING`.
 S29 does not implement G6/G8, complete G0, authorize G1, or permit #746 to
 merge.
 
