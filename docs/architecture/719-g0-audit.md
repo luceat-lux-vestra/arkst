@@ -1005,6 +1005,66 @@ deterministic domain errors, resource limits, and the clean-break CLI/public
 facade migration required by ADR-0022. S27 does not implement G7, complete G0,
 authorize G1, or permit #746 to merge.
 
+## S28 CLI inspect IR — current publication negative baseline candidate
+
+S28 freezes only the current CLI publication route. It does not create a
+separate wire-compatibility promise beyond S27.
+
+At exact pre-S28 #746 HEAD
+`4524e154aee1a5251836e8d8e6df8e1dcfcb982b`,
+`inspect_with_libraries` performs native single-file/project ingestion,
+calls the sinkless `arkst_core::compile` route with default options, emits
+analysis errors, refuses output when `ensure_no_errors` finds an error, and
+for `--emit ir` pretty-serializes `result.ir` directly. `CompileResult.ir`
+is the public `arkst_core::ir::IrDocument`; that facade physically re-exports
+`arkst_ir`. The CLI therefore owns no independent IR schema, version
+envelope, source-provenance envelope, or decode/validation layer.
+
+No native CLI route was found that accepts a manually supplied or historical
+`IrDocument` JSON payload. The former S28 oracle language about "legacy
+documents" is therefore not a CLI-import requirement. S27 already freezes the
+underlying manually constructible/mixed executable wire. S28 instead owns the
+observable fact that a normally compiled CLI input publishes that same current
+public serializer.
+
+Existing analysis-policy tests already provide the fail-closed side of the CLI
+boundary. In particular,
+`inspect_exposes_log_capability_failure_before_refusing_output` executes the
+real binary with `--emit ir` and proves E3010 is surfaced while stdout remains
+empty. Unit coverage separately proves inspect's warning-silent/error-only
+analysis filter and `ensure_no_errors` behavior. S28 does not duplicate those
+fixtures.
+
+### G0 NEW_EXECUTION candidate
+
+`crates/arkst-cli/tests/g0_s28_cli_inspect_ir.rs` adds one bounded real-binary
+publication proof. For a valid parser-clean single-file source it:
+
+1. runs `CARGO_BIN_EXE_arkst inspect <file> --emit ir` and requires success
+   with empty stderr;
+2. parses stdout as JSON and proves no top-level `version` is published;
+3. independently builds the equivalent single-entry `VirtualProject` and
+   calls public `arkst_core::compile`;
+4. requires no public-core diagnostics and proves the CLI JSON value equals
+   `serde_json::to_value(&result.ir)` exactly; and
+5. matches the first semantic node's serialized span to the public-core
+   `SourceSpan`, deriving source identity and byte offsets from the result
+   rather than hard-coding allocator/source-ID values.
+
+The test intentionally does not assert pretty-print whitespace, manufacture a
+legacy CLI JSON input path, invoke a backend or a second evaluator route, or
+duplicate existing fatal-diagnostic refusal evidence.
+
+Accepted ADR-0022 supersedes the old S28 "explicit compat window" expectation.
+G7 must replace this direct mixed-`IrDocument` publication with the
+separately versioned final-document-only wire v1 and may remove the current
+CLI/public facade without a historical Arkst JSON deprecation or import path.
+
+**Classification candidate:**
+`CURRENT_CLI_INSPECT_IR_DIRECT_UNVERSIONED_CORE_SERIALIZATION_NEW_EXECUTION_CANDIDATE_CI_PENDING_G7_VERSIONED_CLI_FACADE_PENDING`.
+S28 does not implement G7, complete G0, authorize G1, or permit #746 to merge.
+
+
 
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
