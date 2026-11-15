@@ -1,0 +1,232 @@
+name: Quarkdown G0 S24 clean-room probe
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g0-s24-clean-room-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: official-v2.5.1-v2.6.0-black-box
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch and verify exact official distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/arkst-g0-s24"
+          rm -rf "$root"
+          mkdir -p "$root/bin" "$root/fixtures"
+
+          fetch_qd() {
+            version="$1"
+            expected="$2"
+            archive="$root/quarkdown-$version.zip"
+            dist="$root/dist-$version"
+            url="https://github.com/iamgio/quarkdown/releases/download/$version/quarkdown-linux-x64.zip"
+
+            curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+            printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+            mkdir -p "$dist"
+            unzip -q "$archive" -d "$dist"
+            qd="$(find "$dist" -type f -name quarkdown -perm -111 -print -quit)"
+            test -n "$qd"
+            ln -s "$qd" "$root/bin/quarkdown-$version"
+            "$qd" --version
+          }
+
+          fetch_qd v2.5.1 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          fetch_qd v2.6.0 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+
+      - name: Author independent bounded S24 fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/arkst-g0-s24"
+
+          cat > "$root/fixtures/mixed-raw.qd" <<'QD'
+          before <em>S24_RAW</em> after
+          QD
+
+          cat > "$root/fixtures/explicit-html.qd" <<'QD'
+          .html {<em>S24_OWNED</em>}
+          QD
+
+          cat > "$root/fixtures/explicit-html-denied.qd" <<'QD'
+          .html {<em>S24_DENIED</em>}
+          QD
+
+          sha256sum "$root"/fixtures/*.qd | tee "$root/fixture-sha256.txt"
+
+      - name: Run bounded default and strict observation matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/arkst-g0-s24"
+          : > "$root/observations.jsonl"
+
+          archive_sha() {
+            case "$1" in
+              v2.5.1) printf '%s' '5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9' ;;
+              v2.6.0) printf '%s' '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4' ;;
+              *) return 1 ;;
+            esac
+          }
+
+          for version in v2.5.1 v2.6.0; do
+            qd="$root/bin/quarkdown-$version"
+            expected="$(archive_sha "$version")"
+
+            for fixture in mixed-raw explicit-html explicit-html-denied; do
+              source="$root/fixtures/$fixture.qd"
+
+              for mode in default strict; do
+                case_id="$version-$fixture-$mode"
+                out="$root/out-$case_id"
+                stdout="$root/$case_id.stdout"
+                stderr="$root/$case_id.stderr"
+                rm -rf "$out"
+
+                args=(compile "$source" --clean --pretty --out "$out" --out-name probe)
+                permission_mode="default"
+                if [ "$fixture" = explicit-html-denied ]; then
+                  args+=(--deny native-content)
+                  permission_mode="deny-native-content"
+                fi
+                if [ "$mode" = strict ]; then
+                  args+=(--strict)
+                fi
+
+                set +e
+                timeout 45s "$qd" "${args[@]}" >"$stdout" 2>"$stderr"
+                rc=$?
+                set -e
+
+                python3 - "$root" "$version" "$expected" "$fixture" "$mode" "$permission_mode" "$source" "$rc" "$stdout" "$stderr" "$out" <<'PY'
+          from hashlib import sha256
+          from html.parser import HTMLParser
+          import json
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          version = sys.argv[2]
+          archive_sha256 = sys.argv[3]
+          fixture = sys.argv[4]
+          mode = sys.argv[5]
+          permission_mode = sys.argv[6]
+          source_path = Path(sys.argv[7])
+          rc = int(sys.argv[8])
+          stdout_path = Path(sys.argv[9])
+          stderr_path = Path(sys.argv[10])
+          out_dir = Path(sys.argv[11])
+
+          class VisibleHTML(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+                  self.skip = 0
+
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script", "style"):
+                      self.skip += 1
+
+              def handle_endtag(self, tag):
+                  if tag in ("script", "style") and self.skip:
+                      self.skip -= 1
+
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.parts.append(data)
+
+          sentinels = [
+              "S24_RAW",
+              "S24_OWNED",
+              "S24_DENIED",
+              "<em>S24_RAW</em>",
+              "<em>S24_OWNED</em>",
+              "<em>S24_DENIED</em>",
+              "&lt;em&gt;S24_RAW&lt;/em&gt;",
+              "&lt;em&gt;S24_OWNED&lt;/em&gt;",
+              "&lt;em&gt;S24_DENIED&lt;/em&gt;",
+          ]
+
+          output_files = []
+          html_evidence = []
+          if out_dir.is_dir():
+              for path in sorted(p for p in out_dir.rglob("*") if p.is_file()):
+                  data = path.read_bytes()
+                  rel = path.relative_to(out_dir).as_posix()
+                  output_files.append({
+                      "path": rel,
+                      "sha256": sha256(data).hexdigest(),
+                      "bytes": len(data),
+                  })
+                  if path.suffix.lower() == ".html":
+                      raw = data.decode("utf-8", errors="replace")
+                      parser = VisibleHTML()
+                      parser.feed(raw)
+                      visible = " ".join(" ".join(parser.parts).split())
+                      contexts = {}
+                      for token in ("S24_RAW", "S24_OWNED", "S24_DENIED"):
+                          index = raw.find(token)
+                          contexts[token] = (
+                              raw[max(0, index - 120): index + len(token) + 120]
+                              if index >= 0 else None
+                          )
+                      html_evidence.append({
+                          "path": rel,
+                          "sha256": sha256(data).hexdigest(),
+                          "visible_text": visible,
+                          "raw_contains": {s: (s in raw) for s in sentinels},
+                          "sentinel_context": contexts,
+                      })
+
+          source_bytes = source_path.read_bytes()
+          observation = {
+              "reference": f"official-quarkdown-{version}-linux-x64",
+              "archive_sha256": archive_sha256,
+              "fixture": fixture,
+              "source_path": source_path.name,
+              "source_sha256": sha256(source_bytes).hexdigest(),
+              "source": source_bytes.decode("utf-8", errors="replace"),
+              "mode": mode,
+              "permission_mode": permission_mode,
+              "rc": rc,
+              "stdout": stdout_path.read_text(encoding="utf-8", errors="replace"),
+              "stderr": stderr_path.read_text(encoding="utf-8", errors="replace"),
+              "output_count": len(output_files),
+              "output_files": output_files,
+              "html_count": len(html_evidence),
+              "html_evidence": html_evidence,
+          }
+
+          with (root / "observations.jsonl").open("a", encoding="utf-8") as stream:
+              stream.write(json.dumps(observation, ensure_ascii=False, sort_keys=True) + "\n")
+
+          print(json.dumps(observation, ensure_ascii=False, sort_keys=True))
+          PY
+              done
+            done
+          done
+
+      - name: Upload retained S24 clean-room observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g0-s24-quarkdown-v251-v260
+          path: /tmp/arkst-g0-s24
+          if-no-files-found: error
