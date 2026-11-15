@@ -753,16 +753,15 @@ fn g0_s25_inline_error_owner_siblings_match_legacy() {
 
         let frontend = compile(&project, &CompileOptions::default());
         let legacy_host = FixtureSourceProvider { source_id, source };
-        let (legacy_ir, legacy_diagnostics) =
-            arkst_engine::evaluator::Evaluator::new()
-                .evaluate_with_resources_and_libraries_for_mode(
-                    &legacy_host,
-                    &legacy_host,
-                    source_id,
-                    Mode::Quarkdown,
-                    &lowered,
-                    &DocumentMetadataDefaults::default(),
-                );
+        let (legacy_ir, legacy_diagnostics) = arkst_engine::evaluator::Evaluator::new()
+            .evaluate_with_resources_and_libraries_for_mode(
+                &legacy_host,
+                &legacy_host,
+                source_id,
+                Mode::Quarkdown,
+                &lowered,
+                &DocumentMetadataDefaults::default(),
+            );
 
         assert_eq!(
             frontend.ir, legacy_ir,
@@ -881,21 +880,16 @@ fn g0_s25_inline_error_owner_siblings_match_legacy() {
 
     let blockquote_source =
         "outer-before\n\n> quote-before .error {quote-error} quote-after\n\nouter-after\n";
-    let (blockquote, source_id) =
-        compile_source_aware_and_assert_legacy_parity(blockquote_source);
+    let (blockquote, source_id) = compile_source_aware_and_assert_legacy_parity(blockquote_source);
     assert_error_provenance(&blockquote, blockquote_source, source_id, "quote-error");
 
-    let [
-        IrNode::Paragraph {
-            content: outer_before,
-            ..
-        },
-        IrNode::Blockquote { content, .. },
-        IrNode::Paragraph {
-            content: outer_after,
-            ..
-        },
-    ] = blockquote.ir.nodes.as_slice()
+    let [IrNode::Paragraph {
+        content: outer_before,
+        ..
+    }, IrNode::Blockquote { content, .. }, IrNode::Paragraph {
+        content: outer_after,
+        ..
+    }] = blockquote.ir.nodes.as_slice()
     else {
         panic!(
             "blockquote: expected outer paragraph / blockquote / outer paragraph, got {:?}",
