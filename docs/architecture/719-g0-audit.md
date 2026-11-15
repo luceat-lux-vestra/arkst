@@ -614,7 +614,7 @@ The initial execution HEAD `371f84a7a9136dabd1f14d09fc3497be722ddaf0` deliberate
 
 After correcting only that host equivalence, exact execution HEAD `e77aaffee570c56827db073d908b77fd3eb95efd` passed CI #43664217853. `fmt`, compatibility, Reference JVM, Ubuntu ARM64/macOS/Windows tests, clippy, wasm, msrv, docs, CodeQL runtime, dependency review, license, spelling and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
 
-**Classification:** `UPSTREAM_V251_V260_S23_LOGGER_ERROR_REFERENCE_FROZEN_ARKST_ORDER_NONROLLBACK_SOURCE_ECHO_CROSS_PLATFORM_PROVEN_CI_PENDING`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+**Classification:** `UPSTREAM_V251_V260_S23_LOGGER_ERROR_REFERENCE_FROZEN_ARKST_ORDER_NONROLLBACK_SOURCE_ECHO_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION, and this oracle/audit reconciliation are exact-head qualified on #746 by CI #43664735698.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
