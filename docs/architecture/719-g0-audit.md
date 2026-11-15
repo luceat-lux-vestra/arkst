@@ -920,7 +920,7 @@ Audit was scope-skipped.
 
 **Classification:** `CURRENT_PUBLIC_EXECUTABLE_IR_TYPE_GAP_FROZEN_G6_TYPE_REJECTION_PENDING`. S26 now freezes the current public mixed-lifecycle type admission as G0 negative-baseline evidence. This is not approval of that API shape: G6 must remove the executable carriers from final document/backend types and replace this compile-pass baseline with compile-time rejection evidence. S26 does not complete G0, authorize G1, or permit #746 to merge.
 
-## S27 versioned wire — current negative baseline candidate
+## S27 versioned wire — frozen current negative baseline
 
 S27 is an Arkst-internal public-wire migration proof. ADR-0022 already fixes
 the target policy: the replacement is a separately versioned, strictly
