@@ -1,7 +1,8 @@
 use arkst_core::ir::{IrComponent, IrDocument, IrInline, IrNode};
 use arkst_core::{
-    compile, compile_with_environment, compile_with_log_sink, CompileOptions, CompileResult,
-    Diagnostic, EnvironmentInputs, LogEvent, LogLevel, LogSink, SourceId, VirtualProjectBuilder,
+    compile, compile_with_capabilities, compile_with_environment, compile_with_log_sink,
+    Capabilities, CompileOptions, CompileResult, Diagnostic, EnvironmentInputs, LogEvent, LogLevel,
+    LogSink, SourceId, VirtualProjectBuilder,
 };
 use arkst_engine::{
     DocumentMetadataDefaults, IncludedSource, LoadableLibraryProvider, LoadableLibrarySource,
@@ -156,6 +157,49 @@ fn compile_project_with_environment_and_assert_legacy_parity(
         diagnostic_signature(&frontend.diagnostics),
         diagnostic_signature(&legacy_diagnostics),
         "normal direct-frontend environment diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+    frontend
+}
+
+fn compile_project_with_capabilities_and_assert_legacy_parity(
+    project: &arkst_core::VirtualProject,
+    entry_source: &str,
+    capabilities: Capabilities,
+) -> CompileResult {
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let parsed = arkst_markdown::parse_with_mode(entry_source, Mode::Quarkdown);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "G0 differential fixtures must start from parser-clean source: {:?}",
+        parsed.diagnostics
+    );
+
+    let (lowered, lowering_diagnostics) =
+        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            source_id,
+            &DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+
+    let frontend =
+        compile_with_capabilities(project, &CompileOptions::default(), capabilities);
+    let (legacy_ir, mut legacy_diagnostics) =
+        arkst_core::evaluator::Evaluator::with_capabilities(capabilities)
+            .evaluate_project(project, source_id, &lowered);
+    legacy_diagnostics.extend(lowering_diagnostics);
+
+    assert_eq!(
+        frontend.ir, legacy_ir,
+        "normal direct-frontend capability result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy_diagnostics),
+        "normal direct-frontend capability diagnostics diverged from the legacy pre-lowered IR evaluator"
     );
     frontend
 }
@@ -636,6 +680,53 @@ fn g0_s23_logger_side_effects_survive_later_explicit_error_matches_legacy() {
     assert_eq!(events[1].message, "second");
     assert!(events[0].span.start < events[1].span.start);
 }
+
+#[test]
+fn g0_s24_raw_html_and_native_content_denial_match_legacy() {
+    let raw_source = "before <em>S24_RAW</em> after\n";
+    let (raw_project, raw_source_id) = build_project(raw_source);
+    let raw_result = compile_project_with_capabilities_and_assert_legacy_parity(
+        &raw_project,
+        raw_source,
+        Capabilities::compatibility_default(),
+    );
+
+    let raw_diagnostics = raw_result
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E8001")
+        .collect::<Vec<_>>();
+    assert_eq!(raw_diagnostics.len(), 2, "{raw_result:?}");
+    for (diagnostic, expected) in raw_diagnostics.iter().zip(["<em>", "</em>"]) {
+        let span = diagnostic.primary.expect("raw HTML primary span");
+        assert_eq!(span.source_id, raw_source_id);
+        assert_eq!(raw_source.get(span.start..span.end), Some(expected));
+    }
+    assert_eq!(paragraph_text(&raw_result), "before S24_RAW after");
+    assert!(!format!("{:?}", raw_result.ir).contains("TargetSpecificContent"));
+
+    let denied_source = ".html {<em>S24_DENIED</em>}\n";
+    let (denied_project, denied_source_id) = build_project(denied_source);
+    let denied_result = compile_project_with_capabilities_and_assert_legacy_parity(
+        &denied_project,
+        denied_source,
+        Capabilities::none(),
+    );
+
+    assert_eq!(denied_result.diagnostics.len(), 1, "{denied_result:?}");
+    let diagnostic = &denied_result.diagnostics[0];
+    assert_eq!(diagnostic.code, "E3004");
+    assert!(diagnostic.message.contains("NativeContent"));
+    let span = diagnostic.primary.expect("native-content denial primary span");
+    assert_eq!(span.source_id, denied_source_id);
+    assert_eq!(
+        denied_source.get(span.start..span.end),
+        Some(".html {<em>S24_DENIED</em>}")
+    );
+    assert!(denied_result.ir.nodes.is_empty(), "{denied_result:?}");
+    assert!(!format!("{:?}", denied_result.ir).contains("TargetSpecificContent"));
+}
+
 
 #[test]
 fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
