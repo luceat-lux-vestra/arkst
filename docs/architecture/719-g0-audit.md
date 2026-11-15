@@ -1005,7 +1005,7 @@ deterministic domain errors, resource limits, and the clean-break CLI/public
 facade migration required by ADR-0022. S27 does not implement G7, complete G0,
 authorize G1, or permit #746 to merge.
 
-## S28 CLI inspect IR — current publication negative baseline candidate
+## S28 CLI inspect IR — frozen current publication negative baseline
 
 S28 freezes only the current CLI publication route. It does not create a
 separate wire-compatibility promise beyond S27.
@@ -1035,7 +1035,7 @@ empty. Unit coverage separately proves inspect's warning-silent/error-only
 analysis filter and `ensure_no_errors` behavior. S28 does not duplicate those
 fixtures.
 
-### G0 NEW_EXECUTION candidate
+### G0 NEW_EXECUTION frozen evidence
 
 `crates/arkst-cli/tests/g0_s28_cli_inspect_ir.rs` adds one bounded real-binary
 publication proof. For a valid parser-clean single-file source it:
@@ -1060,8 +1060,22 @@ G7 must replace this direct mixed-`IrDocument` publication with the
 separately versioned final-document-only wire v1 and may remove the current
 CLI/public facade without a historical Arkst JSON deprecation or import path.
 
-**Classification candidate:**
-`CURRENT_CLI_INSPECT_IR_DIRECT_UNVERSIONED_CORE_SERIALIZATION_NEW_EXECUTION_CANDIDATE_CI_PENDING_G7_VERSIONED_CLI_FACADE_PENDING`.
+### Exact-head execution qualification
+
+Initial NEW_EXECUTION candidate
+`97cc56dcf9897ebc48261c83ea74b7b34b44cf4f` completed CI #43697573712
+with all semantic/platform jobs green but failed `fmt` on one newly added test
+assignment. That observation was classified as a test-source formatting defect.
+
+Formatting-only remediation HEAD
+`9f17c6ccf98b44b1d25e109988f57dd66b63eb60` then completed exact-head CI
+#43698920895 with `fmt`, compatibility, Reference JVM, MSRV, WASM, Clippy,
+docs, CodeQL runtime, dependency review, license, spelling, Ubuntu ARM64,
+macOS, Windows, and the required `Merge Gate` all **SUCCESS**. Security
+Audit was scope-skipped.
+
+**Classification:**
+`CURRENT_CLI_INSPECT_IR_DIRECT_UNVERSIONED_CORE_SERIALIZATION_FROZEN_G7_VERSIONED_CLI_FACADE_PENDING`.
 S28 does not implement G7, complete G0, authorize G1, or permit #746 to merge.
 
 
