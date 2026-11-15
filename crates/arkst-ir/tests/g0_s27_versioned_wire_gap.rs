@@ -41,10 +41,7 @@ fn mixed_executable_document() -> IrDocument {
                 }],
                 span,
             }]),
-            raw_body: Some(IrRawBody::new(
-                SourceText::new("body"),
-                ByteSpan::new(0, 4),
-            )),
+            raw_body: Some(IrRawBody::new(SourceText::new("body"), ByteSpan::new(0, 4))),
             span,
         }],
         metadata: IrMetadata::default(),
