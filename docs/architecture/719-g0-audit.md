@@ -844,6 +844,68 @@ Likewise, S25 does not broaden ordinary rendered-owner recursion into image-alt,
 
 **Classification:** `UPSTREAM_V251_V260_S25_INLINE_ERROR_OWNER_REFERENCE_FROZEN_ARKST_OWNER_LOCAL_SIBLING_PRESERVATION_CROSS_PLATFORM_PROVEN`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
 
+## S26 final-only type boundary — current negative baseline candidate
+
+S26 is an Arkst-internal architecture proof. No upstream Quarkdown renderer or
+language oracle can establish whether Arkst's Rust final-document type prevents
+executable evaluator state from reaching a backend. ADR-0022 is the authority:
+final document types must eventually exclude block/inline invocation carriers,
+callable captures and contextual bodies, and Typst lowering must accept only the
+evaluation-complete final type.
+
+### Current public boundary
+
+Exact pre-S26 read-back at #746 HEAD
+`2ae3dbfe5a269ee1e6e0c0cecfe5d8e20118b265` establishes the negative baseline:
+
+- `arkst_ir::IrDocument` publicly owns `Vec<IrNode>`;
+- `IrNode::{FunctionCall, ChainedFunctionCall, FunctionDeclaration}` remain
+  publicly constructible executable/pre-evaluation carriers;
+- `IrInline::{DirectiveCall, ChainedDirectiveCall}` remain publicly
+  constructible nested executable carriers;
+- `IrValue::{Callable, InlineBody}`, `IrCallable`, and
+  `IrCallableCapture` remain public runtime/execution carriers;
+- `arkst_core::ir` publicly re-exports the `arkst_ir` surface;
+- the legacy public core evaluator still accepts `&IrDocument`; and
+- `arkst_typst::lowering::lower_to_typst` still has the public boundary
+  `fn(&IrDocument) -> (String, Vec<SourceMapEntry>)`.
+
+Therefore the current Rust API cannot provide ADR-0022's final-only
+compile-time rejection. This is a migration gap to freeze as evidence, not a
+compatibility surface to retain.
+
+The historical
+`final_document_guard_detects_nested_block_and_inline_executable_state`
+entry in `719-g0-runtime-test-evidence.tsv` is explicitly only runtime-guard
+evidence. The ledger records it as source-verified in an earlier inspection
+with initial-HEAD CI authority; it does not establish a final-only Rust type
+and is not promoted to S26 type evidence.
+
+### G0 NEW_EXECUTION candidate
+
+`crates/arkst-typst/tests/g0_s26_final_only_type_boundary.rs` is the smallest
+reference-free executable proof for the current gap. It uses only public APIs
+to construct one `IrDocument` containing:
+
+1. a top-level `IrNode::FunctionCall`;
+2. `IrValue::Callable` with an explicit empty `IrCallableCapture`;
+3. `IrValue::InlineBody`; and
+4. a nested paragraph containing `IrInline::DirectiveCall`.
+
+The test also type-checks the public lowering item as
+`fn(&IrDocument) -> (String, Vec<SourceMapEntry>)`. It deliberately **does
+not call the renderer** and does not assert Typst's defensive fallback text.
+The evidence is solely that the current public type system admits executable
+state at the nominal backend boundary.
+
+G6 must invert this proof. Once final-only IR exists, S26 requires an external
+API-boundary/compile-fail proof that these executable carriers cannot inhabit
+the final document and that the backend does not accept the mixed-lifecycle
+type. No compile-fail harness or dependency is introduced during G0.
+
+**Classification candidate:** `CURRENT_PUBLIC_EXECUTABLE_IR_TYPE_GAP_NEW_EXECUTION_CANDIDATE_CI_PENDING_G6_TYPE_REJECTION_PENDING`. This candidate freezes the current architectural defect precisely enough for later migration verification; it does not satisfy G6, complete G0, authorize G1, or permit #746 to merge.
+
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
