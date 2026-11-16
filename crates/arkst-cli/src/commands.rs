@@ -2157,6 +2157,44 @@ mod tests {
     }
 
     #[test]
+    fn issue_752_default_typst_build_publishes_invocation_failure_content() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("recovery.qd");
+        fs::write(&input, ".sum {1}\n    invalid\nlater\n").unwrap();
+
+        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(result.is_ok(), "default build failed: {result:?}");
+
+        let output_path = dir.path().join("recovery.typ");
+        let output = fs::read_to_string(&output_path).expect("default build must publish Typst");
+        assert!(output.contains("#block[Error:"), "{output}");
+        assert!(
+            output.contains("#raw(\".sum {1}\n    invalid\", block: true)"),
+            "{output}"
+        );
+        assert!(output.contains("later"), "{output}");
+    }
+
+    #[test]
+    fn issue_752_strict_build_remains_fail_closed_for_invocation_failure() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("strict-recovery.qd");
+        fs::write(&input, ".sum {1}\n    invalid\nlater\n").unwrap();
+
+        let result = build_with_backend_and_libraries(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            None,
+            Path::new("typst"),
+            BackendSelection::Subprocess,
+            None,
+            true,
+        );
+        assert!(result.is_err(), "strict build must remain fail-closed");
+        assert!(!dir.path().join("strict-recovery.typ").exists());
+    }
+
+    #[test]
     fn native_cli_composition_does_not_inherit_process_environment_190() {
         assert!(
             std::env::var_os("PATH").is_some(),
