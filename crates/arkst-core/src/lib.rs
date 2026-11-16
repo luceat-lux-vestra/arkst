@@ -4062,10 +4062,9 @@ Yiddish"
         let source = ".function {rich}\n    First **one**\n\n    Second *two*\n\n.rich\n";
         let (result, source_id) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-        // Rushdown's original inline spans are retained verbatim; in
-        // particular, the closing delimiter is not part of these paragraph
-        // ranges, so assert against the exact source-backed range.
-        let expected = ["First **one", "Second *two"];
+        // Accepted emphasis/strong nodes are delimiter-completed to the
+        // full authored source-backed range, including their closing delimiter.
+        let expected = ["First **one**", "Second *two*"];
         assert_eq!(result.ir.nodes.len(), expected.len());
         for (node, expected) in result.ir.nodes.iter().zip(expected) {
             let IrNode::Paragraph { span, .. } = node else {
