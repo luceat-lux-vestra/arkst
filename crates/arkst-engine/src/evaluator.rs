@@ -77,15 +77,15 @@ use arkst_ir::{
     IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
     IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody,
-    IrInvocationFailureComponent,
-    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
-    IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
-    IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins,
-    IrPageOrientation, IrPageRange, IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair,
-    IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition,
-    IrSlideTransitionSpeed, IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-    IrTodoComponent, IrValue, NativeTarget, TargetSpecificContent,
+    IrInvocationFailureComponent, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
+    IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState, IrPageBorderWidths,
+    IrPageCounterTarget, IrPageFormatLayer, IrPageFormatSelector, IrPageFormatState,
+    IrPageGeometry, IrPageMarginPosition, IrPageMargins, IrPageOrientation, IrPageRange,
+    IrPageSide, IrPageSizeFormat, IrPageSizeSelection, IrPair, IrParagraphStyleInfo, IrParameter,
+    IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransition, IrSlideTransitionSpeed,
+    IrSlideTransitionStyle, IrSlidesConfiguration, IrSpeakerNoteComponent, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTodoComponent, IrValue,
+    NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::{
     ast::{
@@ -724,10 +724,7 @@ fn recoverable_invocation_failure_node(
         return None;
     }
     let primary = diagnostic.primary?;
-    if primary.source_id != span.source_id
-        || primary.start < span.start
-        || primary.end > span.end
-    {
+    if primary.source_id != span.source_id || primary.start < span.start || primary.end > span.end {
         return None;
     }
 
@@ -769,7 +766,8 @@ fn frontend_invocation_recovery_span(
     };
     let start = invocation.span.start;
     let end = raw_body.span.end;
-    (end >= start && end <= invocation.span.end).then_some(SourceSpan::new(source_id, start, end))
+    (end >= start && end <= invocation.span.end)
+        .then_some(SourceSpan::new(source_id, start, end))
 }
 
 fn materialize_document_invocation_outcome(
