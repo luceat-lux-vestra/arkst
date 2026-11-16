@@ -5594,15 +5594,21 @@ impl Evaluator {
         implicit_argument: Option<InvocationValue>,
         frontend: Option<FrontendCallInput<'_>>,
     ) -> CallOutcome {
-        if let Err(outcome) = validate_ordered_invocation(
-            name,
-            ordered_args,
-            positional_args,
-            named_args,
-            *span,
-            diagnostics,
-        ) {
-            return outcome;
+        let source_defined_incremental_binding = context
+            .get_function(name)
+            .is_some_and(|binding| binding.extension.is_none())
+            && can_defer_source_defined_name(name, context);
+        if !source_defined_incremental_binding {
+            if let Err(outcome) = validate_ordered_invocation(
+                name,
+                ordered_args,
+                positional_args,
+                named_args,
+                *span,
+                diagnostics,
+            ) {
+                return outcome;
+            }
         }
         // Quarkdown injects `.super` only into the active extension body. A
         // source-defined callable with this name remains ordinary and must
@@ -18402,36 +18408,9 @@ impl Evaluator {
         let body_candidate = frontend_body_candidate(frontend, span);
         let bound = match &binding.parameters {
             LambdaParameters::Explicit(parameters) => {
-                let metadata = parameters
-                    .iter()
-                    .map(|parameter| {
-                        let metadata = if parameter.optional {
-                            ParameterMetadata::optional(&parameter.name)
-                        } else {
-                            ParameterMetadata::required(&parameter.name)
-                        };
-                        metadata.with_name_span(parameter.name_span)
-                    })
-                    .collect::<Vec<_>>();
-                let body_shape = body_candidate.as_ref().map(candidate_shape);
-                let plan = match invocation_binder::plan(
+                let metadata = explicit_callable_parameter_metadata(parameters);
+                match self.bind_source_ordered_explicit_callable_candidate_set(
                     &metadata,
-                    &candidate_shapes(&candidates),
-                    body_shape.as_ref(),
-                    BodyPolicy::BindFinal,
-                    span,
-                ) {
-                    Ok(plan) => plan,
-                    Err(error) => {
-                        diagnostics.push(binding_diagnostic_with_message(
-                            error,
-                            callable_binding_message,
-                        ));
-                        return CallOutcome::Failed;
-                    }
-                };
-                match self.bind_explicit_callable_candidate_set(
-                    &plan,
                     candidates,
                     body_candidate,
                     &span,
@@ -18481,53 +18460,9 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         implicit_argument: Option<InvocationValue>,
     ) -> CallOutcome {
-        let binding_plan = if let LambdaParameters::Explicit(parameters) = &binding.parameters {
-            let metadata = parameters
-                .iter()
-                .map(|parameter| {
-                    let metadata = if parameter.optional {
-                        ParameterMetadata::optional(&parameter.name)
-                    } else {
-                        ParameterMetadata::required(&parameter.name)
-                    };
-                    metadata.with_name_span(parameter.name_span)
-                })
-                .collect::<Vec<_>>();
-            match self.preflight_binding(
-                &metadata,
-                ordered_args,
-                positional_args,
-                named_args,
-                body,
-                BodyPolicy::BindFinal,
-                *span,
-                "E3003",
-                None,
-                None,
-                true,
-                diagnostics,
-            ) {
-                Ok(plan) => Some(plan),
-                Err(()) => return CallOutcome::Failed,
-            }
-        } else {
-            let candidates =
-                structural_candidates(ordered_args, positional_args, named_args, *span);
-            if let Err(error) = invocation_binder::validate_implicit(&candidates) {
-                diagnostics.push(binding_diagnostic_with_message(
-                    error,
-                    callable_binding_message,
-                ));
-                return CallOutcome::Failed;
-            }
-            None
-        };
-
         let bound = match &binding.parameters {
-            LambdaParameters::Explicit(_) => {
-                let Some(binding_plan) = binding_plan.as_ref() else {
-                    return CallOutcome::Failed;
-                };
+            LambdaParameters::Explicit(parameters) => {
+                let metadata = explicit_callable_parameter_metadata(parameters);
                 let candidates = match argument_candidates(
                     ordered_args,
                     positional_args,
@@ -18540,10 +18475,12 @@ impl Evaluator {
                     Ok(candidates) => candidates,
                     Err(outcome) => return outcome,
                 };
-                match self.bind_explicit_callable_arguments(
-                    binding_plan,
+                let body_candidate =
+                    body.map(|body| argument_body_candidate(body, *span, candidates.len()));
+                match self.bind_source_ordered_explicit_callable_candidate_set(
+                    &metadata,
                     candidates,
-                    body,
+                    body_candidate,
                     span,
                     diagnostics,
                     context,
@@ -18553,9 +18490,18 @@ impl Evaluator {
                 }
             }
             LambdaParameters::Implicit => {
+                let structural =
+                    structural_candidates(ordered_args, positional_args, named_args, *span);
+                if let Err(error) = invocation_binder::validate_implicit(&structural) {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return CallOutcome::Failed;
+                }
+
                 // Headerless callables retain the existing positional runtime
-                // path; the first #719 migration slice deliberately moves only
-                // explicit structural binding onto ArgumentCandidate.
+                // path; #755 changes only regular explicit-parameter binding.
                 let candidates = match self.evaluate_invocation_candidates(
                     ordered_args,
                     positional_args,
@@ -19590,42 +19536,108 @@ impl Evaluator {
         }
     }
 
-    /// Bind explicit callable slots while their expressions/bodies are still
-    /// unevaluated, then evaluate only selected slots in source order.
+    /// Process regular explicit callable arguments incrementally in source
+    /// order. Each candidate's structural prefix is validated before that
+    /// candidate is evaluated, so an earlier evaluation failure wins over a
+    /// binding defect that is only discoverable at a later candidate. The
+    /// invocation body stays lazy until the complete explicit-argument shape
+    /// has been accepted.
     #[allow(clippy::too_many_arguments)]
-    fn bind_explicit_callable_arguments<'a>(
+    fn bind_source_ordered_explicit_callable_candidate_set<'a>(
         &self,
-        binding_plan: &BindingPlan,
-        candidates: Vec<Candidate<ArgumentCandidate<'a>>>,
-        body: Option<CallBody<'a>>,
-        span: &SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext<'_>,
-    ) -> Result<BoundLambdaArguments, CallOutcome> {
-        let body_candidate =
-            body.map(|body| argument_body_candidate(body, *span, candidates.len()));
-        self.bind_explicit_callable_candidate_set(
-            binding_plan,
-            candidates,
-            body_candidate,
-            span,
-            diagnostics,
-            context,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn bind_explicit_callable_candidate_set<'a>(
-        &self,
-        binding_plan: &BindingPlan,
+        parameters: &[ParameterMetadata<'_>],
         candidates: Vec<Candidate<ArgumentCandidate<'a>>>,
         body_candidate: Option<Candidate<ArgumentCandidate<'a>>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<BoundLambdaArguments, CallOutcome> {
-        let bound = binding_plan
-            .bind(&candidates, body_candidate.as_ref(), *span)
+        let mut prefix_shapes = Vec::with_capacity(candidates.len());
+        let mut evaluated = Vec::with_capacity(candidates.len());
+
+        for candidate in candidates {
+            prefix_shapes.push(candidate_shape(&candidate));
+            if let Err(error) =
+                invocation_binder::validate_candidate_prefix(parameters, &prefix_shapes)
+            {
+                diagnostics.push(binding_diagnostic_with_message(
+                    error,
+                    callable_binding_message,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+
+            let evaluated_candidate = match candidate {
+                Candidate::Positional {
+                    value,
+                    span: value_span,
+                } => Candidate::Positional {
+                    value: self
+                        .evaluate_argument_candidate(&value, span, diagnostics, context)?
+                        .into_ir_value(),
+                    span: value_span,
+                },
+                Candidate::Named {
+                    name,
+                    name_span,
+                    value,
+                    span: value_span,
+                } => Candidate::Named {
+                    name,
+                    name_span,
+                    value: self
+                        .evaluate_argument_candidate(&value, span, diagnostics, context)?
+                        .into_ir_value(),
+                    span: value_span,
+                },
+            };
+            evaluated.push(evaluated_candidate);
+        }
+
+        let body_shape = body_candidate.as_ref().map(candidate_shape);
+        let plan = invocation_binder::plan(
+            parameters,
+            &candidate_shapes(&evaluated),
+            body_shape.as_ref(),
+            BodyPolicy::BindFinal,
+            *span,
+        )
+        .map_err(|error| {
+            diagnostics.push(binding_diagnostic_with_message(
+                error,
+                callable_binding_message,
+            ));
+            CallOutcome::Failed
+        })?;
+
+        let evaluated_body = match body_candidate {
+            Some(Candidate::Positional {
+                value,
+                span: body_span,
+            }) => Some(Candidate::Positional {
+                value: self
+                    .evaluate_argument_candidate(&value, span, diagnostics, context)?
+                    .into_ir_value(),
+                span: body_span,
+            }),
+            Some(Candidate::Named {
+                name,
+                name_span,
+                value,
+                span: body_span,
+            }) => Some(Candidate::Named {
+                name,
+                name_span,
+                value: self
+                    .evaluate_argument_candidate(&value, span, diagnostics, context)?
+                    .into_ir_value(),
+                span: body_span,
+            }),
+            None => None,
+        };
+
+        let bound = plan
+            .bind(&evaluated, evaluated_body.as_ref(), *span)
             .map_err(|error| {
                 diagnostics.push(binding_diagnostic_with_message(
                     error,
@@ -19633,22 +19645,14 @@ impl Evaluator {
                 ));
                 CallOutcome::Failed
             })?;
-
-        let slot_count = bound.slots.len();
-        let mut selected = Vec::with_capacity(slot_count);
-        for (slot_index, slot) in bound.slots.into_iter().enumerate() {
-            if let BoundSlot::Explicit { value, .. } = slot {
-                selected.push((value.source_order(), slot_index, value));
-            }
-        }
-        selected.sort_by_key(|(source_order, _, _)| *source_order);
-
-        let mut values = vec![IrValue::None; slot_count];
-        for (_, slot_index, candidate) in selected {
-            values[slot_index] = self
-                .evaluate_argument_candidate(&candidate, span, diagnostics, context)?
-                .into_ir_value();
-        }
+        let values = bound
+            .slots
+            .into_iter()
+            .map(|slot| match slot {
+                BoundSlot::Explicit { value, .. } => value,
+                BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None,
+            })
+            .collect();
         Ok(BoundLambdaArguments::Explicit(values))
     }
 
@@ -26349,6 +26353,20 @@ fn extension_wrapper_parameters(
     }
 }
 
+fn explicit_callable_parameter_metadata(parameters: &[IrParameter]) -> Vec<ParameterMetadata<'_>> {
+    parameters
+        .iter()
+        .map(|parameter| {
+            let metadata = if parameter.optional {
+                ParameterMetadata::optional(&parameter.name)
+            } else {
+                ParameterMetadata::required(&parameter.name)
+            };
+            metadata.with_name_span(parameter.name_span)
+        })
+        .collect()
+}
+
 fn lambda_binding_metadata(parameters: &LambdaParameters) -> Vec<ParameterMetadata<'_>> {
     match parameters {
         LambdaParameters::Explicit(parameters) => parameters
@@ -30474,23 +30492,14 @@ mod tests {
         let body_candidate =
             frontend_body_candidate(frontend, SourceSpan::new(SourceId(11), 0, 33))
                 .expect("frontend block body candidate");
-        let body_shape = candidate_shape(&body_candidate);
         let parameters = [ParameterMetadata::required("content")];
-        let plan = invocation_binder::plan(
-            &parameters,
-            &candidate_shapes(&candidates),
-            Some(&body_shape),
-            BodyPolicy::BindFinal,
-            SourceSpan::new(SourceId(11), 0, 33),
-        )
-        .expect("body fills final callable parameter");
 
         let evaluator = Evaluator::new();
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
         let bound = evaluator
-            .bind_explicit_callable_candidate_set(
-                &plan,
+            .bind_source_ordered_explicit_callable_candidate_set(
+                &parameters,
                 candidates,
                 Some(body_candidate),
                 &SourceSpan::new(SourceId(11), 0, 33),
