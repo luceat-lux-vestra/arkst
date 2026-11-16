@@ -4181,9 +4181,8 @@ mod tests {
                         _ => None,
                     })
                     .or_else(|| {
-                        body.as_ref().and_then(|body| {
-                            body.iter().find_map(first_strong_span_in_block)
-                        })
+                        body.as_ref()
+                            .and_then(|body| body.iter().find_map(first_strong_span_in_block))
                     }),
                 _ => None,
             }
