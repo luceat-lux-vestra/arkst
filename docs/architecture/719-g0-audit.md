@@ -234,7 +234,7 @@ All **12 JSONL records** (3 sources × 2 modes × 2 official versions) were inde
 3. **Direct-failure control:** the identical default-mode post-failure state and HTML error output without nested `.super` establishes that the observed persistence cannot be attributed exclusively to extension dispatch. Do not conflate call-stack ownership with global failure recovery policy.
 4. **Strict-mode boundary:** the official `sum` exception exits with rc 66 and creates no HTML; the post-failure state is **not observable** in strict mode. Do not infer rollback/persistence from absent output or automatically require identical Arkst CLI exit codes.
 5. **Arkst policy difference:** the existing `g0_s13_nested_super_success_rolls_back_after_outer_failure` normal-vs-legacy final-`IrDocument` differential, cross-platform proven at CI #42952023697 / `802d92bae540d23b17772f36031aafbb6992f97f`, requires one numeric-argument diagnostic and **`before`** after outer failure. This preserves Arkst's accepted invocation-scoped failure-atomic invariant, which differs from both pinned official **default-mode** public outputs in this bounded scenario. The independent upstream reference is frozen; **S13 end-to-end upstream compatibility is not established**.
-6. **Separate recovery-content debt:** default-mode error-panel/source retention is related to the unresolved recoverable failure-content contract in [#752](https://github.com/luceat-lux-vestra/arkst/issues/752). #752 does **not** itself authorize changing failure-atomic semantics or a second HTML renderer. Any proposal to reconcile upstream mutation persistence with Arkst's accepted rollback policy needs explicit architecture disposition; neither behavior should be silently masked by green migration CI.
+6. **Separate recovery-content contract:** [#752](https://github.com/luceat-lux-vestra/arkst/issues/752) is **CLOSED/COMPLETED** via exact-head-qualified PR #777 and protected-main commit `114c1b694e1b36eabed3bd00d3d93dbfb5b4ddad`. It adds backend-neutral source-backed `InvocationFailure` recovery without changing Arkst's accepted invocation-scoped rollback policy or introducing a second HTML renderer. The S13 default-mode post-failure mutation difference therefore remains an explicit rollback-policy divergence, not unresolved recovery-content debt.
 
 **Classification:** `ARKST_S13_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_POST_FAILURE_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN`. This is a **frozen bounded upstream observation plus an open compatibility/policy reconciliation**, not S13 full parity, not G0 exit, not #746 merge authorization and not permission to begin G1. S14 and S15 official references remain pending.
 
@@ -1435,7 +1435,7 @@ Those tests were added at `b6cf594b46dfb4d529fb3020d070b32adf28c489`; duplicate 
 - **Oracle comparison implemented:** `compile_and_assert_legacy_parity` checks exact `IrDocument` plus ordered diagnostics (`code`, `severity`, `message`, primary/secondary source spans, `hints`) against the separate legacy AST-to-executable-IR evaluator path. The tested visible terminal content is `terminal body`.
 - **Precise dynamic claim if CI passes:** normal public source compilation traverses a multi-tail, mixed-owner continuation and binds the terminal block body at the final source-defined owner without a frontend/legacy output difference. This extends the already known **DYN02** path; it is **not** a new architecture route ID.
 - **Authority limit:** the engine-internal `phase3g_multitail_final_body_matches_legacy_chain_result` remains a bounded unit anchor, not an independent upstream oracle. The new public full-frontend S08 path passed [CI #43039010366](https://github.com/luceat-lux-vestra/arkst/actions/runs/43039010366) at exact HEAD `6b945dcd45266ab9d80b6e796edcca603417fdd9`: all three OS full test jobs and required Merge Gate **SUCCESS**. At that earlier test HEAD no independent Quarkdown observation had been captured. The pinned official S08 run is now recorded below; error-first-tail variants and rich body/resource-context matrix remain open. The true counter-based once-only fixture added at `ad7c61d4063f5f1850c09dfc2a463a48094d5fd6` is cross-platform frozen: execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` passed CI #43053491597 on Ubuntu ARM64/macOS/Windows plus Merge Gate, and the reconciled final status HEAD `13291822c75411ef387e2592ce49a8df7f51ee63` passed CI #43055269794.
-- **G0 state:** *bounded Arkst migration proof PASS at the exact S08 test HEAD*, the pinned official upstream S08 observations below now exist, while the default-mode failure recovery-content difference and the remaining adversarial matrix remain OPEN. The once-only numerical counter evidence is frozen; only the separate default-mode recovery-content debt #752 and remaining adversarial matrix stay open. This follow-up **evidence-status commit requires its own exact-HEAD CI**, and the earlier successful run alone is not authority for the documentation commit. #719 G0–G8 and final-only target unchanged; do not merge #746 or start G1.
+- **G0 state:** *bounded Arkst migration proof PASS at the exact S08 test HEAD*. The pinned official upstream S08 observations exist, and the former default-mode recovery-content debt is now production-reconciled by closed #752 / exact-head-qualified PR #777. #746's reconciled S08 assertions now require the source-backed `InvocationFailure` carrier while preserving the frozen once-only/terminal-skip semantics. The remaining adversarial matrix stays open. This post-merge evidence reconciliation requires its own exact-HEAD CI; #719 G0–G8 and the final-only target remain unchanged, and #746 must not merge or start G1 yet.
 
 ## S08 middle-tail failure / stateful terminal-owner control — bounded cross-platform proof
 
@@ -1458,7 +1458,7 @@ Those tests were added at `b6cf594b46dfb4d529fb3020d070b32adf28c489`; duplicate 
 | --- | --- | --- | --- |
 | S08-terminal: `identity {2}::multiply {3}::tail` + terminal indented body | rc 0; stderr empty; one HTML page, visible `Quarkdown terminal body` | rc 0; stderr empty; one HTML page with same hash | Successful mixed-owner terminal body is semantically compatible with Arkst's bounded `terminal body` observation; ignore Quarkdown page chrome only |
 | S08-state-success: terminal `tail` writes `state=changed`, then `.state` | rc 0; stderr empty; one HTML page, visible `Quarkdown terminal body changed` | rc 0; stderr empty; one HTML page with same hash | Final-tail dispatch and state observation agree with Arkst success control at the tested boundary |
-| S08-state-failure: only `multiply {3}` changed to `multiply {true}` | rc 0; stderr `Cannot call function multiply(Number a, Number by) with arguments (2, true): Not a numeric value: true`; one HTML page shows an `Error: multiply` panel, the literal failing `identity` chain and terminal body, plus `before` | rc 66; no HTML page; stderr starts `An error occurred while in strict mode (error code 66)` and names `multiply` | Middle-tail numeric failure prevents final owner state mutation in non-strict mode, as Arkst does. **But error recovery/visible rendered output differs:** upstream retains error panel + original source/body; Arkst bounded IR emits only the remaining `before` paragraph. Strict abort has no comparable post-failure state observation. |
+| S08-state-failure: only `multiply {3}` changed to `multiply {true}` | rc 0; stderr `Cannot call function multiply(Number a, Number by) with arguments (2, true): Not a numeric value: true`; one HTML page shows an `Error: multiply` panel, the literal failing `identity` chain and terminal body, plus `before` | rc 66; no HTML page; stderr starts `An error occurred while in strict mode (error code 66)` and names `multiply` | Middle-tail numeric failure prevents final owner state mutation in non-strict mode, as Arkst does. After #752, Arkst also preserves a backend-neutral source-backed `InvocationFailure` plus the later `before` paragraph. This is semantic recovery reconciliation, not byte-for-byte HTML renderer parity. Strict abort has no comparable post-failure state observation. |
 
 **Exact successful HTML hashes:** `s08-terminal` default/strict = `e13cdbb4bb058c65c7945263ad84c454228bf8dbd84f473c33385d905a675561`; `s08-state-success` default/strict = `1c74f2cb07a9e38ca97cbc107aba60bc30c958dfcb41346b67508da613d72555`. Default failure HTML hash = `6c21f0265c0df0b3f3de9dacad9f6cea26943812c78399083dba1213e4d09bff`; strict failure has no HTML hash because no file is generated.
 
@@ -1468,17 +1468,17 @@ Those tests were added at `b6cf594b46dfb4d529fb3020d070b32adf28c489`; duplicate 
 - The source-defined chain head increments a caller-visible numeric `count` and returns a numeric value. The success control continues through native `multiply {3}` and the terminal source-defined tail; the failure variant changes only the middle input to `multiply {true}`.
 - Required observation in both variants is final `count=1`. On success the visible result is `terminal body\n1`; on middle-tail failure the visible result is `1`, proving the already-successful head committed once while the terminal owner did not execute.
 - The test still performs exact normal-frontend vs legacy executable-IR equality and complete ordered diagnostic-signature equality, so a final count of 1 constrains both entrypoints.
-- **Execution evidence frozen:** exact execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` completed CI #43053491597 **SUCCESS**. Ubuntu ARM64, macOS, and Windows Typst-required test jobs all passed, as did the required Merge Gate. The S08 once-only fixture is therefore frozen for this bounded migration slice; #752 recovery-content debt remains separate.
+- **Execution evidence frozen:** exact execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` completed CI #43053491597 **SUCCESS**. Ubuntu ARM64, macOS, and Windows Typst-required test jobs all passed, as did the required Merge Gate. The S08 once-only fixture remains frozen; #752 recovery content is now production-landed separately via exact-head-qualified PR #777 and is reconciled into the #746 assertions in this post-merge branch update.
 
-### S08 default-mode recovery-content compatibility debt
+### S08 default-mode recovery-content production reconciliation
 
-- **Owner:** #752, `compat(runtime): preserve default-mode failed-chain recovery content`.
-- **Required semantic test:** `g0_s08_default_mode_failed_chain_preserves_recoverable_error_content`.
-- #752 owns the backend-neutral failed-call recovery contract: source-backed recovery/error content at the failed call site, preserved failed chain/body provenance, continued later document content, first-failing-tail ownership and composition with the accepted invocation-scoped rollback rule.
-- Whole-document HTML implementation remains downstream of #320; #752 must not select a second renderer merely to match the reference artifact.
-- This gap is **compatibility debt, not an accepted divergence**. #746 records evidence/classification only and must not change production behavior to make the ledger green.
+- **Owner:** #752, `compat(runtime): preserve default-mode failed-chain recovery content` — **CLOSED/COMPLETED** via exact-head-qualified PR #777 → protected main `114c1b694e1b36eabed3bd00d3d93dbfb5b4ddad`.
+- **Production semantic evidence:** `issue_752_direct_failed_invocation_materializes_source_backed_recovery_content`, `issue_752_failed_chain_preserves_head_once_and_skips_terminal_tail`, CRLF provenance coverage, nested fail-closed negative control, wire round-trip, Typst lowering and CLI publication/strict suppression.
+- **#746 reconciliation:** S05 and S08 differential fixtures now explicitly require the source-backed `IrComponent::InvocationFailure` carrier while retaining exact frontend-vs-legacy parity, first-failing-tail ownership, once-only committed head effects, terminal-tail skip and later independent content.
+- Whole-document HTML implementation remains downstream of #320; this reconciliation does not claim Arkst/Quarkdown byte-for-byte HTML parity.
+- The former #752 compatibility debt is closed. #746 remains evidence-only and must still obtain exact-HEAD CI before qualification.
 
-
+## S09 chain-tail binding errors — pinned official ordering evidence
 ## S09 chain-tail binding errors — pinned official ordering evidence
 
 Disposable clean-room PR #753 is **CLOSED/UNMERGED**. Its final probe HEAD is `4266e88f98da26aff75a089bea64acce41d16cb8`; authoritative run #43052756497 completed **SUCCESS** against the exact official Quarkdown v2.5.1 Linux x64 archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. Retained artifact ID `13870690958`, digest `sha256:57c9b696dc9b3affe2aeb4410c2eb9e5dd338e099d591fb8b39f494141dab160`.
@@ -1500,7 +1500,7 @@ Commit `feb1537c58cb1160dd2e18bde2b690cf95cd3631` renames the fixture to `g0_s09
 
 **Execution evidence frozen:** exact execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` completed CI #43053491597 **SUCCESS**. The corrected two-case S09 public differential passed Ubuntu ARM64, macOS, and Windows Typst-required tests and the required Merge Gate. Both bounded cases therefore preserve exact normal-frontend vs legacy-evaluator IR/diagnostic parity while observing the same once-only committed head effect (`count=1`) as the official v2.5.1 default-mode reference.
 
-**Classification:** official S09 reference and Arkst cross-platform migration evidence are frozen as **bounded semantic-order compatible**. This does not claim byte-for-byte error rendering parity; default-mode recovery-content rendering remains governed by the separate S08/#752 compatibility debt.
+**Classification:** official S09 reference and Arkst cross-platform migration evidence are frozen as **bounded semantic-order compatible**. This does not claim byte-for-byte error rendering parity; backend-neutral default-mode recovery content is now landed under closed #752, while whole-document HTML representation remains downstream of #320.
 
 
 ## S02 UTF-8 / CRLF source provenance — bounded official semantics + Arkst span freeze
@@ -1558,17 +1558,13 @@ PR #746 adds bounded public evidence across parser/evaluator/backend ownership w
 - \`g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure\` proves current Arkst preserves the intended Strong/link/inline-call semantics for the indented CRLF source and that normal frontend vs legacy evaluator remain exactly aligned.
 - \`crates/arkst-cli/tests/g0_s03_source_map.rs\` exercises the real normal compile → final IR → Typst lowering boundary for tight and indented CRLF without adding any new core dependency edge. It requires the generated Typst to retain Strong + link + \`WORLD\` and requires the source map to carry the final IR Strong/link spans.
 
-The audit found one real Arkst provenance defect. Tight CRLF retains the full authored Strong span. For the indented CRLF source, current final \`IrInline::Strong.span\` slices only:
+The audit identified a real Arkst provenance defect at the earlier evidence HEAD: indented CRLF truncated the final `IrInline::Strong.span` before the authored closing `**`. **#758 is now CLOSED/COMPLETED** via exact-head-qualified PR #776. Protected-main commit `1c7b157fb495edee2797b057d044e721ab8c5930` restores the complete authored Strong span `[11,64)`, preserving the closing delimiter while leaving the following CRLF `[64,66)` outside the span.
 
-\`**앞 [.uppercase {world}](https://example.com) 뒤\`
+#746's runtime and CLI source-map fixtures are reconciled accordingly: tight and indented CRLF both require the full authored `**앞 [.uppercase {world}](https://example.com) 뒤**` range, and the Typst source map must carry that corrected final-IR span.
 
-and omits the authored closing \`**\`. The Typst source map correctly reflects that current final-IR span, so the defect belongs to frontend/final-IR provenance rather than the lowering mapper itself. **#758** owns restoring the closing delimiter while preserving current semantic structure, UTF-8/CRLF source backing and mode isolation.
+**Production qualification:** PR #776 exact HEAD `447045e9f724c3d2006bffaa403ef97933611314` passed CI #43888488512 before squash merge to protected main.
 
-This is **compatibility/provenance debt, not an accepted divergence**. Evidence-only #746 freezes current behavior and must not implement the production fix.
-
-**Execution authority:** exact evidence HEAD \`329935ada00ca416cdc96a0aa321d53d1c17642e\` completed CI #43116791006 **SUCCESS**. Ubuntu ARM64, macOS and Windows Typst-required tests, compatibility/reference checks, fmt/clippy/MSRV/WASM/docs/security-related jobs and required Merge Gate all succeeded.
-
-**Classification:** \`UPSTREAM_V251_V260_RICH_INLINE_REFERENCE_FROZEN_ARKST_CRLF_SEMANTICS_PRESERVED_SPAN_DEBT_758_OPEN\`. S03 is evidenced/classified, but source-provenance completion remains blocked by #758.
+**Classification:** `UPSTREAM_V251_V260_RICH_INLINE_REFERENCE_FROZEN_ARKST_CRLF_SEMANTICS_PRESERVED_SPAN_PRODUCTION_RECONCILED`. S03 source-provenance completion is no longer blocked by #758; the reconciled #746 HEAD still requires its own exact-HEAD CI.
 
 
 
@@ -1597,14 +1593,14 @@ Public differential \`g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint
 
 - success has no diagnostics and final visible semantic output \`3\`;
 - the indented-body failure emits exactly one \`E3001\` numeric-argument diagnostic;
-- the failed invocation produces no ordinary final content node, preventing silent success;
+- the failed invocation produces one backend-neutral source-backed `InvocationFailure` recovery node plus the same `E3001`, preventing silent success while preserving the authored failed call;
 - existing \`direct_and_extended_native_raw_body_calls_keep_call_span_provenance\` evidence keeps the direct failed call source-backed through the body text.
 
 Exact Arkst evidence HEAD \`e57bc32241baf36e2bc670313a97bc154ad9c649\` completed CI #43147132829 **SUCCESS** across Ubuntu ARM64, macOS and Windows Typst-required tests plus required Merge Gate.
 
-This yields a bounded compatibility conclusion for **binding, conversion ownership, success output and failure ownership**. It does **not** claim default-mode recovery-content parity: official Quarkdown materializes recoverable failed-call content while current Arkst does not yet have the equivalent backend-neutral representation. #752 already owns that failed-call recovery-content contract and has been updated with this direct-call corroboration; no duplicate debt issue is created.
+This yields a bounded compatibility conclusion for **binding, conversion ownership, success output and failure ownership**. Default-mode backend-neutral recovery content is now production-reconciled by closed #752: the direct failed call retains exact source echo in `InvocationFailure` while the transitional fallback route remains an implementation detail.
 
-**Classification:** \`UPSTREAM_V251_V260_DIRECT_NATIVE_BINDING_CONVERSION_FROZEN_ARKST_FALLBACK_CROSS_PLATFORM_PROVEN_RECOVERY_DEBT_752_OPEN\`. S05's public call semantics are evidenced; the fallback implementation remains transitional and G3 must remove it without changing these observations.
+**Classification:** `UPSTREAM_V251_V260_DIRECT_NATIVE_BINDING_CONVERSION_FROZEN_ARKST_FALLBACK_CROSS_PLATFORM_PROVEN_RECOVERY_CONTENT_PRODUCTION_RECONCILED`. S05's public call semantics and source-backed recovery are evidenced; the fallback implementation remains transitional and G3 must remove it without changing these observations.
 
 
 
@@ -1790,7 +1786,7 @@ The independently authored official S11 source bytes for all four bounded fixtur
 ### Compatibility disposition and remaining G0 blockers
 
 - **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
-- **Observed error-recovery gap (OPEN, not accepted divergence):** official non-strict recovery emits an error panel and source/body in HTML while Arkst's bounded failure `IrDocument` path returns `before` and its own diagnostic. Classify separately as a compatibility behavior to investigate at G0; neither mask it by claiming full S08 compatibility nor change Arkst's accepted invocation-scoped rollback invariant without architecture review.
+- **Observed error-recovery representation:** official non-strict recovery emits an HTML error panel plus source/body. After closed #752, Arkst's bounded failure `IrDocument` now carries a source-backed `InvocationFailure` plus later independent output such as `before`. The semantic recovery-content gap is reconciled; byte-for-byte HTML representation remains outside this evidence slice and downstream of #320. Arkst's accepted invocation-scoped rollback invariant is unchanged.
 - **Still open beyond the frozen S08/S09 slices:** other middle-tail ownership/failure forms, multi-source/nested/host paths, complete G0 producer/consumer reachability, and cross-target output/diagnostic equivalence. S08 once-only and corrected S09 two-case ordering are cross-platform frozen at execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` / CI #43053491597. Strict upstream exit `66` is a reference observation, not an automatic Arkst CLI-exit matching requirement.
 - **Checkpoint discipline:** this is an evidence-only update on PR #746 and requires its **own exact-HEAD CI** before qualification. Disposable PR #751 must be **closed unmerged** after these observations are durable. #719 remains OPEN; no G1 or #746 merge authorization.
 

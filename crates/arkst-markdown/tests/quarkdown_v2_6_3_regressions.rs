@@ -121,7 +121,7 @@ fn nested_emphasis_and_deep_link_destination_retain_inline_structure() {
     ));
     assert_eq!(
         source.get(emphasis_span.start..emphasis_span.end),
-        Some("***Atlas core** trailing veil")
+        Some("***Atlas core** trailing veil*")
     );
 
     let [Inline::Link {

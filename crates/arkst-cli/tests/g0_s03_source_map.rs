@@ -79,12 +79,10 @@ fn g0_s03_normal_compile_to_typst_source_map_preserves_tight_and_indented_crlf_s
         "**앞 [.uppercase {world}](https://example.com) 뒤**",
     );
 
-    // #758 owns restoring the missing closing Strong delimiter in the
-    // indented-CRLF source span. The generated Typst remains semantically
-    // Strong and the source map must faithfully carry the current IR span
-    // until that production fix lands.
+    // #758 is production-merged; the source map must now carry the full
+    // authored Strong delimiter range for indented CRLF as well.
     assert_s03_source_map(
         ".text\r\n    **앞 [.uppercase {world}](https://example.com) 뒤**\r\n",
-        "**앞 [.uppercase {world}](https://example.com) 뒤",
+        "**앞 [.uppercase {world}](https://example.com) 뒤**",
     );
 }

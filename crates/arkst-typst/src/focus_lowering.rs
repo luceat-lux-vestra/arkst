@@ -683,7 +683,7 @@ fn collect_page_margin_positions(nodes: &[IrNode], positions: &mut Vec<IrPageMar
                 IrComponent::Fragment(component) => {
                     collect_page_margin_positions(&component.children, positions);
                 }
-                IrComponent::ExplicitError(_) => {}
+                IrComponent::ExplicitError(_) | IrComponent::InvocationFailure(_) => {}
             },
             IrNode::Heading { .. }
             | IrNode::Paragraph { .. }

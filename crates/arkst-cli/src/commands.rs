@@ -1,5 +1,8 @@
 use anyhow::Context;
-use arkst_core::ir::{IrComponent, IrDocument, IrExplicitErrorComponent, IrInline, IrNode};
+use arkst_core::ir::{
+    IrComponent, IrDocument, IrExplicitErrorComponent, IrInline, IrInvocationFailureComponent,
+    IrNode,
+};
 use arkst_core::{LogEvent, LogLevel, LogSink};
 use clap::ValueEnum;
 use std::cell::RefCell;
@@ -790,8 +793,134 @@ fn explicit_error_diagnostic_matches_component(
 }
 
 #[derive(Debug, Default)]
+struct InvocationFailureComponentCollection<'a> {
+    recoverable: Vec<&'a IrInvocationFailureComponent>,
+    unevidenced: Vec<&'a IrInvocationFailureComponent>,
+}
+
+fn collect_invocation_failure_components_at_depth<'a>(
+    nodes: &'a [IrNode],
+    top_level: bool,
+    collection: &mut InvocationFailureComponentCollection<'a>,
+) {
+    for node in nodes {
+        match node {
+            IrNode::Component {
+                component: IrComponent::InvocationFailure(component),
+            } => {
+                if top_level {
+                    collection.recoverable.push(component);
+                } else {
+                    collection.unevidenced.push(component);
+                }
+            }
+            IrNode::Component {
+                component: IrComponent::Stacked(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Container(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Landscape(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Clip(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Todo(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::SpeakerNote(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Fragment(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Box(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Collapse(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Blockquote { content, .. } => {
+                collect_invocation_failure_components_at_depth(content, false, collection);
+            }
+            IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+                for item in items {
+                    collect_invocation_failure_components_at_depth(&item.nodes, false, collection);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_invocation_failure_components<'a>(
+    nodes: &'a [IrNode],
+) -> InvocationFailureComponentCollection<'a> {
+    let mut collection = InvocationFailureComponentCollection::default();
+    collect_invocation_failure_components_at_depth(nodes, true, &mut collection);
+    collection
+}
+
+fn invocation_failure_diagnostic_matches_component(
+    diagnostic: &arkst_core::Diagnostic,
+    component: &IrInvocationFailureComponent,
+) -> bool {
+    let Some(primary) = diagnostic.primary else {
+        return false;
+    };
+    let primary_matches_recovery = primary.source_id == component.span.source_id
+        && ((primary.start >= component.span.start && primary.end <= component.span.end)
+            || (primary.start == component.span.start && primary.end >= component.span.end));
+
+    diagnostic.code == "E3001"
+        && matches!(&diagnostic.severity, arkst_core::Severity::Error)
+        && diagnostic.message == component.message
+        && !component.source_echo.trim().is_empty()
+        && component.span.end.saturating_sub(component.span.start) == component.source_echo.len()
+        && primary_matches_recovery
+}
+
+#[derive(Debug, Default)]
 struct BuildErrorClassification {
     explicit_messages: Vec<String>,
+    invocation_messages: Vec<String>,
     fatal_errors: usize,
 }
 
@@ -813,42 +942,69 @@ fn classify_build_errors(
     }
     components.recoverable = evidenced;
 
+    let mut invocation_components = collect_invocation_failure_components(&document.nodes);
     let mut classification = BuildErrorClassification::default();
     for diagnostic in diagnostics
         .iter()
         .filter(|diagnostic| matches!(&diagnostic.severity, arkst_core::Severity::Error))
     {
-        if !is_explicit_error_diagnostic(diagnostic) {
+        if is_explicit_error_diagnostic(diagnostic) {
+            if let Some(index) = components.recoverable.iter().position(|component| {
+                explicit_error_diagnostic_matches_component(diagnostic, component)
+            }) {
+                classification
+                    .explicit_messages
+                    .push(components.recoverable.remove(index).message.clone());
+                continue;
+            }
+
+            if let Some(index) = components.unevidenced.iter().position(|component| {
+                explicit_error_diagnostic_matches_component(diagnostic, component)
+            }) {
+                components.unevidenced.remove(index);
+            }
+
             classification.fatal_errors += 1;
             continue;
         }
 
-        if let Some(index) = components.recoverable.iter().position(|component| {
-            explicit_error_diagnostic_matches_component(diagnostic, component)
-        }) {
-            classification
-                .explicit_messages
-                .push(components.recoverable.remove(index).message.clone());
+        if let Some(index) = invocation_components
+            .recoverable
+            .iter()
+            .position(|component| {
+                invocation_failure_diagnostic_matches_component(diagnostic, component)
+            })
+        {
+            classification.invocation_messages.push(
+                invocation_components
+                    .recoverable
+                    .remove(index)
+                    .message
+                    .clone(),
+            );
             continue;
         }
 
-        if let Some(index) = components.unevidenced.iter().position(|component| {
-            explicit_error_diagnostic_matches_component(diagnostic, component)
-        }) {
-            components.unevidenced.remove(index);
+        if let Some(index) = invocation_components
+            .unevidenced
+            .iter()
+            .position(|component| {
+                invocation_failure_diagnostic_matches_component(diagnostic, component)
+            })
+        {
+            invocation_components.unevidenced.remove(index);
         }
 
-        // An explicit-error diagnostic without an evidenced rendered semantic
-        // counterpart remains fatal. Matching an unevidenced component above
-        // consumes only the orphan accounting; it never makes the diagnostic
-        // recoverable.
         classification.fatal_errors += 1;
     }
 
-    // Likewise, never publish a document containing an explicit-error
-    // component without its structured diagnostic provenance.
+    // Never publish a semantic error component without its structured
+    // diagnostic provenance. InvocationFailure is recoverable only as a
+    // direct document child; nested copies remain deliberately unevidenced.
     classification.fatal_errors += components.recoverable.len();
     classification.fatal_errors += components.unevidenced.len();
+    classification.fatal_errors += invocation_components.recoverable.len();
+    classification.fatal_errors += invocation_components.unevidenced.len();
     classification
 }
 
@@ -974,12 +1130,22 @@ pub fn build_with_backend_and_libraries(
             // exit 66 and suppresses artifact publication.
             return Err(anyhow::Error::new(StrictModeError::new(message.clone())));
         }
+        if !classification.invocation_messages.is_empty() {
+            // #752 owns default-mode recovery only. Until strict failed-call
+            // origin/exit-66 parity has its own accepted host contract, retain
+            // the previous strict fail-closed behavior and publish no artifact.
+            anyhow::bail!(
+                "found {} error(s)",
+                classification.invocation_messages.len()
+            );
+        }
     }
 
     emit_native_build_diagnostics(&result.diagnostics);
 
-    // Quarkdown default/non-strict `.error` is a rendered document component,
-    // not a build-aborting diagnostic. Every other error remains fail-closed.
+    // Quarkdown default/non-strict authored `.error` and #752-evidenced
+    // top-level invocation failures are rendered document components, not
+    // build-aborting diagnostics. Every other error remains fail-closed.
     // In strict mode, unpaired/unevidenced errors deliberately stay on this
     // ordinary fatal path rather than being misclassified as exit 66.
     ensure_no_fatal_build_errors(&result.diagnostics, &result.ir)?;
@@ -1630,6 +1796,85 @@ mod tests {
     }
 
     #[test]
+    fn build_error_classifier_pairs_only_top_level_invocation_failures() {
+        let source_echo = ".sum {1}\n    invalid";
+        let source_id = arkst_core::source::SourceId(752);
+        let span = arkst_core::source::SourceSpan::new(source_id, 0, source_echo.len());
+        let primary = arkst_core::source::SourceSpan::new(source_id, 13, source_echo.len());
+        let message = "sum requires numeric arguments".to_string();
+        let diagnostic = arkst_core::Diagnostic {
+            code: "E3001".to_string(),
+            severity: arkst_core::Severity::Error,
+            message: message.clone(),
+            primary: Some(primary),
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        };
+        let failure = IrInvocationFailureComponent {
+            message: message.clone(),
+            source_echo: source_echo.to_string(),
+            span,
+        };
+        let direct = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::InvocationFailure(failure.clone()),
+            }],
+            metadata: Default::default(),
+        };
+
+        let classification = classify_build_errors(std::slice::from_ref(&diagnostic), &direct);
+        assert_eq!(classification.invocation_messages, vec![message.clone()]);
+        assert_eq!(classification.fatal_errors, 0);
+        assert!(ensure_no_fatal_build_errors(std::slice::from_ref(&diagnostic), &direct).is_ok());
+
+        let owner_diagnostic = arkst_core::Diagnostic {
+            code: "E3001".to_string(),
+            severity: arkst_core::Severity::Error,
+            message: message.clone(),
+            primary: Some(arkst_core::source::SourceSpan::new(
+                source_id,
+                span.start,
+                span.end + 6,
+            )),
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        };
+        let owner_classification =
+            classify_build_errors(std::slice::from_ref(&owner_diagnostic), &direct);
+        assert_eq!(
+            owner_classification.invocation_messages,
+            vec![message.clone()]
+        );
+        assert_eq!(owner_classification.fatal_errors, 0);
+
+        let missing_component = IrDocument {
+            nodes: Vec::new(),
+            metadata: Default::default(),
+        };
+        let classification =
+            classify_build_errors(std::slice::from_ref(&diagnostic), &missing_component);
+        assert!(classification.invocation_messages.is_empty());
+        assert_eq!(classification.fatal_errors, 1);
+
+        let orphan_component = classify_build_errors(&[], &direct);
+        assert!(orphan_component.invocation_messages.is_empty());
+        assert_eq!(orphan_component.fatal_errors, 1);
+
+        let nested = IrDocument {
+            nodes: vec![IrNode::Blockquote {
+                content: vec![IrNode::Component {
+                    component: IrComponent::InvocationFailure(failure),
+                }],
+                span,
+            }],
+            metadata: Default::default(),
+        };
+        let classification = classify_build_errors(std::slice::from_ref(&diagnostic), &nested);
+        assert!(classification.invocation_messages.is_empty());
+        assert_eq!(classification.fatal_errors, 1);
+    }
+
+    #[test]
     fn build_error_classifier_requires_diagnostic_component_pairing() {
         let span = arkst_core::source::SourceSpan::new(arkst_core::source::SourceId(197), 0, 13);
         let explicit = arkst_core::Diagnostic {
@@ -1927,6 +2172,44 @@ mod tests {
     /// [`super::build`] directly so they can pass a fake executable path.
     fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::Result<()> {
         super::build(input, formats, output, Path::new("typst"))
+    }
+
+    #[test]
+    fn issue_752_default_typst_build_publishes_invocation_failure_content() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("recovery.qd");
+        fs::write(&input, ".sum {1}\n    invalid\nlater\n").unwrap();
+
+        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(result.is_ok(), "default build failed: {result:?}");
+
+        let output_path = dir.path().join("recovery.typ");
+        let output = fs::read_to_string(&output_path).expect("default build must publish Typst");
+        assert!(output.contains("#block[Error:"), "{output}");
+        assert!(
+            output.contains("#raw(\".sum {1}\n    invalid\", block: true)"),
+            "{output}"
+        );
+        assert!(output.contains("later"), "{output}");
+    }
+
+    #[test]
+    fn issue_752_strict_build_remains_fail_closed_for_invocation_failure() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("strict-recovery.qd");
+        fs::write(&input, ".sum {1}\n    invalid\nlater\n").unwrap();
+
+        let result = build_with_backend_and_libraries(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            None,
+            Path::new("typst"),
+            BackendSelection::Subprocess,
+            None,
+            true,
+        );
+        assert!(result.is_err(), "strict build must remain fail-closed");
+        assert!(!dir.path().join("strict-recovery.typ").exists());
     }
 
     #[test]

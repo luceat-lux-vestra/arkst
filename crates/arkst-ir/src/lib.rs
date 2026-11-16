@@ -252,7 +252,7 @@ fn collect_component_sources(
         IrComponent::Fragment(component) => {
             collect_document_sources(&component.children, sources)?;
         }
-        IrComponent::ExplicitError(_) => {}
+        IrComponent::ExplicitError(_) | IrComponent::InvocationFailure(_) => {}
     }
     Ok(())
 }
@@ -1467,6 +1467,7 @@ pub enum IrComponent {
     SpeakerNote(IrSpeakerNoteComponent),
     Fragment(IrFragmentComponent),
     ExplicitError(IrExplicitErrorComponent),
+    InvocationFailure(IrInvocationFailureComponent),
 }
 
 impl IrComponent {
@@ -1483,6 +1484,7 @@ impl IrComponent {
             Self::SpeakerNote(component) => component.span,
             Self::Fragment(component) => component.span,
             Self::ExplicitError(component) => component.span,
+            Self::InvocationFailure(component) => component.span,
         }
     }
 }
@@ -1498,6 +1500,21 @@ pub struct IrExplicitErrorComponent {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_echo: Option<String>,
+    pub span: SourceSpan,
+}
+
+/// A backend-neutral recoverable document-output representation of a failed
+/// invocation.
+///
+/// Unlike `IrExplicitErrorComponent`, this is not an authored `.error`
+/// request. It records a completed evaluator failure after rollback so a
+/// supported document-output owner can preserve the exact authored invocation
+/// source without carrying callable, checkpoint, or renderer state into final
+/// IR.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrInvocationFailureComponent {
+    pub message: String,
+    pub source_echo: String,
     pub span: SourceSpan,
 }
 
@@ -2278,6 +2295,7 @@ enum WireComponent {
     SpeakerNote(WireSpeakerNoteComponent),
     Fragment(WireFragmentComponent),
     ExplicitError(IrExplicitErrorComponent),
+    InvocationFailure(IrInvocationFailureComponent),
 }
 
 fn is_false(value: &bool) -> bool {
@@ -3006,6 +3024,9 @@ fn component_to_wire(
             span: component.span,
         }),
         IrComponent::ExplicitError(component) => WireComponent::ExplicitError(component.clone()),
+        IrComponent::InvocationFailure(component) => {
+            WireComponent::InvocationFailure(component.clone())
+        }
     })
 }
 
@@ -3593,6 +3614,7 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::ExplicitError(component) => IrComponent::ExplicitError(component),
+        WireComponent::InvocationFailure(component) => IrComponent::InvocationFailure(component),
     })
 }
 
@@ -4307,11 +4329,12 @@ mod tests {
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrContainerMargin, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment,
         IrDocumentAuthor, IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType,
-        IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrLandscapeComponent,
-        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrNumberingFormat, IrNumberingLayer,
-        IrNumberingState, IrNumberingToken, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
-        IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTextDecoration,
-        IrValue, NativeTarget, SourceTable, TargetSpecificContent,
+        IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInvocationFailureComponent,
+        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
+        IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair,
+        IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrTextDecoration, IrValue, NativeTarget, SourceTable,
+        TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -5005,6 +5028,24 @@ mod tests {
         assert!(!encoded.contains("typst"));
         let decoded =
             serde_json::from_str::<IrValue>(&encoded).expect("explicit error deserializes");
+
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn invocation_failure_component_serde_roundtrip_preserves_message_source_echo_and_span() {
+        let value = IrValue::Component(IrComponent::InvocationFailure(
+            IrInvocationFailureComponent {
+                message: "Function 'sum' requires numeric arguments".to_string(),
+                source_echo: ".sum {1}\n    invalid".to_string(),
+                span: SourceSpan::new(SourceId(752), 4, 24),
+            },
+        ));
+
+        let encoded = serde_json::to_string(&value).expect("invocation failure serializes");
+        assert!(!encoded.contains("typst"));
+        let decoded =
+            serde_json::from_str::<IrValue>(&encoded).expect("invocation failure deserializes");
 
         assert_eq!(decoded, value);
     }

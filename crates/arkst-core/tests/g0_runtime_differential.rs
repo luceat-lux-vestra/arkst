@@ -341,6 +341,20 @@ fn paragraph_text(result: &CompileResult) -> String {
         .join("\n")
 }
 
+fn invocation_failure_source_echoes(result: &CompileResult) -> Vec<&str> {
+    result
+        .ir
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            IrNode::Component {
+                component: IrComponent::InvocationFailure(failure),
+            } => Some(failure.source_echo.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn g0_s04_source_defined_direct_calls_match_legacy_ir_entrypoint() {
     let source = ".function {greet}\n    to from?:\n    Hello, .to from .from!\n\n.greet {world}\n.greet {world} from:{Jane}\n";
@@ -948,7 +962,10 @@ fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
     assert!(invalid_result.diagnostics[0]
         .message
         .contains("numeric arguments"));
-    assert!(invalid_result.ir.nodes.is_empty(), "{invalid_result:?}");
+    assert_eq!(
+        invocation_failure_source_echoes(&invalid_result),
+        vec![".sum {1}\n    invalid"]
+    );
 }
 
 #[test]
@@ -1065,6 +1082,10 @@ fn g0_s08_middle_tail_failure_does_not_dispatch_stateful_terminal_tail() {
     let failure = compile_and_assert_legacy_parity(&failed);
     assert_eq!(failure.diagnostics.len(), 1, "{failure:?}");
     assert!(failure.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(
+        invocation_failure_source_echoes(&failure),
+        vec![".identity {2}::multiply {true}::tail\n    terminal body"]
+    );
     assert_eq!(paragraph_text(&failure), "before");
 }
 
@@ -1102,6 +1123,10 @@ fn g0_s08_side_effectful_head_executes_once_on_success_and_middle_failure() {
     let failure = compile_and_assert_legacy_parity(&failed);
     assert_eq!(failure.diagnostics.len(), 1, "{failure:?}");
     assert!(failure.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(
+        invocation_failure_source_echoes(&failure),
+        vec![".counted::multiply {true}::tail\n    terminal body"]
+    );
     assert_eq!(paragraph_text(&failure), "1");
 }
 
@@ -1625,14 +1650,15 @@ fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure() {
         [IrInline::Text { content, .. }] if content == "WORLD"
     ));
     assert_eq!(suffix, " 뒤");
-    // Current Arkst keeps the intended Strong/link/inline-call semantics
-    // under an indented CRLF body, but its final Strong span drops the authored
-    // closing `**`. Freeze that migration behavior here without promoting it
-    // to the target contract; #758 owns restoring the full source-backed span.
+    // #758 is production-merged: the final Strong span now preserves the
+    // complete authored delimiter range while retaining the same semantics.
+    assert_eq!(strong_span.start, 11);
+    assert_eq!(strong_span.end, 64);
     assert_eq!(
         &source[strong_span.start..strong_span.end],
-        "**앞 [.uppercase {world}](https://example.com) 뒤"
+        "**앞 [.uppercase {world}](https://example.com) 뒤**"
     );
+    assert_eq!(&source[64..66], "\r\n");
     assert_eq!(
         &source[link_span.start..link_span.end],
         "[.uppercase {world}](https://example.com)"
