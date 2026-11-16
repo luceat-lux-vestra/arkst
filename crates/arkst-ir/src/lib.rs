@@ -3614,9 +3614,7 @@ fn component_from_wire(
             span: component.span,
         }),
         WireComponent::ExplicitError(component) => IrComponent::ExplicitError(component),
-        WireComponent::InvocationFailure(component) => {
-            IrComponent::InvocationFailure(component)
-        }
+        WireComponent::InvocationFailure(component) => IrComponent::InvocationFailure(component),
     })
 }
 
@@ -4331,12 +4329,12 @@ mod tests {
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrContainerMargin, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAlignment,
         IrDocumentAuthor, IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType,
-        IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline,
-        IrInvocationFailureComponent, IrLandscapeComponent,
-        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrNumberingFormat, IrNumberingLayer,
-        IrNumberingState, IrNumberingToken, IrPair, IrParagraphStyleInfo, IrParameter, IrRange,
-        IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTextDecoration,
-        IrValue, NativeTarget, SourceTable, TargetSpecificContent,
+        IrExplicitErrorComponent, IrFontLayer, IrFontState, IrInline, IrInvocationFailureComponent,
+        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
+        IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair,
+        IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrTextDecoration, IrValue, NativeTarget, SourceTable,
+        TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -5046,8 +5044,8 @@ mod tests {
 
         let encoded = serde_json::to_string(&value).expect("invocation failure serializes");
         assert!(!encoded.contains("typst"));
-        let decoded = serde_json::from_str::<IrValue>(&encoded)
-            .expect("invocation failure deserializes");
+        let decoded =
+            serde_json::from_str::<IrValue>(&encoded).expect("invocation failure deserializes");
 
         assert_eq!(decoded, value);
     }
