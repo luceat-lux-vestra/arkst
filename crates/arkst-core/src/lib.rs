@@ -877,6 +877,37 @@ mod tests {
     }
 
     #[test]
+    fn issue_752_direct_failed_invocation_excludes_crlf_separator_from_recovery_source() {
+        let source = ".sum {1}\r\n    invalid\r\nlater\r\n";
+        let (result, source_id) = compile_source(source);
+
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(result.ir.nodes.len(), 2, "{result:?}");
+
+        let IrNode::Component {
+            component: IrComponent::InvocationFailure(failure),
+        } = &result.ir.nodes[0]
+        else {
+            panic!(
+                "expected invocation-failure component, got {:?}",
+                result.ir.nodes[0]
+            );
+        };
+        assert_eq!(failure.source_echo, ".sum {1}\r\n    invalid");
+        assert_eq!(failure.span.source_id, source_id);
+        assert_eq!(
+            &source[failure.span.start..failure.span.end],
+            failure.source_echo
+        );
+        assert_eq!(
+            &source[failure.span.end..failure.span.end + 2],
+            "\r\n"
+        );
+        assert_eq!(output_text(&result), "later");
+    }
+
+    #[test]
     fn issue_752_failed_chain_preserves_head_once_and_skips_terminal_tail() {
         let source = concat!(
             ".var {count} {0}\n",
