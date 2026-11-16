@@ -9,11 +9,10 @@ use arkst_ir::{
     IrContainerMargin, IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDocument,
     IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior,
     IrFragmentComponent, IrHeadingKind, IrInline, IrInvocationFailureComponent, IrKeybindingPart,
-    IrLandscapeComponent,
-    IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
-    IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration, IrTextScript, IrTextSize, IrTextStyle,
-    IrTextVariant, IrTextWeight, IrTodoComponent, IrValue,
+    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition,
+    IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration,
+    IrTextScript, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -2309,10 +2308,9 @@ mod tests {
         IrContainerRadius, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment,
         IrExplicitErrorComponent, IrHeadingKind, IrInline, IrInvocationFailureComponent,
         IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
-        IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
-        IrTextWeight, IrValue,
+        IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+        IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize,
+        IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
