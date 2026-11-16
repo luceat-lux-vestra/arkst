@@ -1827,6 +1827,26 @@ mod tests {
         assert_eq!(classification.fatal_errors, 0);
         assert!(ensure_no_fatal_build_errors(std::slice::from_ref(&diagnostic), &direct).is_ok());
 
+        let owner_diagnostic = arkst_core::Diagnostic {
+            code: "E3001".to_string(),
+            severity: arkst_core::Severity::Error,
+            message: message.clone(),
+            primary: Some(arkst_core::source::SourceSpan::new(
+                source_id,
+                span.start,
+                span.end + 6,
+            )),
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        };
+        let owner_classification =
+            classify_build_errors(std::slice::from_ref(&owner_diagnostic), &direct);
+        assert_eq!(
+            owner_classification.invocation_messages,
+            vec![message.clone()]
+        );
+        assert_eq!(owner_classification.fatal_errors, 0);
+
         let missing_component = IrDocument {
             nodes: Vec::new(),
             metadata: Default::default(),
