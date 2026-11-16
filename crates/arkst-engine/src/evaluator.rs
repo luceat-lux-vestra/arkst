@@ -746,12 +746,24 @@ fn recoverable_invocation_failure_node(
     })
 }
 
+fn recovery_body_content_end(source: &arkst_source::SourceText, span: ByteSpan) -> Option<usize> {
+    let body = source.slice(span)?;
+    let line_ending_len = if body.ends_with("\r\n") {
+        2
+    } else if body.ends_with(['\n', '\r']) {
+        1
+    } else {
+        0
+    };
+    Some(span.end.saturating_sub(line_ending_len))
+}
+
 fn ir_invocation_recovery_span(
     span: SourceSpan,
     raw_body: Option<&IrRawBody>,
 ) -> Option<SourceSpan> {
     let raw_body = raw_body?;
-    let end = raw_body.span.end;
+    let end = recovery_body_content_end(&raw_body.source, raw_body.span)?;
     (end >= span.start && end <= span.end).then_some(SourceSpan::new(
         span.source_id,
         span.start,
@@ -771,7 +783,7 @@ fn frontend_invocation_recovery_span(
         return None;
     };
     let start = invocation.span.start;
-    let end = raw_body.span.end;
+    let end = recovery_body_content_end(&raw_body.source, raw_body.span)?;
     (end >= start && end <= invocation.span.end).then_some(SourceSpan::new(source_id, start, end))
 }
 
