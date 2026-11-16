@@ -19568,7 +19568,10 @@ impl Evaluator {
             }
 
             let evaluated_candidate = match candidate {
-                Candidate::Positional { value, span: value_span } => Candidate::Positional {
+                Candidate::Positional {
+                    value,
+                    span: value_span,
+                } => Candidate::Positional {
                     value: self
                         .evaluate_argument_candidate(&value, span, diagnostics, context)?
                         .into_ir_value(),
@@ -19608,14 +19611,15 @@ impl Evaluator {
         })?;
 
         let evaluated_body = match body_candidate {
-            Some(Candidate::Positional { value, span: body_span }) => {
-                Some(Candidate::Positional {
-                    value: self
-                        .evaluate_argument_candidate(&value, span, diagnostics, context)?
-                        .into_ir_value(),
-                    span: body_span,
-                })
-            }
+            Some(Candidate::Positional {
+                value,
+                span: body_span,
+            }) => Some(Candidate::Positional {
+                value: self
+                    .evaluate_argument_candidate(&value, span, diagnostics, context)?
+                    .into_ir_value(),
+                span: body_span,
+            }),
             Some(Candidate::Named {
                 name,
                 name_span,
@@ -19649,68 +19653,6 @@ impl Evaluator {
                 BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None,
             })
             .collect();
-        Ok(BoundLambdaArguments::Explicit(values))
-    }
-
-    /// Bind explicit callable slots while their expressions/bodies are still
-    /// unevaluated, then evaluate only selected slots in source order.
-    #[allow(clippy::too_many_arguments)]
-    fn bind_explicit_callable_arguments<'a>(
-        &self,
-        binding_plan: &BindingPlan,
-        candidates: Vec<Candidate<ArgumentCandidate<'a>>>,
-        body: Option<CallBody<'a>>,
-        span: &SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext<'_>,
-    ) -> Result<BoundLambdaArguments, CallOutcome> {
-        let body_candidate =
-            body.map(|body| argument_body_candidate(body, *span, candidates.len()));
-        self.bind_explicit_callable_candidate_set(
-            binding_plan,
-            candidates,
-            body_candidate,
-            span,
-            diagnostics,
-            context,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn bind_explicit_callable_candidate_set<'a>(
-        &self,
-        binding_plan: &BindingPlan,
-        candidates: Vec<Candidate<ArgumentCandidate<'a>>>,
-        body_candidate: Option<Candidate<ArgumentCandidate<'a>>>,
-        span: &SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext<'_>,
-    ) -> Result<BoundLambdaArguments, CallOutcome> {
-        let bound = binding_plan
-            .bind(&candidates, body_candidate.as_ref(), *span)
-            .map_err(|error| {
-                diagnostics.push(binding_diagnostic_with_message(
-                    error,
-                    callable_binding_message,
-                ));
-                CallOutcome::Failed
-            })?;
-
-        let slot_count = bound.slots.len();
-        let mut selected = Vec::with_capacity(slot_count);
-        for (slot_index, slot) in bound.slots.into_iter().enumerate() {
-            if let BoundSlot::Explicit { value, .. } = slot {
-                selected.push((value.source_order(), slot_index, value));
-            }
-        }
-        selected.sort_by_key(|(source_order, _, _)| *source_order);
-
-        let mut values = vec![IrValue::None; slot_count];
-        for (_, slot_index, candidate) in selected {
-            values[slot_index] = self
-                .evaluate_argument_candidate(&candidate, span, diagnostics, context)?
-                .into_ir_value();
-        }
         Ok(BoundLambdaArguments::Explicit(values))
     }
 
@@ -26411,9 +26353,7 @@ fn extension_wrapper_parameters(
     }
 }
 
-fn explicit_callable_parameter_metadata(
-    parameters: &[IrParameter],
-) -> Vec<ParameterMetadata<'_>> {
+fn explicit_callable_parameter_metadata(parameters: &[IrParameter]) -> Vec<ParameterMetadata<'_>> {
     parameters
         .iter()
         .map(|parameter| {
