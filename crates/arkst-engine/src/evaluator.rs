@@ -752,8 +752,11 @@ fn ir_invocation_recovery_span(
 ) -> Option<SourceSpan> {
     let raw_body = raw_body?;
     let end = raw_body.span.end;
-    (end >= span.start && end <= span.end)
-        .then_some(SourceSpan::new(span.source_id, span.start, end))
+    (end >= span.start && end <= span.end).then_some(SourceSpan::new(
+        span.source_id,
+        span.start,
+        end,
+    ))
 }
 
 fn frontend_invocation_recovery_span(
@@ -769,8 +772,7 @@ fn frontend_invocation_recovery_span(
     };
     let start = invocation.span.start;
     let end = raw_body.span.end;
-    (end >= start && end <= invocation.span.end)
-        .then_some(SourceSpan::new(source_id, start, end))
+    (end >= start && end <= invocation.span.end).then_some(SourceSpan::new(source_id, start, end))
 }
 
 fn materialize_document_invocation_outcome(
