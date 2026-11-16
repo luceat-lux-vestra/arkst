@@ -746,27 +746,52 @@ fn recoverable_invocation_failure_node(
     })
 }
 
+fn ir_invocation_recovery_span(
+    span: SourceSpan,
+    raw_body: Option<&IrRawBody>,
+) -> Option<SourceSpan> {
+    let raw_body = raw_body?;
+    let end = raw_body.span.end;
+    (end >= span.start && end <= span.end)
+        .then_some(SourceSpan::new(span.source_id, span.start, end))
+}
+
+fn frontend_invocation_recovery_span(
+    invocation: FrontendInvocation<'_>,
+    source_id: SourceId,
+) -> Option<SourceSpan> {
+    let FrontendBlock::DirectiveCall {
+        raw_body: Some(raw_body),
+        ..
+    } = invocation.block
+    else {
+        return None;
+    };
+    let start = invocation.span.start;
+    let end = raw_body.span.end;
+    (end >= start && end <= invocation.span.end).then_some(SourceSpan::new(source_id, start, end))
+}
+
 fn materialize_document_invocation_outcome(
     outcome: CallOutcome,
-    span: SourceSpan,
-    recoverable_owner: bool,
+    recovery_span: Option<SourceSpan>,
     diagnostics_before: usize,
     diagnostics: &[Diagnostic],
     context: &EvaluationContext<'_>,
 ) -> Vec<IrNode> {
     match outcome {
         CallOutcome::Value(IrValue::Content(nodes)) => nodes,
-        CallOutcome::Failed if recoverable_owner => recoverable_invocation_failure_node(
-            context,
-            span,
-            diagnostics.get(diagnostics_before..).unwrap_or_default(),
-        )
-        .into_iter()
-        .collect(),
-        CallOutcome::Value(_)
-        | CallOutcome::NoValue
-        | CallOutcome::Failed
-        | CallOutcome::Unresolved => Vec::new(),
+        CallOutcome::Failed => recovery_span
+            .and_then(|span| {
+                recoverable_invocation_failure_node(
+                    context,
+                    span,
+                    diagnostics.get(diagnostics_before..).unwrap_or_default(),
+                )
+            })
+            .into_iter()
+            .collect(),
+        CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Unresolved => Vec::new(),
     }
 }
 
@@ -4016,8 +4041,7 @@ impl Evaluator {
                     if !matches!(outcome, CallOutcome::Unresolved) {
                         return Some(materialize_document_invocation_outcome(
                             outcome,
-                            call_span,
-                            invocation.body.is_some(),
+                            frontend_invocation_recovery_span(invocation, source_id),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4049,8 +4073,7 @@ impl Evaluator {
                         );
                         Some(materialize_document_invocation_outcome(
                             outcome,
-                            call.span,
-                            call.body.is_some(),
+                            ir_invocation_recovery_span(call.span, call.raw_body.as_ref()),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4114,8 +4137,7 @@ impl Evaluator {
                         );
                         return Some(materialize_document_invocation_outcome(
                             outcome,
-                            span,
-                            invocation.body.is_some() && !invocation.chain.is_empty(),
+                            frontend_invocation_recovery_span(invocation, source_id),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4145,8 +4167,7 @@ impl Evaluator {
                         );
                         Some(materialize_document_invocation_outcome(
                             outcome,
-                            chain.span,
-                            chain.body.is_some() && !chain.chain.is_empty(),
+                            ir_invocation_recovery_span(chain.span, chain.raw_body.as_ref()),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4286,8 +4307,7 @@ impl Evaluator {
                     );
                     out.extend(materialize_document_invocation_outcome(
                         outcome,
-                        *span,
-                        body.is_some(),
+                        ir_invocation_recovery_span(*span, raw_body.as_ref()),
                         diagnostics_before,
                         diagnostics,
                         context,
@@ -4314,8 +4334,7 @@ impl Evaluator {
                     );
                     out.extend(materialize_document_invocation_outcome(
                         outcome,
-                        *span,
-                        body.is_some() && !chain.is_empty(),
+                        ir_invocation_recovery_span(*span, raw_body.as_ref()),
                         diagnostics_before,
                         diagnostics,
                         context,
