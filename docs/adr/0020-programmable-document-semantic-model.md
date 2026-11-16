@@ -1,11 +1,15 @@
 # ADR-0020: Programmable Document Semantic Model
 
-- Status: Accepted
+- Status: Accepted (historic typed-component contract; mixed-IR lifecycle clauses partially superseded by ADR-0022)
 - Date: 2026-08-20
 - Decision scope: Quarkdown v2.5.1 programmable-document semantics
 - Related issue: #61
 - Supersedes: none
 - Related ADRs: [ADR-0006](0006-source-map-and-diagnostic-model.md), [ADR-0015](0015-compiler-crate-boundaries.md), [ADR-0016](0016-full-quarkdown-compatibility-and-upstream-evolution.md)
+
+## Scoped supersession — 2026-11-11
+
+[ADR-0022](0022-runtime-final-document-ir.md) supersedes the old *single mixed executable/final IR* and *IrValue as universal evaluator carrier* assumptions, and the allowance of unresolved executable calls/captures in completed final IR. This ADR's typed backend-neutral components, target-driven conversion, materialization, provenance, diagnostics and source-map principles remain valid. Historic text is preserved as the prior decision, **not** the current target. No backward compatibility with the old Arkst public API or unversioned JSON is mandated. Full implementation and verification still belong to #719 G0–G8.
 
 ## Context
 

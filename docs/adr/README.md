@@ -35,5 +35,6 @@ This directory contains Architecture Decision Records (ADRs) for Arkst.
 | 0019 | Typst source and resource context              | Accepted  |
 | 0020 | Programmable document semantic model           | Accepted  |
 | 0021 | Optional in-process Typst backend after #187  | Accepted  |
+| 0022 | Evaluator runtime and final document IR boundary | Accepted |
 
 Template: `0000-template.md`

@@ -1,0 +1,1831 @@
+use arkst_core::ir::{IrComponent, IrDocument, IrInline, IrNode};
+use arkst_core::{
+    compile, compile_with_capabilities, compile_with_environment, compile_with_log_sink,
+    Capabilities, CompileOptions, CompileResult, Diagnostic, EnvironmentInputs, LogEvent, LogLevel,
+    LogSink, SourceId, VirtualProjectBuilder,
+};
+use arkst_engine::{
+    DocumentMetadataDefaults, IncludedSource, LoadableLibraryProvider, LoadableLibrarySource,
+    ResourceAccessError, ResourceProvider, ResourceText,
+};
+use arkst_markdown::Mode;
+use std::cell::RefCell;
+
+struct LegacyResult {
+    ir: IrDocument,
+    diagnostics: Vec<Diagnostic>,
+}
+
+fn build_project(source: &str) -> (arkst_core::VirtualProject, SourceId) {
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    (project, source_id)
+}
+
+fn legacy_compile(
+    project: &arkst_core::VirtualProject,
+    source: &str,
+    source_id: SourceId,
+) -> LegacyResult {
+    let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "G0 differential fixtures must start from parser-clean source: {:?}",
+        parsed.diagnostics
+    );
+
+    let (lowered, lowering_diagnostics) =
+        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            source_id,
+            &DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+    assert!(
+        lowering_diagnostics.is_empty(),
+        "G0 differential fixture must be representable by the legacy AST-to-IR bridge: {lowering_diagnostics:?}"
+    );
+
+    let (ir, diagnostics) =
+        arkst_core::evaluator::Evaluator::new().evaluate_project(project, source_id, &lowered);
+    LegacyResult { ir, diagnostics }
+}
+
+fn diagnostic_signature(diagnostics: &[Diagnostic]) -> Vec<String> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            format!(
+                "{}|{:?}|{}|{:?}|{:?}|{:?}",
+                diagnostic.code,
+                diagnostic.severity,
+                diagnostic.message,
+                diagnostic.primary,
+                diagnostic.secondary,
+                diagnostic.hints
+            )
+        })
+        .collect()
+}
+
+fn compile_and_assert_legacy_parity(source: &str) -> CompileResult {
+    let (project, source_id) = build_project(source);
+    let frontend = compile(&project, &CompileOptions::default());
+    let legacy = legacy_compile(&project, source, source_id);
+
+    assert_eq!(
+        frontend.ir, legacy.ir,
+        "normal direct-frontend result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy.diagnostics),
+        "normal direct-frontend diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+    frontend
+}
+
+fn compile_project_and_assert_legacy_parity(
+    project: &arkst_core::VirtualProject,
+    entry_source: &str,
+) -> CompileResult {
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let frontend = compile(project, &CompileOptions::default());
+    let legacy = legacy_compile(project, entry_source, source_id);
+
+    assert_eq!(
+        frontend.ir, legacy.ir,
+        "normal direct-frontend project result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy.diagnostics),
+        "normal direct-frontend project diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+    frontend
+}
+
+fn compile_project_with_environment_and_assert_legacy_parity(
+    project: &arkst_core::VirtualProject,
+    entry_source: &str,
+    environment: &EnvironmentInputs,
+) -> CompileResult {
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let parsed = arkst_markdown::parse_with_mode(entry_source, Mode::Quarkdown);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "G0 differential fixtures must start from parser-clean source: {:?}",
+        parsed.diagnostics
+    );
+
+    let (lowered, lowering_diagnostics) =
+        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            source_id,
+            &DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+    assert!(
+        lowering_diagnostics.is_empty(),
+        "G0 differential fixture must be representable by the legacy AST-to-IR bridge: {lowering_diagnostics:?}"
+    );
+
+    let frontend = compile_with_environment(project, &CompileOptions::default(), environment);
+    let (legacy_ir, legacy_diagnostics) = arkst_core::evaluator::Evaluator::new()
+        .evaluate_project_with_environment(project, source_id, &lowered, environment);
+
+    assert_eq!(
+        frontend.ir, legacy_ir,
+        "normal direct-frontend environment result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy_diagnostics),
+        "normal direct-frontend environment diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+    frontend
+}
+
+fn compile_project_with_capabilities_and_assert_legacy_parity(
+    project: &arkst_core::VirtualProject,
+    entry_source: &str,
+    capabilities: Capabilities,
+) -> CompileResult {
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let parsed = arkst_markdown::parse_with_mode(entry_source, Mode::Quarkdown);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "G0 differential fixtures must start from parser-clean source: {:?}",
+        parsed.diagnostics
+    );
+
+    let (lowered, lowering_diagnostics) =
+        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            source_id,
+            &DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+
+    let frontend = compile_with_capabilities(project, &CompileOptions::default(), capabilities);
+    let (legacy_ir, mut legacy_diagnostics) =
+        arkst_core::evaluator::Evaluator::with_capabilities(capabilities)
+            .evaluate_project(project, source_id, &lowered);
+    legacy_diagnostics.extend(lowering_diagnostics);
+
+    assert_eq!(
+        frontend.ir, legacy_ir,
+        "normal direct-frontend capability result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy_diagnostics),
+        "normal direct-frontend capability diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+    frontend
+}
+
+struct FixtureSourceProvider<'a> {
+    source_id: SourceId,
+    source: &'a str,
+}
+
+impl ResourceProvider for FixtureSourceProvider<'_> {
+    fn source_path(&self, source_id: SourceId) -> Option<String> {
+        (source_id == self.source_id).then(|| "main.qd".to_string())
+    }
+
+    fn source_text(&self, source_id: SourceId) -> Option<&str> {
+        (source_id == self.source_id).then_some(self.source)
+    }
+
+    fn read_text(
+        &self,
+        _source_id: SourceId,
+        reference: &str,
+    ) -> Result<ResourceText, ResourceAccessError> {
+        Err(ResourceAccessError::NotFound {
+            path: reference.to_string(),
+        })
+    }
+
+    fn read_source(
+        &self,
+        _source_id: SourceId,
+        reference: &str,
+    ) -> Result<IncludedSource, ResourceAccessError> {
+        Err(ResourceAccessError::NotFound {
+            path: reference.to_string(),
+        })
+    }
+}
+
+impl LoadableLibraryProvider for FixtureSourceProvider<'_> {
+    fn loadable_library(&self, _name: &str) -> Option<LoadableLibrarySource> {
+        None
+    }
+}
+
+#[derive(Default)]
+struct CollectingSink {
+    events: RefCell<Vec<LogEvent>>,
+}
+
+impl LogSink for CollectingSink {
+    fn emit(&self, event: &LogEvent) {
+        self.events.borrow_mut().push(event.clone());
+    }
+}
+
+fn compile_project_with_log_sink_and_assert_legacy_parity(
+    project: &arkst_core::VirtualProject,
+    entry_source: &str,
+) -> (CompileResult, Vec<LogEvent>) {
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let parsed = arkst_markdown::parse_with_mode(entry_source, Mode::Quarkdown);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "G0 differential fixtures must start from parser-clean source: {:?}",
+        parsed.diagnostics
+    );
+
+    let (lowered, lowering_diagnostics) =
+        arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            source_id,
+            &DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+    assert!(
+        lowering_diagnostics.is_empty(),
+        "G0 differential fixture must be representable by the legacy AST-to-IR bridge: {lowering_diagnostics:?}"
+    );
+
+    let frontend_sink = CollectingSink::default();
+    let frontend = compile_with_log_sink(project, &CompileOptions::default(), &frontend_sink);
+    let legacy_sink = CollectingSink::default();
+    let legacy_host = FixtureSourceProvider {
+        source_id,
+        source: entry_source,
+    };
+    let (legacy_ir, legacy_diagnostics) = arkst_engine::evaluator::Evaluator::new()
+        .evaluate_with_resources_and_libraries_and_log_sink_for_mode(
+            &legacy_host,
+            &legacy_host,
+            &legacy_sink,
+            source_id,
+            Mode::Quarkdown,
+            &lowered,
+            &DocumentMetadataDefaults::default(),
+        );
+
+    assert_eq!(
+        frontend.ir, legacy_ir,
+        "normal direct-frontend logger result diverged from the legacy pre-lowered IR evaluator"
+    );
+    assert_eq!(
+        diagnostic_signature(&frontend.diagnostics),
+        diagnostic_signature(&legacy_diagnostics),
+        "normal direct-frontend logger diagnostics diverged from the legacy pre-lowered IR evaluator"
+    );
+
+    let frontend_events = frontend_sink.events.into_inner();
+    let legacy_events = legacy_sink.events.into_inner();
+    assert_eq!(
+        frontend_events, legacy_events,
+        "normal direct-frontend logger events diverged from the legacy pre-lowered IR evaluator"
+    );
+
+    (frontend, frontend_events)
+}
+
+fn paragraph_text(result: &CompileResult) -> String {
+    result
+        .ir
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            IrNode::Paragraph { content, .. } => Some(
+                content
+                    .iter()
+                    .filter_map(|inline| match inline {
+                        IrInline::Text { content, .. } => Some(content.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>(),
+            ),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn invocation_failure_source_echoes(result: &CompileResult) -> Vec<&str> {
+    result
+        .ir
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            IrNode::Component {
+                component: IrComponent::InvocationFailure(failure),
+            } => Some(failure.source_echo.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn g0_s04_source_defined_direct_calls_match_legacy_ir_entrypoint() {
+    let source = ".function {greet}\n    to from?:\n    Hello, .to from .from!\n\n.greet {world}\n.greet {world} from:{Jane}\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(
+        paragraph_text(&result),
+        "Hello, world from None!\nHello, world from Jane!"
+    );
+}
+
+#[test]
+fn g0_s12_failed_extension_document_state_rollback_matches_legacy_ir_entrypoint() {
+    let source = ".docname {before}\n.function {greet}\n    name:\n    .docname {changed}\n    .sum {true} {2}\n\n.extend {greet}\n    name:\n    .super\n\n.greet {world}\n.docname\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(result.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(paragraph_text(&result), "before");
+}
+
+#[test]
+fn g0_s16_dynamic_and_static_string_conversion_match_legacy_ir_entrypoint() {
+    let dynamic = ".var {numbertext} {.string {-3.5}}\n.abs {.numbertext}\n";
+    let dynamic_result = compile_and_assert_legacy_parity(dynamic);
+    assert!(dynamic_result.diagnostics.is_empty(), "{dynamic_result:?}");
+    assert_eq!(paragraph_text(&dynamic_result), "3.5");
+
+    let static_text = ".abs {.string {-3.5}}\n";
+    let static_result = compile_and_assert_legacy_parity(static_text);
+    assert_eq!(static_result.diagnostics.len(), 1, "{static_result:?}");
+    assert_eq!(static_result.diagnostics[0].code, "E3001");
+    assert!(static_result.ir.nodes.is_empty(), "{static_result:?}");
+}
+
+#[test]
+fn g0_s13_nested_super_success_rolls_back_after_outer_failure() {
+    let source = ".var {state} {before}\n.function {greet}\n    name:\n    base .name\n\n.extend {greet}\n    name:\n    .state {changed}\n    .super\n\n.function {outer}\n    name:\n    .greet {.name}\n    .sum {true} {2}\n\n.outer {world}\n.state\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(result.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(paragraph_text(&result), "before");
+}
+
+#[test]
+fn g0_s14_extended_native_raw_body_stays_lazy_and_matches_legacy() {
+    let source = ".var {state} {before}\n.extend {lowercase}\n    .super\n\n.lowercase\n    .state {changed}\n\n.state\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), ".state {changed}\nbefore");
+}
+
+#[test]
+fn g0_s15_source_defined_nested_body_matches_legacy() {
+    let source = ".function {echo}\n    value:\n    .value\n.text {.echo\n    nested}\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "nested");
+}
+
+#[test]
+fn g0_s17_logger_collection_provenance_boundary_matches_legacy() {
+    let source_backed = ".var {values}\n    - alpha\n    - beta\n.debug {.values}\n";
+    let source_backed_result = compile_and_assert_legacy_parity(source_backed);
+    assert!(
+        source_backed_result.diagnostics.is_empty(),
+        "{source_backed_result:?}"
+    );
+    assert!(
+        source_backed_result.ir.nodes.is_empty(),
+        "{source_backed_result:?}"
+    );
+
+    let generated = ".var {values}\n    - alpha\n    - beta\n.debug {.values::reversed}\n";
+    let generated_result = compile_and_assert_legacy_parity(generated);
+    assert_eq!(
+        generated_result.diagnostics.len(),
+        1,
+        "{generated_result:?}"
+    );
+    assert_eq!(generated_result.diagnostics[0].code, "E3001");
+    assert!(
+        generated_result.diagnostics[0].message.contains(".debug"),
+        "{generated_result:?}"
+    );
+    assert!(generated_result.ir.nodes.is_empty(), "{generated_result:?}");
+
+    let nested_rich =
+        ".var {values}\n    - alpha\n        - **nested-rich**\n    - beta\n.debug {.values}\n";
+    let nested_rich_result = compile_and_assert_legacy_parity(nested_rich);
+    assert_eq!(
+        nested_rich_result.diagnostics.len(),
+        1,
+        "{nested_rich_result:?}"
+    );
+    assert_eq!(nested_rich_result.diagnostics[0].code, "E3001");
+    assert!(
+        nested_rich_result.diagnostics[0].message.contains(".debug"),
+        "{nested_rich_result:?}"
+    );
+    assert!(
+        nested_rich_result.ir.nodes.is_empty(),
+        "{nested_rich_result:?}"
+    );
+}
+
+#[test]
+fn g0_s18_source_backed_rich_table_callback_matches_legacy() {
+    let source = ".var {catalog}\n    | Signal | Code |\n    |--------|------|\n    | Aurora | **keep-2** |\n    | Boreal | skip-1 |\n\n.tablecompute column:{2} compute:{values: .values::size} table:{.catalog}\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    let [IrNode::Table { rows, .. }] = result.ir.nodes.as_slice() else {
+        panic!("expected one table: {:?}", result.ir.nodes);
+    };
+    assert_eq!(rows.len(), 3);
+    assert!(matches!(
+        rows[0].cells[1].content.as_slice(),
+        [IrInline::Strong { .. }]
+    ));
+}
+
+#[test]
+fn g0_s19_nested_doclang_conversion_rollback_matches_legacy() {
+    let source = ".doclang {en}\n.doclang {.pair {.doclang {it}} {invalid1}}\n.doclang\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    assert!(result.diagnostics[0].primary.is_some(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "English");
+    assert_eq!(
+        result
+            .ir
+            .metadata
+            .document_state
+            .locale
+            .as_ref()
+            .map(|locale| locale.tag.as_str()),
+        Some("en")
+    );
+}
+
+#[test]
+fn g0_s20_nested_include_resource_context_matches_legacy() {
+    let entry = ".include {partials/child.qd}\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("valid entry")
+        .add_source("docs/main.qd", entry)
+        .expect("valid entry source")
+        .add_source(
+            "docs/partials/child.qd",
+            ".function {render}\n    text:\n    .ifpresent {.text} {@lambda value: .uppercase {.value}}\n\n.render {.read {data/value.txt}}\n",
+        )
+        .expect("valid child source")
+        .add_asset("docs/partials/data/value.txt", b"nested".to_vec())
+        .expect("valid nested resource")
+        .build()
+        .expect("valid virtual project");
+
+    let result = compile_project_and_assert_legacy_parity(&project, entry);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "NESTED");
+}
+
+#[test]
+fn g0_s20_include_scope_and_share_visibility_match_legacy() {
+    let scope_entry = ".var {value} {main}\n.include {part.qd} sandbox:{scope}\n.value\n";
+    let scope_project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", scope_entry)
+        .expect("valid entry source")
+        .add_source("part.qd", ".var {value} {part}\n.value\n")
+        .expect("valid included source")
+        .build()
+        .expect("valid virtual project");
+    let scope_result = compile_project_and_assert_legacy_parity(&scope_project, scope_entry);
+
+    assert!(scope_result.diagnostics.is_empty(), "{scope_result:?}");
+    assert_eq!(paragraph_text(&scope_result), "part\nmain");
+
+    let share_entry = ".var {value} {main}\n.include {part.qd}\n.value\n";
+    let share_project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", share_entry)
+        .expect("valid entry source")
+        .add_source("part.qd", ".var {value} {part}\n")
+        .expect("valid included source")
+        .build()
+        .expect("valid virtual project");
+    let share_result = compile_project_and_assert_legacy_parity(&share_project, share_entry);
+
+    assert!(share_result.diagnostics.is_empty(), "{share_result:?}");
+    assert_eq!(paragraph_text(&share_result), "part");
+}
+
+#[test]
+fn g0_s21_delayed_resource_base_routes_match_legacy() {
+    let file_entry = ".include {parts/defs.qd}\n.readlater\n";
+    let file_project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("valid entry")
+        .add_source("docs/main.qd", file_entry)
+        .expect("valid entry source")
+        .add_source(
+            "docs/parts/defs.qd",
+            ".function {readlater}\n    .read {data.txt}\n",
+        )
+        .expect("valid definitions source")
+        .add_asset("docs/data.txt", b"CALLER_FILE_BASE".to_vec())
+        .expect("valid caller resource")
+        .add_asset("docs/parts/data.txt", b"DEFINITION_FILE_BASE".to_vec())
+        .expect("valid definition resource")
+        .build()
+        .expect("valid file-include project");
+
+    let file_result = compile_project_and_assert_legacy_parity(&file_project, file_entry);
+
+    assert!(file_result.diagnostics.is_empty(), "{file_result:?}");
+    assert_eq!(paragraph_text(&file_result), "DEFINITION_FILE_BASE");
+
+    let library_entry = ".include {reader}\n.readlater\n";
+    let library_project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("valid entry")
+        .add_source("docs/main.qd", library_entry)
+        .expect("valid entry source")
+        .add_asset("docs/data.txt", b"CALLER_LIBRARY_BASE".to_vec())
+        .expect("valid caller resource")
+        .add_loadable_library("reader", ".function {readlater}\n    .read {data.txt}\n")
+        .build()
+        .expect("valid loadable-library project");
+
+    let library_result = compile_project_and_assert_legacy_parity(&library_project, library_entry);
+
+    assert!(library_result.diagnostics.is_empty(), "{library_result:?}");
+    assert_eq!(paragraph_text(&library_result), "CALLER_LIBRARY_BASE");
+}
+
+#[test]
+fn g0_s22_environment_boundary_matches_legacy() {
+    let denied_source = ".env {PATH}";
+    let denied_project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", denied_source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let denied_source_id = denied_project
+        .sources()
+        .get_id(denied_project.entry())
+        .expect("entry source id");
+
+    let denied_result = compile_project_and_assert_legacy_parity(&denied_project, denied_source);
+
+    assert_eq!(denied_result.diagnostics.len(), 1, "{denied_result:?}");
+    assert_eq!(denied_result.diagnostics[0].code, "E3004");
+    assert_eq!(
+        denied_result.diagnostics[0].primary,
+        Some(arkst_source::SourceSpan::new(
+            denied_source_id,
+            0,
+            denied_source.len(),
+        ))
+    );
+    assert!(denied_result.ir.nodes.is_empty(), "{denied_result:?}");
+
+    let empty_source = ".string {.isnone {.env {PATH}}}";
+    let empty_project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", empty_source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let environment = EnvironmentInputs::default();
+
+    let empty_result = compile_project_with_environment_and_assert_legacy_parity(
+        &empty_project,
+        empty_source,
+        &environment,
+    );
+
+    assert!(empty_result.diagnostics.is_empty(), "{empty_result:?}");
+    assert_eq!(paragraph_text(&empty_result), "true");
+}
+
+#[test]
+fn g0_s23_logger_side_effects_survive_later_explicit_error_matches_legacy() {
+    let source = concat!(
+        ".function {boom}\n",
+        "    .log {.pair {left} {right}}\n",
+        "    .debug {second}\n",
+        "    .error {boom}\n",
+        "\n",
+        "before\n",
+        "\n",
+        ".boom\n",
+        "\n",
+        "after\n",
+    );
+    let (project, _) = build_project(source);
+    let (result, events) = compile_project_with_log_sink_and_assert_legacy_parity(&project, source);
+
+    let pair =
+        "[DynamicValue(unwrappedValue=left, evaluationContext=null), DynamicValue(unwrappedValue=right, evaluationContext=null)]";
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.diagnostics[0].code, "E3011");
+    assert!(result.diagnostics[0].message.contains("boom"));
+    assert_eq!(paragraph_text(&result), "before\nafter");
+    assert!(matches!(
+        result.ir.nodes.as_slice(),
+        [
+            IrNode::Paragraph { .. },
+            IrNode::Component {
+                component: IrComponent::ExplicitError(_)
+            },
+            IrNode::Paragraph { .. }
+        ]
+    ));
+
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events[0].level, LogLevel::Log);
+    assert_eq!(events[0].message, pair);
+    assert_eq!(events[1].level, LogLevel::Debug);
+    assert_eq!(events[1].message, "second");
+    assert!(events[0].span.start < events[1].span.start);
+}
+
+#[test]
+fn g0_s24_raw_html_and_native_content_denial_match_legacy() {
+    let raw_source = "before <em>S24_RAW</em> after\n";
+    let (raw_project, raw_source_id) = build_project(raw_source);
+    let raw_result = compile_project_with_capabilities_and_assert_legacy_parity(
+        &raw_project,
+        raw_source,
+        Capabilities::compatibility_default(),
+    );
+
+    let raw_diagnostics = raw_result
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E8001")
+        .collect::<Vec<_>>();
+    assert_eq!(raw_diagnostics.len(), 2, "{raw_result:?}");
+    for (diagnostic, expected) in raw_diagnostics.iter().zip(["<em>", "</em>"]) {
+        let span = diagnostic.primary.expect("raw HTML primary span");
+        assert_eq!(span.source_id, raw_source_id);
+        assert_eq!(raw_source.get(span.start..span.end), Some(expected));
+    }
+    assert_eq!(paragraph_text(&raw_result), "before S24_RAW after");
+    assert!(!format!("{:?}", raw_result.ir).contains("TargetSpecificContent"));
+
+    let denied_source = ".html {<em>denied</em>}\n";
+    let (denied_project, denied_source_id) = build_project(denied_source);
+    let denied_result = compile_project_with_capabilities_and_assert_legacy_parity(
+        &denied_project,
+        denied_source,
+        Capabilities::none(),
+    );
+
+    assert_eq!(denied_result.diagnostics.len(), 1, "{denied_result:?}");
+    let diagnostic = &denied_result.diagnostics[0];
+    assert_eq!(diagnostic.code, "E3004");
+    assert!(diagnostic.message.contains("NativeContent"));
+    let span = diagnostic
+        .primary
+        .expect("native-content denial primary span");
+    assert_eq!(span.source_id, denied_source_id);
+    assert_eq!(
+        denied_source.get(span.start..span.end),
+        Some(".html {<em>denied</em>}")
+    );
+    assert!(denied_result.ir.nodes.is_empty(), "{denied_result:?}");
+    assert!(!format!("{:?}", denied_result.ir).contains("TargetSpecificContent"));
+}
+
+#[test]
+fn g0_s25_inline_error_owner_siblings_match_legacy() {
+    fn compile_source_aware_and_assert_legacy_parity(source: &str) -> (CompileResult, SourceId) {
+        let (project, source_id) = build_project(source);
+        let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "G0 differential fixtures must start from parser-clean source: {:?}",
+            parsed.diagnostics
+        );
+
+        let (lowered, lowering_diagnostics) =
+            arkst_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+                &parsed.document,
+                source_id,
+                &DocumentMetadataDefaults::default(),
+                Mode::Quarkdown,
+            );
+        assert!(
+            lowering_diagnostics.is_empty(),
+            "G0 differential fixture must be representable by the legacy AST-to-IR bridge: {lowering_diagnostics:?}"
+        );
+
+        let frontend = compile(&project, &CompileOptions::default());
+        let legacy_host = FixtureSourceProvider { source_id, source };
+        let (legacy_ir, legacy_diagnostics) = arkst_engine::evaluator::Evaluator::new()
+            .evaluate_with_resources_and_libraries_for_mode(
+                &legacy_host,
+                &legacy_host,
+                source_id,
+                Mode::Quarkdown,
+                &lowered,
+                &DocumentMetadataDefaults::default(),
+            );
+
+        assert_eq!(
+            frontend.ir, legacy_ir,
+            "normal direct-frontend explicit-error result diverged from the legacy pre-lowered IR evaluator"
+        );
+        assert_eq!(
+            diagnostic_signature(&frontend.diagnostics),
+            diagnostic_signature(&legacy_diagnostics),
+            "normal direct-frontend explicit-error diagnostics diverged from the legacy pre-lowered IR evaluator"
+        );
+
+        (frontend, source_id)
+    }
+
+    fn inline_text(inlines: &[IrInline]) -> String {
+        inlines
+            .iter()
+            .filter_map(|inline| match inline {
+                IrInline::Text { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<String>()
+            .trim()
+            .to_string()
+    }
+
+    fn assert_error_provenance(
+        result: &CompileResult,
+        source: &str,
+        source_id: SourceId,
+        message: &str,
+    ) {
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3011");
+        assert!(diagnostic.message.contains(message));
+        assert_eq!(
+            diagnostic.primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+
+        let source_echo = format!(".error {{{message}}}");
+        assert!(
+            source.contains(&source_echo),
+            "fixture must contain the expected explicit-error spelling"
+        );
+    }
+
+    fn assert_inline_owner(
+        result: &CompileResult,
+        source: &str,
+        source_id: SourceId,
+        owner: &str,
+        before: &str,
+        message: &str,
+        after: &str,
+    ) {
+        assert_error_provenance(result, source, source_id, message);
+        let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
+            panic!("{owner}: expected one paragraph, got {:?}", result.ir.nodes);
+        };
+        assert_eq!(inline_text(&content[..1]), "outer-before", "{owner}");
+
+        let owner_content = match (owner, &content[1]) {
+            ("emphasis", IrInline::Emphasis { content, .. })
+            | ("link", IrInline::Link { content, .. }) => content,
+            (_, other) => panic!("{owner}: unexpected inline owner {other:?}"),
+        };
+        let [before_inline, error_inline, after_inline] = owner_content.as_slice() else {
+            panic!("{owner}: expected text/error/text, got {owner_content:?}");
+        };
+        assert_eq!(
+            inline_text(std::slice::from_ref(before_inline)),
+            before,
+            "{owner}"
+        );
+
+        let IrInline::ExplicitError { component } = error_inline else {
+            panic!("{owner}: expected inline explicit error, got {error_inline:?}");
+        };
+        assert_eq!(component.message, message, "{owner}");
+        assert_eq!(
+            component.source_echo.as_deref(),
+            Some(format!(".error {{{message}}}").as_str()),
+            "{owner}"
+        );
+        assert_eq!(component.span.source_id, source_id, "{owner}");
+
+        assert_eq!(
+            inline_text(std::slice::from_ref(after_inline)),
+            after,
+            "{owner}"
+        );
+        assert_eq!(inline_text(&content[2..]), "outer-after", "{owner}");
+    }
+
+    for (source, owner, before, message, after) in [
+        (
+            "outer-before *em-before .error {emphasis-error} em-after* outer-after\n",
+            "emphasis",
+            "em-before",
+            "emphasis-error",
+            "em-after",
+        ),
+        (
+            "outer-before [link-before .error {link-error} link-after](https://example.com) outer-after\n",
+            "link",
+            "link-before",
+            "link-error",
+            "link-after",
+        ),
+    ] {
+        let (result, source_id) = compile_source_aware_and_assert_legacy_parity(source);
+        assert_inline_owner(&result, source, source_id, owner, before, message, after);
+    }
+
+    let blockquote_source =
+        "outer-before\n\n> quote-before .error {quote-error} quote-after\n\nouter-after\n";
+    let (blockquote, source_id) = compile_source_aware_and_assert_legacy_parity(blockquote_source);
+    assert_error_provenance(&blockquote, blockquote_source, source_id, "quote-error");
+
+    let [IrNode::Paragraph {
+        content: outer_before,
+        ..
+    }, IrNode::Blockquote { content, .. }, IrNode::Paragraph {
+        content: outer_after,
+        ..
+    }] = blockquote.ir.nodes.as_slice()
+    else {
+        panic!(
+            "blockquote: expected outer paragraph / blockquote / outer paragraph, got {:?}",
+            blockquote.ir.nodes
+        );
+    };
+    assert_eq!(inline_text(outer_before), "outer-before");
+    assert_eq!(inline_text(outer_after), "outer-after");
+
+    let [before, error, after] = content.as_slice() else {
+        panic!("blockquote: expected paragraph/error/paragraph, got {content:?}");
+    };
+    let IrNode::Paragraph {
+        content: before_content,
+        ..
+    } = before
+    else {
+        panic!("blockquote: expected before paragraph, got {before:?}");
+    };
+    assert_eq!(inline_text(before_content), "quote-before");
+
+    let IrNode::Component {
+        component: IrComponent::ExplicitError(component),
+    } = error
+    else {
+        panic!("blockquote: expected nested explicit-error component, got {error:?}");
+    };
+    assert_eq!(component.message, "quote-error");
+    assert_eq!(
+        component.source_echo.as_deref(),
+        Some(".error {quote-error}")
+    );
+    assert_eq!(component.span.source_id, source_id);
+
+    let IrNode::Paragraph {
+        content: after_content,
+        ..
+    } = after
+    else {
+        panic!("blockquote: expected after paragraph, got {after:?}");
+    };
+    assert_eq!(inline_text(after_content), "quote-after");
+}
+
+#[test]
+fn g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint() {
+    let success = ".sum {1} {2}\n";
+    let success_result = compile_and_assert_legacy_parity(success);
+    assert!(success_result.diagnostics.is_empty(), "{success_result:?}");
+    assert_eq!(paragraph_text(&success_result), "3");
+
+    let invalid_body = ".sum {1}\n    invalid\n";
+    let invalid_result = compile_and_assert_legacy_parity(invalid_body);
+    assert_eq!(invalid_result.diagnostics.len(), 1, "{invalid_result:?}");
+    assert_eq!(invalid_result.diagnostics[0].code, "E3001");
+    assert!(invalid_result.diagnostics[0]
+        .message
+        .contains("numeric arguments"));
+    assert_eq!(
+        invocation_failure_source_echoes(&invalid_result),
+        vec![".sum {1}\n    invalid"]
+    );
+}
+
+#[test]
+fn g0_s06_zero_argument_chain_tail_matches_legacy_ir_entrypoint() {
+    let source = ".function {identity}\n    value:\n    .value\n\n.function {tail}\n    previous:\n    .previous\n\n.identity {7}::tail\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "7");
+
+    // Official Quarkdown v2.5.1/v2.6.0 evidence also makes head execution
+    // observable: the zero-authored tail consumes the implicit predecessor,
+    // while the successful head-side mutation commits exactly once.
+    let once_only = concat!(
+        ".var {count} {0}\n",
+        ".function {counted}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .sum {3} {4}\n",
+        "\n",
+        ".function {tail}\n",
+        "    previous:\n",
+        "    .previous\n",
+        "\n",
+        ".counted::tail\n",
+        ".count\n",
+    );
+    let once_only_result = compile_and_assert_legacy_parity(once_only);
+
+    assert!(
+        once_only_result.diagnostics.is_empty(),
+        "{once_only_result:?}"
+    );
+    assert_eq!(paragraph_text(&once_only_result), "7\n1");
+}
+
+#[test]
+fn g0_s07_flat_argument_chain_tail_matches_legacy_ir_entrypoint() {
+    let source = ".function {identity}\n    value:\n    .value\n\n.function {tail}\n    previous second:\n    .second\n\n.identity {7}::tail {9}\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "9");
+
+    // Official Quarkdown v2.5.1/v2.6.0 independently proves the evaluated
+    // predecessor occupies slot 0 and the authored positional tail argument
+    // follows in slot 1.
+    let slots = ".function {identity}\n    value:\n    .value\n\n.function {tail}\n    previous second:\n    .sum {.previous} {.second}\n\n.identity {7}::tail {9}\n";
+    let slots_result = compile_and_assert_legacy_parity(slots);
+
+    assert!(slots_result.diagnostics.is_empty(), "{slots_result:?}");
+    assert_eq!(paragraph_text(&slots_result), "16");
+
+    // Make evaluation order observable. The head must commit count=1 before
+    // the authored tail argument reads .count; evaluating the authored
+    // candidate first would return 0 instead.
+    let order = concat!(
+        ".var {count} {0}\n",
+        ".function {counted}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .sum {3} {4}\n",
+        "\n",
+        ".function {tail}\n",
+        "    previous second:\n",
+        "    .second\n",
+        "\n",
+        ".counted::tail {.count}\n",
+        ".count\n",
+    );
+    let order_result = compile_and_assert_legacy_parity(order);
+
+    assert!(order_result.diagnostics.is_empty(), "{order_result:?}");
+    assert_eq!(paragraph_text(&order_result), "1\n1");
+}
+
+#[test]
+fn g0_s08_multitail_terminal_body_source_native_source_matches_legacy() {
+    // S08 / DYN02 bounded full-frontend proof: source-defined head,
+    // native multiply middle tail, and source-defined terminal body owner.
+    // Upstream Quarkdown reference is intentionally NOT claimed here.
+    let source = ".function {identity}\n    value:\n    .value\n\n.function {tail}\n    previous content:\n    .content\n\n.identity {2}::multiply {3}::tail\n    terminal body\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "terminal body");
+}
+
+#[test]
+fn g0_s08_middle_tail_failure_does_not_dispatch_stateful_terminal_tail() {
+    // Successful terminal-tail dispatch is a control: this mutation must happen
+    // when the native middle tail succeeds, and must not happen on failure.
+    // This tests only Arkst frontend-vs-legacy parity, not official Quarkdown.
+    let success = concat!(
+        ".var {state} {before}\n",
+        ".function {identity}\n",
+        "    value:\n",
+        "    .value\n",
+        "\n",
+        ".function {tail}\n",
+        "    previous content:\n",
+        "    .state {changed}\n",
+        "    .content\n",
+        "\n",
+        ".identity {2}::multiply {3}::tail\n",
+        "    terminal body\n",
+        ".state\n",
+    );
+    let successful = compile_and_assert_legacy_parity(success);
+    assert!(successful.diagnostics.is_empty(), "{successful:?}");
+    assert_eq!(paragraph_text(&successful), "terminal body\nchanged");
+
+    // The failing middle tail must stop before the state-mutating final
+    // source-defined tail. Keep the same terminal body and control source.
+    let failed = success.replace("::multiply {3}::tail", "::multiply {true}::tail");
+    let failure = compile_and_assert_legacy_parity(&failed);
+    assert_eq!(failure.diagnostics.len(), 1, "{failure:?}");
+    assert!(failure.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(
+        invocation_failure_source_echoes(&failure),
+        vec![".identity {2}::multiply {true}::tail\n    terminal body"]
+    );
+    assert_eq!(paragraph_text(&failure), "before");
+}
+
+#[test]
+fn g0_s08_side_effectful_head_executes_once_on_success_and_middle_failure() {
+    // A caller-visible numeric counter makes duplicate head evaluation
+    // observable. The source-defined head succeeds and commits count=1 before
+    // either the successful or failing native middle tail runs.
+    //
+    // Exact frontend-vs-legacy IR equality below means the final visible count
+    // proves once-only execution in both entrypoints, not only in the normal
+    // frontend path.
+    let success = concat!(
+        ".var {count} {0}\n",
+        ".function {counted}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .sum {1} {1}\n",
+        "\n",
+        ".function {tail}\n",
+        "    previous content:\n",
+        "    .content\n",
+        "\n",
+        ".counted::multiply {3}::tail\n",
+        "    terminal body\n",
+        ".count\n",
+    );
+    let successful = compile_and_assert_legacy_parity(success);
+    assert!(successful.diagnostics.is_empty(), "{successful:?}");
+    assert_eq!(paragraph_text(&successful), "terminal body\n1");
+
+    // Keep the same side-effectful head and terminal body, changing only the
+    // native middle-tail input. The already-successful head invocation must
+    // remain committed exactly once; the terminal owner must not run.
+    let failed = success.replace("::multiply {3}::tail", "::multiply {true}::tail");
+    let failure = compile_and_assert_legacy_parity(&failed);
+    assert_eq!(failure.diagnostics.len(), 1, "{failure:?}");
+    assert!(failure.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(
+        invocation_failure_source_echoes(&failure),
+        vec![".counted::multiply {true}::tail\n    terminal body"]
+    );
+    assert_eq!(paragraph_text(&failure), "1");
+}
+
+#[test]
+fn g0_s09_chain_tail_shape_errors_preserve_once_only_head_effect() {
+    // Both cases make head execution observable through a caller-visible
+    // counter. Official Quarkdown v2.5.1 default-mode evidence shows the
+    // source-defined head executes once before the terminal-tail binding
+    // failure, so its committed effect remains visible as count=1.
+    let prefix = concat!(
+        ".var {count} {0}\n",
+        ".function {counted}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .sum {1} {1}\n",
+        "\n",
+    );
+
+    // The head first produces the implicit predecessor and commits count=1.
+    // The terminal function's only parameter is then occupied by that
+    // predecessor; supplying a terminal block body collides with the bound
+    // slot and fails at the terminal tail.
+    let invalid_terminal_body = format!(
+        "{prefix}{}",
+        concat!(
+            ".function {tail}\n",
+            "    previous:\n",
+            "    .previous\n",
+            "\n",
+            ".counted::tail\n",
+            "    rejected body\n",
+            ".count\n",
+        )
+    );
+    let body_failure = compile_and_assert_legacy_parity(&invalid_terminal_body);
+    assert_eq!(body_failure.diagnostics.len(), 1, "{body_failure:?}");
+    assert_eq!(paragraph_text(&body_failure), "1");
+
+    // The committed head result occupies previous and the first authored
+    // positional argument occupies second; one additional authored argument
+    // is therefore excess. The terminal-tail failure must not duplicate or
+    // roll back the already-successful head effect.
+    let excess_positional_tail = format!(
+        "{prefix}{}",
+        concat!(
+            ".function {tail}\n",
+            "    previous second:\n",
+            "    .second\n",
+            "\n",
+            ".counted::tail {9} {10}\n",
+            ".count\n",
+        )
+    );
+    let positional_failure = compile_and_assert_legacy_parity(&excess_positional_tail);
+    assert_eq!(
+        positional_failure.diagnostics.len(),
+        1,
+        "{positional_failure:?}"
+    );
+    assert_eq!(paragraph_text(&positional_failure), "1");
+}
+
+#[test]
+fn g0_s01_mixed_arguments_evaluate_left_to_right_matches_legacy() {
+    // The two nested tick calls mutate one caller-visible counter and return
+    // the value after each increment. The target combines the first result as
+    // the tens digit and the second as the ones digit, so source-order
+    // evaluation is externally visible as 12 followed by final count 2.
+    let source = concat!(
+        ".var {count} {0}\n",
+        ".function {tick}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .count\n",
+        "\n",
+        ".function {target}\n",
+        "    first second:\n",
+        "    .sum {.multiply {.first} {10}} {.second}\n",
+        "\n",
+        ".target {.tick} second:{.tick}\n",
+        ".count\n",
+    );
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "12\n2");
+}
+
+#[test]
+fn g0_s01_positional_after_named_defers_to_earlier_nested_failure() {
+    // Official Quarkdown v2.5.1 and accepted Arkst #755 semantics evaluate
+    // source-defined candidates in authored order. The earlier named candidate
+    // therefore reports its nested numeric failure before the later
+    // positional-after-named defect can win. The later .tick must not run.
+    let source = concat!(
+        ".var {count} {0}\n",
+        ".function {tick}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .count\n",
+        "\n",
+        ".function {target}\n",
+        "    first second:\n",
+        "    .sum {.first} {.second}\n",
+        "\n",
+        ".target first:{.sum {true} {2}} {.tick}\n",
+        ".count\n",
+    );
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    let diagnostic = &result.diagnostics[0];
+    assert_eq!(diagnostic.code, "E3001");
+    assert!(diagnostic.message.contains("numeric arguments"));
+    let primary = diagnostic
+        .primary
+        .expect("nested numeric failure provenance");
+    assert_eq!(&source[primary.start..primary.end], "{true}");
+    assert_eq!(paragraph_text(&result), "0");
+}
+#[test]
+fn g0_s01_duplicate_named_defers_to_earlier_nested_failure() {
+    // Official Quarkdown v2.5.1 and accepted Arkst #755 semantics surface the
+    // earlier nested numeric failure before the later duplicate binding can
+    // win. The later .tick candidate must remain unevaluated.
+    let source = concat!(
+        ".var {count} {0}\n",
+        ".function {tick}\n",
+        "    .var {count} {.count::sum {1}}\n",
+        "    .count\n",
+        "\n",
+        ".function {target}\n",
+        "    first second?:\n",
+        "    .first\n",
+        "\n",
+        ".target first:{.sum {true} {2}} first:{.tick}\n",
+        ".count\n",
+    );
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    let diagnostic = &result.diagnostics[0];
+    assert_eq!(diagnostic.code, "E3001");
+    assert!(diagnostic.message.contains("numeric arguments"));
+    let primary = diagnostic
+        .primary
+        .expect("nested numeric failure provenance");
+    assert_eq!(&source[primary.start..primary.end], "{true}");
+    assert_eq!(paragraph_text(&result), "0");
+}
+#[test]
+fn g0_s02_utf8_tight_nested_call_keeps_exact_source_spans_and_mode_isolation() {
+    use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
+
+    let source = ".outer {앞{.inner {값}}뒤}\r\n";
+    let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+    assert!(parsed.diagnostics.is_empty(), "{parsed:?}");
+
+    let [Block::DirectiveCall {
+        name,
+        arguments,
+        span,
+        ..
+    }] = parsed.document.nodes.as_slice()
+    else {
+        panic!("expected one Quarkdown block call: {parsed:?}");
+    };
+    assert_eq!(name, "outer");
+    assert_eq!(&source[span.start..span.end], ".outer {앞{.inner {값}}뒤}");
+    assert!(source.is_char_boundary(span.start));
+    assert!(source.is_char_boundary(span.end));
+
+    let [CallArgument::Positional {
+        value: Value::Content(content),
+        span: argument_span,
+    }] = arguments.as_slice()
+    else {
+        panic!("expected one source-backed content argument: {arguments:?}");
+    };
+    assert_eq!(
+        &source[argument_span.start..argument_span.end],
+        "{앞{.inner {값}}뒤}"
+    );
+
+    let [Inline::Text {
+        content: prefix,
+        span: prefix_span,
+    }, Inline::DirectiveCall {
+        name: inner_name,
+        name_span,
+        head_span,
+        arguments: inner_arguments,
+        span: inner_span,
+        ..
+    }, Inline::Text {
+        content: suffix,
+        span: suffix_span,
+    }] = content.as_slice()
+    else {
+        panic!("expected tight nested call surrounded by text: {content:?}");
+    };
+    assert_eq!(prefix, "앞");
+    assert_eq!(&source[prefix_span.start..prefix_span.end], "앞");
+    assert_eq!(inner_name, "inner");
+    assert_eq!(&source[name_span.start..name_span.end], ".inner");
+    assert_eq!(&source[head_span.start..head_span.end], ".inner {값}");
+    assert_eq!(&source[inner_span.start..inner_span.end], "{.inner {값}}");
+    let [CallArgument::Positional {
+        value,
+        span: inner_argument_span,
+    }] = inner_arguments.as_slice()
+    else {
+        panic!("expected one inner argument: {inner_arguments:?}");
+    };
+    assert_eq!(
+        &source[inner_argument_span.start..inner_argument_span.end],
+        "{값}"
+    );
+    match value {
+        Value::Identifier(value) => assert_eq!(value, "값"),
+        Value::Content(content) => {
+            let [Inline::Text {
+                content: value,
+                span,
+            }] = content.as_slice()
+            else {
+                panic!("expected one UTF-8 inner text value: {content:?}");
+            };
+            assert_eq!(value, "값");
+            assert_eq!(&source[span.start..span.end], "값");
+        }
+        other => panic!("unexpected inner value: {other:?}"),
+    }
+    assert_eq!(suffix, "뒤");
+    assert_eq!(&source[suffix_span.start..suffix_span.end], "뒤");
+
+    let markdown = arkst_markdown::parse_with_mode(source, Mode::Markdown);
+    assert!(markdown.diagnostics.is_empty(), "{markdown:?}");
+    assert!(markdown.document.nodes.iter().all(|node| match node {
+        Block::DirectiveCall { .. } => false,
+        Block::Paragraph { content, .. } => content
+            .iter()
+            .all(|inline| !matches!(inline, Inline::DirectiveCall { .. })),
+        _ => true,
+    }));
+}
+
+#[test]
+fn g0_s02_crlf_escaped_delimiter_keeps_source_backing_and_markdown_literal() {
+    use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
+
+    let source = "prefix .foo {한글 \\}\r\ntext} suffix\r\n";
+    assert!(source.as_bytes().windows(2).any(|pair| pair == b"\r\n"));
+
+    let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+    assert!(parsed.diagnostics.is_empty(), "{parsed:?}");
+    let [Block::Paragraph { content, .. }] = parsed.document.nodes.as_slice() else {
+        panic!("expected one inline paragraph: {parsed:?}");
+    };
+    let Inline::DirectiveCall {
+        name,
+        arguments,
+        span,
+        ..
+    } = content
+        .iter()
+        .find(|inline| matches!(inline, Inline::DirectiveCall { name, .. } if name == "foo"))
+        .expect("escaped-delimiter Quarkdown call")
+    else {
+        unreachable!()
+    };
+    assert_eq!(name, "foo");
+    assert_eq!(&source[span.start..span.end], ".foo {한글 \\}\r\ntext}");
+    let [CallArgument::Positional {
+        value: Value::Content(argument_content),
+        span: argument_span,
+    }] = arguments.as_slice()
+    else {
+        panic!("expected source-backed escaped content: {arguments:?}");
+    };
+    assert_eq!(
+        &source[argument_span.start..argument_span.end],
+        "{한글 \\}\r\ntext}"
+    );
+    let rebuilt = argument_content
+        .iter()
+        .map(|inline| match inline {
+            Inline::Text { span, .. } | Inline::SoftBreak { span } | Inline::HardBreak { span } => {
+                &source[span.start..span.end]
+            }
+            other => panic!("unexpected escaped content node: {other:?}"),
+        })
+        .collect::<String>();
+    assert_eq!(rebuilt, "한글 \\}\r\ntext");
+    assert!(source.is_char_boundary(span.start));
+    assert!(source.is_char_boundary(span.end));
+
+    let markdown = arkst_markdown::parse_with_mode(source, Mode::Markdown);
+    assert!(markdown.diagnostics.is_empty(), "{markdown:?}");
+    assert!(markdown.document.nodes.iter().all(|node| match node {
+        Block::DirectiveCall { .. } => false,
+        Block::Paragraph { content, .. } => content
+            .iter()
+            .all(|inline| !matches!(inline, Inline::DirectiveCall { .. })),
+        _ => true,
+    }));
+}
+
+#[test]
+fn g0_s02_normal_compile_keeps_utf8_crlf_nested_failure_source_identity() {
+    let source = "앞\r\n\r\n.sum {1} {.multiply {true} {2}}\r\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let result = compile(&project, &CompileOptions::default());
+
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    let failure_start = source.find("{true}").expect("nested boolean candidate");
+    assert_eq!(
+        result.diagnostics[0].primary,
+        Some(arkst_source::SourceSpan::new(
+            source_id,
+            failure_start,
+            failure_start + "{true}".len(),
+        ))
+    );
+    let primary = result.diagnostics[0].primary.expect("primary source span");
+    assert_eq!(&source[primary.start..primary.end], "{true}");
+    assert!(source.is_char_boundary(primary.start));
+    assert!(source.is_char_boundary(primary.end));
+}
+
+#[test]
+fn g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_legacy_parity() {
+    use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
+
+    fn contains_directive(inline: &Inline) -> bool {
+        match inline {
+            Inline::DirectiveCall { .. } => true,
+            Inline::Emphasis { content, .. }
+            | Inline::Strong { content, .. }
+            | Inline::Link { content, .. }
+            | Inline::Image { content, .. }
+            | Inline::Strikethrough { content, .. } => content.iter().any(contains_directive),
+            _ => false,
+        }
+    }
+
+    let source = ".text {**앞 [.uppercase {world}](https://example.com) 뒤**}\r\n";
+    let parsed = arkst_markdown::parse_with_mode(source, Mode::Quarkdown);
+    assert!(parsed.diagnostics.is_empty(), "{parsed:?}");
+
+    let [Block::DirectiveCall { arguments, .. }] = parsed.document.nodes.as_slice() else {
+        panic!("expected one top-level text call: {parsed:?}");
+    };
+    let [CallArgument::Positional {
+        value: Value::Content(content),
+        ..
+    }] = arguments.as_slice()
+    else {
+        panic!("expected one rich content argument: {arguments:?}");
+    };
+    let [Inline::Strong {
+        content: strong_content,
+        span: strong_span,
+    }] = content.as_slice()
+    else {
+        panic!("expected one strong wrapper: {content:?}");
+    };
+    assert_eq!(
+        &source[strong_span.start..strong_span.end],
+        "**앞 [.uppercase {world}](https://example.com) 뒤**"
+    );
+
+    let [Inline::Text {
+        content: prefix,
+        span: prefix_span,
+    }, Inline::Link {
+        content: link_content,
+        destination,
+        span: link_span,
+        ..
+    }, Inline::Text {
+        content: suffix,
+        span: suffix_span,
+    }] = strong_content.as_slice()
+    else {
+        panic!("expected text/link/text inside strong: {strong_content:?}");
+    };
+    assert_eq!(prefix, "앞 ");
+    assert_eq!(&source[prefix_span.start..prefix_span.end], "앞 ");
+    assert_eq!(destination, "https://example.com");
+    assert_eq!(
+        &source[link_span.start..link_span.end],
+        "[.uppercase {world}](https://example.com)"
+    );
+    assert_eq!(suffix, " 뒤");
+    assert_eq!(&source[suffix_span.start..suffix_span.end], " 뒤");
+
+    let [Inline::DirectiveCall {
+        name,
+        arguments: inner_arguments,
+        span: inner_span,
+        ..
+    }] = link_content.as_slice()
+    else {
+        panic!("expected inline directive as link label: {link_content:?}");
+    };
+    assert_eq!(name, "uppercase");
+    assert_eq!(
+        &source[inner_span.start..inner_span.end],
+        ".uppercase {world}"
+    );
+    let [CallArgument::Positional {
+        span: inner_argument_span,
+        ..
+    }] = inner_arguments.as_slice()
+    else {
+        panic!("expected one uppercase argument: {inner_arguments:?}");
+    };
+    assert_eq!(
+        &source[inner_argument_span.start..inner_argument_span.end],
+        "{world}"
+    );
+
+    let markdown = arkst_markdown::parse_with_mode(source, Mode::Markdown);
+    assert!(markdown.diagnostics.is_empty(), "{markdown:?}");
+    assert!(markdown.document.nodes.iter().all(|node| match node {
+        Block::DirectiveCall { .. } => false,
+        Block::Paragraph { content, .. } => !content.iter().any(contains_directive),
+        _ => true,
+    }));
+
+    let result = compile_and_assert_legacy_parity(source);
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    let [IrNode::Paragraph {
+        content: final_content,
+        ..
+    }] = result.ir.nodes.as_slice()
+    else {
+        panic!("expected one final paragraph: {result:?}");
+    };
+    let [IrInline::Strong {
+        content: final_strong,
+        span: final_strong_span,
+    }] = final_content.as_slice()
+    else {
+        panic!("expected final strong wrapper: {final_content:?}");
+    };
+    let [IrInline::Text {
+        content: final_prefix,
+        ..
+    }, IrInline::Link {
+        content: final_link,
+        destination: final_destination,
+        span: final_link_span,
+        ..
+    }, IrInline::Text {
+        content: final_suffix,
+        ..
+    }] = final_strong.as_slice()
+    else {
+        panic!("expected final text/link/text ordering: {final_strong:?}");
+    };
+    assert_eq!(final_prefix, "앞 ");
+    assert_eq!(final_destination, "https://example.com");
+    assert!(matches!(
+        final_link.as_slice(),
+        [IrInline::Text { content, .. }] if content == "WORLD"
+    ));
+    assert_eq!(final_suffix, " 뒤");
+    assert_eq!(
+        &source[final_strong_span.start..final_strong_span.end],
+        "**앞 [.uppercase {world}](https://example.com) 뒤**"
+    );
+    assert_eq!(
+        &source[final_link_span.start..final_link_span.end],
+        "[.uppercase {world}](https://example.com)"
+    );
+}
+
+#[test]
+fn g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure() {
+    let source = ".text\r\n    **앞 [.uppercase {world}](https://example.com) 뒤**\r\n";
+    let result = compile_and_assert_legacy_parity(source);
+
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
+        panic!("expected one final paragraph: {result:?}");
+    };
+    let [IrInline::Strong {
+        content: strong_content,
+        span: strong_span,
+    }] = content.as_slice()
+    else {
+        panic!("expected CRLF body to retain strong structure: {content:?}");
+    };
+    let [IrInline::Text {
+        content: prefix, ..
+    }, IrInline::Link {
+        content: link_content,
+        destination,
+        span: link_span,
+        ..
+    }, IrInline::Text {
+        content: suffix, ..
+    }] = strong_content.as_slice()
+    else {
+        panic!("expected text/link/text ordering: {strong_content:?}");
+    };
+    assert_eq!(prefix, "앞 ");
+    assert_eq!(destination, "https://example.com");
+    assert!(matches!(
+        link_content.as_slice(),
+        [IrInline::Text { content, .. }] if content == "WORLD"
+    ));
+    assert_eq!(suffix, " 뒤");
+    // #758 is production-merged: the final Strong span now preserves the
+    // complete authored delimiter range while retaining the same semantics.
+    assert_eq!(strong_span.start, 11);
+    assert_eq!(strong_span.end, 64);
+    assert_eq!(
+        &source[strong_span.start..strong_span.end],
+        "**앞 [.uppercase {world}](https://example.com) 뒤**"
+    );
+    assert_eq!(&source[64..66], "\r\n");
+    assert_eq!(
+        &source[link_span.start..link_span.end],
+        "[.uppercase {world}](https://example.com)"
+    );
+}
+
+#[test]
+fn g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint() {
+    let definition_then_caller = concat!(
+        ".var {value} {definition}\n",
+        ".function {captured}\n",
+        "    .value\n",
+        "\n",
+        ".captured\n",
+        ".var {value} {caller}\n",
+        ".captured\n",
+    );
+    let definition_then_caller_result = compile_and_assert_legacy_parity(definition_then_caller);
+    assert!(
+        definition_then_caller_result.diagnostics.is_empty(),
+        "{definition_then_caller_result:?}"
+    );
+    assert_eq!(
+        paragraph_text(&definition_then_caller_result),
+        "definition\ncaller"
+    );
+
+    let parameter_precedence = concat!(
+        ".var {value} {definition}\n",
+        ".function {show}\n",
+        "    value:\n",
+        "    .value\n",
+        "\n",
+        ".var {value} {caller}\n",
+        ".show {parameter}\n",
+    );
+    let parameter_precedence_result = compile_and_assert_legacy_parity(parameter_precedence);
+    assert!(
+        parameter_precedence_result.diagnostics.is_empty(),
+        "{parameter_precedence_result:?}"
+    );
+    assert_eq!(paragraph_text(&parameter_precedence_result), "parameter");
+
+    let nested_overlay = concat!(
+        ".function {inner}\n",
+        "    .value\n",
+        "\n",
+        ".function {outer}\n",
+        "    .inner\n",
+        "\n",
+        ".var {value} {caller}\n",
+        ".outer\n",
+        ".var {value} {next caller}\n",
+        ".outer\n",
+    );
+    let nested_overlay_result = compile_and_assert_legacy_parity(nested_overlay);
+    assert!(
+        nested_overlay_result.diagnostics.is_empty(),
+        "{nested_overlay_result:?}"
+    );
+    assert_eq!(
+        paragraph_text(&nested_overlay_result),
+        "caller\nnext caller"
+    );
+}
+
+#[test]
+fn g0_s11_extension_super_order_owner_and_recursion_match_legacy_ir_entrypoint() {
+    // Each parser-clean source is byte-for-byte copied from the independently
+    // executed official Quarkdown v2.5.1/v2.6.0 S11 probe (#764).
+    // The oracle is the public output order; the migration invariant is exact
+    // final IrDocument plus ordered diagnostic parity between entrypoints.
+    let cases = [
+        (
+            "three-layer",
+            r#".function {greet}
+    name:
+    root .name
+
+.extend {greet}
+    name:
+    middle
+    .super
+
+.extend {greet}
+    name:
+    outer
+    .super
+
+.greet {Ada}
+"#,
+            "middle\nouter\nroot Ada",
+        ),
+        (
+            "override-ownership",
+            r#".function {greet}
+    name:
+    root .name
+
+.extend {greet}
+    name:
+    middle .name
+    .super name:{middle-owner}
+
+.extend {greet}
+    name:
+    outer .name
+    .super name:{outer-owner}
+
+.greet {initial}
+"#,
+            "middle initial\nouter middle-owner\nroot outer-owner",
+        ),
+        (
+            "nested-super",
+            r#".function {echo}
+    name:
+    echo-root .name
+
+.extend {echo}
+    name:
+    echo-wrapper
+    .super
+
+.function {invoke}
+    name:
+    .echo {.name}
+
+.extend {invoke}
+    name:
+    invoke-wrapper
+    .super
+
+.invoke {hello}
+.echo {after}
+"#,
+            "invoke-wrapper\necho-wrapper\necho-root hello\necho-wrapper\necho-root after",
+        ),
+        (
+            "recursive-super",
+            r#".function {walk}
+    remaining:
+    .if {.remaining::equals {0}}
+        done
+    .ifnot {.remaining::equals {0}}
+        .walk {.remaining::subtract {1}}
+
+.extend {walk}
+    remaining:
+    .super
+
+.walk {2}
+"#,
+            "done",
+        ),
+    ];
+
+    for (name, source, expected_output) in cases {
+        let result = compile_and_assert_legacy_parity(source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "S11 {name} unexpectedly emitted diagnostics: {result:?}"
+        );
+        assert_eq!(
+            paragraph_text(&result),
+            expected_output,
+            "S11 {name} must preserve official extension dispatch, .super owner and output order"
+        );
+    }
+}

@@ -1,0 +1,1806 @@
+# #719 G0 — executable surface audit and evidence ledger
+
+**Status: FINAL G0 CLOSEOUT CANDIDATE. Substantive G0 exit criteria satisfied; final closeout HEAD exact-HEAD CI/merge/post-merge reconciliation still pending.** Baseline: `main@54a7285ca7adce7482bc27df587f156a6162a3f9`; Git tree `5213795ebd154b25d2e10b199dcd6fcebb625eff`. Parent [#719](https://github.com/luceat-lux-vestra/arkst/issues/719) owns G0–G8. This document inventories the complete **declared** AST/IR variant surface and identified production/host routes; it does **not** claim every dynamic dispatch branch or test path has already been proven.
+
+## Final G0 acceptance closeout — 2026-11-17
+
+The final G0 review resolves the normative #719 exit criteria without reducing later-gate scope:
+
+1. **Complete inventory / no unidentified route class:** `719-g0-execution-surface-inventory.tsv` contains 117 data rows with all nine required fields non-empty and no malformed row. `719-g0-dynamic-route-evidence.tsv` contains DYN01–DYN06 with all ten required fields non-empty. These six route classes identify the live transitional producer→consumer families; exhaustive owner/permutation removal is explicitly assigned to G1–G4/G8 rather than left unowned.
+2. **Representative behavioral contract:** `719-g0-differential-oracle-contract.tsv` contains S01–S32 with all ten fields non-empty. Clean-room reference observations, exact frontend-vs-legacy migration tests, intentional rollback/policy divergences and later-gate ownership are frozen. Production blockers #755, #758 and #752 are CLOSED/COMPLETED and their landed semantics are reconciled into this evidence branch.
+3. **Normative architecture authority:** ADR-0022 is accepted; ADR-0020 carries an explicit scoped-supersession note; `docs/ARCHITECTURE.md` names ADR-0022 as the accepted target. The historical mixed executable/final one-IR model is no longer authoritative.
+4. **Public/wire policy:** development-stage clean-break policy is explicit: final-only versioned wire v1, rejection of historical unversioned/executable payloads, and no required legacy Arkst API/JSON compatibility adapter. Implementation belongs to G6/G7; G0 owns the authority and frozen gap evidence.
+5. **Exact-head evidence:** post-merge #755/#758/#752 reconciliation HEAD `af239888dbfd2f222c77ef1709b8db4218b63a17` was synchronized to protected main (ahead=150/behind=0) and passed CI #43905649506 including compatibility, pinned Reference JVM, fmt, clippy, MSRV, WASM, dependency review, Ubuntu ARM64/macOS/Windows, docs/spelling, CodeQL runtime and required Merge Gate.
+
+**Acceptance verdict:** all substantive G0 inventory, behavioral-contract and architectural-authority requirements are satisfied. This closeout edit changes #746 HEAD, so the new immutable documentation HEAD must receive its own exact-HEAD CI before G0 gate exit is durably recorded. Squash merge and post-merge reconciliation remain separate work units. G1 must not start before those steps complete.
+
+Historical sections below preserve the chronology of earlier candidate states. Their `PENDING`, `INCOMPLETE`, or “do not claim G0 exit” wording describes those earlier checkpoints and is superseded for current status by this closeout section.
+
+## Machine-readable authority
+
+[719-g0-execution-surface-inventory.tsv](719-g0-execution-surface-inventory.tsv) has **117 data rows**: **97 enum variants** and **20 cross-layer routes**. Each row gives the declaration path/line, observed current path, state, mandatory migration gate, test/source anchor and outstanding obligation. Test/source anchors indicate where evidence must be established; they do *not* mean the case passed.
+
+| Type | Declared count | Names |
+|---|---:|---|
+| `ast.Block` | 13 | Heading, Paragraph, Blockquote, UnorderedList, OrderedList, Table, CodeBlock, ThematicBreak, PageBreak, DirectiveCall, Metadata, RawHtml, Unsupported |
+| `ast.Inline` | 12 | Text, Emphasis, Strong, DirectiveCall, Link, Image, Code, RawHtml, Strikethrough, HardBreak, SoftBreak, Unsupported |
+| `ast.Value` | 8 | String, Number, Boolean, Identifier, Range, Content, InlineBody, Lambda |
+| `ast.CallArgument` | 2 | Positional, Named |
+| `ir.IrNode` | 17 | Heading, Paragraph, Blockquote, UnorderedList, OrderedList, Table, CodeBlock, RawHtml, TargetSpecificContent, Component, PageMarginContent, FunctionCall, ChainedFunctionCall, FunctionDeclaration, ThematicBreak, PageBreak, Math |
+| `ir.IrInline` | 28 | Text, Keybinding, Whitespace, PageCounter, PageNumberFormat, PageNumberReset, LastHeading, Emphasis, Strong, TextSize, TextCase, TextVariant, TextScript, TextColor, Underline, Overline, Strikethrough, InlineCollapse, DirectiveCall, ChainedDirectiveCall, Link, Image, ExplicitError, Code, SoftBreak, HardBreak, RawHtml, TargetSpecificContent |
+| `ir.IrValue` | 17 | String, Number, Boolean, Identifier, Size, Color, Enum, Range, Collection, Pair, Dictionary, Content, Component, Unit, None, Callable, InlineBody |
+| **Total variants** | **97** | Mechanically extracted from exact pinned AST/IR source |
+
+The inventory was generated from the declarations of `arkst-markdown/src/ast.rs` and `arkst-ir/src/lib.rs`, verified against counts `13/12/8/2/17/28/17`. On any code change affecting these enums, regenerate and diff the ledger; a zero-drift claim without this check is invalid.
+
+## Observed execution-to-output path
+
+```
+VirtualProject / SourceStore
+  -> parse_with_mode -> frontend AST
+  -> core::compile_with_inputs -> Evaluator::evaluate_frontend_*
+    -> selected top-level frontend invocation candidates (Phase 3A–3I)
+    OR lower_top_level_block / lower_top_level_chain_tail
+    -> evaluate_node / evaluate_inlines / evaluate_call_body
+    -> callable body Vec<IrNode> / IrCallSegment / IR value conversion
+    -> RuntimeValue::SemanticLeaf(IrValue) / InvocationValue
+    -> EvaluationContext cloned scope tree + savepoint/document state
+  -> IrDocument with completed nodes and state snapshot, but executable variants remain legal
+  -> Typst lowering + source maps / inspect JSON via IrDocumentWire
+```
+
+Source anchors:
+- `crates/arkst-core/src/lib.rs:326–437`: normal compile facade and final `CompileResult.ir`.
+- `crates/arkst-engine/src/evaluator.rs:3838–4092`: frontend select/fallback; `:145` callable body; `:20245` IR body; `:1641–1695,2188–2221` cloned scopes/journal; `:985–1010` document state.
+- `crates/arkst-engine/src/ast_to_ir.rs:473–625,1034–1160,1195–1250`: structure/inline/value IR bridges including executable lambda and rich content.
+- `crates/arkst-engine/src/value_conversion.rs:106–310`: runtime provenance/origin and `SemanticLeaf(IrValue)` / `InvocationValue`.
+- `crates/arkst-ir/src/lib.rs:17–79,3757–3810,4019–4040,4260–4300`: executable block/inline/callable and unversioned wire.
+- `crates/arkst-typst/src/lowering.rs:19–32`: backend accepts mixed-lifecycle `&IrDocument`; no final-only type boundary.
+- `docs/ARCHITECTURE.md:595–622` / ADR-0020: earlier executable one-IR statement conflicts with #719's target.
+
+## Ownership and dependency closure
+
+| Work area | Paths audited | Target gate | Required evidence before acceptance |
+|---|---|---|---|
+| All top-level block calls, named/positional/mixed args and chains | FrontendInvocation, ArgumentCandidate, IrCallSegment | G1/G3 | Source order, owner precedence, structural preflight, once-only side effects, multi-tail |
+| All nested block/inline/link/heading/list/table/content nodes | block_to_ir, inline_to_ir, evaluate_evidenced_structural_nodes | G4 | Direct AST at every depth, source spans and diagnostics, HTML fail-closed |
+| Lambda bodies, user function, extension and conditionals | FunctionBinding Vec<IrNode>, evaluate_call_body | G2–G4 | Captured vs caller scope/resource/mode, laziness, atomic rollback |
+| Repeated/generated content, #718 tables, #682 structured strings | RuntimeValue, ValueProvenance, target converters | G1/G4 | Per-child provenance, materialized vs source-backed, no producer heuristic |
+| Includes/libraries/subdocuments/resources, environment/logger | ResourceProvider/LoadableLibraryProvider, source mode/context | G2/G4 | Explicit capabilities, no project-root escape, independent compiles |
+| Document metadata/config | mutable DocumentState -> IrDocumentState | G5 | One final immutable config; defaults and rollback parity |
+| Final IR, pure Typst, native/in-process | IrNode/IrInline/IrValue, lower_to_typst | G6/G8 | No executable syntax allowed by type, output/source-map parity |
+| Wire, CLI inspect, public AST-to-IR/evaluate facade | IrDocumentWire, CLI, core legacy wrappers | G7 | Versioned DTO, legacy accept/reject matrix, malicious data tests, deprecation |
+| CI + reference | Merge Gate, Reference JVM, platform tests | G0/G8 | Exact-head CI, Linux ARM/macOS/Windows, WASM, clean-room oracle |
+
+## Baseline test/source anchors to expand, not falsely treat as PASS
+
+- `arkst-markdown/tests/call_grammar_audit.rs`; `content_inline_markdown.rs`
+- `arkst-core/tests/quarkdown_nested_call_body_690.rs`, `quarkdown_function_extension.rs`, `quarkdown_value_model_audit.rs`, `ir_facade.rs`
+- `arkst-engine/tests/resource_contract.rs`, `global_resource_boundary.rs`, `environment_inputs.rs`; `arkst-core/tests/resource_permission_policy_296.rs`
+- `arkst-ir/tests/code_callouts_serde.rs`; `arkst-typst-subprocess/tests/lowering_integration.rs`, `backend_integration.rs`; `arkst-typst-inprocess/tests/backend_parity.rs`
+- `.github/workflows/ci.yml` required Merge Gate and `.github/workflows/reference-jvm.yml`. Latest Phase 3I proof: [CI 42751293944](https://github.com/luceat-lux-vestra/arkst/actions/runs/42751293944), **not** a proof of this candidate.
+
+## Historical initial blockers for the **G0 gate** (superseded by final closeout above)
+
+1. Continue tracing every actual producer/consumer/call site of all ledger types, including nested/generative, extension/native precedence, legacy/core, WASM/host and test-only fixtures. Dynamic-route slices A and B below prove five concrete runtime routes with exact current-head execution evidence; they do **not** make the remaining routes exhaustive. The enum list is declaration-complete, not yet an exhaustive runtime branch proof.
+2. Freeze independent clean-room representative inputs and byte-exact expected diagnostic code/message/span/order, effects, lazy branches/failed mutations, resource modes, source provenance, output and source-map behavior. Preserve known PARTIAL/unsupported/fail-closed cases.
+3. Decide public API and CLI/wire compatibility/version policy from consumer inventory; test legacy decoder behavior and invalid source refs rather than assuming compatibility.
+4. Review and accept [proposed ADR-0022](../adr/0022-runtime-final-document-ir.md); explicitly amend historical ADR-0020 and `docs/ARCHITECTURE.md` after acceptance, without silently rewriting their prior claims.
+5. Submit the documentation candidate as a PR and verify exact-HEAD required CI/docs policy. **No G0 exit before this is green and merged/reconciled.**
+
+**Durable STOP:** documentation candidate HEAD only. No source implementation, PR, CI, merge, or claim that G0 is completed. #719 remains OPEN.
+
+## Exact runtime caller/test evidence (G0 proof slice; NOT G0 complete)
+
+Companion [runtime test evidence matrix](719-g0-runtime-test-evidence.tsv) indexes **44 exact `#[test]` functions from 16 verified source files** at original PR HEAD `0b6143a9e95f76ac3913a1d7acea171670d1b880`. Names and line numbers were read from exact source (each has a `#[test]` annotation and assertion). Each matrix entry records the entrypoint and **specific asserted subject**, not merely a test filename. These anchors are a selected baseline, **not** coverage proof for every dynamic runtime path or all 97 declared variants.
+
+### Call chain and bridge sites established from code
+
+1. Normal frontend: `arkst-markdown/src/parser.rs:756` -> `arkst-core/src/lib.rs:326-422` -> `Evaluator::evaluate_frontend_*` -> `evaluator.rs:3838-3892`. Selected top-level calls enter `FrontendInvocation`; unselected blocks still enter `ast_to_ir::lower_top_level_block` at `evaluator.rs:3867`, then `evaluate_evidenced_structural_nodes` at 3875.
+2. Direct-call selection: `evaluator.rs:3935-3996` uses Phase-3A source candidates only for selected owners; otherwise `ast_to_ir::lower_top_level_direct_call` feeds executable IR arguments to `evaluate_block_call`. Chain route `evaluator.rs:3999-4090` still lowers tail IR at 4021 and can fall back to `evaluate_block_chain`; `continue_chain_from_value` at 19904 operates on `IrCallSegment`. Unit test `phase3i_native_tail_falls_back_to_pre_lowered_chain` specifically verifies this remaining fallback.
+3. Nested content: `ast_to_ir.rs:473` block conversion, `:1034` inline conversion, `:1195` value conversion, `evaluator.rs:4521` structural evaluation, `:4765-4779` inline execution. `FunctionBinding.body: Vec<IrNode>` at `evaluator.rs:145` and `evaluate_call_body` at 20245 continue executing IR bodies. This is **not** direct AST at every depth.
+4. Values and state: `value_conversion.rs:166-310` has `RuntimeValueKind::SemanticLeaf(IrValue)` and `InvocationValue`; `evaluator.rs:1641-1695,2188-2221` maintains cloned parent-scope/context and journal state. `final_document_guard_detects_nested_block_and_inline_executable_state` tests a **runtime guard**, not a final-only Rust type.
+5. Final consumers: `arkst-ir/src/lib.rs:33-79` serializes via unversioned `IrDocumentWire`; `arkst-cli/src/commands.rs:1599` writes `result.ir` JSON; `arkst-typst/src/lowering.rs:23` still accepts unqualified `&IrDocument`. No type-enforced final-only or versioned-wire contract exists.
+6. **Fixture entrypoint matters:** `arkst-engine/tests/{logger_diagnostics,loadable_library_dispatch,environment_inputs}.rs` call `ast_to_ir_with_diagnostics_for_mode` and `Evaluator::evaluate*(IrDocument)`. They test the **legacy executable IR entrypoint**, not normal frontend-AST execution. Other rows are separately marked parser-only, evaluator-private unit, normal `arkst-core::compile`, wire or backend.
+
+### Dynamic producer/consumer reachability — bounded slice A
+
+Companion [dynamic-route evidence ledger](719-g0-dynamic-route-evidence.tsv) closes a **bounded part** of G0 blocker 1 by tying three transitional runtime routes to exact production branches and exact current-head test execution. It does not promote the remaining inventory routes to proven status.
+
+Production authority for this slice is unchanged from the current PR candidate: `crates/arkst-engine/src/evaluator.rs` blob `217d3b4c107119c9ffe81daa303bcac0883d2675` and `crates/arkst-engine/src/ast_to_ir.rs` blob `54802c362b3d3584fc25a1527f781dc0fc8f6377`. Exact execution authority is CI run **#42901128320** at `e11e6362c1ae58b33eb63dfa505647f3b81f0464`, with test jobs macOS `130127146005`, Windows `130127146163`, and Ubuntu ARM64 `130127146132`.
+
+| Route | Production reachability established | Exact executable evidence | Current classification |
+|---|---|---|---|
+| **DYN01 direct source-defined call** | `evaluate_frontend_with_context` recognizes `FrontendInvocation`; the `DirectCall` branch attempts AST-backed `evaluate_frontend_block_call` before the explicit `lower_top_level_direct_call -> evaluate_block_call` fallback. | `g0_s04_source_defined_direct_calls_match_legacy_ir_entrypoint`; `phase3a_frontend_candidates_preserve_syntax_and_mixed_source_order` — both PASS on macOS/Windows/Ubuntu ARM64 at #42901128320. | **Branch-proven for the selected source-defined direct-call slice**, not all direct-call owners/shapes. |
+| **DYN02 chain head + executable IR tail** | The `Chain` branch can keep the selected head in frontend syntax while `lower_top_level_chain_tail` materializes `IrCallSegment`; `continue_chain_from_value` consumes those segments and explicitly retains pre-lowered/native fallback ownership. | Phase 3E/3F/3G/3H/3I tests for shared continuation, terminal body parity, multi-tail parity, binding failure parity, predecessor ordering, flat-tail parity and native fallback — **7/7 PASS on all three platforms**. | **Mixed AST/IR transitional route dynamically proven**; its existence is a G3 migration obligation, not final architecture. |
+| **DYN03 callable / selected body executable IR** | `FunctionBinding.body` is physically `Vec<IrNode>`; selected frontend block bodies cross `lower_frontend_block_body_for_runtime`; `evaluate_call_body` consumes block `IrNode` via `evaluate_node` and inline IR via `evaluate_inlines`. | First-class callable capture, two nested-body frontend tests, extension document rollback and lazy native raw-body tests — **5/5 PASS on all three platforms**. | **Executable IR body storage/consumption dynamically proven**; this directly demonstrates the remaining G4 body bridge. |
+
+This slice upgrades those three routes from lexical/path anchors to **source-traced + executable-current-head evidence**. It intentionally leaves open: exhaustive direct/native/unresolved invocation ownership, every chain argument/body/extension/resource combination, all nested/generative AST owners, value/runtime provenance paths, context/transaction routes, host/WASM routes, public API/wire consumers and backend consumers.
+
+### Dynamic producer/consumer reachability — bounded slice B
+
+Slice B extends the same [dynamic-route evidence ledger](719-g0-dynamic-route-evidence.tsv) with two additional runtime routes: evaluator-owned runtime value/provenance and invocation-scoped context/transaction journaling. This is still a bounded proof slice, not exhaustive G0 reachability.
+
+Production authority used by this slice:
+- `crates/arkst-engine/src/value_conversion.rs` blob `c47164b1cc2524a3cf79c615e83058d8b6cd72a9`;
+- `crates/arkst-engine/src/evaluator.rs` blob `217d3b4c107119c9ffe81daa303bcac0883d2675`;
+- `crates/arkst-engine/src/builtins.rs` blob `35369890b3081c4e7359656f561f5369bb6d9333`.
+
+Execution authority is exact-head CI run **#42906026861** at `04a7ee7a56cb656a29edc7f1f4e25a930a607767`, with macOS job `130144201000`, Windows job `130144200964`, and Ubuntu ARM64 job `130144200908`.
+
+| Route | Production reachability established | Exact executable evidence | Current classification |
+|---|---|---|---|
+| **DYN04 runtime value / provenance** | `evaluate_argument_candidate` materializes evaluator-owned `RuntimeValue`; `RuntimeValue::collection` decomposes collection children so provenance is owned per element. Variables retain `RuntimeValue`; the direct logger route recovers it with `direct_variable_runtime_value` and `builtins::logger_string_conversion` consumes the bounded source-backed provenance. Operation-generated collections remain fail-closed. | RuntimeValue nested-collection provenance; logger dynamic-string boundary; direct Markdown-list source-origin conversion; generated-collection fail-closed behavior; provenance confinement; dynamic-vs-static conversion audit — **6/6 PASS on all three platforms** at #42906026861. | **Runtime provenance production/consumption dynamically proven for this bounded value/logger slice.** `SemanticLeaf(IrValue)` and `InvocationValue` remain transitional adapters, so G1 is not closed. |
+| **DYN05 context / transaction savepoint** | `evaluate_call_value_with_input` begins an invocation and captures `InvocationCheckpoint`; failure calls `checkpoint.restore -> rollback_transaction -> restore_undo`, success calls `checkpoint.commit -> commit_savepoint`. `record_variable_before` and `record_document_state_undo` journal first writes, while cloned scope trees share the transaction with distinct scope identity. | Nested candidate rollback; caller-variable rollback; document-state rollback; prior-success preservation; nested-super outer rollback; local/parent function-binding undo; unresolved-callable non-publication; bounded document append undo metadata; nested conversion rollback — **9/9 PASS on all three platforms**. | **Invocation savepoint/journal route dynamically proven for the tested variable/function/document-state boundaries.** This preserves the reviewed S12 invariant but does not finish the target EvalSession/stable-identity transaction design. |
+
+Across slice B, **15/15 exact tests pass on macOS, Windows and Ubuntu ARM64** at the cited exact execution HEAD.
+
+This slice upgrades the runtime-value and transaction routes from structural anchors to **source-traced + executable evidence**. It intentionally leaves open: full recursive provenance across every semantic category and consumer, #682/#718 integration closure, every conversion target, all scope/resource/capture combinations, all document-state fields, host/WASM boundaries, public API/wire consumers and backend consumers. The new documentation commit that records this slice still requires its own exact-head CI before merge.
+
+### CI provenance and interpretation
+
+[PR #746 initial exact-HEAD CI #42770631592](https://github.com/luceat-lux-vestra/arkst/actions/runs/42770631592) passed including `Merge Gate`. Linux ARM, Windows and macOS job-step readback confirmed **`Test (Typst required)` ran and completed successfully** and `Documentation-only fast path` was skipped. The pinned workflow `ci.yml:395` invokes `cargo test --locked --workspace --all-targets --all-features`. Thus the baseline includes a genuine workspace test suite on the **previous HEAD**, but the matrix does not supply per-test job logs or an independent clean-room oracle. A new docs candidate HEAD must receive its own CI check.
+
+### Unresolved G0 proof requirements retained without scope reduction
+
+- Trace and classify **every producer/consumer** of all AST and IR variants, including all nested/generated sites and legacy API consumers; selected 44 fixtures are not exhaustive proof.
+- Build independent clean-room parity fixtures for rich/multi-tail/named/terminal-body AST routes, all function/extension/conditional owners, diagnostic codes/messages/source spans and state side effects versus the old IR path.
+- Preserve source vs materialized recursive per-element provenance for #682 structured String and #718 source-backed table; existing conversion tests cannot close these integration gaps.
+- Freeze cross-provider/subdocument/closure and nested transaction oracle cases under normal frontend and legacy entrypoints, plus source-map/backend parity and size/recursion limits.
+- Define legacy IR public API/CLI/Wire compatibility, versioning, decode rejection and malicious payload tests; review ADR-0022 and update historical ADR-0020/architecture text before claiming G0 accepted.
+
+**STOP:** this entrypoint-aware evidence slice is a documentation candidate only. It does not create new tests, finish G0, change code, or justify G1 start. The next checkpoint must check the replacement PR HEAD and authoritative CI.
+
+## Full Rust production-source lexical variant census and differential-oracle contract (G0 candidate)
+
+The [production variant cross-reference ledger](719-g0-production-variant-crossrefs.tsv) read **all 48 `crates/*/src/**/*.rs` files** at exact frozen source HEAD `c24ae20d9fb6898ef82faf5ddc0f4aa40ae03e5a` (each source blob SHA recorded in 48 `FILE_SCAN` rows, even when no explicit variant references appear). It records **454 variant/file pairs with 4,068 matching source-line references** across all **97 declared AST/IR variants**. All 97 types have at least one matching explicit `Enum::Variant` spelling; `FILE_SCAN` + `ENUM_REF` rows total **502** (plus TSV header). The matcher covers direct `IrNode/IrInline/IrValue`, frontend `Block/Inline/Value/CallArgument`, and recognized `Frontend*` aliases, with exact line locations. This is a reproducible, code-wide **lexical census**, **not** exhaustive semantic reachability: comments, in-module tests and dead code may contribute matches; aliases not recognized by the matcher, destructuring without enum prefixes, type-erased factories, and dynamic dispatch need independent review.
+
+**Stage ownership cross-check:** `arkst-markdown/src/parser.rs` produces parsed AST; `arkst-engine/src/ast_to_ir.rs` consumes AST and creates executable IR; `arkst-engine/src/evaluator.rs` has partial direct-AST calls, remaining pre-lowered body/chain execution and final semantic results; `arkst-ir/src/lib.rs` contains in-memory executable variants plus wire conversions; `arkst-typst/src/lowering.rs`, `focus_lowering.rs` and `arkst-cli/src/commands.rs` consume IR. Neither file-reference density nor an empty `ENUM_REF` row establishes whether a source file is a runtime consumer via traits, accessors or type-erased helpers. This distinction is part of G0's required review, not a reason to remove those routes.
+
+The [differential oracle contract](719-g0-differential-oracle-contract.tsv) adds **32 separately numbered proposed oracle probes** with explicit input/setup, comparison paths, observable dimensions (diagnostics code/message/span/order; emitted nodes; mutation journal; source identities; source maps; host permissions; wire shape), provisional compatibility invariants, existing test anchors and G0/G1–G8 ownership. Every row is marked **`PENDING_REFERENCE_FREEZE_AND_NEW_EXECUTION`**. Existing tests are included only as anchors; they are **not** an independent oracle. For upstream-supported Quarkdown constructs, freeze independently recorded outputs from a pinned clean-room reference; for Arkst-specific policy, freeze independently reviewed current behavioral contracts before allowing new AST routes to supersede legacy ones. Never fabricate a PASS from the fixture design.
+
+**Acceptance limitations:** the 48/48 source census closes a *lexical source enumeration* item, not the entire G0 runtime producer/consumer proof; complete each `role_tier` with branch reachability, actual producer/consumer direction and test IDs. The 32-oracle design closes a *test-plan specification* item, not observed differential parity. G0 remains blocked on executable new independent oracle proofs, public API/CLI/legacy wire compatibility decision, ADR-0022 acceptance and historical architecture reconciliation. #682/#718 provenance/conversion boundaries remain mandatory. The prior 44 anchored tests and their previous green CI remain a separate baseline, not validation of this candidate.
+
+**Checkpoint STOP:** documentation candidate only. Do not declare G0 accepted, begin G1, merge #746, or close #719 until explicit gate exit evidence exists.
+
+## First executable normal-frontend vs legacy-IR differential bundle (G0 candidate)
+
+A first **executable differential fixture bundle** now lives in `crates/arkst-core/tests/g0_runtime_differential.rs`. It runs the same parser-clean Quarkdown source through (a) the normal public `arkst_core::compile` frontend path and (b) an explicit legacy pipeline `parse_with_mode -> ast_to_ir_with_diagnostics_for_mode -> core evaluator::evaluate_project(IrDocument)`, then requires exact final `IrDocument` equality and a normalized exact diagnostic signature (code, severity, message, primary/secondary spans and hints).
+
+The bounded bundle implements three previously planned oracle rows:
+
+- **S04** source-defined direct calls with required/optional/named binding.
+- **S12** failed extension mutation of document state, requiring rollback and identical diagnostic/output.
+- **S16** dynamic String-to-number conversion versus source-authored static String rejection.
+
+These fixtures establish **normal-vs-legacy differential assertions in executable test code**. They do **not** by themselves prove Quarkdown/reference correctness. Disposable clean-room PR #748 now supplies the independent official-v2.5.1 observations for S04, S12 and S16: S04 and S16 are semantically compatible at the tested boundaries, while S12 intentionally diverges because Arkst preserves its accepted transactional rollback invariant. These fixtures still do not close unimplemented S01–S32 cases or the G0 dynamic route census.
+
+### S04 and S16 independent-reference disposition: semantically compatible
+
+The same disposable clean-room PR #748 at exact HEAD `347b5a155fdb5ed11e6113e9aa29cc7bfd2ec803`, workflow run #42825801315, used the official Quarkdown v2.5.1 Linux x64 archive with SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. The retained artifact is ID `13768992195`, digest `sha256:751d3386190fb2f5a33d702a2907a16321b87acb5eb1fcceddf96b8d785454a0`.
+
+For **S04**, official v2.5.1 default and strict modes both exit 0 with empty stderr and the same visible output: `Quarkdown Hello, world from None! Hello, world from Jane!`. The rendered HTML SHA-256 is `3f4c6d0db35eccc030dc107e0ded16fe6004e4b5aeb56c02c6aa37dc8cd010c8` in both modes. This independently supports the required/optional/named source-defined direct-call behavior exercised by Arkst's S04 differential fixture.
+
+For **S16 dynamic String**, official default and strict modes both exit 0, produce visible `Quarkdown 3.5`, and share HTML SHA-256 `97cbf5ab43bce37796fb200cab5635d83597fadd92b9df46a5a7943001510645`. For **S16 static String**, official non-strict mode reports that `abs(Number x)` received a `StringValue` instead of Number, renders an error document with SHA-256 `f2a72851f31038b0c44c786fd653571ec4a9120d6e36bc2a9014e8f42574dda6`, and strict mode exits 66 with no HTML. This independently supports the semantic conversion boundary: dynamically produced numeric text converts, while a statically typed String remains rejected by a Number target.
+
+The S16 compatibility claim is deliberately **semantic**, not byte-identical diagnostic-presentation parity. Arkst's diagnostic code/message/rendering contract remains its own tested interface; the official CLI presentation and JVM exception naming are not imported as Arkst's byte-for-byte oracle.
+
+Accordingly:
+- **S04:** upstream reference frozen as semantically compatible at the required/optional/named direct-call boundary.
+- **S16:** upstream reference frozen as semantically compatible at the dynamic-vs-static numeric conversion boundary.
+- Their independent-reference plus Arkst migration evidence was validated at exact HEAD `4ffe231011688997788c9fed751695201c0983bb` by CI run #42833994417: required Merge Gate succeeded and S04/S16 passed on macOS, Windows and Ubuntu ARM64. This freezes the evidence disposition; it does not close wider G0 coverage. Any later documentation candidate, including the commit that records this wording, still requires its own exact-HEAD CI before merge.
+
+### S12 independent-reference disposition: intentional rollback divergence
+
+Disposable clean-room PR #748 at exact HEAD `347b5a155fdb5ed11e6113e9aa29cc7bfd2ec803` ran the official Quarkdown v2.5.1 Linux x64 release artifact (archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`) as a black-box oracle. Workflow run #42825801315 completed successfully and retained artifact ID `13768992195` with digest `sha256:751d3386190fb2f5a33d702a2907a16321b87acb5eb1fcceddf96b8d785454a0`.
+
+For the S12 fixture, official v2.5.1 **non-strict** reports the failing `.sum {true} {2}` but leaves the preceding `.docname {changed}` mutation observable; the final document-name observation is `changed`. Strict mode exits with code 66 before a post-failure state can be observed. This contradicts Arkst's established rollback behavior, where a failed invocation/body restores evaluator/document mutations to its savepoint while previously committed successful outer mutations remain committed.
+
+The divergence is **intentional and reviewed**, not a compatibility bug to repair by weakening Arkst's transaction semantics. The decision is anchored by completed programmable-language audit #150, shared atomicity owner #167, the extension regression family in `quarkdown_function_extension.rs`, #719's retained first-write/savepoint transaction direction, and accepted ADR-0016's requirement to document/review intentional divergences and invariant weakening.
+
+Accordingly, S12 has two distinct authorities:
+
+- **Arkst migration oracle:** normal/direct-AST and legacy evaluator paths must preserve Arkst's failure-atomic rollback result (`before`) and the boundary that earlier successful commits survive.
+- **Upstream compatibility reference:** official Quarkdown v2.5.1 non-strict preserves the failed invocation's prior document mutation (`changed`).
+- **Compatibility classification:** explicit intentional divergence. Upstream-output equality is not the S12 acceptance predicate.
+
+The S12 row in the differential-oracle contract is therefore frozen as an Arkst migration oracle with an explicit upstream divergence. Exact HEAD `4ffe231011688997788c9fed751695201c0983bb` was validated by CI run #42833994417: required Merge Gate succeeded and S12 passed on macOS, Windows and Ubuntu ARM64. This freezes the S12 reference/migration evidence disposition; it does not complete G0 or relax any remaining G0 proof requirement. Any later documentation candidate, including the commit that records this wording, still requires its own exact-HEAD CI before merge.
+
+**STOP boundary:** S04/S12/S16 evidence-status reconciliation only. CI for the replacement documentation HEAD, additional oracle fixtures, ADR acceptance, merge and later G0 work remain separate work units.
+
+## S13/S14/S15 executable migration differential — bounded G0 evidence
+
+Three additional executable migration oracles were added to `crates/arkst-core/tests/g0_runtime_differential.rs` at candidate `802d92bae540d23b17772f36031aafbb6992f97f`. As for S04/S12/S16, the helper compiles exactly the same parser-clean source through normal public `arkst_core::compile` and the legacy `parse_with_mode -> ast_to_ir_with_diagnostics_for_mode -> Evaluator::evaluate_project(IrDocument)` entrypoint, requiring exact final `IrDocument` equality and normalized diagnostic equality including code, severity, message, primary/secondary spans and hints.
+
+| Scenario | New differential test | Bounded observed assertion |
+| --- | --- | --- |
+| **S13** nested transaction rollback | `g0_s13_nested_super_success_rolls_back_after_outer_failure` | A nested successful `.super` side effect is undone after its outer invocation fails, with exactly one numeric-argument diagnostic and final visible state `before`. |
+| **S14** native raw body laziness | `g0_s14_extended_native_raw_body_stays_lazy_and_matches_legacy` | Apparent `.state {changed}` source inside an extended native `.lowercase` raw body stays opaque text, and the later state remains `before`, without diagnostics. |
+| **S15** nested source-defined body | `g0_s15_source_defined_nested_body_matches_legacy` | A nested indented body passed to a source-defined `.echo` inside `.text` yields exactly `nested`, without diagnostics. |
+
+**Execution evidence:** [CI #42952023697](https://github.com/luceat-lux-vestra/arkst/actions/runs/42952023697), exact `head_sha=802d92bae540d23b17772f36031aafbb6992f97f`, completed **SUCCESS**. The macOS, Windows and Ubuntu ARM64 `test` jobs each completed successfully, including `Test (Typst required)` (full workspace `cargo test --locked --workspace --all-targets --all-features`). Required `Merge Gate` also succeeded. These three newly added, non-ignored integration tests were included in that full-workspace test run.
+
+**Classification at the original Arkst migration-test work unit:** `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING` for S13/S14/S15. The tests originated from established Arkst regressions, with **no independent official reference available at that earlier checkpoint**. S13, S14 and S15 now have later independent evidence, recorded below; S15's official proof is intentionally bounded to the authored nested-body public behavior and does not establish generalized callable-precedence/provenance internals. Arkst's accepted failure-atomic policy must not be silently recast as official Quarkdown parity.
+
+**G0 remains incomplete:** this slice does not resolve remaining S01–S32 oracle rows, exhaustive dynamic producer/consumer reachability, public API / versioned wire / CLI policy, proposed ADR-0022 acceptance, or ADR-0020 / architecture reconciliation. No G1 or merge authorization follows from the green CI run.
+
+## S13 independent official Quarkdown nested-failure reference — rollback divergence
+
+**Scope and provenance.** Disposable [draft PR #765](https://github.com/luceat-lux-vestra/arkst/pull/765) is an evidence-only workflow `.github/workflows/probe-719-g0-s13.yml` at exact HEAD `7c4117b5a55e82950f002ba0c036db5f4f5068b9` based on `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. Official [run #43436415448](https://github.com/luceat-lux-vestra/arkst/actions/runs/43436415448) completed **SUCCESS** in both versions, and separate PR CI #43436415132 completed **SUCCESS**. The workflow's green result means **collection completed**, not that Arkst and Quarkdown agree on failure recovery.
+
+Pinned official Linux x64 distributions and independently inspected ZIP artifacts:
+
+- **v2.5.1:** distribution SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`; artifact `g0-s13-quarkdown-v2.5.1` ID `14043523099`, downloaded ZIP SHA-256 `443783a27b0dd7c802fdd4c86080be8c1d82b8c52b32b7cb03ad96659fda7d60`.
+- **v2.6.0:** distribution SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`; artifact `g0-s13-quarkdown-v2.6.0` ID `14042159098`, downloaded ZIP SHA-256 `96a89b207beca83e1cce053f3a9c303fbd979c38515b1d02c01281720629c236`.
+
+All **12 JSONL records** (3 sources × 2 modes × 2 official versions) were independently inspected against the ZIP's exact source bytes, stdout/stderr bytes, HTML file counts, HTML SHA-256, and extracted visible HTML text. Each version's results agree for the same fixture/mode. Strict-mode stack-trace implementation lines differ across versions, but the error category and exit behavior are the same.
+
+| Fixture | Input SHA-256 | Default result, both versions | Strict result, both versions | HTML SHA-256 where generated |
+| --- | --- | --- | --- | --- |
+| `nested-failure` (same public source as Arkst S13 regression) | `0ddcfe9e3c631d30d5c7ac0bc820530c6ee0dd728839d3ca978da9cdaa1c0155` | rc **0**, one HTML, stderr `sum` numeric coercion error, rendered error box retains failing `.sum {true} {2}` source, **later state `changed`**; no `base world` paragraph | rc **66**, `sum` exception on stderr, zero HTML | `562a29f15bcaa1aac46904178ca320c8d6f1142c66b69415dbf0df1068584789` (default) |
+| `nested-success` (failure removed) | `23fb108d639b1e23c31aaa2d9ad69eeafb513b693d468058ead8ce040e68b4a6` | rc **0**, no stderr, `base world` then `changed` | rc **0**, no stderr, same output | `16e4db039159cd22c6ceb07c22162328287e4b1f56f100c016ad01b3efee2ce3` (both modes) |
+| `direct-failure` (no nested `.super`) | `aaf5cdb3bef4ea21ce52a37e05d8704222343429e020c6c5aafc7a0c4fdf9f37` | rc **0**, one HTML, same error box and **later state `changed`**; HTML byte-identical to `nested-failure` default | rc **66**, `sum` exception on stderr, zero HTML | `562a29f15bcaa1aac46904178ca320c8d6f1142c66b69415dbf0df1068584789` (default) |
+
+### Interpretation and compatibility disposition
+
+1. **Official default-mode public behavior:** the failing `sum` is reported in stderr and represented by a source-backed error panel in the output; compilation returns process rc 0 and subsequent top-level `.state` renders `changed`, **not `before`**, after either nested or direct failed invocation. This is a directly observed retained mutation, **not** evidence that a nested transaction journal commits or rolls back in any particular internal way.
+2. **Success control:** the nested `.greet` → extended `.super` path produces `base world`, then the persisted state `changed`. This confirms the mutation is effective on a successful path.
+3. **Direct-failure control:** the identical default-mode post-failure state and HTML error output without nested `.super` establishes that the observed persistence cannot be attributed exclusively to extension dispatch. Do not conflate call-stack ownership with global failure recovery policy.
+4. **Strict-mode boundary:** the official `sum` exception exits with rc 66 and creates no HTML; the post-failure state is **not observable** in strict mode. Do not infer rollback/persistence from absent output or automatically require identical Arkst CLI exit codes.
+5. **Arkst policy difference:** the existing `g0_s13_nested_super_success_rolls_back_after_outer_failure` normal-vs-legacy final-`IrDocument` differential, cross-platform proven at CI #42952023697 / `802d92bae540d23b17772f36031aafbb6992f97f`, requires one numeric-argument diagnostic and **`before`** after outer failure. This preserves Arkst's accepted invocation-scoped failure-atomic invariant, which differs from both pinned official **default-mode** public outputs in this bounded scenario. The independent upstream reference is frozen; **S13 end-to-end upstream compatibility is not established**.
+6. **Separate recovery-content contract:** [#752](https://github.com/luceat-lux-vestra/arkst/issues/752) is **CLOSED/COMPLETED** via exact-head-qualified PR #777 and protected-main commit `114c1b694e1b36eabed3bd00d3d93dbfb5b4ddad`. It adds backend-neutral source-backed `InvocationFailure` recovery without changing Arkst's accepted invocation-scoped rollback policy or introducing a second HTML renderer. The S13 default-mode post-failure mutation difference therefore remains an explicit rollback-policy divergence, not unresolved recovery-content debt.
+
+**Classification:** `ARKST_S13_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_POST_FAILURE_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN`. This is a **frozen bounded upstream observation plus an open compatibility/policy reconciliation**, not S13 full parity, not G0 exit, not #746 merge authorization and not permission to begin G1. S14 and S15 official references remain pending.
+
+## S14 independent official Quarkdown native raw-body reference — bounded semantic parity
+
+**Scope and provenance.** Disposable [draft PR #766](https://github.com/luceat-lux-vestra/arkst/pull/766) is an evidence-only workflow `.github/workflows/probe-719-g0-s14.yml` at exact HEAD `7229d621876177e4f530d082c5cdbd554af55b7d`, based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. Official [run #43456000605](https://github.com/luceat-lux-vestra/arkst/actions/runs/43456000605) completed **SUCCESS** for both pinned releases; separate probe PR [CI #43456000645](https://github.com/luceat-lux-vestra/arkst/actions/runs/43456000645) and required Merge Gate also completed **SUCCESS**. A green collection workflow is not itself semantic proof; the archived records below were independently inspected.
+
+Pinned official Linux x64 distributions and downloaded artifacts:
+
+- **v2.5.1:** distribution SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`; artifact `g0-s14-quarkdown-v2.5.1` ID `14053628440`, ZIP SHA-256 `ea669e5b30c18b485cc0a7a2cb52079a97a3e39fd57273eb7647df5674bdc824`.
+- **v2.6.0:** distribution SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`; artifact `g0-s14-quarkdown-v2.6.0` ID `14053813014`, ZIP SHA-256 `0df85158a4bedbb3433eebe251df30b0fcb08bcc46627e3228e3ef8cf61283d9`.
+
+All **12 JSONL observations** (3 authored sources × default/strict × 2 releases) were reconciled against exact source bytes, process rc/stdout/stderr, generated HTML count, HTML SHA-256 and extracted visible text. For each fixture, v2.5.1 and v2.6.0 produced the same semantic result; default and strict also matched. The two releases differ only in ANSI reset spelling in successful CLI stdout, not in the observed document output.
+
+| Fixture | Source SHA-256 | Result in v2.5.1 and v2.6.0, default and strict | HTML SHA-256 |
+| --- | --- | --- | --- |
+| `extended-raw` — byte-exact Arkst S14 source | `8ab0a63fcf94452f73a5ee306ea67d9312aacac7240d22c8ec8fb5e885905c11` | rc **0**, empty stderr, one HTML; visible body contains literal `.state {changed}` followed by **`before`** | `002a8d71e37e0482836bd5fcabe2eeac76d42c36dec722e7d7f50d0c7fa5f6f6` |
+| `native-raw` — same raw body without `.extend` | `1bcfdf4106c9c6bf0b778c0e8217db1040a9ecb6d2a5e83d1f9e0f4918d7200b` | rc **0**, empty stderr, same literal `.state {changed}` then **`before`** | `002a8d71e37e0482836bd5fcabe2eeac76d42c36dec722e7d7f50d0c7fa5f6f6` |
+| `explicit-state` — executable positive control | `edd536fdb0d0ef12a170ce8126e25873d421924e3bdf105840f12c8e0a15b95d` | rc **0**, empty stderr; subsequent state is **`changed`** and the directive source is not rendered literally | `4413ef9892cdb2cff83c5919b95be812c9ffc879fa3e43a4b0776377a6ed828b` |
+
+### Interpretation and compatibility disposition
+
+1. **Native raw-body opaqueness is directly observable.** In both releases and both modes, the indented `.state {changed}` passed as the body of native `.lowercase` appears as literal output and does not mutate the later top-level state; that state remains `before`.
+2. **Extension does not change that body contract.** The extended-native source and the direct-native control produce identical HTML bytes and visible output. This supports the bounded public conclusion that the `.extend {lowercase} / .super` wrapper does not cause the native raw body to be reparsed as executable Quarkdown.
+3. **The positive control distinguishes opaqueness from a broken state primitive.** Executing `.state {changed}` directly changes the later state to `changed` in all four official version/mode combinations.
+4. **Do not overclaim internal representation.** The official HTML does not prove Arkst's parser node type, source-span storage, raw byte ownership, internal evaluator dispatch or renderer byte parity. It supports only the public semantic result: this native body remains opaque/literal rather than executing the apparent directive.
+5. **Arkst migration proof aligns with the bounded reference.** Existing `g0_s14_extended_native_raw_body_stays_lazy_and_matches_legacy` requires exact final `IrDocument` and ordered diagnostic parity between Arkst normal frontend and legacy evaluator, empty diagnostics, and paragraph output `.state {changed}\nbefore`. Its exact migration-test candidate `802d92bae540d23b17772f36031aafbb6992f97f` passed macOS/Windows/Ubuntu ARM64 plus Merge Gate in CI #42952023697. Combined with the independent official observation above, S14's **bounded public native raw-body laziness contract is compatible and frozen**.
+
+**Classification:** `UPSTREAM_V251_V260_S14_NATIVE_RAW_BODY_OPAQUE_SEMANTICS_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. This classification is limited to the three bounded fixtures and public raw-body/state behavior. It does not claim renderer byte parity, complete native-body provenance equivalence, all native builtins, G0 completion, #746 merge authorization or G1 readiness. S15 official reference remains pending.
+
+## S15 independent official Quarkdown nested source-body reference — bounded semantic parity
+
+**Scope and provenance.** Disposable [draft PR #767](https://github.com/luceat-lux-vestra/arkst/pull/767) is an evidence-only workflow `.github/workflows/probe-719-g0-s15.yml` at exact HEAD `1681a7191e3064b05909e22c2c2a932fe4260b9a`, based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. Official [run #43468848884](https://github.com/luceat-lux-vestra/arkst/actions/runs/43468848884) completed **SUCCESS** for both pinned releases; separate probe PR [CI #43468849293](https://github.com/luceat-lux-vestra/arkst/actions/runs/43468849293) and required Merge Gate also completed **SUCCESS**. Green collection alone was not used as semantic proof; both archived ZIPs were independently downloaded and all records inspected.
+
+Pinned official Linux x64 distributions and downloaded artifacts:
+
+- **v2.5.1:** distribution SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`; artifact `g0-s15-quarkdown-v2.5.1` ID `14058424137`, ZIP SHA-256 `a0a95ec49e71c7bfee3f2fcd702070e52fe90ead07bf9b6e691d9a3b37ab4796`.
+- **v2.6.0:** distribution SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`; artifact `g0-s15-quarkdown-v2.6.0` ID `14059478572`, ZIP SHA-256 `ab5cd92633369abc5b5732205ee350d1d8e96a46a5baf06c98eff4f7033511d0`.
+
+All **12 JSONL observations** (3 authored sources × default/strict × 2 releases) were reconciled against exact fixture bytes/hashes, rc/stdout/stderr, HTML count, rendered text and HTML SHA-256.
+
+| Fixture | Source SHA-256 | v2.5.1 default/strict | v2.6.0 default/strict |
+| --- | --- | --- | --- |
+| `nested-source` — byte-exact Arkst S15 source | `3d972d602d34d61846e3a419393328a4ea01bce9f3b3e0b599a6ccc2f787f0ed` | rc **0**, empty stderr, one HTML, visible document text `nested` | same semantic result |
+| `inline-source` — same source-defined `.echo` with explicit `{nested}` | `95c07db8f369fc3f5b3347bd3ba07551a4700ae1642149194e6260ecd36dd099` | rc **0**, empty stderr, one HTML, visible document text `nested` | same semantic result |
+| `text-literal` — outer `.text {nested}` control | `60e21967a3524770edce121459eec2ed2cc3bd956355e2242f174d1d2dc9d1c5` | rc **0**, empty stderr, one HTML, visible document text `nested` | same semantic result |
+
+Within **v2.5.1**, all six generated documents are byte-identical with HTML SHA-256 `7f13d0eabd119e52cbee06fc19d145595ff49430c4d8ea418198b33fca71b734`. Within **v2.6.0**, all six are byte-identical with HTML SHA-256 `554ca6534e1decfb51484f70fee83d3c250b26f3d28f3c979e409560caadbd43`. The differing release-level HTML hashes therefore reflect release output bytes/chrome, not a semantic difference among the three bounded fixtures. Successful CLI stdout also differs only in ANSI reset spelling between releases.
+
+### Interpretation and compatibility disposition
+
+1. **The exact S15 nested source shape is accepted in both pinned releases and modes.** A source-defined `.echo` called inside `.text` with its final value supplied by an indented continuation compiles successfully and yields public visible text `nested`, with no stderr.
+2. **Nested and inline source-defined calls agree publicly.** Replacing the indented continuation with explicit inline `{nested}` yields the same visible document and release-local HTML bytes. This supports the bounded public conclusion that the indented continuation supplies the value expected by this source-defined callable in this nested content position.
+3. **The literal control bounds the inference.** Because the direct `.text {nested}` control is also byte-identical within each release, these records do **not** independently identify generalized callable-precedence rules, exact AST/IR body ownership, source-span provenance, or evaluator dispatch. Those internals must not be inferred from renderer equality.
+4. **Existing project evidence is consistent but separate.** Closed issue #690 documents an independently verified official v2.7.0 nested-call-body acceptance case and the required parser/evaluator contract, including source-defined precedence as an acceptance dimension. The current S15 v2.5.1/v2.6.0 probe does not broaden itself to that generalized precedence proof; it freezes only this authored source-defined nested-body public result.
+5. **Arkst migration proof aligns with the bounded reference.** `g0_s15_source_defined_nested_body_matches_legacy` requires exact final `IrDocument` and ordered diagnostic parity between the normal frontend and legacy evaluator, no diagnostics, and public paragraph text `nested`. Its migration-test candidate `802d92bae540d23b17772f36031aafbb6992f97f` passed Ubuntu ARM64/macOS/Windows and required Merge Gate in CI #42952023697. Combined with the independent official observation above, the **bounded S15 nested source-body public semantics are compatible and frozen**.
+
+**Classification:** `UPSTREAM_V251_V260_S15_NESTED_SOURCE_BODY_PUBLIC_SEMANTICS_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. This does not claim generalized callable precedence, exact provenance/source-span equivalence, AST/IR representation, renderer byte parity across releases, all nested-body forms, G0 completion, #746 merge authorization or G1 readiness.
+
+## S17 logger collection provenance boundary — Arkst migration candidate with frozen upstream divergence
+
+**Bounded migration target.** S17 protects evaluator-owned collection provenance at the logger/String conversion boundary while final-document IR replaces the legacy execution bridge. The new `g0_s17_logger_collection_provenance_boundary_matches_legacy` test at candidate `424681095ce3ffc265ce4f6709984bc130361366` runs three parser-clean sources through both the normal public frontend and the legacy pre-lowered evaluator, requiring exact final `IrDocument` equality and ordered diagnostic-signature equality:
+
+| Case | Bounded Arkst result |
+| --- | --- |
+| direct source-backed Markdown list → `.debug {.values}` | accepted conversion validation, no diagnostics, no document nodes |
+| same list after `::reversed` materialization → `.debug` | exactly one `E3001` conversion diagnostic mentioning `.debug`, no document nodes |
+| source-backed list with nested rich Markdown child → `.debug` | exactly one `E3001` conversion diagnostic mentioning `.debug`, no document nodes |
+
+These cases are adapted directly from established `arkst-engine/tests/logger_diagnostics.rs` evidence, including `operation_generated_collections_remain_fail_closed_at_logger_string_boundary` and the source-provenance boundary tests. They freeze the migration invariant that **evidenced source origin may enable a bounded logger projection, but materialization or unevidenced recursive/rich children must not inherit that authority through an origin heuristic**.
+
+### Independent upstream evidence and intentional scope
+
+Open compatibility decision [#682](https://github.com/luceat-lux-vestra/arkst/issues/682) already records independently authored black-box observations against official Quarkdown **v2.7.0** macOS aarch64 asset SHA-256 `60afe5ab3d2dad10355eea2ec9ca477f229c6f4c5be27a4d0338b5ed00add919`. That evidence shows the current upstream String target is broader than Arkst's stable adapter: operation-generated collections can be projected into JVM-shaped `DynamicValue(... evaluationContext=...)` text, and producer/provenance affects public String projection.
+
+Arkst intentionally does **not** fabricate or persist those runtime-identity-bearing projections today. #682 remains OPEN and explicitly blocks widening the shared String contract until the supported/normalized/divergent categories are reviewed. Therefore S17 is **not an upstream-parity claim**. The frozen reference establishes a known upstream-v2.7 divergence/decision dependency, while this G0 slice only proves that the **current Arkst fail-closed provenance boundary survives the frontend migration unchanged**.
+
+This distinction is required:
+
+- do not add runtime/JVM identity text to durable IR or wire provenance;
+- do not widen generic String conversion as a side effect of G0;
+- do not infer source authority from collection shape after operation materialization;
+- do not treat an accepted direct Markdown-list logger projection as permission for nested rich/generated values;
+- leave the broader structured-String compatibility decision and future `split` work owned by #682.
+
+**Candidate classification:** `ARKST_S17_MIGRATION_PROVENANCE_BOUNDARY_CANDIDATE_UPSTREAM_V27_RUNTIME_IDENTITY_DIVERGENCE_DECISION_OPEN_CI_PENDING`. Exact-head CI and Merge Gate for the final S17 evidence HEAD are still required before this candidate is qualified. This slice does not resolve #682, S18+, generalized provenance, G0 completion, #746 merge authorization or G1 readiness.
+
+## S18 table-input boundary — partial migration qualified, provenance foundation proven, consumer pending
+
+**Implemented migration proof.** `g0_s18_source_backed_rich_table_callback_matches_legacy` preserves the already-implemented source-backed rich-table/callback path across normal frontend ↔ legacy evaluator. The final evidence HEAD `56abda214fbac9a7eda56f38e49aed0491e63f16` passed exact-head CI #43528790105 with fmt, Ubuntu ARM64/macOS/Windows and required Merge Gate. That proof remains intentionally bounded to:
+
+- Markdown table stored in `.var {catalog}`;
+- named `table:{.catalog}` input to `.tablecompute`;
+- nested callback `values: .values::size`;
+- exact final `IrDocument` + ordered diagnostic parity;
+- three final rows and preserved `IrInline::Strong` rich-cell content.
+
+**The #718 provenance discriminator itself is already proven.** Merged [PR #721](https://github.com/luceat-lux-vestra/arkst/pull/721), exact HEAD `46410de34144ce5b592e9b29807cab2923310c01`, added evaluator regression `repeat_runtime_provenance_distinguishes_source_tables_from_generated_tables`. Its proof exercises the exact semantic distinction required by #718 before output shape erases provenance:
+
+- direct authored Markdown-table elements produced through native `.repeat` retain per-child `ValueProvenance::SourceBackedMarkdown`;
+- the same runtime iterable/coercion boundary preserves that provenance;
+- a `.tablebyrows` call used as the repeat body produces Table-shaped semantic content whose runtime children remain `Materialized`;
+- classification is made at the authored callable-statement boundary, not from Table node shape, source spans, renderer bytes or producer-name heuristics.
+
+PR #721 is merged. Its CI #42086226953 completed **SUCCESS**, including Ubuntu ARM64/macOS/Windows and required Merge Gate; Reference JVM run #42086226637 also completed **SUCCESS**.
+
+### What remains unresolved
+
+The remaining S18 gap is **not** an inability to represent or prove source-backed-vs-materialized table provenance. That foundation exists and is qualified. The remaining gap is the actual current-v2.7 consumer owned by [#718](https://github.com/luceat-lux-vestra/arkst/issues/718):
+
+`.table subTables:{Iterable<Any>}`
+
+Repository read-back found no executable native `.table subTables` path on current main; code search finds the callable only in compatibility/audit metadata, and the compatibility gap inventory still lists `.table` as unsupported/open while bounded `.tablebyrows`, `.tablecolumn(s)`, `.tablesort`, `.tablefilter` and `.tablecompute` exist separately.
+
+Therefore S18 must not be marked complete yet. What is established is:
+
+1. the implemented adjacent source-backed rich-table/callback migration path is exact-head qualified;
+2. the evaluator runtime provenance discriminator required by #718 is independently merged and exact-head qualified;
+3. the missing piece is wiring that already-proven discriminator into the actual `.table subTables` consumer and then testing its accepted source-backed inputs versus rejected materialized generated Tables.
+
+No new architecture carrier, local parser, source reconstruction or shape heuristic is justified by this evidence. G0 must not implement #718 production behavior as a side effect.
+
+**Classification:** `ARKST_S18_PARTIAL_MIGRATION_PROVENANCE_FOUNDATION_PROVEN_TABLE_CONSUMER_PENDING_CI_PENDING`. The semantic/provenance evidence is established, but this updated evidence-document HEAD still requires its own exact-head CI, and full S18 closure remains blocked on the #718 production consumer rather than on provenance architecture.
+
+## S19 nested document-state conversion rollback — Arkst migration qualified, official default-mode rollback divergence frozen
+
+**Arkst migration invariant.** `g0_s19_nested_doclang_conversion_rollback_matches_legacy` preserves the existing #167/#152 document-state atomicity contract while final-document IR replaces the legacy execution bridge. Exact Arkst evidence HEAD `d7354bc7a1d1b541414ed65d79fe6b4b4773efec` passed CI #43541989460 with fmt, Ubuntu ARM64/macOS/Windows, Reference JVM and required Merge Gate.
+
+The exact fixture is:
+
+```quarkdown
+.doclang {en}
+.doclang {.pair {.doclang {it}} {invalid1}}
+.doclang
+```
+
+Arkst requires one `E3001`, rollback of the nested temporary `it` write, retention of the previously committed `en`, visible getter text `English`, and final `IrDocument.metadata.document_state.locale.tag == "en"`. Normal public frontend and legacy pre-lowered evaluator must produce exactly equal final `IrDocument` and ordered diagnostic signatures.
+
+### Independent official Quarkdown exact-fixture reference
+
+Disposable clean-room draft PR #768 is **CLOSED/UNMERGED** after evidence preservation. Its exact probe HEAD is `54309b19124762b51551d368d908ec810d889752`, based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`, with exactly one workflow file. Official collection run #43543462450 completed **SUCCESS** for both pinned releases; separate PR CI #43543462409 completed **SUCCESS**.
+
+Pinned official Linux x64 distributions:
+
+- **v2.5.1:** archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`
+- **v2.6.0:** archive SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`
+
+The exact fixture bytes were identical in both artifacts and match the Arkst S19 source byte-for-byte. Fixture SHA-256:
+
+`f3831dc17d272145754fbf148d7968b8a2517dee54b700cce272f84c0573d503`
+
+Retained/downloaded artifact ZIPs were independently hashed and exactly match GitHub's recorded artifact digests:
+
+- **v2.5.1:** artifact ID `14091949667`, ZIP SHA-256 `e6626b474748a14bc7f1afecdca61013b5ec8db6242c6c62b3fddf3c35d06525`
+- **v2.6.0:** artifact ID `14092811866`, ZIP SHA-256 `475cf7ec8fb2dbc321fe4b248d978ecb16b91e40f05e02b8f8fab4350faf7fd5`
+
+Four observations were inspected independently:
+
+| Release | Mode | rc | HTML | Bounded post-failure observation |
+| --- | --- | ---: | --- | --- |
+| v2.5.1 | default | 0 | 1 file, SHA-256 `d3deeb94dd6d43954fce22b78dfc4ac9fd8fe434866d106af73b89ee7e788634` | Error panel is emitted and the later zero-argument `.doclang` getter renders **`italiano`**. The nested `.doclang {it}` mutation therefore remains observable after the enclosing conversion failure. |
+| v2.5.1 | strict | 66 | none | Strict compilation aborts at the failing outer `.doclang`; no post-failure getter output is published, so rollback/persistence cannot be inferred from strict output. |
+| v2.6.0 | default | 0 | 1 file, SHA-256 `016689f78c8358dd96488a443a93b7d18f00be19dba170a9f4982ea6d00963a8` | Error panel is emitted and the later getter renders **`Italian`**. The same nested `it` mutation remains observable after the enclosing conversion failure. |
+| v2.6.0 | strict | 66 | none | Strict compilation aborts at the failing outer `.doclang`; no post-failure getter output is published. |
+
+Both default-mode runs report the same failing outer conversion shape in stderr: the `.pair` value contains the nested `.doclang` result plus `invalid1`, the locale conversion fails, but the nested locale mutation has already been published and remains visible to the later getter. The v2.5.1/v2.6.0 visible locale spelling differs only because the releases localize the locale name differently; both identify the effective locale as Italian rather than English.
+
+### Disposition
+
+This exact-fixture evidence confirms the same failure-effect direction already observed in S12/S13: official Quarkdown **default mode publishes the nested document-state mutation performed before the later enclosing failure**, while Arkst's accepted #167 invocation-savepoint policy rolls it back.
+
+Therefore:
+
+- **Arkst migration acceptance remains rollback-based:** after the failed outer conversion, locale stays `en` and the getter remains `English`;
+- **official v2.5.1/v2.6.0 default-mode behavior diverges:** locale `it` remains observable after the failure;
+- **strict mode is not evidence of rollback or persistence** because rc 66 prevents publication of the later getter;
+- do not weaken #167 document-state atomicity automatically to match the official default-mode side effect;
+- any future compatibility reconciliation is an explicit architecture/policy decision, not a G0 evidence patch;
+- this proof remains bounded to the exact S19 `.doclang` nested-candidate fixture and does not claim universal behavior for every document-state setter or failure shape.
+
+**Classification:** `ARKST_S19_MIGRATION_PROVEN_UPSTREAM_V251_V260_DEFAULT_NESTED_DOCLANG_MUTATION_PERSISTS_ROLLBACK_DIVERGENCE_OPEN_CI_PENDING`. The migration proof and official reference are frozen; only the new documentation/classification HEAD still requires exact-head CI before qualification.
+
+## S20 nested include resource context — source-relative + sandbox visibility qualified, capability boundary frozen as legacy-IR-only, reference pending
+
+**Qualified source-relative migration proof.** `g0_s20_nested_include_resource_context_matches_legacy` proves the implemented nested file-include + included-source-relative resource path across the normal frontend and legacy pre-lowered evaluator. Exact HEAD `84ba18bd10a7721fcab8e50842803d0d59fad957` passed CI #43553576223 including fmt, Ubuntu ARM64/macOS/Windows, Reference JVM and required Merge Gate.
+
+That fixture keeps one `VirtualProject` across both execution paths:
+
+- `docs/main.qd` includes `docs/partials/child.qd`;
+- the child defines/invokes `.render`;
+- `.render` executes an `.ifpresent` lambda and `.read {data/value.txt}`;
+- the only resource is `docs/partials/data/value.txt`, so success requires the included source's resource base rather than the entry source base;
+- exact final `IrDocument` and ordered diagnostics match, and the visible output is `NESTED`.
+
+**Qualified SHARE/SCOPE migration proof.** `g0_s20_include_scope_and_share_visibility_match_legacy` is exact-head qualified at `714ce02c94dce076716984376a4843e4af33391c` / CI #43568771942:
+
+- `sandbox:{scope}` isolates the included write and yields `part\nmain`;
+- default SHARE keeps the included write caller-visible and yields `part`;
+- both variants preserve exact final `IrDocument` and ordered diagnostics parity between normal frontend and legacy evaluator.
+
+This proof is a visibility/ownership migration check, not a claim that include sandbox modes are a host-security boundary.
+
+### Capability non-escalation disposition
+
+The remaining capability half is **not a missing source fixture**. It is a runtime/wire fail-closed invariant whose negative state cannot be authored through current public Quarkdown source syntax.
+
+The evidence is consistent across the public construction and runtime boundaries:
+
+1. frontend `Value::Lambda` and callable-target conversion produce an `IrCallable` with `capture: None` before evaluator materialization; this is only an unevaluated structural representation, not a request to strip resource authority;
+2. the resource audit records that a source-defined callable materialized under resource access retains the lexical resource-base `SourceId`, optional subdocument root and loadable-library availability as **evaluator-runtime metadata**;
+3. that runtime metadata deliberately omits provider objects and is never serialized;
+4. `PROGRAMMABLE_DOCUMENT_SEMANTICS.md` fixes the caller overlay as lookup-only and explicitly states that it does not copy host/provider runtime objects into the callable;
+5. IR serialization intentionally drops `IrCallableCapture.resource_context`; `callable_resource_context_is_runtime_only_and_fails_closed_after_wire_roundtrip` proves decoded callables cannot reconstruct resource authority from wire data;
+6. `legacy_callable_capture_cannot_gain_caller_resource_capability` manually constructs exactly that decoded/legacy shape—an `IrCallableCapture` with `resource_context: None`—and proves that invoking it under a resource-capable caller performs no resource read.
+
+There is no source-language operation that serializes/decodes a callable in place, clears its runtime resource marker, or directly constructs an `IrCallableCapture`. Consequently, a public source-level G0 test for this exact negative capability shape would require invented syntax or an artificial frontend hook and would no longer be evidence of the public language path.
+
+**Disposition:** the capability non-escalation half is therefore frozen as an **engine/legacy-IR-only security boundary**, not a pending public-source migration scenario. The existing engine regression is the correct executable owner. G0 must not fabricate source syntax solely to duplicate it.
+
+### Remaining S20 boundary
+
+#155 owns the filesystem/project/data/resource audit. Completed #188 owns the common logical resolver prerequisite. The remaining S20 work after this disposition is now limited to reference closure:
+
+- no independently archived official Quarkdown black-box fixture covering the complete bounded S20 nested resource/include behavior is frozen yet;
+- upstream absolute/global resource permission behavior remains an intentional fail-closed policy divergence and is not widened here;
+- public WASM resource-binding parity and graph/output ownership remain separately tracked outside this bounded G0 migration slice.
+
+**Classification:** `ARKST_S20_SOURCE_RELATIVE_AND_SANDBOX_VISIBILITY_MIGRATION_QUALIFIED_CAPABILITY_LEGACY_IR_ONLY_BOUNDARY_FROZEN_REFERENCE_PENDING_CI_PENDING`. The two public migration proofs are qualified; the capability boundary is disposition-frozen at engine/legacy-IR level; only the updated documentation/classification HEAD and exact official reference remain to close this S20 evidence slice.
+
+## S21 delayed callable resource-base routes — official two-route reference frozen, NEW_EXECUTION qualified
+
+The original S21 oracle wording conflated two different resource-base routes. The frozen contract is now explicit:
+
+1. **Path-backed file include:** an ordinary included source owns a real source-relative base. A callable defined in that included file and invoked later resolves nested resources from the **defining included source**.
+2. **External loadable library:** a library supplied through the external-library registry is evaluated with detached library provenance but keeps the **caller/includer resource base** for nested resource access. It does not acquire the library directory as a language-level resource base.
+
+### Independent official reference
+
+Disposable clean-room draft PR #771 was closed **UNMERGED** at exact HEAD `71f9179fe48caaa53bda1eac105396a9138ff1ee`. Probe run #43657450168 completed **SUCCESS** for both pinned releases:
+
+- Quarkdown v2.5.1 artifact `14139041481`, digest / downloaded ZIP SHA-256 `8da915f7820b0cc389358c44ad59e7dfaa5c114cbbb493a8e6bad899383af884`;
+- Quarkdown v2.6.0 artifact `14137969953`, digest / downloaded ZIP SHA-256 `ae56184c3810cfb2d168c3f3d0d4225abfcae36d4151d85f6bf64ab7d6b90285`.
+
+All **8/8** version/mode/fixture observations were independently reconciled against the archived source/input hashes, stdout/stderr, generated HTML count and HTML hashes. Both releases in default and strict mode produced `rc=0`, empty stderr and exactly one HTML output per fixture.
+
+- **Path-backed include delayed callable:** visible sentinel `DEFINITION_FILE_BASE`; HTML SHA-256 `1d8f202153bfdba36388a12ae394448e2c4c5012c84b7ea1ccdca326339d64e7`.
+- **External `--libs` delayed callable:** visible sentinel `CALLER_LIBRARY_BASE`; HTML SHA-256 `cc33004a5ce0764e443dd4aecf74cef80c70f803f187205de5a764050804900a`.
+
+This freezes the public upstream distinction. It is not evidence that every callable uses a definition base, and it does not widen any provider/capability authority.
+
+### Arkst NEW_EXECUTION proof
+
+`g0_s21_delayed_resource_base_routes_match_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` contains two independent `VirtualProject` subfixtures and reuses the existing `compile_project_and_assert_legacy_parity` helper:
+
+- the file-include subfixture uses conflicting `docs/data.txt=CALLER_FILE_BASE` and `docs/parts/data.txt=DEFINITION_FILE_BASE` resources and requires visible `DEFINITION_FILE_BASE`;
+- the loadable-library subfixture registers `reader` with `add_loadable_library`, uses caller resource `docs/data.txt=CALLER_LIBRARY_BASE`, and requires visible `CALLER_LIBRARY_BASE`;
+- both require exact final `IrDocument` equality and ordered diagnostic-signature equality between normal frontend compilation and the legacy pre-lowered evaluator, with empty diagnostics.
+
+After the rustfmt-only follow-up, exact execution HEAD `d9a128c03097739d258a5ad2036b46d6316efd69` passed CI #43658830869: `fmt`, Ubuntu ARM64/macOS/Windows tests, Reference JVM, compatibility, clippy, wasm, msrv, docs and required `Merge Gate` all completed **SUCCESS**.
+
+The existing engine regressions remain the detailed request/provenance anchors:
+
+- `included_file_functions_keep_their_definition_resource_base`;
+- `library_functions_keep_includer_resource_base_and_detached_provenance`.
+
+**Classification:** `UPSTREAM_V251_V260_S21_TWO_ROUTE_RESOURCE_BASE_REFERENCE_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION evidence, and this documentation/oracle reconciliation are exact-head qualified on #746 by CI #43659502201.
+
+## S22 environment input boundary — upstream reference reused, explicit-snapshot migration qualified
+
+S22 does not require a new clean-room probe. Issue #190 already closed the process/environment boundary using independently authored official Quarkdown evidence from disposable PR #374 plus a deterministic Arkst host contract.
+
+### Existing official reference
+
+`docs/compatibility/quarkdown/ENVIRONMENT_INPUTS.md` records the clean-room observations from disposable PR #374, which is **CLOSED/DRAFT/UNMERGED** at exact HEAD `499114ff56e500e27710021a5cacefdb6ca2412a`. The official Linux x64 archives were pinned before execution:
+
+- Quarkdown v2.5.1 SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`;
+- Quarkdown v2.6.0 SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`.
+
+Both releases established the same bounded public behavior:
+
+1. without explicit `process` permission, `.env` is denied before variable presence matters;
+2. with `--allow process`, a present variable returns the exact host-provided String;
+3. with `--allow process`, an absent variable returns `none`;
+4. allowed present/absent cases succeed in both normal and strict modes.
+
+This is public-language evidence for permission gating and present/absent values. It is **not** a requirement that Arkst expose ambient process state.
+
+### Arkst host-boundary decision
+
+Closed issue #190 intentionally replaces upstream ambient process lookup with an explicit deterministic capability boundary. The reviewed implementation PR #375 was green at exact HEAD `f4f8e86b69e53c8da86cb02ea59af2ab520f908e` and merged as main commit `8e1c692e39ebcbf09a49229385ef4169bb55b56c`.
+
+The accepted Arkst contract is:
+
+- `EnvironmentInputs` is an immutable caller-supplied snapshot for one evaluation;
+- supplying a snapshot authorizes `.env` and defines the **complete** visible environment;
+- a present key returns the exact injected String;
+- an absent key returns `None`;
+- omitting the snapshot fails closed with source-backed `E3004`;
+- an explicit empty snapshot authorizes lookup while making every key absent;
+- production engine/core paths do not call `std::env` and do not fall back to cwd/process state;
+- public WASM/embedder exposure remains separately owned by #191.
+
+This is an intentional host-authority distinction while preserving the bounded language-level present/absent semantics.
+
+### Fresh G0 NEW_EXECUTION proof
+
+`g0_s22_environment_boundary_matches_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` adds two bounded normal-frontend vs legacy-evaluator cases.
+
+**Case A — no snapshot**
+
+- source: `.env {PATH}`;
+- normal frontend uses the ordinary `compile` path;
+- legacy path uses the existing project-backed evaluator without environment authority;
+- exact final `IrDocument` and ordered diagnostic signatures must match;
+- exactly one source-backed `E3004` is required;
+- no output nodes are allowed.
+
+**Case B — explicit empty snapshot**
+
+- source: `.string {.isnone {.env {PATH}}}`;
+- normal frontend uses `compile_with_environment(..., EnvironmentInputs::default())`;
+- legacy path uses `Evaluator::evaluate_project_with_environment` with the same empty snapshot;
+- exact final `IrDocument` and ordered diagnostic signatures must match;
+- diagnostics must be empty;
+- visible output must be `true`.
+
+Using `PATH` is deliberate: CI runners have ambient process state, so the explicit-empty case proves that the snapshot is complete authority rather than an overlay onto the host process environment.
+
+After the rustfmt-only follow-up, exact execution HEAD `5afd35c332becb6dd350cfc71aca1b4e34b4154d` passed CI #43661962464. `fmt`, Ubuntu ARM64/macOS/Windows tests, Reference JVM, compatibility, clippy, wasm, msrv, docs, CodeQL runtime and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
+
+**Classification:** `UPSTREAM_V251_V260_ENV_PERMISSION_PRESENT_ABSENT_REFERENCE_FROZEN_ARKST_EXPLICIT_SNAPSHOT_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION, and this oracle/audit reconciliation are exact-head qualified on #746 by CI #43662649388.
+
+## S23 logger side effects and explicit-error boundary — existing clean-room reference reused, sink-aware migration qualified
+
+S23 does not require a new clean-room probe. Closed issue #197 already assembled independent official Quarkdown v2.5.1/v2.6.0 logger/error evidence, and merged #398 separately owns the source-echo provenance needed for exact explicit-error IR comparison.
+
+### Existing official reference
+
+The canonical evidence remains `docs/compatibility/quarkdown/LOGGER_DIAGNOSTICS.md`.
+
+- Disposable PR #378 is **CLOSED/DRAFT/UNMERGED** at exact HEAD `82885148091846b7f7bb4e33611d6738a5953727`; probe run #35426565850 completed **SUCCESS** and freezes the bounded DynamicValue Pair projection used by direct `.log` / `.debug`.
+- Disposable #382 exact HEAD `aa1e3d48a67b3655bd0660ff328b7d03301f27a1` / run #35432948304 **SUCCESS** and #385 exact HEAD `d60bed38621ae4bb0fad5812ba4c8d526eecede1` / run #35436686190 **SUCCESS** freeze non-strict explicit-error continuation: the selected local body stops/replaces at `.error`, while caller/top-level continuation proceeds.
+- Disposable #386 exact HEAD `360150d0d4532cb6178e493297f5cb18c84bafe6` / run #35445609185 **SUCCESS** freezes logger/error evaluation ordering and the fact that already-emitted logger side effects are not retroactively rolled back merely because a later selected explicit error finalizes strict publication.
+- Merged PR #398, `compat(logger): preserve evidenced explicit-error source echo`, exact reviewed HEAD `2b1770a7452194e486bfe4fbb3d083ee89a4fdd1`, owns the bounded source-spelling provenance contract. It captures the original `.error {...}` call spelling through `ResourceProvider::source_text` before callable-result span rebasing and fails closed to `None` if the host does not expose source text.
+
+The last point is a provenance capability, not ambient resource discovery. Exact final-IR comparison must therefore compare execution paths with equivalent source-text availability; normal frontend evidence must not be normalized to erase `source_echo`.
+
+### Fresh G0 NEW_EXECUTION proof
+
+`g0_s23_logger_side_effects_survive_later_explicit_error_matches_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` uses a source-defined callable whose body executes, in order:
+
+1. `.log {.pair {left} {right}}`;
+2. `.debug {second}`;
+3. `.error {boom}`.
+
+The callable is invoked between caller-visible `before` and `after` content.
+
+The sink-specific parity helper compares:
+
+- normal `compile_with_log_sink`;
+- the same parser-clean source lowered through the legacy AST-to-IR bridge and evaluated with `Evaluator::evaluate_with_resources_and_libraries_and_log_sink_for_mode`.
+
+The legacy side receives a test-local fail-closed host adapter that exposes only the already-known fixture entry's stable logical `source_path` and exact `source_text`. It returns no loadable libraries and rejects resource reads/includes. This is required only to match the normal frontend's #398 provenance capability; it does not add resource or library authority.
+
+The oracle remains strict:
+
+- exact final `IrDocument` equality, including `ExplicitError.source_echo`;
+- exact ordered diagnostic-signature equality;
+- exact ordered `LogEvent` equality;
+- first event is `Log` with the reviewed Pair projection;
+- second event is `Debug("second")`;
+- one `E3011` explicit-error boundary is present;
+- final document shape is caller `before` → explicit-error component → caller `after`;
+- both already-emitted events survive the later callable failure.
+
+The initial execution HEAD `371f84a7a9136dabd1f14d09fc3497be722ddaf0` deliberately failed the exact IR oracle because the legacy comparator incorrectly used provider-less `evaluate_with_log_sink`: normal frontend produced `source_echo: Some(".error {boom}")`, while the lower-capability legacy host correctly failed closed to `None`. That failure exposed a harness asymmetry, not a product semantic divergence, so the exact IR assertion was retained.
+
+After correcting only that host equivalence, exact execution HEAD `e77aaffee570c56827db073d908b77fd3eb95efd` passed CI #43664217853. `fmt`, compatibility, Reference JVM, Ubuntu ARM64/macOS/Windows tests, clippy, wasm, msrv, docs, CodeQL runtime, dependency review, license, spelling and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
+
+**Classification:** `UPSTREAM_V251_V260_S23_LOGGER_ERROR_REFERENCE_FROZEN_ARKST_ORDER_NONROLLBACK_SOURCE_ECHO_CROSS_PLATFORM_PROVEN`. The official reference, Arkst NEW_EXECUTION, and this oracle/audit reconciliation are exact-head qualified on #746 by CI #43664735698.
+
+## S24 raw HTML policy and native-content capability boundary — official reference frozen, Arkst migration qualified with explicit policy divergence
+
+S24 has two distinct semantic questions that must not be collapsed:
+
+1. what ordinary parser-exposed raw HTML means in Quarkdown source; and
+2. what the explicit Quarkdown `.html` builtin may publish when the `native-content` capability is available or denied.
+
+The official clean-room result and Arkst's accepted #58 policy agree on the ownership boundary—ordinary mixed raw markup must not silently become native HTML—but they intentionally differ on how unowned markup is surfaced.
+
+### Independent official v2.5.1/v2.6.0 reference
+
+Disposable PR #772 remains **OPEN/DRAFT/UNMERGED** at exact HEAD `f3881c6d5e3676781b167c0701d698f95a2f01aa`. Probe workflow run #43669812707 completed **SUCCESS** and retained artifact `g0-s24-quarkdown-v251-v260` (artifact ID `14143647092`).
+
+The workflow SHA-verified the official Linux x64 archives before execution:
+
+- v2.5.1: `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`;
+- v2.6.0: `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`.
+
+The three independently authored source fixtures were also retained and hashed:
+
+- mixed raw `before <em>S24_RAW</em> after`: `892a67a3a565d24adc1d7a05e18750d1868bb7058485eeef17dc4da2d06ffb98`;
+- explicit `.html {<em>S24_OWNED</em>}`: `16916685ce0d8d41c1881aea295e34f00d3fc144602172e4fe6f7c934b6cd5e8`;
+- explicit denied `.html {<em>S24_DENIED</em>}`: `6fd56ad01a043086128c08a0954f0321cc1242215075b9c6fc8a167d81e3bd3b`.
+
+All **12/12** version × fixture × mode observations were present, and v2.5.1/v2.6.0 behaved identically for this bounded surface.
+
+**Ordinary mixed raw markup**
+
+- default and strict both return `rc=0` with empty stderr;
+- one HTML document is produced as part of the normal output bundle;
+- the authored `<em>S24_RAW</em>` is **not** emitted as a native `<em>` element;
+- visible output is `before < em > S24_RAW < /em > after`;
+- `index.html` SHA-256 is `8dbaf022fcce2ac3b9a37bd2ffea7ea8653662716823637384bb80dc757fb245`.
+
+This freezes the official language observation: ordinary mixed raw markup is not native-content authority, but the bounded source is literalized rather than rejected.
+
+**Explicit `.html` with default permission**
+
+- default and strict both return `rc=0` with empty stderr;
+- raw output contains exact native `<em>S24_OWNED</em>`;
+- visible output is `S24_OWNED`;
+- `index.html` SHA-256 is `d015d6f9e272257d70f9665c7e809fad2bf13ee7a140bb1ecc34a8d256240f11`.
+
+This is the positive ownership control: native HTML appears only through the explicit Quarkdown builtin when the capability is available.
+
+**Explicit `.html` with `--deny native-content`**
+
+- default mode returns `rc=0`, writes the stable missing-permission message to stderr, emits a rendered error artifact, and emits no denied sentinel/native HTML; `index.html` SHA-256 is `fe8f0041f0fc03b0c735c548bb5d94455677e0eab403755a7c51a1a13ca9b900`;
+- strict mode returns `rc=72`, emits no output artifact, and stderr begins with `An error occurred while in strict mode (error code 72)` followed by the `MissingPermissionException`.
+
+The semantic boundary is therefore permission denial **before native HTML publication**. Default-vs-strict artifact recovery and process exit behavior are host/CLI finalization policy and are not requirements for Arkst's platform-neutral core evaluator.
+
+### Arkst policy disposition for ordinary mixed raw HTML
+
+Closed #58 and `docs/compatibility/RAW_HTML_POLICY.md` intentionally reject ordinary mixed raw HTML in `.qd` / `.arkst` instead of adopting a backend-specific or HTML-parser interpretation.
+
+That accepted Arkst policy is now explicitly classified as a bounded divergence from the frozen official literalization behavior:
+
+- parser-owned Quarkdown raw tags fail closed with source-backed `E8001`;
+- ordinary non-HTML text around and between rejected raw tags remains ordinary paragraph text;
+- rejected raw tags never become `TargetSpecificContent`;
+- `.html` remains a separate, explicitly owned language feature.
+
+The divergence must remain visible in the oracle. It is not permissible to describe current Arkst `E8001` behavior as byte-for-byte or semantic parity with the official mixed-raw fixture merely because both sides avoid native HTML publication.
+
+### Arkst NEW_EXECUTION proof
+
+`g0_s24_raw_html_and_native_content_denial_match_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` adds a capability-aware normal-frontend vs legacy-evaluator proof.
+
+The helper compares:
+
+- normal `compile_with_capabilities`;
+- the same parser-clean source lowered through the legacy AST→IR bridge;
+- `arkst_core::evaluator::Evaluator::with_capabilities(...).evaluate_project(...)` with the same capability set.
+
+Legacy lowering diagnostics are appended after evaluator diagnostics so the ordered diagnostic contract matches the normal frontend's published order.
+
+**Arkst mixed-raw policy case**
+
+Source: `before <em>S24_RAW</em> after`.
+
+The oracle requires:
+
+- exact final `IrDocument` equality between normal frontend and legacy evaluator;
+- exact ordered diagnostic-signature equality;
+- exactly two source-backed `E8001` diagnostics, one for `<em>` and one for `</em>`;
+- visible paragraph text `before S24_RAW after`;
+- no `TargetSpecificContent`.
+
+This is migration parity for Arkst's accepted #58 policy, not a claim of official mixed-raw semantic compatibility.
+
+**Arkst native-content denial case**
+
+Source: `.html {<em>denied</em>}` with `Capabilities::none()`.
+
+The oracle requires:
+
+- exact final `IrDocument` equality;
+- exact ordered diagnostic-signature equality;
+- exactly one source-backed `E3004` whose message names `NativeContent`;
+- the primary span covers the explicit `.html` call;
+- zero final output nodes;
+- no `TargetSpecificContent`.
+
+Existing authorized `.html` regressions remain the positive control and are not duplicated in the G0 differential.
+
+The first execution HEAD `d617174802424c147f58beb2db6cf32d0835229c` failed CI #43670487879 before semantic parity could be classified: the denied fixture used underscore-bearing sentinel `S24_DENIED`, which produced parser diagnostic `E3010` inside the Quarkdown content argument, and one rustfmt wrapping difference remained. The semantic assertions were not weakened.
+
+After replacing only that sentinel with the already-established parser-clean `denied` spelling and applying rustfmt, corrected exact HEAD `64ea463bae32626c7a0d2dad2329d1982848553c` passed CI #43671340151. `fmt`, compatibility, Reference JVM, Ubuntu ARM64/macOS/Windows tests, clippy, wasm, msrv, docs, CodeQL runtime, dependency review, license, spelling and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
+
+**Classification:** `UPSTREAM_V251_V260_S24_NATIVE_CONTENT_REFERENCE_FROZEN_ARKST_POLICY_DIVERGENCE_AND_CAPABILITY_BOUNDARY_CROSS_PLATFORM_PROVEN`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+
+## S25 inline explicit-error rendered-owner boundary — existing official reference reused, Arkst migration qualified
+
+S25 does **not** require another upstream probe. The exact public owner behavior needed by this migration slice was already frozen by the #197 clean-room evidence series against the pinned Quarkdown v2.5.1/v2.6.0 binaries.
+
+The bounded question is narrower than the whole native `.error` host contract: when an explicit error appears inside an already-supported ordinary rendered owner, does evaluation preserve the owner and its surrounding siblings, or does migration accidentally hoist/drop/fabricate output?
+
+### Reused official v2.5.1/v2.6.0 reference
+
+All referenced probes used the same SHA-verified official Linux x64 archives:
+
+- v2.5.1: `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`;
+- v2.6.0: `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`.
+
+**Blockquote owner — #392**
+
+Disposable #392 is **CLOSED/DRAFT/UNMERGED** at exact HEAD `b933c59a925e6a4c0e9ec2fe38c5cda4356c441d`. Probe run #35470944959 completed **SUCCESS**:
+
+- v2.5.1 job `105971681630`;
+- v2.6.0 job `105971681518`.
+
+For the blockquote fixture, both releases agree:
+
+- default/non-strict returns `rc=0` and publishes output;
+- independent outer content before/after the blockquote remains;
+- local `quote-before` / `quote-after` siblings remain around the rendered error;
+- the error stays structurally nested under the blockquote rather than being hoisted to top level;
+- the rendered component contains the literal source call `.error {<marker>}`;
+- strict returns `rc=66` and publishes no artifact.
+
+**Direct emphasis and link owners — #431**
+
+Disposable #431 is **CLOSED/UNMERGED** at exact HEAD `ba6967abf7b8db33676e1792a05faa7794d11467`. Probe run #35960370518 completed **SUCCESS**:
+
+- v2.5.1 job `107507446189`;
+- v2.6.0 job `107507445946`.
+
+For both direct emphasis and direct link fixtures, both versions show the same bounded behavior:
+
+- default mode returns `rc=0`;
+- visible order is outer-before → local-before → rendered error → local-after → outer-after;
+- the rendered error DOM remains under the corresponding `em` or `a` owner;
+- the literal `.error {...}` source spelling is present in the rendered error;
+- strict returns `rc=66` with no HTML artifact.
+
+This is the direct owner evidence S25 needs. #382/#385/#386 remain baseline authority for explicit-error presentation, body replacement/caller continuation and strict first-error finalization, but they are not substitutes for these owner-local observations.
+
+**Representative rendered-owner composition — #433**
+
+Disposable #433 is **CLOSED/UNMERGED** at exact HEAD `4105ef2d9c349c96d84e9ca65997f58684fdaead`. Probe run #35961838890 completed **SUCCESS**:
+
+- v2.5.1 job `107511884469`;
+- v2.6.0 job `107511884449`.
+
+The independently authored matrix covers:
+
+- unordered-list → emphasis;
+- ordered-list → link;
+- blockquote → strong;
+- emphasis → link;
+- link → strong;
+- table-cell → strong.
+
+Every fixture is default `rc=0` with output present and one exact source-echo occurrence, while strict is `rc=66` with no HTML artifact in both releases.
+
+Canonical #197 source review explains why this representative matrix is sufficient for the already-supported ordinary rendered-owner tree: in both pinned upstream tags `FunctionCallNode` is an `ErrorCapableNode`, failed expansion is rendered by replacing the call node with `Box.error`, and `NestableNode` renderers recurse through children without an artificial owner-depth counter.
+
+That recursion rule is deliberately **not** generalized to distinct semantic owners. Image-alt, directive bodies, value/callable boundaries, and other independently different/cross-owned contexts remain fail-closed or owned elsewhere.
+
+### Arkst NEW_EXECUTION proof
+
+`g0_s25_inline_error_owner_siblings_match_legacy` in `crates/arkst-core/tests/g0_runtime_differential.rs` adds one bounded core migration test with exactly three parser-clean fixtures:
+
+1. direct emphasis:
+   `outer-before *em-before .error {emphasis-error} em-after* outer-after`;
+2. direct link:
+   `outer-before [link-before .error {link-error} link-after](https://example.com) outer-after`;
+3. blockquote with independent outer paragraphs and local
+   `quote-before .error {quote-error} quote-after` siblings.
+
+The test compares the ordinary normal frontend `compile` path with the same source lowered through the legacy AST→IR bridge and evaluated through `evaluate_with_resources_and_libraries_for_mode`.
+
+The legacy side receives the existing test-local `FixtureSourceProvider` so both paths have equivalent #398 source-text provenance. That provider exposes only the known fixture's logical source path/text; resource reads fail closed and loadable-library lookup returns none. It does not grant new resource/library authority.
+
+For each fixture the oracle requires:
+
+- exact final `IrDocument` equality;
+- exact ordered diagnostic-signature equality;
+- exactly one source-backed `E3011`;
+- exact `.error {...}` `ExplicitError.source_echo`;
+- explicit-error component provenance tied to the fixture source;
+- preservation and ordering of all evidenced siblings.
+
+The owner-local shape is also explicit:
+
+- emphasis keeps the inline error inside `IrInline::Emphasis`;
+- link keeps it inside `IrInline::Link`;
+- blockquote keeps paragraph → explicit-error component → paragraph inside `IrNode::Blockquote`, between independent outer paragraphs.
+
+The first execution HEAD `4b007b1b310ace361a7b97d12558636ca61df8ae` completed all three semantic platform jobs successfully in CI #43680414824 but failed required `fmt`; Merge Gate therefore failed. No semantic assertion failed.
+
+Formatting-only HEAD `e541deb71b892ea44fbbff8a2f1732021ab6e4fb` then passed CI #43681039624. `fmt`, compatibility, Reference JVM, Ubuntu ARM64/macOS/Windows tests, clippy, wasm, msrv, docs, CodeQL runtime, dependency review, license, spelling and required `Merge Gate` all completed **SUCCESS**; Security Audit was scope-skipped.
+
+### Boundary of the S25 claim
+
+This G0 test is a **core migration equivalence** proof. It intentionally does not duplicate already-frozen native host behavior:
+
+- default/non-strict recoverable rendering and process return code;
+- strict exit 66 / no-artifact finalization;
+- exact Quarkdown HTML DOM/CSS presentation.
+
+Those remain compatibility/host-finalization evidence owned by the existing logger/error probes and native CLI tests.
+
+Likewise, S25 does not broaden ordinary rendered-owner recursion into image-alt, directive-body, value/callable or other distinct semantic boundaries.
+
+**Classification:** `UPSTREAM_V251_V260_S25_INLINE_ERROR_OWNER_REFERENCE_FROZEN_ARKST_OWNER_LOCAL_SIBLING_PRESERVATION_CROSS_PLATFORM_PROVEN`. The official reference and Arkst NEW_EXECUTION are frozen/qualified; only this oracle/audit reconciliation HEAD still requires exact-head CI before the documentation classification itself is qualified.
+
+## S26 final-only type boundary — current negative baseline candidate
+
+S26 is an Arkst-internal architecture proof. No upstream Quarkdown renderer or
+language oracle can establish whether Arkst's Rust final-document type prevents
+executable evaluator state from reaching a backend. ADR-0022 is the authority:
+final document types must eventually exclude block/inline invocation carriers,
+callable captures and contextual bodies, and Typst lowering must accept only the
+evaluation-complete final type.
+
+### Current public boundary
+
+Exact pre-S26 read-back at #746 HEAD
+`2ae3dbfe5a269ee1e6e0c0cecfe5d8e20118b265` establishes the negative baseline:
+
+- `arkst_ir::IrDocument` publicly owns `Vec<IrNode>`;
+- `IrNode::{FunctionCall, ChainedFunctionCall, FunctionDeclaration}` remain
+  publicly constructible executable/pre-evaluation carriers;
+- `IrInline::{DirectiveCall, ChainedDirectiveCall}` remain publicly
+  constructible nested executable carriers;
+- `IrValue::{Callable, InlineBody}`, `IrCallable`, and
+  `IrCallableCapture` remain public runtime/execution carriers;
+- `arkst_core::ir` publicly re-exports the `arkst_ir` surface;
+- the legacy public core evaluator still accepts `&IrDocument`; and
+- `arkst_typst::lowering::lower_to_typst` still has the public boundary
+  `fn(&IrDocument) -> (String, Vec<SourceMapEntry>)`.
+
+Therefore the current Rust API cannot provide ADR-0022's final-only
+compile-time rejection. This is a migration gap to freeze as evidence, not a
+compatibility surface to retain.
+
+The historical
+`final_document_guard_detects_nested_block_and_inline_executable_state`
+entry in `719-g0-runtime-test-evidence.tsv` is explicitly only runtime-guard
+evidence. The ledger records it as source-verified in an earlier inspection
+with initial-HEAD CI authority; it does not establish a final-only Rust type
+and is not promoted to S26 type evidence.
+
+### G0 NEW_EXECUTION candidate
+
+`crates/arkst-typst/tests/g0_s26_final_only_type_boundary.rs` is the smallest
+reference-free executable proof for the current gap. It uses only public APIs
+to construct one `IrDocument` containing:
+
+1. a top-level `IrNode::FunctionCall`;
+2. `IrValue::Callable` with an explicit empty `IrCallableCapture`;
+3. `IrValue::InlineBody`; and
+4. a nested paragraph containing `IrInline::DirectiveCall`.
+
+The test also type-checks the public lowering item as
+`fn(&IrDocument) -> (String, Vec<SourceMapEntry>)`. It deliberately **does
+not call the renderer** and does not assert Typst's defensive fallback text.
+The evidence is solely that the current public type system admits executable
+state at the nominal backend boundary.
+
+G6 must invert this proof. Once final-only IR exists, S26 requires an external
+API-boundary/compile-fail proof that these executable carriers cannot inhabit
+the final document and that the backend does not accept the mixed-lifecycle
+type. No compile-fail harness or dependency is introduced during G0.
+
+### Exact-head execution qualification
+
+The first NEW_EXECUTION candidate at `9b6954b98f3194b6efed211be8ec97680972b27f`
+completed CI #43683571081 with all semantic/platform jobs green but failed
+`fmt` on the newly added function-pointer declaration. That observation was
+classified as a test-source formatting defect, not a semantic, evidence,
+workflow-policy, or environment failure.
+
+Formatting-only remediation HEAD
+`f8b4a07b63960b50b12f44bc652a44c3f17b965d` then completed CI
+#43684839827 with `fmt`, compatibility, Reference JVM, MSRV, WASM, Clippy,
+docs, CodeQL runtime, dependency review, license, spelling, Ubuntu ARM64,
+macOS, Windows, and the required `Merge Gate` all **SUCCESS**. Security
+Audit was scope-skipped.
+
+**Classification:** `CURRENT_PUBLIC_EXECUTABLE_IR_TYPE_GAP_FROZEN_G6_TYPE_REJECTION_PENDING`. S26 now freezes the current public mixed-lifecycle type admission as G0 negative-baseline evidence. This is not approval of that API shape: G6 must remove the executable carriers from final document/backend types and replace this compile-pass baseline with compile-time rejection evidence. S26 does not complete G0, authorize G1, or permit #746 to merge.
+
+## S27 versioned wire — frozen current negative baseline
+
+S27 is an Arkst-internal public-wire migration proof. ADR-0022 already fixes
+the target policy: the replacement is a separately versioned, strictly
+validated, final-document-only wire v1. Historical unversioned/mixed Arkst JSON
+is rejected outright; there is no legacy importer, dual-format output, or
+deprecation window to preserve.
+
+### Current public wire boundary
+
+Exact pre-S27 read-back at #746 HEAD
+`2d6c3307dd2225f9b18c92edf534135cf670aa62` establishes the current gap:
+
+- `IrDocument` itself implements public `Serialize` and `Deserialize`;
+- private `IrDocumentWire { nodes, metadata, sources? }` has no required
+  schema-version field and does not deny unknown top-level fields;
+- executable `WireNode::{FunctionCall, ChainedFunctionCall,
+  FunctionDeclaration}`, `WireInline::{DirectiveCall,
+  ChainedDirectiveCall}`, and `WireValue::{Callable, InlineBody}` are
+  serialized and recursively reconstructed;
+- the public IR node/inline/value/callable types retain serde and
+  `arkst-core::ir` re-exports those physical types;
+- CLI `inspect --emit ir` pretty-serializes `result.ir` directly.
+
+Current source-table handling is partially fail-closed but is not the G7
+contract. Raw-body decoding already rejects a `source_ref` without a document
+source table, an out-of-range reference, both `source` and `source_ref`,
+neither field, and a raw-body span outside its selected buffer. Callable
+`resource_context` is deliberately omitted from JSON and remains absent after
+decode. Those are useful positive safety anchors.
+
+The current decoder nevertheless has no document version gate, no recursive
+executable-variant rejection, no rejection of duplicate/noncanonical source
+tables, no final-document validation tying ordinary `SourceSpan` identities
+and ranges to an authoritative source table, and no explicit Arkst wire
+depth/size/cardinality resource-limit contract. Generic derived-serde shape
+errors are not a substitute for deterministic G7 domain validation.
+
+### G0 NEW_EXECUTION frozen evidence
+
+`crates/arkst-ir/tests/g0_s27_versioned_wire_gap.rs` uses only the public
+`arkst_ir`, `arkst_source`, and serde JSON surfaces. Its bounded matrix:
+
+1. constructs a representative mixed executable document with a block
+   `FunctionCall`, nested inline `DirectiveCall`, `Callable`,
+   `InlineBody`, and source-backed raw body;
+2. proves the emitted top-level document is unversioned and the current
+   `IrDocument` decoder accepts the executable document without invoking an
+   evaluator or backend;
+3. injects an unknown `version` field and proves the current decoder ignores
+   it;
+4. rewrites the source table into duplicate/noncanonical form and proves it is
+   accepted, then observes ordinary reserialization canonicalizing the table;
+5. corrupts the executable callable body's structural JSON shape and proves
+   derived serde rejects it before IR construction, without freezing incidental
+   complete serde error text.
+
+Existing internal tests remain the positive anchors for missing/out-of-range
+raw-body references and runtime resource-context non-escalation; the external
+test does not duplicate those cases.
+
+### Exact-head execution qualification
+
+Initial NEW_EXECUTION candidate
+`1650d8cca5265cca25b3a262ddd2e0ad38b080bf` completed CI #43687066755
+with all semantic/platform jobs green but failed `fmt` on one newly added
+constructor expression. That observation was classified as a test-source
+formatting defect.
+
+Formatting-only remediation HEAD
+`e939524a8fb5e3b02940865eedd3aaa9b79c57ec` then completed exact-head CI
+#43687865039 with `fmt`, compatibility, Reference JVM, MSRV, WASM, Clippy,
+docs, CodeQL runtime, dependency review, license, spelling, Ubuntu ARM64,
+macOS, Windows, and the required `Merge Gate` all **SUCCESS**. Security
+Audit was scope-skipped.
+
+**Classification:**
+`CURRENT_UNVERSIONED_MIXED_EXECUTABLE_WIRE_GAP_FROZEN_G7_V1_STRICT_REJECTION_PENDING`.
+This freezes only the current wire defect and limited existing fail-closed
+behavior. G7 must replace it with required v1 discrimination, final-only DTOs,
+strict/canonical source and span validation, recursive executable rejection,
+deterministic domain errors, resource limits, and the clean-break CLI/public
+facade migration required by ADR-0022. S27 does not implement G7, complete G0,
+authorize G1, or permit #746 to merge.
+
+## S28 CLI inspect IR — frozen current publication negative baseline
+
+S28 freezes only the current CLI publication route. It does not create a
+separate wire-compatibility promise beyond S27.
+
+At exact pre-S28 #746 HEAD
+`4524e154aee1a5251836e8d8e6df8e1dcfcb982b`,
+`inspect_with_libraries` performs native single-file/project ingestion,
+calls the sinkless `arkst_core::compile` route with default options, emits
+analysis errors, refuses output when `ensure_no_errors` finds an error, and
+for `--emit ir` pretty-serializes `result.ir` directly. `CompileResult.ir`
+is the public `arkst_core::ir::IrDocument`; that facade physically re-exports
+`arkst_ir`. The CLI therefore owns no independent IR schema, version
+envelope, source-provenance envelope, or decode/validation layer.
+
+No native CLI route was found that accepts a manually supplied or historical
+`IrDocument` JSON payload. The former S28 oracle language about "legacy
+documents" is therefore not a CLI-import requirement. S27 already freezes the
+underlying manually constructible/mixed executable wire. S28 instead owns the
+observable fact that a normally compiled CLI input publishes that same current
+public serializer.
+
+Existing analysis-policy tests already provide the fail-closed side of the CLI
+boundary. In particular,
+`inspect_exposes_log_capability_failure_before_refusing_output` executes the
+real binary with `--emit ir` and proves E3010 is surfaced while stdout remains
+empty. Unit coverage separately proves inspect's warning-silent/error-only
+analysis filter and `ensure_no_errors` behavior. S28 does not duplicate those
+fixtures.
+
+### G0 NEW_EXECUTION frozen evidence
+
+`crates/arkst-cli/tests/g0_s28_cli_inspect_ir.rs` adds one bounded real-binary
+publication proof. For a valid parser-clean single-file source it:
+
+1. runs `CARGO_BIN_EXE_arkst inspect <file> --emit ir` and requires success
+   with empty stderr;
+2. parses stdout as JSON and proves no top-level `version` is published;
+3. independently builds the equivalent single-entry `VirtualProject` and
+   calls public `arkst_core::compile`;
+4. requires no public-core diagnostics and proves the CLI JSON value equals
+   `serde_json::to_value(&result.ir)` exactly; and
+5. matches the first semantic node's serialized span to the public-core
+   `SourceSpan`, deriving source identity and byte offsets from the result
+   rather than hard-coding allocator/source-ID values.
+
+The test intentionally does not assert pretty-print whitespace, manufacture a
+legacy CLI JSON input path, invoke a backend or a second evaluator route, or
+duplicate existing fatal-diagnostic refusal evidence.
+
+Accepted ADR-0022 supersedes the old S28 "explicit compat window" expectation.
+G7 must replace this direct mixed-`IrDocument` publication with the
+separately versioned final-document-only wire v1 and may remove the current
+CLI/public facade without a historical Arkst JSON deprecation or import path.
+
+### Exact-head execution qualification
+
+Initial NEW_EXECUTION candidate
+`97cc56dcf9897ebc48261c83ea74b7b34b44cf4f` completed CI #43697573712
+with all semantic/platform jobs green but failed `fmt` on one newly added test
+assignment. That observation was classified as a test-source formatting defect.
+
+Formatting-only remediation HEAD
+`9f17c6ccf98b44b1d25e109988f57dd66b63eb60` then completed exact-head CI
+#43698920895 with `fmt`, compatibility, Reference JVM, MSRV, WASM, Clippy,
+docs, CodeQL runtime, dependency review, license, spelling, Ubuntu ARM64,
+macOS, Windows, and the required `Merge Gate` all **SUCCESS**. Security
+Audit was scope-skipped.
+
+**Classification:**
+`CURRENT_CLI_INSPECT_IR_DIRECT_UNVERSIONED_CORE_SERIALIZATION_FROZEN_G7_VERSIONED_CLI_FACADE_PENDING`.
+S28 does not implement G7, complete G0, authorize G1, or permit #746 to merge.
+
+## S29 source map — frozen current nested-include provenance baseline
+
+S29 owns the current source-identity and pure lowering provenance baseline, not
+an artificial requirement that both native Typst adapters expose identical
+structured original-source diagnostics.
+
+At exact pre-S29 #746 HEAD
+`d1b09428af47512c127c5c2c146ada2da8c7416e`,
+`VirtualProjectBuilder::build` sorts ordinary sources by canonical logical
+path before insertion into `SourceStore`. `SourceStore` then allocates
+monotonic `SourceId` values, so ordinary project IDs are stable against the
+caller's `add_source` order. Detached loadable-library provenance is allocated
+only after ordinary sources.
+
+Existing
+`source_map_is_independent_of_source_insertion_order` already compiles two
+projects with reversed source-add order and requires identical generated Typst
+plus identical complete `SourceMapEntry` vectors. Existing core resource
+coverage separately proves nested include/resource evaluation retains the
+included source identity. The remaining bounded S29 gap is therefore successful
+composition of those two facts: a nested included child must actually own an
+emitted lowering mapping while the complete output/map remain insertion-order
+stable.
+
+`arkst_typst::lower_to_typst` is a pure host-independent lowering boundary.
+It records emitted generated ranges against the `SourceSpan` already carried
+by final semantic nodes/inline values. Host behavior is intentionally
+asymmetric: the optional in-process adapter accepts the lowering-owned map and
+maps a Typst diagnostic back only when one unique validated mapping covers the
+generated range, while the subprocess adapter does not accept a source map and
+returns sanitized textual generated-source diagnostics. Existing in-process
+reliable/incomplete/ambiguous mapping tests and the cross-backend parity corpus
+freeze that distinction. S29 therefore does not fabricate subprocess
+structured spans merely to satisfy the old shorthand "both hosts" wording.
+
+### G0 NEW_EXECUTION frozen evidence
+
+`lowering_integration::nested_include_source_map_is_independent_of_source_insertion_order`
+adds one focused real frontend-to-lowering proof. It builds two equivalent
+projects whose `docs/main.qd` performs
+`.include {partials/child.qd}`, reverses only source-add order, and:
+
+1. requires both public `compile` results to be diagnostic-free;
+2. resolves the child source identity by logical path rather than hard-coding a
+   numeric `SourceId`;
+3. requires identical generated Typst and identical complete source-map vectors;
+4. requires the nested child to own at least one non-empty generated mapping;
+   and
+5. validates both the child's original byte range against the actual child
+   source and the generated range against the generated Typst.
+
+The test does not add a raw Typst escape, invoke either native backend, or
+duplicate the existing host diagnostic-handoff tests.
+
+G6 must preserve this source provenance when executable state is removed from
+final IR. G8 owns backend-specific source-map/diagnostic acceptance and must
+respect the already-evidenced adapter asymmetry rather than require fabricated
+subprocess `SourceSpan` parity.
+
+### Exact-head execution qualification
+
+Fresh NEW_EXECUTION exact HEAD
+`c3dd272666253c9444506685f6010fb02f6bc2e3` completed CI #43714679761
+with `fmt`, compatibility, Reference JVM, MSRV, WASM, Clippy, docs, CodeQL
+runtime, dependency review, license, spelling, Ubuntu ARM64, macOS, Windows,
+and the required `Merge Gate` all **SUCCESS**. Security Audit was scope-skipped.
+
+**Classification:**
+`CURRENT_PATH_SORTED_SOURCE_IDS_AND_TYPST_SOURCE_MAP_NESTED_INCLUDE_MAPPING_FROZEN_G6_G8_PENDING`.
+S29 does not implement G6/G8, complete G0, authorize G1, or permit #746 to
+merge.
+
+
+
+
+
+
+## S30 native backend parity — frozen current baseline
+
+S30 freezes the current native backend boundary after Arkst semantic evaluation
+and pure Typst lowering are complete. It does not require both native adapters
+to expose identical implementation details or identical diagnostic types.
+
+At exact #746 HEAD
+`83b564dc0615483711cc78dd3b428221d74465ae`,
+`backend_parity_corpus_has_one_semantic_oracle_for_both_native_adapters`
+constructs each logical fixture once as a `VirtualProject`, runs the public
+Arkst `compile` path and `arkst_typst::lower_to_typst`, then gives the same
+generated Typst input to both `SubprocessBackend` and `InProcessBackend`.
+The frontend/evaluator is therefore fixture construction before the backend
+boundary, not work performed by either adapter.
+
+The production dependency boundary reinforces that contract:
+`arkst-typst-subprocess` and `arkst-typst-inprocess` do not depend on
+`arkst-core` or `arkst-engine`. The subprocess adapter invokes the installed
+Typst executable; the in-process adapter invokes Typst's compiler/PDF APIs over
+its `VirtualProject`-backed world. Neither native backend has an Arkst
+evaluator call path.
+
+The existing parity oracle covers:
+
+- generated-source semantic markers before backend execution;
+- shared observable success/failure classification where the adapter contracts
+  are intended to agree;
+- non-empty PDF, `%PDF-` header, `%%EOF`, observable page count, equal page
+  count across adapters, and a two-page minimum for the multi-page fixture;
+- logical diagnostic paths and no native/temp path leakage;
+- package-diagnostic remote-URL hygiene;
+- reliable unique original `SourceSpan` handoff only in the in-process
+  adapter;
+- no fabricated original `SourceSpan` when mapping is unavailable or
+  ambiguous, and no structured subprocess original span; and
+- the reviewed package-capability divergence: subprocess best-effort static
+  preflight versus the in-process hard package/network capability boundary.
+
+PDF byte identity, object ordering, metadata/compression identity, and exact
+backend-specific diagnostic wording are deliberately not parity requirements.
+
+### Exact-head execution qualification
+
+The parity suite itself verifies the external Typst executable is version
+`0.15.1`; with `ARKST_REQUIRE_TYPST=1` a missing executable is a failure, not
+a skip. The production CI workflow installs pinned Typst 0.15.1 and runs the
+workspace `Test (Typst required)` step with that requirement enabled.
+
+At exact current #746 HEAD
+`83b564dc0615483711cc78dd3b428221d74465ae`, CI #43724517447 completed
+**SUCCESS**. The Typst-required test step succeeded on Ubuntu ARM64, macOS, and
+Windows, and the required `Merge Gate` succeeded. Security Audit was
+scope-skipped.
+
+No new S30 test was necessary: the already-existing corpus plus this current
+exact-head cross-platform execution closes the bounded G0 evidence requirement.
+
+G6 must preserve the completed final semantic input boundary when executable
+state is removed from final IR. G8 must requalify the same adapter-specific
+observable parity after integration; it must not fabricate evaluator work,
+subprocess structured source spans, or stronger subprocess package isolation.
+
+**Classification:**
+`CURRENT_PINNED_TYPST_NATIVE_BACKEND_PARITY_CORPUS_FROZEN_G6_G8_PENDING`.
+
+S30 does not implement G6/G8, complete G0, authorize G1, or permit #746 to
+merge.
+
+
+## S31 host isolation — frozen current baseline
+
+S31 freezes the current platform-neutral compiler/evaluator capability boundary
+without pretending that every native adapter is sandbox-equivalent.
+
+At exact #746 HEAD
+`c740276dab5863fc62a11cc892b3cf251d5d44cf`, required CI #43761996802
+completed **SUCCESS**. The `wasm` job checks `arkst-core` and `arkst-typst`
+for `wasm32-unknown-unknown --all-features`; the native matrix simultaneously
+runs the full workspace/all-targets/all-features tests on Ubuntu ARM64, macOS,
+and Windows. The required `Merge Gate` succeeded and Security Audit was
+scope-skipped.
+
+### Platform-neutral evaluator and resource boundary
+
+`EnvironmentInputs` is the complete explicit authority for Quarkdown
+`.env`. Omitting it denies environment access with source-backed E3004;
+supplying an empty snapshot authorizes lookup but makes every name absent; and
+repeated evaluations observe only the immutable snapshot supplied to that
+evaluation. The default/native CLI composition does not inherit the host
+process environment, and the production core/engine environment path is
+guarded against ambient `std::env` lookup.
+
+`ResourceProvider` exposes semantic logical resource operations only.
+Optional metadata/directory operations fail closed unless a provider explicitly
+implements them. `VirtualProjectResourceProvider` implements the current
+operations over immutable `VirtualProject` state. Paths are source-relative
+logical identities; URI/nonlocal references, absolute or Windows paths, and
+project-root escape are rejected. `list_directory` is an explicit
+project-scoped read-only logical directory capability returning logical
+names/kinds only; it does not expose host directory metadata or ambient
+filesystem authority.
+
+`arkst-typst` remains the pure lowering boundary. Its dependency/source guard
+rejects upward/native execution dependencies and production use of
+`std::fs`, `std::process`, native `PathBuf`, or `tempfile`.
+
+### Explicit native adapter boundaries
+
+The native CLI owns project filesystem ingestion, canonicalization, and
+symlink policy before constructing `VirtualProject`.
+
+`InProcessBackend` builds Typst's `World` only from the completed
+`VirtualProject`, embedded/project fonts, and generated source. It does not
+discover the host filesystem, consult the process clock, or provide a package
+network resolver. Missing date capability and package requests—including
+runtime-generated package access—fail closed.
+
+`SubprocessBackend` is deliberately different. It explicitly owns process
+execution and a temporary project mirror, constrains staged project resources
+with logical paths and Typst `--root`, rejects file/directory symlink escape,
+and sanitizes native host paths from diagnostics. Its package/network resolver
+is **not** hard-isolated by static preflight. Static preflight is only
+best-effort validation and is not a sandbox. This residual capability is an
+intentional documented adapter divergence, not a hidden escalation.
+
+The bounded G0 invariant is therefore: **platform-neutral evaluation/lowering
+does not implicitly acquire process, environment, network, or host-filesystem
+authority; native authority appears only at explicit host/adapter boundaries
+with documented fail-closed behavior or residual policy.**
+
+Public WASM project/resource bindings and native↔WASM end-to-end parity remain
+#191/M6 product work. They are not required to freeze the current architecture
+baseline.
+
+G2 must preserve explicit environment/resource/capability ownership when
+runtime state moves into evaluator/session structures. G8 must requalify the
+WASM build and native adapter isolation after integration.
+
+**Classification:**
+`CURRENT_WASM_BUILD_AND_EXPLICIT_HOST_CAPABILITY_ISOLATION_FROZEN_G2_G8_PENDING`.
+
+S31 does not implement G2/G8 or #191, complete G0, authorize G1, or permit
+#746 to merge.
+
+
+## S32 evaluator bounds — depth-overflow NEW_EXECUTION qualified
+
+S32 separates evaluator-owned semantic budgets from host/project/backend
+resource limits. Current `EvaluationLimits` owns two immutable values per
+compilation: `max_materialized_elements` and `max_evaluation_depth`.
+
+At exact pre-S32 #746 HEAD
+`4a00e45f04b8e40d52b307029047583f2308defe`, CI #43780573434 completed
+**SUCCESS** across the native matrix, WASM, and required `Merge Gate`.
+Existing current-head evidence already freezes the materialization half of the
+contract: low public `CompileOptions` budgets produce source-backed `E3005`,
+and range, foreach, collection, CSV, and table consumers reuse the same
+per-operation ceiling without publishing partial document output. R10 requires
+checked finite cardinality before conversion/reservation/iteration and
+deliberately does not claim aggregate output budgeting.
+
+Existing depth evidence is narrower. Successful recursive source-defined
+functions use the shared callable path, and
+`loadable_library_recursion_is_bounded_by_evaluation_depth` proves self and
+mutual loadable-library recursion terminate under a depth-8 evaluator budget.
+That test does not freeze the complete public-compile depth-overflow contract.
+
+### Fresh bounded execution proof
+
+`arkst-core::tests::compile_recursive_depth_limit_rolls_back_state_and_releases_guard`
+adds the missing NEW_EXECUTION evidence only. It compiles one source with:
+
+- a caller-visible `state=root`;
+- a source-defined `overflow` callable that writes `state=mutated` and then
+  recursively calls itself;
+- `max_materialized_elements=1024`, intentionally non-constraining;
+- `max_evaluation_depth=5`, for which the next attempted call at exhaustion
+  is the nested `.var {state} {mutated}` setter (source bytes 45..67), not the
+  following recursive `.overflow` call; and
+- post-failure `.state` plus `.sum {1} {2}` observations.
+
+The bounded execution oracle requires exactly one `E3005` whose message identifies evaluator
+depth overflow and whose primary `SourceSpan` precisely covers the attempted
+nested `.var {state} {mutated}` setter (bytes 45..67). The evaluator checks
+the active depth on call entry; the recursion is the cause, but the next call
+actually rejected by the guard is the setter. It then requires output
+`root\n3`: `root` proves the
+failed recursive invocation did not publish its caller-visible mutation, while
+`3` proves a later independent call can enter evaluation after failure and
+therefore the scoped active-depth guard was released.
+
+No production behavior, public API, default limit, dependency, parser limit,
+host/project limit, or aggregate output policy was changed in this evidence slice.
+Parser/source/asset/generated-output/timeout ceilings remain owned by their
+responsible stages. G2 must preserve scoped evaluator accounting and
+transaction ownership during runtime/session migration; G8 must requalify the
+integrated boundaries.
+
+The original S32 test at exact HEAD
+`5e55ed56999cae1392cdba6dd6c89f7324a72ecb` failed [CI #43808699078](https://github.com/luceat-lux-vestra/arkst/actions/runs/43808699078)
+on all three OSes: it incorrectly expected the *following* recursive call
+span 72..81, while the diagnostic consistently identified the first denied
+nested setter span 45..67. The same test also required a rustfmt line-wrap
+correction. The focused fix corrected only the strict test assertion, rustfmt
+and S32 evidence description; the evaluator was not changed.
+
+Corrected #746 HEAD `42fd47c28535508a45140036a39a3d5a21b07573`
+passed [exact-head CI #43845639721](https://github.com/luceat-lux-vestra/arkst/actions/runs/43845639721)
+with Ubuntu ARM64, macOS and Windows tests, `fmt`, compatibility, pinned
+Reference JVM, WASM and the required `Merge Gate` all successful.
+Security Audit was scope-skipped (16 success, 1 skipped, 0 failed). This
+qualifies the bounded public-compile depth-overflow / exact-source-span /
+invocation-rollback / post-failure-guard-release proof, not G0 as a whole.
+
+**Classification:**
+`CURRENT_TYPED_EVALUATOR_BOUNDS_MATERIALIZATION_FROZEN_DEPTH_OVERFLOW_ATOMICITY_NEW_EXECUTION_EXACT_HEAD_CROSS_PLATFORM_PROVEN_G2_G8_PENDING`.
+
+S32's bounded NEW_EXECUTION proof is exact-head CI qualified. This does not
+complete G0, authorize G1, implement G2/G8, or permit #746 to merge.
+
+## S05/S06/S07 executable normal-vs-legacy migration proof
+
+At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
+
+- **S05 native direct fallback:** `g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint` covers successful native `.sum {1} {2}` (visible `3`) and a native `.sum` call with a raw block body that produces one numeric-argument diagnostic. The native-owner selector denies the Phase 3A source-defined candidate path and retains the `lower_top_level_direct_call -> evaluate_block_call` executable-IR bridge.
+- **S06 zero-argument source-defined chain tail:** `g0_s06_zero_argument_chain_tail_matches_legacy_ir_entrypoint` covers a source-defined head with one bodyless terminal tail and no authored tail arguments, returning the predecessor `7`. This is a bounded Phase 3H parser-to-runtime parity check; the existing evaluator unit tests separately inspect the evaluated predecessor candidate's slot/origin.
+- **S07 one-flat-argument source-defined chain tail:** `g0_s07_flat_argument_chain_tail_matches_legacy_ir_entrypoint` covers the same head followed by one flat positional authored tail argument, returning `9`. This is a bounded Phase 3I parity check; the existing evaluator unit tests separately inspect predecessor slot 0 and authored slot 1 including source order and spans.
+
+**Execution:** [CI #42953638203](https://github.com/luceat-lux-vestra/arkst/actions/runs/42953638203) at exact HEAD `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919` completed **SUCCESS**. All three native platform `test (Typst required)` suites (macOS, Windows, Ubuntu ARM64) completed **SUCCESS**, as did the required `Merge Gate`, MSRV, Clippy, WASM, docs, compatibility and pinned Reference JVM verification.
+
+**Classification:** S05–S07 = `ARKST_MIGRATION_CROSS_PLATFORM_PROVEN_UPSTREAM_REFERENCE_PENDING`. No fresh independent official Quarkdown black-box reference has been captured for these three test cases, so they do not establish new upstream semantic compatibility. S05 is not an exhaustive native-call matrix; S06/S07 do not exhaust all chain owners, side effects, rich bodies, named/multiple authored arguments, source modes or resource contexts. DYN06 in the route ledger records only the native-direct fallback; S06/S07 extend the already-recognized DYN02 chain route rather than inventing a new architectural owner.
+
+**G0 exit remains blocked:** additional dynamic route closure, remaining S01–S32 oracles, public API/CLI/versioned wire decision, proposed ADR-0022 acceptance, ADR-0020/architecture reconciliation and final CI/merge acceptance are still outstanding. No G1 authorization or merge claim is made by this evidence slice.
+
+## Maintainer decision approved — 2026-11-11
+
+The [G0 maintainer decision record](719-g0-maintainer-decision-brief.md)
+replaces the earlier compatibility-preserving proposal. ADR-0022 is
+accepted as the target: **do not maintain historical Arkst Rust API/IR JSON
+backward compatibility**; remove old public executable-IR interfaces,
+reject old unversioned JSON, emit only the new strictly validated wire v1,
+and carry out all G0–G8 work without cost-based scope reduction.
+
+This is an **architecture decision, not a completed implementation or G0
+gate exit**. Do not confuse Arkst historical API breakage with permitted
+degradation of Quarkdown language compatibility, source maps, diagnostics,
+rollback semantics or security. Keep PR #746 unmerged until its G0
+evidence and CI obligations are complete.
+
+## S01 source-order and later binding failures — pinned official reference
+
+Disposable clean-room PR #754 is **CLOSED/UNMERGED**. Final probe HEAD `5866a0d6f538029de71c080afd7b4e11b2433953`; authoritative run #43057680381 completed **SUCCESS** using the exact official Quarkdown v2.5.1 Linux x64 archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. Retained artifact `g0-s01-quarkdown-v2.5.1`, ID `13872356098`, digest `sha256:69db66203158e2f5b96172b071557084258df8b8ccfe54452152bf190e4a34f4`.
+
+The fixtures are independently authored and intentionally make argument ordering observable rather than relying on the names of existing Arkst tests.
+
+| Fixture | Official default | Official strict | Bounded semantic observation |
+|---|---|---|---|
+| valid positional → named mixed call with two stateful nested `tick` calls | rc 0; stderr empty; visible target result `12`, then final `count=2`; HTML SHA-256 `73f3849d26bddb9e0d62261820b7514b02e2312da75a8d1fea715be4812d22a1` | rc 0; same HTML hash | ordinary eager candidates evaluate left-to-right in source order; first nested call returns 1, second returns 2 |
+| `first:{.sum {true} {2}} {.tick}` | rc 0; failure owned by nested `sum`; recoverable error HTML plus later visible `0`; SHA-256 `8fd250442b361d59715fc5d26e7ad6f790a5b01d59238e05a08ad28337f17d14` | rc 66; owner `sum`; no HTML | the earlier named candidate is evaluated and fails before the later positional-after-named defect becomes the first observable error |
+| `first:{.sum {true} {2}} first:{.tick}` | rc 0; same nested `sum` failure and later visible `0`; same bounded failure HTML hash | rc 66; owner `sum`; no HTML | the earlier candidate failure likewise precedes discovery of the later duplicate-name binding defect |
+
+### S01 Arkst reconciliation
+
+The prior ledger sentence **“preflight validation precedes argument effects” is not a valid universal Quarkdown-compatibility invariant**. It described current Arkst's shared structural-plan architecture, not the complete official v2.5.1 ordering contract.
+
+Current Arkst intentionally constructs a structural binding plan before eager candidate evaluation. The new #746 public differential candidates therefore separate two claims:
+
+- `g0_s01_mixed_arguments_evaluate_left_to_right_matches_legacy` expects the compatible valid-mixed observation: target `12`, final count `2`;
+- `g0_s01_positional_after_named_preflights_before_nested_failure_in_arkst` and `g0_s01_duplicate_named_preflights_before_nested_failure_in_arkst` freeze current Arkst's different failure ordering, exact source provenance and normal-frontend vs legacy-evaluator parity.
+
+Those tests were added at `b6cf594b46dfb4d529fb3020d070b32adf28c489`; duplicate diagnostic wording/provenance was pinned at `313331d4a6d616ad2ec9bdebba836a7689800204`. Exact execution HEAD `313331d4a6d616ad2ec9bdebba836a7689800204` completed CI #43058559999 **SUCCESS**: Ubuntu ARM64, macOS, and Windows Typst-required jobs plus the required Merge Gate all succeeded. The valid mixed slice is therefore bounded-compatible evidence; the two preflight-first failure cases are cross-platform-frozen Arkst migration evidence for the open #755 compatibility debt.
+
+**Compatibility owner:** #755, `compat(runtime): match source-ordered argument evaluation before later binding failures`. This is **compatibility debt, not an accepted divergence**. The required future change must preserve source-ordered/incremental regular argument processing without replacing it with a blanket “evaluate everything before validation” rule, and it must preserve #167 rollback/commit guarantees. Production semantics are intentionally not changed in evidence-only PR #746.
+
+## S08 mixed-owner multitail + terminal body — bounded cross-platform proof (not G0 exit)
+
+- **New full-frontend fixture:** `g0_runtime_differential::g0_s08_multitail_terminal_body_source_native_source_matches_legacy` compiles parser-clean source containing a source-defined `identity` head, native `multiply` middle tail, and a source-defined `tail` owning the terminal indented body.
+- **Oracle comparison implemented:** `compile_and_assert_legacy_parity` checks exact `IrDocument` plus ordered diagnostics (`code`, `severity`, `message`, primary/secondary source spans, `hints`) against the separate legacy AST-to-executable-IR evaluator path. The tested visible terminal content is `terminal body`.
+- **Precise dynamic claim if CI passes:** normal public source compilation traverses a multi-tail, mixed-owner continuation and binds the terminal block body at the final source-defined owner without a frontend/legacy output difference. This extends the already known **DYN02** path; it is **not** a new architecture route ID.
+- **Authority limit:** the engine-internal `phase3g_multitail_final_body_matches_legacy_chain_result` remains a bounded unit anchor, not an independent upstream oracle. The new public full-frontend S08 path passed [CI #43039010366](https://github.com/luceat-lux-vestra/arkst/actions/runs/43039010366) at exact HEAD `6b945dcd45266ab9d80b6e796edcca603417fdd9`: all three OS full test jobs and required Merge Gate **SUCCESS**. At that earlier test HEAD no independent Quarkdown observation had been captured. The pinned official S08 run is now recorded below; error-first-tail variants and rich body/resource-context matrix remain open. The true counter-based once-only fixture added at `ad7c61d4063f5f1850c09dfc2a463a48094d5fd6` is cross-platform frozen: execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` passed CI #43053491597 on Ubuntu ARM64/macOS/Windows plus Merge Gate, and the reconciled final status HEAD `13291822c75411ef387e2592ce49a8df7f51ee63` passed CI #43055269794.
+- **G0 state:** *bounded Arkst migration proof PASS at the exact S08 test HEAD*. The pinned official upstream S08 observations exist, and the former default-mode recovery-content debt is now production-reconciled by closed #752 / exact-head-qualified PR #777. #746's reconciled S08 assertions now require the source-backed `InvocationFailure` carrier while preserving the frozen once-only/terminal-skip semantics. The remaining adversarial matrix stays open. This post-merge evidence reconciliation requires its own exact-HEAD CI; #719 G0–G8 and the final-only target remain unchanged, and #746 must not merge or start G1 yet.
+
+## S08 middle-tail failure / stateful terminal-owner control — bounded cross-platform proof
+
+- **Source-backed test (qualified at exact test HEAD):** `g0_runtime_differential::g0_s08_middle_tail_failure_does_not_dispatch_stateful_terminal_tail` compares a successful native `multiply {3}` middle segment with a failing native `multiply {true}` segment in the same source-defined-head → native-middle-tail → source-defined-terminal-tail chain.
+- The terminal `tail` mutates a root-visible `state` to `changed` before returning the indented terminal body. The success control requires `terminal body` followed by `changed`; the failure requires exactly one numeric-arguments diagnostic and only the unchanged `before` state output.
+- The fixture calls `compile_and_assert_legacy_parity` for **both** variants, comparing exact final `IrDocument` and ordered diagnostic signatures (including spans). This is a **DYN02** continuation/failure-path evidence candidate, not a new route ID.
+- **Critical limits:** the `multiply {true}` failure is a native middle-tail numeric error; the official-v2.5.1 observation has now been captured as detailed below, but alternate error ownership, nested resources and full G0 dynamic reachability are not proven. The new counted side-effect fixture is present on #746 but remains CI-pending at this documentation point. The prior S08 success-case cross-platform proof remains authoritative only for its exact test HEAD.
+- **Execution authority:** [CI #43042015522](https://github.com/luceat-lux-vestra/arkst/actions/runs/43042015522) at exact test HEAD `cb620b24a3c567366047423ec64de967a59c533d` **SUCCESS**, including Linux ARM64/macOS/Windows test (Typst required) jobs, Reference JVM and required Merge Gate. The bounded successful-control / failing-native-middle-tail test is now cross-platform proven. This evidence-reconciliation documentation commit requires its own exact-HEAD CI before declaring that new documentation HEAD qualified. G0 remains open; #746 unmerged.
+
+## S08 pinned official Quarkdown v2.5.1 black-box oracle — six observed executions
+
+**Evidence authority:** disposable clean-room [PR #751](https://github.com/luceat-lux-vestra/arkst/pull/751), exact probe HEAD `cc8162b8d9d4c9098f0593e39b786710c12d4083`, workflow `.github/workflows/probe-719-g0-s08-v251.yml`, completed [run #43045759202](https://github.com/luceat-lux-vestra/arkst/actions/runs/43045759202) **SUCCESS** with official binary download/checksum/execution and artifact upload all successful. The three fixture sources are independently authored and committed in that workflow, **not copied from upstream implementation/tests**.
+
+- Official release URL: `https://github.com/iamgio/quarkdown/releases/download/v2.5.1/quarkdown-linux-x64.zip`.
+- Verified archive SHA-256: `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`.
+- Retained run artifact: `g0-s08-quarkdown-v2.5.1`, ID `13867202016`, digest `sha256:314071c54e248bd682dc0cb7b92ee18e73c6282dab84ad5ac61275b80eb12657`.
+- Invocation: official binary `compile <fixture>.qd --clean --pretty --out <path> --out-name probe`, adding `--strict` for strict run. Each observation records exit code, stdout, stderr, visible text of emitted HTML, and complete HTML SHA-256.
+
+| Fixture | Default official v2.5.1 | Strict official v2.5.1 | Interpretation |
+| --- | --- | --- | --- |
+| S08-terminal: `identity {2}::multiply {3}::tail` + terminal indented body | rc 0; stderr empty; one HTML page, visible `Quarkdown terminal body` | rc 0; stderr empty; one HTML page with same hash | Successful mixed-owner terminal body is semantically compatible with Arkst's bounded `terminal body` observation; ignore Quarkdown page chrome only |
+| S08-state-success: terminal `tail` writes `state=changed`, then `.state` | rc 0; stderr empty; one HTML page, visible `Quarkdown terminal body changed` | rc 0; stderr empty; one HTML page with same hash | Final-tail dispatch and state observation agree with Arkst success control at the tested boundary |
+| S08-state-failure: only `multiply {3}` changed to `multiply {true}` | rc 0; stderr `Cannot call function multiply(Number a, Number by) with arguments (2, true): Not a numeric value: true`; one HTML page shows an `Error: multiply` panel, the literal failing `identity` chain and terminal body, plus `before` | rc 66; no HTML page; stderr starts `An error occurred while in strict mode (error code 66)` and names `multiply` | Middle-tail numeric failure prevents final owner state mutation in non-strict mode, as Arkst does. After #752, Arkst also preserves a backend-neutral source-backed `InvocationFailure` plus the later `before` paragraph. This is semantic recovery reconciliation, not byte-for-byte HTML renderer parity. Strict abort has no comparable post-failure state observation. |
+
+**Exact successful HTML hashes:** `s08-terminal` default/strict = `e13cdbb4bb058c65c7945263ad84c454228bf8dbd84f473c33385d905a675561`; `s08-state-success` default/strict = `1c74f2cb07a9e38ca97cbc107aba60bc30c958dfcb41346b67508da613d72555`. Default failure HTML hash = `6c21f0265c0df0b3f3de9dacad9f6cea26943812c78399083dba1213e4d09bff`; strict failure has no HTML hash because no file is generated.
+
+### S08 once-only counter candidate
+
+- **Candidate test:** `g0_runtime_differential::g0_s08_side_effectful_head_executes_once_on_success_and_middle_failure`, added on #746 at commit `ad7c61d4063f5f1850c09dfc2a463a48094d5fd6`.
+- The source-defined chain head increments a caller-visible numeric `count` and returns a numeric value. The success control continues through native `multiply {3}` and the terminal source-defined tail; the failure variant changes only the middle input to `multiply {true}`.
+- Required observation in both variants is final `count=1`. On success the visible result is `terminal body\n1`; on middle-tail failure the visible result is `1`, proving the already-successful head committed once while the terminal owner did not execute.
+- The test still performs exact normal-frontend vs legacy executable-IR equality and complete ordered diagnostic-signature equality, so a final count of 1 constrains both entrypoints.
+- **Execution evidence frozen:** exact execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` completed CI #43053491597 **SUCCESS**. Ubuntu ARM64, macOS, and Windows Typst-required test jobs all passed, as did the required Merge Gate. The S08 once-only fixture remains frozen; #752 recovery content is now production-landed separately via exact-head-qualified PR #777 and is reconciled into the #746 assertions in this post-merge branch update.
+
+### S08 default-mode recovery-content production reconciliation
+
+- **Owner:** #752, `compat(runtime): preserve default-mode failed-chain recovery content` — **CLOSED/COMPLETED** via exact-head-qualified PR #777 → protected main `114c1b694e1b36eabed3bd00d3d93dbfb5b4ddad`.
+- **Production semantic evidence:** `issue_752_direct_failed_invocation_materializes_source_backed_recovery_content`, `issue_752_failed_chain_preserves_head_once_and_skips_terminal_tail`, CRLF provenance coverage, nested fail-closed negative control, wire round-trip, Typst lowering and CLI publication/strict suppression.
+- **#746 reconciliation:** S05 and S08 differential fixtures now explicitly require the source-backed `IrComponent::InvocationFailure` carrier while retaining exact frontend-vs-legacy parity, first-failing-tail ownership, once-only committed head effects, terminal-tail skip and later independent content.
+- Whole-document HTML implementation remains downstream of #320; this reconciliation does not claim Arkst/Quarkdown byte-for-byte HTML parity.
+- The former #752 compatibility debt is closed. #746 remains evidence-only and must still obtain exact-HEAD CI before qualification.
+
+## S09 chain-tail binding errors — pinned official ordering evidence
+## S09 chain-tail binding errors — pinned official ordering evidence
+
+Disposable clean-room PR #753 is **CLOSED/UNMERGED**. Its final probe HEAD is `4266e88f98da26aff75a089bea64acce41d16cb8`; authoritative run #43052756497 completed **SUCCESS** against the exact official Quarkdown v2.5.1 Linux x64 archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. Retained artifact ID `13870690958`, digest `sha256:57c9b696dc9b3affe2aeb4410c2eb9e5dd338e099d591fb8b39f494141dab160`.
+
+The first probe run #43052656501 is explicitly **NON-EVIDENCE**: the generated workflow accidentally escaped the shell array expansion and passed literal `${args[@]}` to the Quarkdown CLI. Commit `4266e88f98da26aff75a089bea64acce41d16cb8` fixes only that harness defect; only run #43052756497 is authoritative.
+
+| Fixture | Official default | Official strict | Bounded semantic observation |
+|---|---|---|---|
+| terminal body collides with the terminal `tail(previous)` predecessor slot | rc 0; stderr owned by `tail` with ParameterAlreadyBound; one HTML page contains error recovery, literal failed chain/body, and final visible `1`; SHA-256 `78e5105e25a173706d83e214665f80d09708f1dc81b468f5ae7447f629f80a8f` | rc 66; `tail` failure; no HTML | source-defined head already executed once and committed `count=1` before terminal-tail binding failure |
+| excess authored tail positional argument after implicit predecessor | rc 0; stderr owned by `tail`, 3 arguments for 2 parameters; one HTML page contains error recovery, literal failed chain, and final visible `1`; SHA-256 `e14fec6e8102f3b9ed56a80463626a42a42d6afd8f2d70bd9fccdb073fde13f2` | rc 66; `tail` failure; no HTML | same ordering: head commits once, then terminal tail rejects excess binding; the head effect is neither duplicated nor rolled back |
+
+### Arkst reconciliation
+
+The initial public S09 candidate incorrectly encoded an old **preflight-before-head** interpretation and expected final `count=0`. CI #43052527482 disproved that interpretation on current Arkst: both Ubuntu ARM64 and macOS reached the new test after all preceding G0 differential fixtures passed, and the first S09 assertion reported actual `"1"` versus expected `"0"`.
+
+That failure is evidence about the test expectation, **not a production regression**. The normal frontend and legacy evaluator had already passed exact IR and normalized diagnostic equality before the assertion. Current Arkst therefore matches the official reference ordering for the first bounded case.
+
+Commit `feb1537c58cb1160dd2e18bde2b690cf95cd3631` renames the fixture to `g0_s09_chain_tail_shape_errors_preserve_once_only_head_effect`, changes both bounded expected counters to `1`, and documents the correct order.
+
+**Execution evidence frozen:** exact execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` completed CI #43053491597 **SUCCESS**. The corrected two-case S09 public differential passed Ubuntu ARM64, macOS, and Windows Typst-required tests and the required Merge Gate. Both bounded cases therefore preserve exact normal-frontend vs legacy-evaluator IR/diagnostic parity while observing the same once-only committed head effect (`count=1`) as the official v2.5.1 default-mode reference.
+
+**Classification:** official S09 reference and Arkst cross-platform migration evidence are frozen as **bounded semantic-order compatible**. This does not claim byte-for-byte error rendering parity; backend-neutral default-mode recovery content is now landed under closed #752, while whole-document HTML representation remains downstream of #320.
+
+
+## S02 UTF-8 / CRLF source provenance — bounded official semantics + Arkst span freeze
+
+Disposable clean-room PR #756 is **evidence-only and must remain unmerged**. The final bounded probe HEAD is `64a2b784fef393705752a02602d3149a56f74ab0`; authoritative run #43103889446 completed **SUCCESS** against the exact official Quarkdown v2.5.1 Linux x64 archive SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`. Retained artifact `g0-s02-quarkdown-v2.5.1` has ID `13893545643` and digest `sha256:cd97005a95d63a8b7ada89c7532302a7c4d00ac3132ea063d57c7a1cb3f6a4ea`.
+
+The final probe intentionally uses only native `.text` calls so it measures the S02 grammar surface itself rather than user-defined-function implementation details. Earlier #756 runs #43103559415 and #43103738073 are **NON-EVIDENCE**: those revisions included a broader user-defined-function CRLF fixture and were replaced before freezing S02.
+
+| Final fixture pair | Official v2.5.1 default + strict | Bounded conclusion |
+| --- | --- | --- |
+| tight nested UTF-8 native call, LF vs CRLF | all rc 0; stderr empty; visible text `앞 값 뒤` | LF and CRLF are semantically equivalent at this native nested-call boundary. LF HTML SHA-256 `a76536e4dcaf8adfddb1df3454c8688727603581c8f3ec533617809e575d78c8`; CRLF HTML SHA-256 `601075a1830a7bad6d023a6b86a72bc13a71d64a690a27a5613cdeca3102601b`. Different HTML bytes mean **do not claim byte-identical renderer output**. |
+| escaped closing delimiter spanning a line break, LF vs CRLF | all rc 0; stderr empty; visible text `prefix 한글 } text suffix` | LF and CRLF semantics match at this escaped-delimiter boundary. All four outputs share HTML SHA-256 `64c5d98fa611ecc673fae43fcf73203191e36efcc439c467842f94494ea81636`. |
+
+### Arkst source-provenance evidence
+
+PR #746 adds three public S02 tests:
+
+- `g0_s02_utf8_tight_nested_call_keeps_exact_source_spans_and_mode_isolation`: Quarkdown mode preserves the exact source-backed spans for the outer call, nested call, UTF-8 argument and surrounding text while all offsets remain UTF-8 character boundaries. The same source parsed in Markdown mode must not fabricate block or inline directive calls.
+- `g0_s02_crlf_escaped_delimiter_keeps_source_backing_and_markdown_literal`: the raw CRLF and escaped `\}` remain source-backed through the parsed content; Markdown mode again remains literal/non-directive.
+- `g0_s02_normal_compile_keeps_utf8_crlf_nested_failure_source_identity`: normal compilation of a nested failing call pins the diagnostic primary span to the exact `{true}` bytes in the original CRLF source and preserves the correct `SourceId`.
+
+The exact Arkst execution HEAD `67b192781620a03c8264a4d76491c67e377f2c9a` completed CI #43102574849 **SUCCESS**. Ubuntu ARM64, macOS and Windows Typst-required tests, compatibility/reference jobs, fmt/clippy/MSRV/WASM/docs/security-related jobs and the required Merge Gate all passed.
+
+**Classification:** official v2.5.1 is authority only for the bounded native LF/CRLF semantic observations above. Arkst's exact byte offsets, raw-CRLF provenance, SourceId mapping and Markdown-mode isolation are internal parser/compiler evidence and are **not inferred from black-box HTML output**. S02 is therefore frozen as `UPSTREAM_V251_NATIVE_LF_CRLF_SEMANTICS_AND_ARKST_SOURCE_PROVENANCE_CROSS_PLATFORM_FROZEN`; no compatibility debt was discovered in the final bounded S02 grammar.
+
+
+
+## S03 nested rich inlines — official cross-version reference + Arkst provenance debt
+
+Disposable clean-room PR #757 is **CLOSED/UNMERGED**. Its final probe HEAD is \`ba44fe89d7c97920635c59b21bdf74fb67f07734\`. The independently authored fixture nests Strong text, a Markdown link and an inline \`.uppercase {world}\` call, then exercises the same authored content as tight/indented LF/CRLF in default and strict modes.
+
+### Official Quarkdown reference
+
+Two release binaries were pinned because the repository's verified compatibility baseline is v2.6.0 while historical G0 slices also use v2.5.1:
+
+- **v2.5.1:** run #43115604496 **SUCCESS**; artifact \`g0-s03-quarkdown-v2.5.1\` ID \`13899065329\`, digest \`sha256:8ed9f11543f0da38ce2e764035a64e284832e0e91f1a99b1a7494f07ce2109d8\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **v2.6.0 verified baseline:** run #43115604769 **SUCCESS**; artifact \`g0-s03-quarkdown-v2.6.0\` ID \`13898221999\`, digest \`sha256:ce0692de74edfeb67fe90cc63e20d6e3a1e3584b1bce4e5b97240d2249a42c6e\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+Both releases show the same bounded behavior in default and strict modes:
+
+| Source shape | rc / stderr | Rich-inline observation |
+| --- | --- | --- |
+| tight LF | rc 0 / empty | one Strong element; link href \`https://example.com\`; inline call renders \`WORLD\`; visible \`앞 WORLD 뒤\` |
+| tight CRLF | rc 0 / empty | same semantics |
+| indented LF | rc 0 / empty | same semantics |
+| indented CRLF | rc 0 / empty | link and inline call still work, but Strong count is 0 and the authored \`**\` markers remain visible as literal text |
+
+The indented-CRLF Strong loss is reproducible in both binaries, but it is **not automatically a required Arkst behavior**. ADR-0016 targets public document-language semantics and explicitly excludes undocumented upstream bugs; Arkst's documented syntax contract states that CRLF is accepted with LF-normalized semantics. Reproducing the binary quirk would therefore weaken Arkst's documented CRLF contract without a compatibility decision.
+
+### Arkst migration/source-map evidence
+
+PR #746 adds bounded public evidence across parser/evaluator/backend ownership without introducing a forbidden core → Typst dependency:
+
+- \`g0_s03_nested_markdown_and_inline_call_preserve_order_spans_and_legacy_parity\` proves tight-CRLF parser ordering/spans, Markdown-mode isolation, exact normal-frontend vs legacy final-IR/diagnostic parity, and final Strong → Text/Link(\`WORLD\`)/Text ordering.
+- \`g0_s03_indented_crlf_rich_body_preserves_arkst_markdown_structure\` proves current Arkst preserves the intended Strong/link/inline-call semantics for the indented CRLF source and that normal frontend vs legacy evaluator remain exactly aligned.
+- \`crates/arkst-cli/tests/g0_s03_source_map.rs\` exercises the real normal compile → final IR → Typst lowering boundary for tight and indented CRLF without adding any new core dependency edge. It requires the generated Typst to retain Strong + link + \`WORLD\` and requires the source map to carry the final IR Strong/link spans.
+
+The audit identified a real Arkst provenance defect at the earlier evidence HEAD: indented CRLF truncated the final `IrInline::Strong.span` before the authored closing `**`. **#758 is now CLOSED/COMPLETED** via exact-head-qualified PR #776. Protected-main commit `1c7b157fb495edee2797b057d044e721ab8c5930` restores the complete authored Strong span `[11,64)`, preserving the closing delimiter while leaving the following CRLF `[64,66)` outside the span.
+
+#746's runtime and CLI source-map fixtures are reconciled accordingly: tight and indented CRLF both require the full authored `**앞 [.uppercase {world}](https://example.com) 뒤**` range, and the Typst source map must carry that corrected final-IR span.
+
+**Production qualification:** PR #776 exact HEAD `447045e9f724c3d2006bffaa403ef97933611314` passed CI #43888488512 before squash merge to protected main.
+
+**Classification:** `UPSTREAM_V251_V260_RICH_INLINE_REFERENCE_FROZEN_ARKST_CRLF_SEMANTICS_PRESERVED_SPAN_PRODUCTION_RECONCILED`. S03 source-provenance completion is no longer blocked by #758; the reconciled #746 HEAD still requires its own exact-HEAD CI.
+
+
+
+## S05 native direct fallback — cross-version binding/conversion reference
+
+Disposable clean-room PR #759 is **CLOSED/UNMERGED**. Its final probe HEAD is \`f7c8f3d774d9c1160d91e5f2a387825b1dc08448\`; authoritative matrix run #43146982448 completed **SUCCESS**.
+
+The probe pins both official binaries used by this repository's compatibility evidence:
+
+- **v2.5.1:** artifact \`g0-s05-quarkdown-v2.5.1\`, ID \`13912021800\`, digest \`sha256:cde05d6cb692aaa90491606edc5f26d3420d2be9d9aca042d9a3548f19a936f9\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **v2.6.0 verified baseline:** artifact \`g0-s05-quarkdown-v2.6.0\`, ID \`13912316262\`, digest \`sha256:0bea018cc182142f22e4b53c3f03430f8eaef5bd8c6aade2c88e849585781194\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+The two releases behave identically for the bounded direct-native cases in both default and strict modes.
+
+| Fixture | Official observation | Bounded conclusion |
+| --- | --- | --- |
+| \`.sum {1} {2}\` | rc 0, empty stderr, visible result \`3\`; HTML SHA-256 \`8cc1ff7a706fd342dbb6961a9d7a151b567635d98269dafa82108f80639e605b\` | ordinary direct native binding/conversion is stable across v2.5.1/v2.6.0 |
+| \`.sum {1}\\n    invalid\` default | rc 0; stderr says \`sum(Number a, Number b)\` received \`(1, invalid)\` and \`invalid\` is not numeric; one recoverable error HTML artifact, SHA-256 \`fbde998724e0638b00b0461a5ba3cd98dbb61cfc3e0254792b8b829ea5b98141\` | the indented body is the second argument, not an ignored body; numeric coercion owns the failure |
+| same source, strict | rc 66; stderr identifies originating function \`sum\`; no HTML artifact | strict failure owner is the same direct native call |
+
+### Arkst reconciliation
+
+The S05 route exists because the current direct-AST evaluator does not yet own every native-call shape and can fall back to the transitional pre-lowered chain path. That route is **migration architecture**, not a compatibility contract and not an end-state endorsement.
+
+Public differential \`g0_s05_native_direct_fallback_matches_legacy_ir_entrypoint\` already proves exact normal-frontend vs legacy-evaluator parity for the same two authored cases. The S05 evidence update additionally pins:
+
+- success has no diagnostics and final visible semantic output \`3\`;
+- the indented-body failure emits exactly one \`E3001\` numeric-argument diagnostic;
+- the failed invocation produces one backend-neutral source-backed `InvocationFailure` recovery node plus the same `E3001`, preventing silent success while preserving the authored failed call;
+- existing \`direct_and_extended_native_raw_body_calls_keep_call_span_provenance\` evidence keeps the direct failed call source-backed through the body text.
+
+Exact Arkst evidence HEAD \`e57bc32241baf36e2bc670313a97bc154ad9c649\` completed CI #43147132829 **SUCCESS** across Ubuntu ARM64, macOS and Windows Typst-required tests plus required Merge Gate.
+
+This yields a bounded compatibility conclusion for **binding, conversion ownership, success output and failure ownership**. Default-mode backend-neutral recovery content is now production-reconciled by closed #752: the direct failed call retains exact source echo in `InvocationFailure` while the transitional fallback route remains an implementation detail.
+
+**Classification:** `UPSTREAM_V251_V260_DIRECT_NATIVE_BINDING_CONVERSION_FROZEN_ARKST_FALLBACK_CROSS_PLATFORM_PROVEN_RECOVERY_CONTENT_PRODUCTION_RECONCILED`. S05's public call semantics and source-backed recovery are evidenced; the fallback implementation remains transitional and G3 must remove it without changing these observations.
+
+
+
+## S06 zero-authored tail — predecessor slot + once-only head freeze
+
+Disposable clean-room PR #761 is **CLOSED/UNMERGED**. Final probe HEAD \`b82872891ce93f55a771b60373705159778cd17f\`; authoritative matrix run #43216405262 completed **SUCCESS**.
+
+Pinned official distributions:
+
+- **Quarkdown v2.5.1:** artifact \`g0-s06-quarkdown-v2.5.1\`, ID \`13942668602\`, digest \`sha256:feb8beb0852f61572347931141d6fd06ef6647db7e8f0ab83a50b95a41c77be8\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **Quarkdown v2.6.0 verified baseline:** artifact \`g0-s06-quarkdown-v2.6.0\`, ID \`13944036277\`, digest \`sha256:cb0e09c5ff384f0b45c47813ea89fd5f951dd12f86b6b3e80cae118539d78444\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+Both official releases behave identically in default and strict modes:
+
+| Fixture | Official observation | Bounded conclusion |
+| --- | --- | --- |
+| source-defined \`identity {7}::tail\`, where \`tail\` declares only \`previous:\` | rc 0, empty stderr, visible \`7\`; HTML SHA-256 \`8ce36f5ab06821d0ab99b883925c6865b3ca5321a37e88bda0d6061c6db982e4\` | evaluated head result is available to the zero-authored tail as its implicit predecessor |
+| side-effectful \`counted::tail\` control | head increments caller-visible \`count\`, returns numeric \`7\`; tail returns predecessor; later count is \`1\`; visible \`7 1\`; HTML SHA-256 \`3b7ef4df402f04618e144e20363d062190ed825c026771e9204fd1d84ba93376\` | successful head executes exactly once before zero-authored tail binding/dispatch |
+
+### Arkst reconciliation
+
+The existing S06 public differential already compares the same baseline source through normal frontend evaluation and the legacy whole-call IR evaluator with exact final \`IrDocument\` and normalized diagnostic equality.
+
+The evidence update extends \`g0_s06_zero_argument_chain_tail_matches_legacy_ir_entrypoint\` with the independently authored once-only control used by the official probe. It therefore freezes all of the following in both Arkst entrypoints:
+
+- head-side mutation commits exactly once;
+- the head result \`7\` becomes the zero-authored tail's predecessor;
+- the tail returns that predecessor without requiring an authored argument;
+- the later caller-visible counter remains \`1\`;
+- final visible semantic output is \`7\\n1\`.
+
+Exact S06 execution HEAD \`4c1ae8aee02f2e4c803135d99f322e5ade370e82\` completed CI #43216634805 **SUCCESS**. Ubuntu ARM64, macOS and Windows Typst-required tests, Reference JVM, compatibility, fmt/clippy/MSRV/WASM/docs/security-related jobs and required Merge Gate all succeeded.
+
+The official black-box HTML is authority only for the bounded semantic ordering/once-only observations. Exact Arkst source spans, value origin metadata and transitional evaluator representation remain internal implementation evidence and are not inferred from rendered HTML.
+
+### Protected-main synchronization
+
+While S06 was being frozen, protected \`main\` advanced from \`40b5659053dd61567646bed8daeff6259e2a8e93\` to \`8b9d347e82001a790baf1dfcf83267c378abd5f3\` via merged #760, which only adopts mold for the Ubuntu ARM64 CI/cache path.
+
+PR #746 was explicitly synchronized after the S06 executable run:
+
+- synchronization merge commit: \`aa252bc5a0accfd67af9f38d8d3c4bb6308a8316\`;
+- parents: S06 evidence HEAD \`4c1ae8aee02f2e4c803135d99f322e5ade370e82\` + protected main \`8b9d347e82001a790baf1dfcf83267c378abd5f3\`;
+- the merged tree preserves #746 evidence plus the two #760 workflow files;
+- compare against protected main reports \`ahead_by=61\`, \`behind_by=0\`, merge base = current protected main.
+
+This removes the prior base drift before the S06 docs are qualified.
+
+**Architecture disposition:** current chain execution still continues through a transitional executable-IR tail path. S06 freezes the public predecessor/once-only contract that G3 must preserve while removing that bridge; the bridge itself is not endorsed as final architecture.
+
+**Classification:** \`UPSTREAM_V251_V260_ZERO_AUTHORED_TAIL_PREDECESSOR_ONCE_ONLY_FROZEN_ARKST_CROSS_PLATFORM_PROVEN\`. No new S06 compatibility debt was discovered in this bounded semantic surface.
+
+
+
+## S07 flat tail — predecessor/authored slot order + evaluation-order freeze
+
+Disposable clean-room PR #762 is **CLOSED/UNMERGED**. Final probe HEAD \`0446da6c3015d8f1e5346c61cbaa2bb15b4788e8\`; authoritative matrix run #43233514212 completed **SUCCESS**.
+
+Pinned official distributions:
+
+- **Quarkdown v2.5.1:** artifact \`g0-s07-quarkdown-v2.5.1\`, ID \`13950044069\`, digest \`sha256:ce5ac56c445da30b820e0e87ab74d8f0cf0cecde0a1a31c2182506c14f1c90d3\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **Quarkdown v2.6.0 verified baseline:** artifact \`g0-s07-quarkdown-v2.6.0\`, ID \`13951237487\`, digest \`sha256:d3822acd6464945f29cf9faa85c114f59d5ed4d7ed694e53bd1b7f11f508dbd9\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+Both official releases behave identically in default and strict modes:
+
+| Fixture | Official observation | Bounded conclusion |
+| --- | --- | --- |
+| \`.identity {7}::tail {9}\`, where \`tail(previous, second)\` returns \`second\` | rc 0, empty stderr, visible \`9\`; HTML SHA-256 \`42904ad40d1e7212944e515c9997d297cb35b037d73951bdc3eb39aab66cc884\` | one authored positional tail candidate follows the implicit predecessor and binds to the second parameter |
+| same call with tail returning \`.sum {.previous} {.second}\` | visible \`16\`; HTML SHA-256 \`d69b14097f932ac0f271302fe7d27ae7df48fe0f6afeead3d12d2098823d69be\` | predecessor \`7\` and authored positional \`9\` occupy distinct ordered slots 0 and 1 |
+| side-effect/read order control \`.counted::tail {.count}\` | head increments caller-visible count from 0 to 1 and returns 7; authored argument reads count; tail returns authored value; later count remains 1; visible \`1 1\`; HTML SHA-256 \`bdee750b99434d4f8df2f3db6f4a7567479c154a75874e0b098287fcf853c5f3\` | head executes exactly once **before** authored tail-argument evaluation |
+
+### Arkst reconciliation
+
+The existing S07 public differential compared the baseline flat-tail source through normal frontend evaluation and the legacy whole-call IR evaluator with exact final \`IrDocument\` and normalized diagnostic equality.
+
+The S07 evidence update extends that same differential with two independent controls matching the official probe:
+
+- a slot-identity control requiring \`sum(previous, second) == 16\`;
+- an evaluation-order control requiring final visible \`1\\n1\`, which would become \`0\\n1\` if the authored \`.count\` candidate were evaluated before the side-effectful head.
+
+Exact S07 execution HEAD \`1e0f2e48a173b9d0e951345e7170fec14e7970bf\` completed CI #43233772000 **SUCCESS**. Ubuntu ARM64, macOS and Windows Typst-required tests, Reference JVM, compatibility, fmt/clippy/MSRV/WASM/docs/security-related jobs and required Merge Gate all succeeded.
+
+The bounded public contract is therefore:
+
+1. execute the chain head exactly once;
+2. commit/evaluate that head before evaluating the authored tail candidate;
+3. bind the evaluated predecessor to slot 0;
+4. bind the authored positional candidate to the next positional slot;
+5. dispatch the tail with those ordered bindings.
+
+The official black-box output is semantic authority for those observations only. Exact Arkst source spans/origin metadata remain internal evaluator evidence and are not inferred from rendered HTML.
+
+**Architecture disposition:** Arkst still represents this route through the transitional executable-IR chain-tail bridge. S07 freezes behavior that G3 must preserve while removing that bridge; the bridge itself is not part of the ADR-0022 target.
+
+**Classification:** \`UPSTREAM_V251_V260_FLAT_TAIL_PREDECESSOR_THEN_AUTHORED_ORDER_ONCE_ONLY_FROZEN_ARKST_CROSS_PLATFORM_PROVEN\`. No new S07 compatibility debt was found in this bounded semantic surface.
+
+
+
+## S10 callable identity — definition capture, caller overlay, parameter precedence
+
+Disposable clean-room PR #763 is **CLOSED/UNMERGED**. Final probe HEAD \`4980f28fc7ef90c4bc341d52ddf347fa59cfb15e\`; authoritative matrix run #43238226209 completed **SUCCESS**.
+
+Pinned official distributions:
+
+- **Quarkdown v2.5.1:** artifact \`g0-s10-quarkdown-v2.5.1\`, ID \`13953472202\`, digest \`sha256:f892286616678d23b6e6a35a708413af22c28a8a1e0b92df7bc9d111c0465a0a\`; Linux x64 archive SHA-256 \`5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9\`.
+- **Quarkdown v2.6.0 verified baseline:** artifact \`g0-s10-quarkdown-v2.6.0\`, ID \`13954161200\`, digest \`sha256:4320dceebf7d77ca091bfc8a6defc450028b7e1e4ecfec5798ae8cd449d7ca63\`; Linux x64 archive SHA-256 \`5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4\`.
+
+Both releases behave identically in default and strict modes:
+
+| Fixture | Official observation | Bounded conclusion |
+| --- | --- | --- |
+| definition value \`definition\`; callable returns \`.value\`; invoke before and after caller sets \`value=caller\` | rc 0, empty stderr, visible \`definition caller\`; HTML SHA-256 \`1148644bf3dcc34ea87ad8309bec82261fc1596575347108e3532a4f8513a3da\` | definition capture supplies fallback when no caller binding exists; current caller-visible value overlays it at invocation |
+| definition \`value=definition\`, caller \`value=caller\`, callable parameter also named \`value\`, invoke with \`parameter\` | rc 0, empty stderr, visible \`parameter\`; HTML SHA-256 \`3861de905485dd8eb6e2cd28469310e9f70c24e776f7d24c9c2645fe761cd0de\` | invocation parameter shadows caller overlay and definition capture |
+| outer callable invokes inner callable reading \`.value\`; caller changes \`value\` between invocations | rc 0, empty stderr, visible \`caller next caller\`; HTML SHA-256 \`f25cd12c7a8ce17b627f28b57dd3fdaeda24cd8b230541bfc3234373f09d615b\` | current caller overlay propagates through nested callable invocation and is refreshed for each call |
+
+### Arkst reconciliation
+
+The existing product tests already covered the individual callable scope behaviors. S10 adds a single G0 public differential, \`g0_s10_callable_capture_and_caller_overlay_match_legacy_ir_entrypoint\`, containing the same three independently authored controls. Each source is compiled through both the normal frontend and the legacy whole-call evaluator, requiring exact final \`IrDocument\` and normalized diagnostic equality before its visible result is asserted.
+
+The frozen public lookup layering is therefore:
+
+1. immutable **definition capture** as fallback;
+2. current **caller-visible overlay** for permitted caller context;
+3. invocation child scope with **parameters installed last**, so parameters shadow both outer layers;
+4. nested callable invocation receives the current caller overlay rather than a stale invocation snapshot.
+
+This does not imply that caller overlay becomes a mutation owner or that definition capture is rewritten. Those ownership rules remain internal evaluator-state semantics and broader mutable-scope parity remains outside this bounded S10 observation.
+
+Initial execution HEAD `b5d6384dd811d2f0265797321a84e60d6d156987` passed the Ubuntu ARM64/macOS/Windows semantic test jobs but failed only the repository rustfmt gate. No semantic assertion failed. After formatting and evidence reconciliation, HEAD `e60d13a0f92e296a13df21648e3309b3aed5c017` completed CI #43239940174 with Ubuntu ARM64/macOS/Windows tests, Reference JVM, compatibility, fmt/clippy/MSRV/WASM/docs/security-related jobs and required Merge Gate all **SUCCESS**.
+
+The first #43239940174 attempt hit a transient GitHub API **HTTP 503** while the trusted docs-only scope job fetched PR metadata; CodeQL runtime and Merge Gate consequently failed only because they depend on that classification. Failed jobs were re-run **without any source change**. The rerun completed docs-only scope, CodeQL runtime and Merge Gate successfully, so the transient infrastructure failure is not classified as product or policy debt.
+
+**Architecture disposition:** `IrCallable` / callable capture and runtime scope composition remain G2/G4 migration ownership. The public definition/caller/parameter lookup semantics must survive clean-break removal of legacy executable/runtime bridges; rendered HTML is not authority for Arkst's capture representation, owner identity or source provenance.
+
+**Classification:** `UPSTREAM_V251_V260_CALLABLE_DEFINITION_CALLER_PARAMETER_LAYERING_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. No new S10 compatibility debt was discovered in this bounded scope surface.
+
+
+## S11 extension-super — pinned official reference and Arkst cross-platform differential (bounded frozen)
+
+Disposable independent [PR #764](https://github.com/luceat-lux-vestra/arkst/pull/764) is **CLOSED/UNMERGED** and was evidence-only, at exact HEAD `7064d2c158de4889684d04b23cbc726331834001` based on protected `main@8b9d347e82001a790baf1dfcf83267c378abd5f3`. [Run #43348831761](https://github.com/luceat-lux-vestra/arkst/actions/runs/43348831761) completed **SUCCESS** with both official-version jobs. Separate probe-PR CI #43348831681 also succeeded. This does **not** prove Arkst product behavior.
+
+The official Linux x64 distributions were fetched with pinned archive hashes:
+
+- **Quarkdown v2.5.1:** distribution SHA-256 `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`; retained `g0-s11-quarkdown-v2.5.1` artifact ID `14002787390`, independently downloaded artifact ZIP SHA-256 `ebf6d996b83ef1f25d2f5d3ef3cb8a0c2e28d8917b2c5f27c78422ed2c7782ec`.
+- **Quarkdown v2.6.0 verified baseline:** distribution SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`; retained `g0-s11-quarkdown-v2.6.0` artifact ID `14002503548`, independently downloaded ZIP SHA-256 `039a1ea2a5ffdf6487f52cecdd4546e3b95bcd1ac1d188a284aab75874fe776c`.
+
+Both ZIP archives were opened, and all **16** JSONL observations (four distinct authored fixtures × two modes × two versions) were reconciled against the archived input bytes and generated HTML bytes. Every run exited **0**, produced exactly **one HTML file**, and had **empty stderr**. Both releases and default/strict modes produced identical per-fixture visible paragraphs and identical per-fixture HTML SHA-256 values.
+
+| Independent fixture | Verified rendered paragraph text in source/output order | HTML SHA-256 (same across releases and modes) |
+| --- | --- | --- |
+| `three-layer` | `middle` → `outer` → `root Ada` | `0ab6819e714f4f7ebc9b7c3507b1b1772a604965ee0531c876f6c0c4f19511aa` |
+| `override-ownership` | `middle initial` → `outer middle-owner` → `root outer-owner` | `4955b8d2ed393ada86215b4dcba9d6e3ec16818646b0ac5492ef18d9a714a134` |
+| `nested-super` | First paragraph: `invoke-wrapper` → `echo-wrapper` → `echo-root hello`; second independent call: `echo-wrapper` → `echo-root after` | `cc210826db9ba06c9dbc929260e3bf87d6788ed804dc72df098f29f713517051` |
+| `recursive-super` | `done` for finite input `remaining=2` | `d79d721707b0e695cb0ded072da88e9e487729f54c6122f38aad3a243162de29` |
+
+### Bounded public-language conclusions
+
+1. In this three-layer declaration, execution is **first-authored extension (`middle`) → next-authored extension (`outer`) → original callable (`root`)**, not an assumed latest-authored-first output order.
+2. The first layer's `.super name:{middle-owner}` supplies the argument visible to the next `outer` layer; the next layer's `.super name:{outer-owner}` supplies the argument visible to `root`. Local output before each `.super` observes its own invocation parameter. No blanket shared-parameter mutation is inferred.
+3. A nested call into independently extended `echo` emits `echo-wrapper → echo-root hello`; calling `echo` again after returning emits `echo-wrapper → echo-root after`. This supports bounded restoration/selection of active extension context, not proof of internal stack representation.
+4. The tested finite recursion through `.super` reaches `done`; it does **not** establish a universal recursion limit, exact invocation count, or internal callable identity semantics.
+
+These are **upstream black-box public semantic observations only**. The independent official HTML bytes/hashes do not establish Arkst's renderer parity or internal `IrCallable` identity, source provenance, exception/rollback behavior, or universal recursion semantics. G2/G3 must preserve the frozen public extension semantics while eliminating transitional executable-IR bridges.
+
+### Arkst S11 normal-vs-legacy execution proof
+
+The independently authored official S11 source bytes for all four bounded fixtures were copied into `crates/arkst-core/tests/g0_runtime_differential.rs` on #746 without changing their input syntax. The test `g0_s11_extension_super_order_owner_and_recursion_match_legacy_ir_entrypoint` calls `compile_and_assert_legacy_parity` for **each** source; that shared helper requires exact final `IrDocument` equality and ordered diagnostic signature equality between the normal compiler and the legacy AST-to-IR evaluator before S11 asserts **empty diagnostics** and the official output paragraphs in source order.
+
+| Verified input | Required Arkst visible paragraph order |
+| --- | --- |
+| `three-layer` | `middle` → `outer` → `root Ada` |
+| `override-ownership` | `middle initial` → `outer middle-owner` → `root outer-owner` |
+| `nested-super` | `invoke-wrapper` → `echo-wrapper` → `echo-root hello` → `echo-wrapper` → `echo-root after` |
+| `recursive-super` | `done` |
+
+**Execution authority:** S11 product-test implementation commit `fc6ec100e3f2149efcbb45063426750573e68226`, [exact-head CI #43430559795](https://github.com/luceat-lux-vestra/arkst/actions/runs/43430559795) **COMPLETED SUCCESS**. Required semantic test jobs `test (ubuntu-24.04-arm)`, `test (macos-latest)`, and `test (windows-latest)` each **SUCCESS**. Compatibility, pinned Reference JVM, fmt, Clippy, MSRV, WASM, docs/spelling, dependency review, license, CodeQL runtime, trusted docs-only scope, and required `Merge Gate` all **SUCCESS**. `Security Audit` was **SKIPPED**, not counted as a successful job. The product-test commit was synchronized with protected `main` at verification (`behind_by=0`, merge base `8b9d347e82001a790baf1dfcf83267c378abd5f3`). Subsequent evidence-only documentation commits require their own exact-HEAD CI; the product-test CI is not automatically transferable to a later HEAD.
+
+**Architecture disposition:** This is a bounded public-language extension/super compatibility slice and a cross-platform final-IR/diagnostic migration proof. It is not byte-for-byte HTML renderer parity with Quarkdown, a proof about internal callable identity/provenance, failure handling, or an authorization to remove the legacy evaluator. G2/G3 migration obligations remain, as do the other G0 unresolved slices/debts.
+
+**Classification:** `UPSTREAM_V251_V260_S11_EXTENSION_SUPER_PUBLIC_SEMANTICS_FROZEN_ARKST_CROSS_PLATFORM_PROVEN`. S11 is **bounded frozen**, not an assertion that G0 overall is complete. #719 stays open; #746 stays unmerged; G1 remains blocked.
+
+
+### Compatibility disposition and remaining G0 blockers
+
+- **Observed supported-success parity (bounded):** upstream compiled terminal body and state mutation align with the local Arkst normal-vs-legacy migration fixtures. The independent HTML hashes apply **only** to Quarkdown's own default-vs-strict output, not Arkst/Quarkdown byte-for-byte renderer equality.
+- **Observed error-recovery representation:** official non-strict recovery emits an HTML error panel plus source/body. After closed #752, Arkst's bounded failure `IrDocument` now carries a source-backed `InvocationFailure` plus later independent output such as `before`. The semantic recovery-content gap is reconciled; byte-for-byte HTML representation remains outside this evidence slice and downstream of #320. Arkst's accepted invocation-scoped rollback invariant is unchanged.
+- **Still open beyond the frozen S08/S09 slices:** other middle-tail ownership/failure forms, multi-source/nested/host paths, complete G0 producer/consumer reachability, and cross-target output/diagnostic equivalence. S08 once-only and corrected S09 two-case ordering are cross-platform frozen at execution HEAD `71b525e696d63eb48e9bb7e837fc5e87bc69cbee` / CI #43053491597. Strict upstream exit `66` is a reference observation, not an automatic Arkst CLI-exit matching requirement.
+- **Checkpoint discipline:** this is an evidence-only update on PR #746 and requires its **own exact-HEAD CI** before qualification. Disposable PR #751 must be **closed unmerged** after these observations are durable. #719 remains OPEN; no G1 or #746 merge authorization.
+
