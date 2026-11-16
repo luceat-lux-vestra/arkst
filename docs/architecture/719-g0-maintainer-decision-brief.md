@@ -1,6 +1,6 @@
 # #719 G0 — Accepted maintainer direction: full clean-break architecture
 
-**Status:** POLICY APPROVED 2026-11-11; G0 and G1–G8 IMPLEMENTATION INCOMPLETE.
+**Status:** POLICY APPROVED 2026-11-11; G0 SUBSTANTIVE ACCEPTANCE CRITERIA SATISFIED 2026-11-17; FINAL CLOSEOUT HEAD QUALIFICATION/MERGE STILL REQUIRED; G1–G8 IMPLEMENTATION INCOMPLETE.
 **Owner:** [#719](https://github.com/luceat-lux-vestra/arkst/issues/719).
 
 ## Maintainer's explicit decision
@@ -59,10 +59,20 @@ G7: strict v1 wire, public Rust/CLI/host/WASM replacements;
 G8: cross-platform diagnostics, source-map, security, performance,
 Quarkdown compatibility and exact-main post-merge acceptance.
 
-Existing DYN01–DYN06 and S04/S05/S06/S07/S12/S13/S14/S15/S16 are bounded
-proofs, not full G0 exit. Finish the missing scenarios and production paths.
-The original #719 sequencing still applies: **G0 must pass before G1**.
-No architecture cost tradeoff may waive requirements.
+G0 now has a complete 117-row execution-surface inventory, six identified
+dynamic route classes (DYN01–DYN06), and a 32-row differential-oracle
+contract with frozen or explicitly owned dispositions. Production
+compatibility blockers #755, #758 and #752 are closed and reconciled into
+the evidence branch. Remaining implementation obligations are assigned to
+their normative later gates (#682/#718 under G1 integration, final-only
+type/wire/backend work under G2–G8, and #770 as its independent language
+policy owner) rather than treated as unidentified G0 routes.
+
+All substantive G0 acceptance criteria are therefore satisfied. The final
+closeout documentation commit must still receive exact-HEAD CI and be
+merged/reconciled before durable G0 gate exit is recorded. The original
+#719 sequencing still applies: **G0 must exit before G1 starts**. No
+architecture cost tradeoff may waive later-gate requirements.
 
 ## Separate security and language compatibility decisions
 
@@ -75,7 +85,8 @@ No architecture cost tradeoff may waive requirements.
 - #718 implementation may use merged provenance foundations, but its
   own language/reference tests and #719 integration proof remain required.
 
-**Acceptance vs delivery:** the target policy is decided, while the new
-runtime, final IR, wire, public API cutover and full G0–G8 proof are NOT
-implemented by this documentation branch. Keep #746 OPEN and #719 OPEN.
-Do not claim G0 completion or start G1 until the remaining G0 gate passes.
+**Acceptance vs delivery:** the target policy and G0 evidence package are
+now substantively complete. The new runtime, final IR, wire, public API
+cutover and G1–G8 implementation remain future work. Keep #746 and #719
+open until the final G0 closeout HEAD is exact-head-qualified, merged and
+post-merge reconciled. Do not start G1 before that durable gate exit.

@@ -1,6 +1,20 @@
 # #719 G0 — executable surface audit and evidence ledger
 
-**Status: unverified candidate, G0 exit NOT YET MET.** Baseline: `main@54a7285ca7adce7482bc27df587f156a6162a3f9`; Git tree `5213795ebd154b25d2e10b199dcd6fcebb625eff`. Parent [#719](https://github.com/luceat-lux-vestra/arkst/issues/719) owns G0–G8. This document inventories the complete **declared** AST/IR variant surface and identified production/host routes; it does **not** claim every dynamic dispatch branch or test path has already been proven.
+**Status: FINAL G0 CLOSEOUT CANDIDATE. Substantive G0 exit criteria satisfied; final closeout HEAD exact-HEAD CI/merge/post-merge reconciliation still pending.** Baseline: `main@54a7285ca7adce7482bc27df587f156a6162a3f9`; Git tree `5213795ebd154b25d2e10b199dcd6fcebb625eff`. Parent [#719](https://github.com/luceat-lux-vestra/arkst/issues/719) owns G0–G8. This document inventories the complete **declared** AST/IR variant surface and identified production/host routes; it does **not** claim every dynamic dispatch branch or test path has already been proven.
+
+## Final G0 acceptance closeout — 2026-11-17
+
+The final G0 review resolves the normative #719 exit criteria without reducing later-gate scope:
+
+1. **Complete inventory / no unidentified route class:** `719-g0-execution-surface-inventory.tsv` contains 117 data rows with all nine required fields non-empty and no malformed row. `719-g0-dynamic-route-evidence.tsv` contains DYN01–DYN06 with all ten required fields non-empty. These six route classes identify the live transitional producer→consumer families; exhaustive owner/permutation removal is explicitly assigned to G1–G4/G8 rather than left unowned.
+2. **Representative behavioral contract:** `719-g0-differential-oracle-contract.tsv` contains S01–S32 with all ten fields non-empty. Clean-room reference observations, exact frontend-vs-legacy migration tests, intentional rollback/policy divergences and later-gate ownership are frozen. Production blockers #755, #758 and #752 are CLOSED/COMPLETED and their landed semantics are reconciled into this evidence branch.
+3. **Normative architecture authority:** ADR-0022 is accepted; ADR-0020 carries an explicit scoped-supersession note; `docs/ARCHITECTURE.md` names ADR-0022 as the accepted target. The historical mixed executable/final one-IR model is no longer authoritative.
+4. **Public/wire policy:** development-stage clean-break policy is explicit: final-only versioned wire v1, rejection of historical unversioned/executable payloads, and no required legacy Arkst API/JSON compatibility adapter. Implementation belongs to G6/G7; G0 owns the authority and frozen gap evidence.
+5. **Exact-head evidence:** post-merge #755/#758/#752 reconciliation HEAD `af239888dbfd2f222c77ef1709b8db4218b63a17` was synchronized to protected main (ahead=150/behind=0) and passed CI #43905649506 including compatibility, pinned Reference JVM, fmt, clippy, MSRV, WASM, dependency review, Ubuntu ARM64/macOS/Windows, docs/spelling, CodeQL runtime and required Merge Gate.
+
+**Acceptance verdict:** all substantive G0 inventory, behavioral-contract and architectural-authority requirements are satisfied. This closeout edit changes #746 HEAD, so the new immutable documentation HEAD must receive its own exact-HEAD CI before G0 gate exit is durably recorded. Squash merge and post-merge reconciliation remain separate work units. G1 must not start before those steps complete.
+
+Historical sections below preserve the chronology of earlier candidate states. Their `PENDING`, `INCOMPLETE`, or “do not claim G0 exit” wording describes those earlier checkpoints and is superseded for current status by this closeout section.
 
 ## Machine-readable authority
 
@@ -66,7 +80,7 @@ Source anchors:
 - `arkst-ir/tests/code_callouts_serde.rs`; `arkst-typst-subprocess/tests/lowering_integration.rs`, `backend_integration.rs`; `arkst-typst-inprocess/tests/backend_parity.rs`
 - `.github/workflows/ci.yml` required Merge Gate and `.github/workflows/reference-jvm.yml`. Latest Phase 3I proof: [CI 42751293944](https://github.com/luceat-lux-vestra/arkst/actions/runs/42751293944), **not** a proof of this candidate.
 
-## Open blockers for the **G0 gate** (no deferral or scope reduction)
+## Historical initial blockers for the **G0 gate** (superseded by final closeout above)
 
 1. Continue tracing every actual producer/consumer/call site of all ledger types, including nested/generative, extension/native precedence, legacy/core, WASM/host and test-only fixtures. Dynamic-route slices A and B below prove five concrete runtime routes with exact current-head execution evidence; they do **not** make the remaining routes exhaustive. The enum list is declaration-complete, not yet an exhaustive runtime branch proof.
 2. Freeze independent clean-room representative inputs and byte-exact expected diagnostic code/message/span/order, effects, lazy branches/failed mutations, resource modes, source provenance, output and source-map behavior. Preserve known PARTIAL/unsupported/fail-closed cases.

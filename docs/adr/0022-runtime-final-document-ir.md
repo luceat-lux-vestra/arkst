@@ -1,6 +1,6 @@
 # ADR-0022 — Separate evaluator runtime from final document IR
 
-- **Status:** Accepted (target design; G0–G8 implementation remains incomplete)
+- **Status:** Accepted (target design; G0 substantive acceptance criteria satisfied 2026-11-17; final closeout HEAD qualification/merge pending; G1–G8 implementation incomplete)
 - **Date:** 2026-11-10
 - **Maintainer acceptance:** 2026-11-11 (development-stage, no historical Arkst API/wire compatibility obligation)
 - **Owner:** [#719](https://github.com/luceat-lux-vestra/arkst/issues/719)
@@ -54,10 +54,10 @@ The new wire is **v1 only**. Missing/unversioned or unknown versions are errors;
 
 Preserve ADR-0020's accepted typed backend-neutral semantic component decision, strict target-driven conversion, source provenance guarantees, output materialization, diagnostics and Typst source-map responsibility. ADR-0015 crate ownership remains applicable with the explicit separation of runtime versus final schema and wire. ADR-0016 clean-room and compatibility evidence policy is unchanged.
 
-Approval establishes **target architectural authority only**; G0 evidence and G1–G8 migration remain incomplete. Historic accepted ADRs keep their historical record with scoped supersession notes. The physical implementation may continue to contain transitional executable IR until it is removed and fully verified.
+Approval established **target architectural authority**. The G0 evidence package now has complete declared/dynamic route inventories, a frozen differential baseline, reconciled production compatibility blockers and accepted supersession policy. Its substantive acceptance criteria are satisfied; only the final closeout documentation HEAD qualification/merge/post-merge bookkeeping remains before durable G0 exit. G1–G8 migration remains incomplete. Historic accepted ADRs keep their historical record with scoped supersession notes. The physical implementation may continue to contain transitional executable IR until later gates remove and fully verify it.
 
 ## Migration/verification (mandatory full #719 scope)
 
 G0: exhaustive declared+dynamic path and consumer inventory, frozen clean-room semantic baseline and accepted ADR; G1: full typed RuntimeValue + conversion; G2: EvalSession/context/journal; G3: all AST calls/chains/controls; G4: all nested AST/callable/resource bodies; G5: immutable final DocumentConfig; G6: final-only IR and pure backend; G7: versioned wire, CLI, public facade and host migrations; G8: complete cross-platform, source-map, diagnostic, rollback, performance and security acceptance before closing #719. Each G0–G8 gate has mandatory exit proof; total PR count may vary. #718/#682 continue to own their features but contribute mandatory provenance/conversion integration proof.
 
-**Accepted target only:** this ADR does not itself complete G0, authorize premature G1 work, change production code or public wire, merge PR #746 or close #719. All G0–G8 evidence and acceptance gates remain mandatory.
+**Gate boundary:** ADR acceptance alone did not complete G0. The separate #746 evidence package now satisfies G0's substantive inventory/behavior/authority criteria, but the final closeout HEAD must still be exact-head-qualified, merged and post-merge reconciled before G1 may start. This ADR does not authorize premature G1 work, change production code or public wire, or close #719. G1–G8 evidence and acceptance gates remain mandatory.
