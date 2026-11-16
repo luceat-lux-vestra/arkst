@@ -529,7 +529,7 @@ fn ordinary_braces_remain_text_inside_content_arguments() {
 }
 
 #[test]
-fn delimiter_completion_is_scoped_to_content_arguments() {
+fn delimiter_completion_preserves_full_authored_document_spans() {
     let source = "**normal** and *emphasis*\n";
     for mode in [Mode::Markdown, Mode::Quarkdown] {
         let output = parse_with_mode(source, mode);
@@ -546,7 +546,7 @@ fn delimiter_completion_is_scoped_to_content_arguments() {
                 inline => panic!("unexpected inline {inline:?}"),
             })
             .collect();
-        assert_eq!(spans, ["**normal", " and ", "*emphasis"]);
+        assert_eq!(spans, ["**normal**", " and ", "*emphasis*"]);
     }
 }
 
