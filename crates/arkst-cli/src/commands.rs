@@ -1,5 +1,8 @@
 use anyhow::Context;
-use arkst_core::ir::{IrComponent, IrDocument, IrExplicitErrorComponent, IrInline, IrNode};
+use arkst_core::ir::{
+    IrComponent, IrDocument, IrExplicitErrorComponent, IrInline, IrInvocationFailureComponent,
+    IrNode,
+};
 use arkst_core::{LogEvent, LogLevel, LogSink};
 use clap::ValueEnum;
 use std::cell::RefCell;
@@ -790,8 +793,101 @@ fn explicit_error_diagnostic_matches_component(
 }
 
 #[derive(Debug, Default)]
+struct InvocationFailureComponentCollection<'a> {
+    recoverable: Vec<&'a IrInvocationFailureComponent>,
+    unevidenced: Vec<&'a IrInvocationFailureComponent>,
+}
+
+fn collect_invocation_failure_components_at_depth<'a>(
+    nodes: &'a [IrNode],
+    top_level: bool,
+    collection: &mut InvocationFailureComponentCollection<'a>,
+) {
+    for node in nodes {
+        match node {
+            IrNode::Component {
+                component: IrComponent::InvocationFailure(component),
+            } => {
+                if top_level {
+                    collection.recoverable.push(component);
+                } else {
+                    collection.unevidenced.push(component);
+                }
+            }
+            IrNode::Component {
+                component:
+                    IrComponent::Stacked(component)
+                    | IrComponent::Container(component)
+                    | IrComponent::Landscape(component)
+                    | IrComponent::Clip(component)
+                    | IrComponent::Todo(component)
+                    | IrComponent::SpeakerNote(component)
+                    | IrComponent::Fragment(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Box(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Collapse(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Blockquote { content, .. } => {
+                collect_invocation_failure_components_at_depth(content, false, collection);
+            }
+            IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+                for item in items {
+                    collect_invocation_failure_components_at_depth(
+                        &item.nodes,
+                        false,
+                        collection,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_invocation_failure_components<'a>(
+    nodes: &'a [IrNode],
+) -> InvocationFailureComponentCollection<'a> {
+    let mut collection = InvocationFailureComponentCollection::default();
+    collect_invocation_failure_components_at_depth(nodes, true, &mut collection);
+    collection
+}
+
+fn invocation_failure_diagnostic_matches_component(
+    diagnostic: &arkst_core::Diagnostic,
+    component: &IrInvocationFailureComponent,
+) -> bool {
+    let Some(primary) = diagnostic.primary else {
+        return false;
+    };
+    diagnostic.code == "E3001"
+        && matches!(&diagnostic.severity, arkst_core::Severity::Error)
+        && diagnostic.message == component.message
+        && !component.source_echo.trim().is_empty()
+        && component.span.end.saturating_sub(component.span.start) == component.source_echo.len()
+        && primary.source_id == component.span.source_id
+        && primary.start >= component.span.start
+        && primary.end <= component.span.end
+}
+
+#[derive(Debug, Default)]
 struct BuildErrorClassification {
     explicit_messages: Vec<String>,
+    invocation_messages: Vec<String>,
     fatal_errors: usize,
 }
 
@@ -813,42 +909,65 @@ fn classify_build_errors(
     }
     components.recoverable = evidenced;
 
+    let mut invocation_components = collect_invocation_failure_components(&document.nodes);
     let mut classification = BuildErrorClassification::default();
     for diagnostic in diagnostics
         .iter()
         .filter(|diagnostic| matches!(&diagnostic.severity, arkst_core::Severity::Error))
     {
-        if !is_explicit_error_diagnostic(diagnostic) {
+        if is_explicit_error_diagnostic(diagnostic) {
+            if let Some(index) = components.recoverable.iter().position(|component| {
+                explicit_error_diagnostic_matches_component(diagnostic, component)
+            }) {
+                classification
+                    .explicit_messages
+                    .push(components.recoverable.remove(index).message.clone());
+                continue;
+            }
+
+            if let Some(index) = components.unevidenced.iter().position(|component| {
+                explicit_error_diagnostic_matches_component(diagnostic, component)
+            }) {
+                components.unevidenced.remove(index);
+            }
+
             classification.fatal_errors += 1;
             continue;
         }
 
-        if let Some(index) = components.recoverable.iter().position(|component| {
-            explicit_error_diagnostic_matches_component(diagnostic, component)
-        }) {
+        if let Some(index) = invocation_components
+            .recoverable
+            .iter()
+            .position(|component| {
+                invocation_failure_diagnostic_matches_component(diagnostic, component)
+            })
+        {
             classification
-                .explicit_messages
-                .push(components.recoverable.remove(index).message.clone());
+                .invocation_messages
+                .push(invocation_components.recoverable.remove(index).message.clone());
             continue;
         }
 
-        if let Some(index) = components.unevidenced.iter().position(|component| {
-            explicit_error_diagnostic_matches_component(diagnostic, component)
-        }) {
-            components.unevidenced.remove(index);
+        if let Some(index) = invocation_components
+            .unevidenced
+            .iter()
+            .position(|component| {
+                invocation_failure_diagnostic_matches_component(diagnostic, component)
+            })
+        {
+            invocation_components.unevidenced.remove(index);
         }
 
-        // An explicit-error diagnostic without an evidenced rendered semantic
-        // counterpart remains fatal. Matching an unevidenced component above
-        // consumes only the orphan accounting; it never makes the diagnostic
-        // recoverable.
         classification.fatal_errors += 1;
     }
 
-    // Likewise, never publish a document containing an explicit-error
-    // component without its structured diagnostic provenance.
+    // Never publish a semantic error component without its structured
+    // diagnostic provenance. InvocationFailure is recoverable only as a
+    // direct document child; nested copies remain deliberately unevidenced.
     classification.fatal_errors += components.recoverable.len();
     classification.fatal_errors += components.unevidenced.len();
+    classification.fatal_errors += invocation_components.recoverable.len();
+    classification.fatal_errors += invocation_components.unevidenced.len();
     classification
 }
 
@@ -974,12 +1093,22 @@ pub fn build_with_backend_and_libraries(
             // exit 66 and suppresses artifact publication.
             return Err(anyhow::Error::new(StrictModeError::new(message.clone())));
         }
+        if !classification.invocation_messages.is_empty() {
+            // #752 owns default-mode recovery only. Until strict failed-call
+            // origin/exit-66 parity has its own accepted host contract, retain
+            // the previous strict fail-closed behavior and publish no artifact.
+            anyhow::bail!(
+                "found {} error(s)",
+                classification.invocation_messages.len()
+            );
+        }
     }
 
     emit_native_build_diagnostics(&result.diagnostics);
 
-    // Quarkdown default/non-strict `.error` is a rendered document component,
-    // not a build-aborting diagnostic. Every other error remains fail-closed.
+    // Quarkdown default/non-strict authored `.error` and #752-evidenced
+    // top-level invocation failures are rendered document components, not
+    // build-aborting diagnostics. Every other error remains fail-closed.
     // In strict mode, unpaired/unevidenced errors deliberately stay on this
     // ordinary fatal path rather than being misclassified as exit 66.
     ensure_no_fatal_build_errors(&result.diagnostics, &result.ir)?;
