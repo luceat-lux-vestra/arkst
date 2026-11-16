@@ -4131,11 +4131,7 @@ impl Evaluator {
                         );
                         Some(materialize_document_invocation_outcome(
                             outcome,
-                            ir_direct_recovery_span(
-                                &call.name,
-                                call.span,
-                                call.raw_body.as_ref(),
-                            ),
+                            ir_direct_recovery_span(&call.name, call.span, call.raw_body.as_ref()),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
