@@ -1189,12 +1189,11 @@ fn g0_s01_mixed_arguments_evaluate_left_to_right_matches_legacy() {
 }
 
 #[test]
-fn g0_s01_positional_after_named_preflights_before_nested_failure_in_arkst() {
-    // Official Quarkdown v2.5.1 evaluates the earlier named candidate first
-    // and therefore reports the nested numeric failure. Current Arkst instead
-    // structurally rejects the later positional-after-named shape before
-    // evaluating either candidate. This test freezes only Arkst
-    // frontend-vs-legacy migration parity and the exact current provenance.
+fn g0_s01_positional_after_named_defers_to_earlier_nested_failure() {
+    // Official Quarkdown v2.5.1 and accepted Arkst #755 semantics evaluate
+    // source-defined candidates in authored order. The earlier named candidate
+    // therefore reports its nested numeric failure before the later
+    // positional-after-named defect can win. The later .tick must not run.
     let source = concat!(
         ".var {count} {0}\n",
         ".function {tick}\n",
@@ -1212,26 +1211,17 @@ fn g0_s01_positional_after_named_preflights_before_nested_failure_in_arkst() {
 
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
     let diagnostic = &result.diagnostics[0];
-    assert_eq!(diagnostic.code, "E3003");
-    assert_eq!(
-        diagnostic.message,
-        "positional argument after named argument is not allowed"
-    );
-    let primary = diagnostic.primary.expect("positional argument provenance");
-    assert_eq!(&source[primary.start..primary.end], "{.tick}");
-    let [secondary] = diagnostic.secondary.as_slice() else {
-        panic!("expected one named-argument conflict span: {diagnostic:?}");
-    };
-    assert!(source[secondary.start..secondary.end].starts_with("first:"));
+    assert_eq!(diagnostic.code, "E3001");
+    assert!(diagnostic.message.contains("numeric arguments"));
+    let primary = diagnostic.primary.expect("nested numeric failure provenance");
+    assert_eq!(&source[primary.start..primary.end], "{true}");
     assert_eq!(paragraph_text(&result), "0");
 }
-
 #[test]
-fn g0_s01_duplicate_named_preflights_before_nested_failure_in_arkst() {
-    // As above, official v2.5.1 surfaces the nested failure from the earlier
-    // candidate before it reaches the later duplicate binding. Arkst's current
-    // structural plan reports the duplicate first and does not evaluate either
-    // nested candidate.
+fn g0_s01_duplicate_named_defers_to_earlier_nested_failure() {
+    // Official Quarkdown v2.5.1 and accepted Arkst #755 semantics surface the
+    // earlier nested numeric failure before the later duplicate binding can
+    // win. The later .tick candidate must remain unevaluated.
     let source = concat!(
         ".var {count} {0}\n",
         ".function {tick}\n",
@@ -1249,20 +1239,12 @@ fn g0_s01_duplicate_named_preflights_before_nested_failure_in_arkst() {
 
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
     let diagnostic = &result.diagnostics[0];
-    assert_eq!(diagnostic.code, "E3003");
-    assert_eq!(
-        diagnostic.message,
-        "named argument `first` was supplied more than once"
-    );
-    let primary = diagnostic.primary.expect("duplicate argument provenance");
-    assert_eq!(&source[primary.start..primary.end], "first");
-    let [secondary] = diagnostic.secondary.as_slice() else {
-        panic!("expected one prior-binding span: {diagnostic:?}");
-    };
-    assert!(source[secondary.start..secondary.end].starts_with("first:"));
+    assert_eq!(diagnostic.code, "E3001");
+    assert!(diagnostic.message.contains("numeric arguments"));
+    let primary = diagnostic.primary.expect("nested numeric failure provenance");
+    assert_eq!(&source[primary.start..primary.end], "{true}");
     assert_eq!(paragraph_text(&result), "0");
 }
-
 #[test]
 fn g0_s02_utf8_tight_nested_call_keeps_exact_source_spans_and_mode_isolation() {
     use arkst_markdown::ast::{Block, CallArgument, Inline, Value};
