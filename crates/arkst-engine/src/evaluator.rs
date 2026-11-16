@@ -77,6 +77,7 @@ use arkst_ir::{
     IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
     IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody,
+    IrInvocationFailureComponent,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer,
     IrNumberingState, IrPageBorderWidths, IrPageCounterTarget, IrPageFormatLayer,
     IrPageFormatSelector, IrPageFormatState, IrPageGeometry, IrPageMarginPosition, IrPageMargins,
@@ -711,6 +712,60 @@ enum CallOutcome {
     Unresolved,
 }
 
+fn recoverable_invocation_failure_node(
+    context: &EvaluationContext<'_>,
+    span: SourceSpan,
+    new_diagnostics: &[Diagnostic],
+) -> Option<IrNode> {
+    let [diagnostic] = new_diagnostics else {
+        return None;
+    };
+    if diagnostic.code != "E3001" || !matches!(diagnostic.severity, Severity::Error) {
+        return None;
+    }
+    let primary = diagnostic.primary?;
+    if primary.source_id != span.source_id
+        || primary.start < span.start
+        || primary.end > span.end
+    {
+        return None;
+    }
+
+    let source = context.resources?.source_text(span.source_id)?;
+    let source_echo = source.get(span.start..span.end)?.to_string();
+    if source_echo.trim().is_empty() {
+        return None;
+    }
+
+    Some(IrNode::Component {
+        component: IrComponent::InvocationFailure(IrInvocationFailureComponent {
+            message: diagnostic.message.clone(),
+            source_echo,
+            span,
+        }),
+    })
+}
+
+fn materialize_document_invocation_outcome(
+    outcome: CallOutcome,
+    span: SourceSpan,
+    diagnostics_before: usize,
+    diagnostics: &[Diagnostic],
+    context: &EvaluationContext<'_>,
+) -> Vec<IrNode> {
+    match outcome {
+        CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+        CallOutcome::Failed => recoverable_invocation_failure_node(
+            context,
+            span,
+            diagnostics.get(diagnostics_before..).unwrap_or_default(),
+        )
+        .into_iter()
+        .collect(),
+        CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Unresolved => Vec::new(),
+    }
+}
+
 fn explicit_error_source_echo(context: &EvaluationContext<'_>, span: SourceSpan) -> Option<String> {
     let source = context.resources?.source_text(span.source_id)?;
     let source_echo = source.get(span.start..span.end)?;
@@ -931,7 +986,7 @@ fn ir_component_contains_evaluator_executable_state(component: &IrComponent) -> 
         IrComponent::Fragment(component) => {
             ir_nodes_contain_evaluator_executable_state(&component.children)
         }
-        IrComponent::ExplicitError(_) => false,
+        IrComponent::ExplicitError(_) | IrComponent::InvocationFailure(_) => false,
     }
 }
 
@@ -3936,6 +3991,7 @@ impl Evaluator {
                 if invocation.can_defer_phase3a_arguments(context) {
                     let structural = frontend_structural_call(invocation.arguments, source_id);
                     let call_span = frontend_source_span(invocation.span, source_id);
+                    let diagnostics_before = evaluation_diagnostics.len();
                     let outcome = self.evaluate_frontend_block_call(
                         invocation.name,
                         &structural.ordered_args,
@@ -3953,15 +4009,13 @@ impl Evaluator {
                         context,
                     );
                     if !matches!(outcome, CallOutcome::Unresolved) {
-                        return Some(match outcome {
-                            CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
-                            CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Failed => {
-                                Vec::new()
-                            }
-                            CallOutcome::Unresolved => unreachable!(
-                                "phase3a unresolved calls continue through direct-call lowering"
-                            ),
-                        });
+                        return Some(materialize_document_invocation_outcome(
+                            outcome,
+                            call_span,
+                            diagnostics_before,
+                            evaluation_diagnostics,
+                            context,
+                        ));
                     }
                 }
 
@@ -3974,6 +4028,7 @@ impl Evaluator {
                     ast_to_ir::TopLevelCallLowering::NotSelected => None,
                     ast_to_ir::TopLevelCallLowering::Invalid => Some(Vec::new()),
                     ast_to_ir::TopLevelCallLowering::Call(call) => {
+                        let diagnostics_before = evaluation_diagnostics.len();
                         let outcome = self.evaluate_block_call(
                             &call.name,
                             Some(call.ordered_args.as_slice()),
@@ -3986,13 +4041,13 @@ impl Evaluator {
                             evaluation_diagnostics,
                             context,
                         );
-                        Some(match outcome {
-                            CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
-                            CallOutcome::Value(_)
-                            | CallOutcome::NoValue
-                            | CallOutcome::Failed
-                            | CallOutcome::Unresolved => Vec::new(),
-                        })
+                        Some(materialize_document_invocation_outcome(
+                            outcome,
+                            call.span,
+                            diagnostics_before,
+                            evaluation_diagnostics,
+                            context,
+                        ))
                     }
                 }
             }
@@ -4033,6 +4088,7 @@ impl Evaluator {
                         return Some(Vec::new());
                     }
                     let span = frontend_source_span(invocation.span, source_id);
+                    let diagnostics_before = evaluation_diagnostics.len();
                     let outcome = self.evaluate_frontend_chain_head(
                         invocation,
                         source_id,
@@ -4049,13 +4105,13 @@ impl Evaluator {
                             &span,
                             evaluation_diagnostics,
                         );
-                        return Some(match outcome {
-                            CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
-                            CallOutcome::Value(_)
-                            | CallOutcome::NoValue
-                            | CallOutcome::Failed
-                            | CallOutcome::Unresolved => Vec::new(),
-                        });
+                        return Some(materialize_document_invocation_outcome(
+                            outcome,
+                            span,
+                            diagnostics_before,
+                            evaluation_diagnostics,
+                            context,
+                        ));
                     }
                 }
 
@@ -4068,6 +4124,7 @@ impl Evaluator {
                     ast_to_ir::TopLevelChainLowering::NotSelected => None,
                     ast_to_ir::TopLevelChainLowering::Invalid => Some(Vec::new()),
                     ast_to_ir::TopLevelChainLowering::Chain(chain) => {
+                        let diagnostics_before = evaluation_diagnostics.len();
                         let outcome = self.evaluate_block_chain(
                             &chain.head,
                             &chain.chain,
@@ -4078,13 +4135,13 @@ impl Evaluator {
                             evaluation_diagnostics,
                             context,
                         );
-                        Some(match outcome {
-                            CallOutcome::Value(IrValue::Content(evaluated)) => evaluated,
-                            CallOutcome::Value(_)
-                            | CallOutcome::NoValue
-                            | CallOutcome::Failed
-                            | CallOutcome::Unresolved => Vec::new(),
-                        })
+                        Some(materialize_document_invocation_outcome(
+                            outcome,
+                            chain.span,
+                            diagnostics_before,
+                            evaluation_diagnostics,
+                            context,
+                        ))
                     }
                 }
             }
@@ -4169,7 +4226,7 @@ impl Evaluator {
         // Top-level paragraphs are an independently evidenced output owner for inline `.error`.
         // Keep this opt-in at the document boundary rather than widening generic paragraph
         // evaluation used by callable, conditional, include, and value/content paths.
-        let nodes = self.evaluate_evidenced_structural_nodes(&document.nodes, diagnostics, context);
+        let nodes = self.evaluate_document_output_nodes(&document.nodes, diagnostics, context);
         (
             IrDocument {
                 nodes,
@@ -4180,6 +4237,87 @@ impl Evaluator {
             },
             std::mem::take(diagnostics),
         )
+    }
+
+    /// Evaluates top-level document output. Recoverable invocation failures
+    /// are materialized only here; nested/value/callback owners continue to
+    /// observe `CallOutcome::Failed` and remain fail-closed.
+    fn evaluate_document_output_nodes(
+        &self,
+        nodes: &[IrNode],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Vec<IrNode> {
+        let mut out = Vec::new();
+        for node in nodes {
+            match node {
+                IrNode::FunctionCall {
+                    name,
+                    positional_args,
+                    named_args,
+                    ordered_args,
+                    lambda_parameters,
+                    body,
+                    raw_body,
+                    span,
+                    ..
+                } => {
+                    let diagnostics_before = diagnostics.len();
+                    let outcome = self.evaluate_block_call(
+                        name,
+                        ordered_args.as_deref(),
+                        positional_args,
+                        named_args,
+                        lambda_parameters.as_deref(),
+                        body.as_deref(),
+                        raw_body.as_ref(),
+                        span,
+                        diagnostics,
+                        context,
+                    );
+                    out.extend(materialize_document_invocation_outcome(
+                        outcome,
+                        *span,
+                        diagnostics_before,
+                        diagnostics,
+                        context,
+                    ));
+                }
+                IrNode::ChainedFunctionCall {
+                    head,
+                    chain,
+                    lambda_parameters,
+                    body,
+                    raw_body,
+                    span,
+                } => {
+                    let diagnostics_before = diagnostics.len();
+                    let outcome = self.evaluate_block_chain(
+                        head,
+                        chain,
+                        lambda_parameters.as_deref(),
+                        body,
+                        raw_body.as_ref(),
+                        span,
+                        diagnostics,
+                        context,
+                    );
+                    out.extend(materialize_document_invocation_outcome(
+                        outcome,
+                        *span,
+                        diagnostics_before,
+                        diagnostics,
+                        context,
+                    ));
+                }
+                other => out.extend(self.evaluate_evidenced_structural_nodes(
+                    std::slice::from_ref(other),
+                    diagnostics,
+                    context,
+                )),
+            }
+        }
+        out
     }
 
     /// Evaluates a list of block nodes, collecting any diagnostics.
