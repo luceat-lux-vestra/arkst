@@ -1,4 +1,4 @@
-use arkst_core::ir::{IrInline, IrNode};
+use arkst_core::ir::{IrComponent, IrInline, IrNode};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -77,7 +77,6 @@ fn and_or_reject_invalid_binding_and_conversion_with_provenance() {
     for source in [
         ".and {true}\n",
         ".or {false} {true} {false}\n",
-        ".and {true} {false}\n    true\n",
         ".and a:{true} a:{false} b:{true}\n",
         ".or left:{false} b:{true}\n",
     ] {
@@ -85,6 +84,18 @@ fn and_or_reject_invalid_binding_and_conversion_with_provenance() {
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert!(result.ir.nodes.is_empty(), "{result:?}");
     }
+
+    let source = ".and {true} {false}\n    true\n";
+    let result = compile_source(source);
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.ir.nodes.len(), 1, "{result:?}");
+    let IrNode::Component {
+        component: IrComponent::InvocationFailure(failure),
+    } = &result.ir.nodes[0]
+    else {
+        panic!("expected invocation-failure recovery node, got {result:?}");
+    };
+    assert_eq!(failure.source_echo, ".and {true} {false}\n    true");
 
     let source = ".and {true} {1}\n";
     let result = compile_source(source);

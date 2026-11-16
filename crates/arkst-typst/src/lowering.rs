@@ -8,11 +8,11 @@ use arkst_ir::{
     IrColor, IrComponent, IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent,
     IrContainerMargin, IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDocument,
     IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior,
-    IrFragmentComponent, IrHeadingKind, IrInline, IrKeybindingPart, IrLandscapeComponent,
-    IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
-    IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration, IrTextScript, IrTextSize, IrTextStyle,
-    IrTextVariant, IrTextWeight, IrTodoComponent, IrValue,
+    IrFragmentComponent, IrHeadingKind, IrInline, IrInvocationFailureComponent, IrKeybindingPart,
+    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition,
+    IrSize, IrSizeUnit, IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration,
+    IrTextScript, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrTodoComponent, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -374,7 +374,7 @@ impl LoweringContext {
                 return own
                     .saturating_add(self.count_fragment_transitions_in_nodes(&component.children));
             }
-            IrComponent::ExplicitError(_) => None,
+            IrComponent::ExplicitError(_) | IrComponent::InvocationFailure(_) => None,
         };
         children.map_or(0, |children| {
             self.count_fragment_transitions_in_nodes(children)
@@ -700,6 +700,7 @@ impl LoweringContext {
             IrComponent::SpeakerNote(note) => self.lower_speaker_note(note),
             IrComponent::Fragment(fragment) => self.lower_fragment(fragment),
             IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
+            IrComponent::InvocationFailure(failure) => self.lower_invocation_failure(failure),
         }
     }
 
@@ -731,6 +732,18 @@ impl LoweringContext {
         if trailing_newline {
             self.push('\n');
         }
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_invocation_failure(&mut self, component: &IrInvocationFailureComponent) {
+        let before = self.output.len();
+        self.push_str("#block[Error: ");
+        self.push_str(&escape_typst_text(&component.message));
+        self.push_str("\n#raw(\"");
+        self.push_str(&escape_typst_string(&component.source_echo));
+        self.push_str("\", block: true)]\n");
         if component.span.source_id != SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
         }
@@ -2293,11 +2306,11 @@ mod tests {
         IrCallSegment, IrClipComponent, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
         IrContainerBorderWidths, IrContainerComponent, IrContainerMargin, IrContainerPadding,
         IrContainerRadius, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment,
-        IrExplicitErrorComponent, IrHeadingKind, IrInline, IrLandscapeComponent, IrListItem,
-        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
-        IrTextWeight, IrValue,
+        IrExplicitErrorComponent, IrHeadingKind, IrInline, IrInvocationFailureComponent,
+        IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
+        IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+        IrTableCell, IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration, IrTextSize,
+        IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
 
@@ -2397,6 +2410,16 @@ mod tests {
         }
     }
 
+    fn invocation_failure_node(message: &str, source_echo: &str) -> IrNode {
+        IrNode::Component {
+            component: IrComponent::InvocationFailure(IrInvocationFailureComponent {
+                message: message.to_string(),
+                source_echo: source_echo.to_string(),
+                span: empty_span(),
+            }),
+        }
+    }
+
     fn sized_container_node(
         width: Option<IrSize>,
         height: Option<IrSize>,
@@ -2463,6 +2486,30 @@ mod tests {
         assert!(
             code.contains("#raw(\".error    {.msg}\", block: true)"),
             "{code}"
+        );
+    }
+
+    #[test]
+    fn lower_invocation_failure_is_deterministic_and_preserves_source_echo() {
+        let doc = IrDocument {
+            nodes: vec![invocation_failure_node(
+                "Function sum requires numeric arguments",
+                ".sum {1}\n    invalid",
+            )],
+            metadata: IrMetadata::default(),
+        };
+
+        let first = super::lower_to_typst_code(&doc);
+        let second = super::lower_to_typst_code(&doc);
+
+        assert_eq!(first, second);
+        assert!(
+            first.contains("#block[Error: Function sum requires numeric arguments"),
+            "{first}"
+        );
+        assert!(
+            first.contains("#raw(\".sum {1}\n    invalid\", block: true)"),
+            "{first}"
         );
     }
 
