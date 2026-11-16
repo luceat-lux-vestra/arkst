@@ -439,7 +439,7 @@ pub struct CompileResult {
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::{IrInline, IrNode};
+    use crate::ir::{IrComponent, IrInline, IrNode};
     use crate::{
         CompileOptions, EvaluationLimits, LogEvent, LogLevel, LogSink, Severity, VirtualPathBuf,
         VirtualProjectBuilder,
@@ -846,6 +846,103 @@ mod tests {
                 other => panic!("unexpected inline {other:?}"),
             })
             .collect()
+    }
+
+    #[test]
+    fn issue_752_direct_failed_invocation_materializes_source_backed_recovery_content() {
+        let source = ".sum {1}\n    invalid\nlater\n";
+        let (result, source_id) = compile_source(source);
+
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(result.ir.nodes.len(), 2, "{result:?}");
+
+        let IrNode::Component {
+            component: IrComponent::InvocationFailure(failure),
+        } = &result.ir.nodes[0]
+        else {
+            panic!("expected invocation-failure component, got {:?}", result.ir.nodes[0]);
+        };
+        assert_eq!(failure.message, result.diagnostics[0].message);
+        assert_eq!(failure.source_echo, ".sum {1}\n    invalid");
+        assert_eq!(failure.span.source_id, source_id);
+        assert_eq!(
+            &source[failure.span.start..failure.span.end],
+            failure.source_echo
+        );
+        assert_eq!(output_text(&result), "later");
+    }
+
+    #[test]
+    fn issue_752_failed_chain_preserves_head_once_and_skips_terminal_tail() {
+        let source = concat!(
+            ".var {count} {0}\n",
+            ".function {counted}\n",
+            "    .var {count} {.count::sum {1}}\n",
+            "    .sum {1} {1}\n",
+            "\n",
+            ".function {tail}\n",
+            "    previous content:\n",
+            "    .var {count} {.count::sum {10}}\n",
+            "    .content\n",
+            "\n",
+            ".counted::multiply {true}::tail\n",
+            "    terminal body\n",
+            ".count\n",
+        );
+        let (result, source_id) = compile_source(source);
+
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(result.ir.nodes.len(), 2, "{result:?}");
+
+        let IrNode::Component {
+            component: IrComponent::InvocationFailure(failure),
+        } = &result.ir.nodes[0]
+        else {
+            panic!("expected invocation-failure component, got {:?}", result.ir.nodes[0]);
+        };
+        assert_eq!(failure.message, result.diagnostics[0].message);
+        assert_eq!(
+            failure.source_echo,
+            ".counted::multiply {true}::tail\n    terminal body"
+        );
+        assert_eq!(failure.span.source_id, source_id);
+        assert_eq!(
+            &source[failure.span.start..failure.span.end],
+            failure.source_echo
+        );
+
+        // The successful head committed count=1 exactly once. The failing
+        // native middle tail short-circuited before the terminal tail could
+        // add 10, and later independent document output still follows.
+        assert_eq!(output_text(&result), "1");
+    }
+
+    #[test]
+    fn issue_752_nested_failed_invocation_remains_fail_closed() {
+        let source = concat!(
+            ".function {wrapper}\n",
+            "    .sum {1}\n",
+            "        invalid\n",
+            "\n",
+            ".wrapper\n",
+            "later\n",
+        );
+        let (result, _) = compile_source(source);
+
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert!(
+            result.ir.nodes.iter().all(|node| !matches!(
+                node,
+                IrNode::Component {
+                    component: IrComponent::InvocationFailure(_)
+                }
+            )),
+            "{result:?}"
+        );
+        assert_eq!(output_text(&result), "later");
     }
 
     #[test]
