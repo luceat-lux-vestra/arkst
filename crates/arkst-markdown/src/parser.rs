@@ -1888,9 +1888,7 @@ fn convert_inline(
         KindData::Link(link) => link_span(arena, node, link, source),
         KindData::Image(image) => image_span(arena, node, image, source),
         KindData::Strikethrough(_) => strikethrough_span(arena, node, source),
-        KindData::Emphasis(_) | KindData::Strong(_)
-            if context == InlineConversionContext::ContentArgument =>
-        {
+        KindData::Emphasis(_) | KindData::Strong(_) => {
             content_delimited_inline_span(arena, node, source)
         }
         _ => node_span(arena, node, source),
@@ -2800,11 +2798,10 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
 }
 
 fn content_delimited_inline_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
-    // Rushdown keeps the delimiter semantics in its AST but omits the closing
-    // delimiter from the node span. Content arguments need the complete
-    // source-backed range for their preserved Markdown nodes. Complete only an
-    // already accepted node's range; this does not recognize or create
-    // Markdown structure for ordinary document conversion.
+    // Rushdown keeps accepted emphasis/strong delimiter semantics in its AST
+    // but can omit the closing delimiter from the node span. Complete only an
+    // already accepted node's source-backed range in both document and content
+    // conversion; this does not recognize or create Markdown structure.
     let span = node_span(arena, node, source)?;
     let Some((delimiter, width)) = emphasis_delimiter(arena, node, source) else {
         return Some(span);
@@ -4153,6 +4150,86 @@ mod tests {
         };
         assert_eq!(text, "한글");
         assert_eq!(&source[text_span.start..text_span.end], text);
+    }
+
+    #[test]
+    fn indented_crlf_strong_span_includes_closing_delimiter_without_mode_leakage() {
+        fn first_strong_span(inlines: &[Inline]) -> Option<ByteSpan> {
+            inlines.iter().find_map(|inline| match inline {
+                Inline::Strong { span, .. } => Some(*span),
+                Inline::Emphasis { content, .. }
+                | Inline::Link { content, .. }
+                | Inline::Image { content, .. }
+                | Inline::Strikethrough { content, .. } => first_strong_span(content),
+                _ => None,
+            })
+        }
+
+        fn first_strong_span_in_block(block: &Block) -> Option<ByteSpan> {
+            match block {
+                Block::Paragraph { content, .. } => first_strong_span(content),
+                Block::DirectiveCall {
+                    arguments, body, ..
+                } => arguments
+                    .iter()
+                    .find_map(|argument| match argument {
+                        CallArgument::Positional {
+                            value: Value::Content(content),
+                            ..
+                        } => first_strong_span(content),
+                        CallArgument::Named(_) => None,
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        body.as_ref().and_then(|body| {
+                            body.iter().find_map(first_strong_span_in_block)
+                        })
+                    }),
+                _ => None,
+            }
+        }
+
+        fn assert_quarkdown_case(source: &str, expected: &str) {
+            let output = parse_with_diagnostics(source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            let span = output
+                .document
+                .nodes
+                .iter()
+                .find_map(first_strong_span_in_block)
+                .expect("strong span");
+            assert_eq!(&source[span.start..span.end], expected);
+            assert!(source.is_char_boundary(span.start));
+            assert!(source.is_char_boundary(span.end));
+        }
+
+        let rich = "**앞 [.uppercase {world}](https://example.com) 뒤**";
+        let tight_lf = format!(".text {{{rich}}}\n");
+        let tight_crlf = format!(".text {{{rich}}}\r\n");
+        let indented_lf = format!(".text\n    {rich}\n");
+        let indented_crlf = format!(".text\r\n    {rich}\r\n");
+
+        for source in [&tight_lf, &tight_crlf, &indented_lf, &indented_crlf] {
+            assert_quarkdown_case(source, rich);
+        }
+
+        let output = parse_with_diagnostics(&indented_crlf);
+        let span = output
+            .document
+            .nodes
+            .iter()
+            .find_map(first_strong_span_in_block)
+            .expect("indented CRLF strong span");
+        assert_eq!(span, ByteSpan::new(11, 64));
+        assert_eq!(&indented_crlf[64..66], "\r\n");
+
+        let markdown = parse_with_mode(&indented_crlf, Mode::Markdown);
+        assert!(markdown.diagnostics.is_empty(), "{markdown:?}");
+        assert!(markdown
+            .document
+            .nodes
+            .iter()
+            .all(|block| !matches!(block, Block::DirectiveCall { .. })));
     }
 
     #[test]
