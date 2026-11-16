@@ -1300,7 +1300,7 @@ S31 does not implement G2/G8 or #191, complete G0, authorize G1, or permit
 #746 to merge.
 
 
-## S32 evaluator bounds — depth-overflow NEW_EXECUTION candidate
+## S32 evaluator bounds — depth-overflow NEW_EXECUTION qualified
 
 S32 separates evaluator-owned semantic budgets from host/project/backend
 resource limits. Current `EvaluationLimits` owns two immutable values per
@@ -1322,7 +1322,7 @@ functions use the shared callable path, and
 mutual loadable-library recursion terminate under a depth-8 evaluator budget.
 That test does not freeze the complete public-compile depth-overflow contract.
 
-### Fresh bounded candidate
+### Fresh bounded execution proof
 
 `arkst-core::tests::compile_recursive_depth_limit_rolls_back_state_and_releases_guard`
 adds the missing NEW_EXECUTION evidence only. It compiles one source with:
@@ -1336,7 +1336,7 @@ adds the missing NEW_EXECUTION evidence only. It compiles one source with:
   following recursive `.overflow` call; and
 - post-failure `.state` plus `.sum {1} {2}` observations.
 
-The candidate requires exactly one `E3005` whose message identifies evaluator
+The bounded execution oracle requires exactly one `E3005` whose message identifies evaluator
 depth overflow and whose primary `SourceSpan` precisely covers the attempted
 nested `.var {state} {mutated}` setter (bytes 45..67). The evaluator checks
 the active depth on call entry; the recursion is the cause, but the next call
@@ -1347,7 +1347,7 @@ failed recursive invocation did not publish its caller-visible mutation, while
 therefore the scoped active-depth guard was released.
 
 No production behavior, public API, default limit, dependency, parser limit,
-host/project limit, or aggregate output policy changes in this candidate.
+host/project limit, or aggregate output policy was changed in this evidence slice.
 Parser/source/asset/generated-output/timeout ceilings remain owned by their
 responsible stages. G2 must preserve scoped evaluator accounting and
 transaction ownership during runtime/session migration; G8 must requalify the
@@ -1358,13 +1358,21 @@ The original S32 test at exact HEAD
 on all three OSes: it incorrectly expected the *following* recursive call
 span 72..81, while the diagnostic consistently identified the first denied
 nested setter span 45..67. The same test also required a rustfmt line-wrap
-correction. This focused candidate corrects the expectation and formatting;
-it does not change the evaluator or mark execution qualified.
+correction. The focused fix corrected only the strict test assertion, rustfmt
+and S32 evidence description; the evaluator was not changed.
 
-**Classification candidate:**
-`CURRENT_TYPED_EVALUATOR_BOUNDS_MATERIALIZATION_FROZEN_DEPTH_OVERFLOW_ATOMICITY_NEW_EXECUTION_CANDIDATE_CI_PENDING_G2_G8`.
+Corrected #746 HEAD `42fd47c28535508a45140036a39a3d5a21b07573`
+passed [exact-head CI #43845639721](https://github.com/luceat-lux-vestra/arkst/actions/runs/43845639721)
+with Ubuntu ARM64, macOS and Windows tests, `fmt`, compatibility, pinned
+Reference JVM, WASM and the required `Merge Gate` all successful.
+Security Audit was scope-skipped (16 success, 1 skipped, 0 failed). This
+qualifies the bounded public-compile depth-overflow / exact-source-span /
+invocation-rollback / post-failure-guard-release proof, not G0 as a whole.
 
-S32 remains unqualified until exact-head CI succeeds. This candidate does not
+**Classification:**
+`CURRENT_TYPED_EVALUATOR_BOUNDS_MATERIALIZATION_FROZEN_DEPTH_OVERFLOW_ATOMICITY_NEW_EXECUTION_EXACT_HEAD_CROSS_PLATFORM_PROVEN_G2_G8_PENDING`.
+
+S32's bounded NEW_EXECUTION proof is exact-head CI qualified. This does not
 complete G0, authorize G1, implement G2/G8, or permit #746 to merge.
 
 ## S05/S06/S07 executable normal-vs-legacy migration proof
