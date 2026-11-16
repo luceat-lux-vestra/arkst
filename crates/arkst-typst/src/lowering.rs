@@ -2411,6 +2411,16 @@ mod tests {
         }
     }
 
+    fn invocation_failure_node(message: &str, source_echo: &str) -> IrNode {
+        IrNode::Component {
+            component: IrComponent::InvocationFailure(IrInvocationFailureComponent {
+                message: message.to_string(),
+                source_echo: source_echo.to_string(),
+                span: empty_span(),
+            }),
+        }
+    }
+
     fn sized_container_node(
         width: Option<IrSize>,
         height: Option<IrSize>,
@@ -2477,6 +2487,30 @@ mod tests {
         assert!(
             code.contains("#raw(\".error    {.msg}\", block: true)"),
             "{code}"
+        );
+    }
+
+    #[test]
+    fn lower_invocation_failure_is_deterministic_and_preserves_source_echo() {
+        let doc = IrDocument {
+            nodes: vec![invocation_failure_node(
+                "Function sum requires numeric arguments",
+                ".sum {1}\n    invalid",
+            )],
+            metadata: IrMetadata::default(),
+        };
+
+        let first = super::lower_to_typst_code(&doc);
+        let second = super::lower_to_typst_code(&doc);
+
+        assert_eq!(first, second);
+        assert!(
+            first.contains("#block[Error: Function sum requires numeric arguments"),
+            "{first}"
+        );
+        assert!(
+            first.contains("#raw(\".sum {1}\n    invalid\", block: true)"),
+            "{first}"
         );
     }
 
