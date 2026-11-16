@@ -1794,6 +1794,69 @@ mod tests {
     }
 
     #[test]
+    fn build_error_classifier_pairs_only_top_level_invocation_failures() {
+        let source_echo = ".sum {1}\n    invalid";
+        let source_id = arkst_core::source::SourceId(752);
+        let span = arkst_core::source::SourceSpan::new(source_id, 0, source_echo.len());
+        let primary = arkst_core::source::SourceSpan::new(source_id, 13, source_echo.len());
+        let message = "sum requires numeric arguments".to_string();
+        let diagnostic = arkst_core::Diagnostic {
+            code: "E3001".to_string(),
+            severity: arkst_core::Severity::Error,
+            message: message.clone(),
+            primary: Some(primary),
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        };
+        let failure = IrInvocationFailureComponent {
+            message: message.clone(),
+            source_echo: source_echo.to_string(),
+            span,
+        };
+        let direct = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::InvocationFailure(failure.clone()),
+            }],
+            metadata: Default::default(),
+        };
+
+        let classification =
+            classify_build_errors(std::slice::from_ref(&diagnostic), &direct);
+        assert_eq!(classification.invocation_messages, vec![message.clone()]);
+        assert_eq!(classification.fatal_errors, 0);
+        assert!(
+            ensure_no_fatal_build_errors(std::slice::from_ref(&diagnostic), &direct).is_ok()
+        );
+
+        let missing_component = IrDocument {
+            nodes: Vec::new(),
+            metadata: Default::default(),
+        };
+        let classification =
+            classify_build_errors(std::slice::from_ref(&diagnostic), &missing_component);
+        assert!(classification.invocation_messages.is_empty());
+        assert_eq!(classification.fatal_errors, 1);
+
+        let orphan_component = classify_build_errors(&[], &direct);
+        assert!(orphan_component.invocation_messages.is_empty());
+        assert_eq!(orphan_component.fatal_errors, 1);
+
+        let nested = IrDocument {
+            nodes: vec![IrNode::Blockquote {
+                content: vec![IrNode::Component {
+                    component: IrComponent::InvocationFailure(failure),
+                }],
+                span,
+            }],
+            metadata: Default::default(),
+        };
+        let classification =
+            classify_build_errors(std::slice::from_ref(&diagnostic), &nested);
+        assert!(classification.invocation_messages.is_empty());
+        assert_eq!(classification.fatal_errors, 1);
+    }
+
+    #[test]
     fn build_error_classifier_requires_diagnostic_component_pairing() {
         let span = arkst_core::source::SourceSpan::new(arkst_core::source::SourceId(197), 0, 13);
         let explicit = arkst_core::Diagnostic {
