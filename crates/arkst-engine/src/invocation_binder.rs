@@ -234,6 +234,104 @@ pub(crate) fn validate_implicit<T>(candidates: &[Candidate<T>]) -> Result<(), Bi
     Ok(())
 }
 
+/// Validate only the candidate prefix that is known so far.
+///
+/// Unlike `plan`, this deliberately does not enforce missing required
+/// parameters or body policy. Callers can therefore validate one source-order
+/// candidate, evaluate it, and only then inspect the next candidate. A
+/// structural defect on the current candidate is still reported before that
+/// candidate is evaluated.
+pub(crate) fn validate_candidate_prefix<T>(
+    parameters: &[ParameterMetadata<'_>],
+    candidates: &[Candidate<T>],
+) -> Result<(), BindingError> {
+    validate_order(candidates)?;
+    let mut named_parameters = BTreeMap::new();
+    for (index, parameter) in parameters.iter().enumerate() {
+        named_parameters.entry(parameter.name).or_insert(index);
+        for alias in parameter.aliases {
+            named_parameters.entry(*alias).or_insert(index);
+        }
+    }
+
+    let mut bound_spans: Vec<Option<SourceSpan>> = vec![None; parameters.len()];
+    let mut next_positional = 0;
+    for candidate in candidates {
+        match candidate {
+            Candidate::Positional { span, .. } => {
+                while next_positional < parameters.len() && bound_spans[next_positional].is_some() {
+                    next_positional += 1;
+                }
+                let index = next_positional;
+                if index == parameters.len() {
+                    return Err(BindingError {
+                        message: "received too many positional arguments".to_string(),
+                        primary: *span,
+                        secondary: Vec::new(),
+                        hint: "Remove the excess positional argument or bind it to a declared parameter."
+                            .to_string(),
+                    });
+                }
+                if !parameters[index].allows_positional {
+                    return Err(BindingError {
+                        message: format!(
+                            "parameter `{}` requires a named argument",
+                            parameters[index].name
+                        ),
+                        primary: *span,
+                        secondary: Vec::new(),
+                        hint: format!(
+                            "Use `{}:` to provide this option by name.",
+                            parameters[index].name
+                        ),
+                    });
+                }
+                bound_spans[index] = Some(*span);
+                next_positional += 1;
+            }
+            Candidate::Named {
+                name,
+                name_span,
+                span,
+                ..
+            } => {
+                let Some(&index) = named_parameters.get(name.as_str()) else {
+                    return Err(BindingError {
+                        message: format!("unknown named argument `{name}`"),
+                        primary: *name_span,
+                        secondary: Vec::new(),
+                        hint: "Use the parameter's declared name or an explicitly supported alias."
+                            .to_string(),
+                    });
+                };
+                let parameter = &parameters[index];
+                if !parameter.allows_named {
+                    return Err(BindingError {
+                        message: format!("named argument `{name}` is not supported"),
+                        primary: *name_span,
+                        secondary: Vec::new(),
+                        hint: "Pass this value positionally.".to_string(),
+                    });
+                }
+                if let Some(previous_span) = bound_spans[index] {
+                    return Err(BindingError {
+                        message: format!(
+                            "parameter `{}` collides with an already bound argument",
+                            parameter.name
+                        ),
+                        primary: *span,
+                        secondary: vec![previous_span],
+                        hint: "Remove the positional or named value that already fills this parameter."
+                            .to_string(),
+                    });
+                }
+                bound_spans[index] = Some(*span);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Build the structural binding decision for one ordered candidate sequence.
 pub(crate) fn plan<T>(
     parameters: &[ParameterMetadata<'_>],
@@ -742,6 +840,33 @@ mod tests {
             .expect_err("invalid binding");
             assert!(error.message.contains(expected), "{}: {error:?}", expected);
         }
+    }
+
+    #[test]
+    fn candidate_prefix_validation_defers_missing_parameters_but_rejects_current_shape() {
+        let parameters = [
+            ParameterMetadata::required("first"),
+            ParameterMetadata::required("second"),
+        ];
+
+        validate_candidate_prefix(&parameters, &[named("first", 1, 10)])
+            .expect("a valid prefix must not fail only because later parameters are missing");
+
+        let positional_after_named =
+            validate_candidate_prefix(&parameters, &[named("first", 1, 10), positional(2, 20)])
+                .expect_err("the current positional candidate is structurally invalid");
+        assert!(positional_after_named
+            .message
+            .contains("positional argument after named"));
+        assert_eq!(positional_after_named.primary, span(20, 21));
+        assert_eq!(positional_after_named.secondary, [span(10, 12)]);
+
+        let duplicate =
+            validate_candidate_prefix(&parameters, &[named("first", 1, 10), named("first", 2, 20)])
+                .expect_err("the current duplicate candidate is structurally invalid");
+        assert!(duplicate.message.contains("more than once"));
+        assert_eq!(duplicate.primary, span(20, 21));
+        assert_eq!(duplicate.secondary, [span(10, 12)]);
     }
 
     #[test]
