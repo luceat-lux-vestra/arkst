@@ -861,7 +861,10 @@ mod tests {
             component: IrComponent::InvocationFailure(failure),
         } = &result.ir.nodes[0]
         else {
-            panic!("expected invocation-failure component, got {:?}", result.ir.nodes[0]);
+            panic!(
+                "expected invocation-failure component, got {:?}",
+                result.ir.nodes[0]
+            );
         };
         assert_eq!(failure.message, result.diagnostics[0].message);
         assert_eq!(failure.source_echo, ".sum {1}\n    invalid");
@@ -900,7 +903,10 @@ mod tests {
             component: IrComponent::InvocationFailure(failure),
         } = &result.ir.nodes[0]
         else {
-            panic!("expected invocation-failure component, got {:?}", result.ir.nodes[0]);
+            panic!(
+                "expected invocation-failure component, got {:?}",
+                result.ir.nodes[0]
+            );
         };
         assert_eq!(failure.message, result.diagnostics[0].message);
         assert_eq!(
