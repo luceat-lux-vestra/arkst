@@ -8,7 +8,8 @@ use arkst_ir::{
     IrColor, IrComponent, IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent,
     IrContainerMargin, IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDocument,
     IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrFragmentBehavior,
-    IrFragmentComponent, IrHeadingKind, IrInline, IrKeybindingPart, IrLandscapeComponent,
+    IrFragmentComponent, IrHeadingKind, IrInline, IrInvocationFailureComponent, IrKeybindingPart,
+    IrLandscapeComponent,
     IrMainAxisAlignment, IrNode, IrPageCounterTarget, IrPageMarginPosition, IrSize, IrSizeUnit,
     IrSpeakerNoteComponent, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
     IrTableRow, IrTaskStatus, IrTextCase, IrTextDecoration, IrTextScript, IrTextSize, IrTextStyle,
@@ -374,7 +375,7 @@ impl LoweringContext {
                 return own
                     .saturating_add(self.count_fragment_transitions_in_nodes(&component.children));
             }
-            IrComponent::ExplicitError(_) => None,
+            IrComponent::ExplicitError(_) | IrComponent::InvocationFailure(_) => None,
         };
         children.map_or(0, |children| {
             self.count_fragment_transitions_in_nodes(children)
@@ -700,6 +701,7 @@ impl LoweringContext {
             IrComponent::SpeakerNote(note) => self.lower_speaker_note(note),
             IrComponent::Fragment(fragment) => self.lower_fragment(fragment),
             IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
+            IrComponent::InvocationFailure(failure) => self.lower_invocation_failure(failure),
         }
     }
 
@@ -731,6 +733,18 @@ impl LoweringContext {
         if trailing_newline {
             self.push('\n');
         }
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_invocation_failure(&mut self, component: &IrInvocationFailureComponent) {
+        let before = self.output.len();
+        self.push_str("#block[Error: ");
+        self.push_str(&escape_typst_text(&component.message));
+        self.push_str("\n#raw(\"");
+        self.push_str(&escape_typst_string(&component.source_echo));
+        self.push_str("\", block: true)]\n");
         if component.span.source_id != SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
         }
