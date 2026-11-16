@@ -900,10 +900,7 @@ mod tests {
             &source[failure.span.start..failure.span.end],
             failure.source_echo
         );
-        assert_eq!(
-            &source[failure.span.end..failure.span.end + 2],
-            "\r\n"
-        );
+        assert_eq!(&source[failure.span.end..failure.span.end + 2], "\r\n");
         assert_eq!(output_text(&result), "later");
     }
 
