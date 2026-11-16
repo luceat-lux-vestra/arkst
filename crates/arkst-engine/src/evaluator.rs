@@ -749,20 +749,24 @@ fn recoverable_invocation_failure_node(
 fn materialize_document_invocation_outcome(
     outcome: CallOutcome,
     span: SourceSpan,
+    recoverable_owner: bool,
     diagnostics_before: usize,
     diagnostics: &[Diagnostic],
     context: &EvaluationContext<'_>,
 ) -> Vec<IrNode> {
     match outcome {
         CallOutcome::Value(IrValue::Content(nodes)) => nodes,
-        CallOutcome::Failed => recoverable_invocation_failure_node(
+        CallOutcome::Failed if recoverable_owner => recoverable_invocation_failure_node(
             context,
             span,
             diagnostics.get(diagnostics_before..).unwrap_or_default(),
         )
         .into_iter()
         .collect(),
-        CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Unresolved => Vec::new(),
+        CallOutcome::Value(_)
+        | CallOutcome::NoValue
+        | CallOutcome::Failed
+        | CallOutcome::Unresolved => Vec::new(),
     }
 }
 
@@ -778,6 +782,7 @@ fn explicit_error_source_echo(context: &EvaluationContext<'_>, span: SourceSpan)
 fn component_contains_explicit_error(component: &IrComponent) -> bool {
     match component {
         IrComponent::ExplicitError(_) => true,
+        IrComponent::InvocationFailure(_) => false,
         IrComponent::Stacked(component) => {
             component.children.iter().any(node_contains_explicit_error)
         }
@@ -1465,7 +1470,7 @@ fn component_children(component: &IrComponent) -> Option<&[IrNode]> {
         IrComponent::Todo(component) => Some(&component.children),
         IrComponent::SpeakerNote(component) => Some(&component.children),
         IrComponent::Fragment(component) => Some(&component.children),
-        IrComponent::ExplicitError(_) => None,
+        IrComponent::ExplicitError(_) | IrComponent::InvocationFailure(_) => None,
     }
 }
 
@@ -4012,6 +4017,7 @@ impl Evaluator {
                         return Some(materialize_document_invocation_outcome(
                             outcome,
                             call_span,
+                            invocation.body.is_some(),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4044,6 +4050,7 @@ impl Evaluator {
                         Some(materialize_document_invocation_outcome(
                             outcome,
                             call.span,
+                            call.body.is_some(),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4108,6 +4115,7 @@ impl Evaluator {
                         return Some(materialize_document_invocation_outcome(
                             outcome,
                             span,
+                            invocation.body.is_some() && !invocation.chain.is_empty(),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4138,6 +4146,7 @@ impl Evaluator {
                         Some(materialize_document_invocation_outcome(
                             outcome,
                             chain.span,
+                            chain.body.is_some() && !chain.chain.is_empty(),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4278,6 +4287,7 @@ impl Evaluator {
                     out.extend(materialize_document_invocation_outcome(
                         outcome,
                         *span,
+                        body.is_some(),
                         diagnostics_before,
                         diagnostics,
                         context,
@@ -4305,6 +4315,7 @@ impl Evaluator {
                     out.extend(materialize_document_invocation_outcome(
                         outcome,
                         *span,
+                        body.is_some() && !chain.is_empty(),
                         diagnostics_before,
                         diagnostics,
                         context,
@@ -28826,6 +28837,11 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
             // the caller invocation spelling, so rebasing must never rewrite
             // source_echo.
             component.span = source_span;
+        }
+        IrComponent::InvocationFailure(_) => {
+            // Recovery content is materialized only at its final document
+            // output owner. Its span and source_echo are an inseparable exact
+            // authored provenance pair and must never be rebound.
         }
     }
 }
