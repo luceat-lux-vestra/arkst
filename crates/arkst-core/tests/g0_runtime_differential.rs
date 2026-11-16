@@ -1213,7 +1213,9 @@ fn g0_s01_positional_after_named_defers_to_earlier_nested_failure() {
     let diagnostic = &result.diagnostics[0];
     assert_eq!(diagnostic.code, "E3001");
     assert!(diagnostic.message.contains("numeric arguments"));
-    let primary = diagnostic.primary.expect("nested numeric failure provenance");
+    let primary = diagnostic
+        .primary
+        .expect("nested numeric failure provenance");
     assert_eq!(&source[primary.start..primary.end], "{true}");
     assert_eq!(paragraph_text(&result), "0");
 }
@@ -1241,7 +1243,9 @@ fn g0_s01_duplicate_named_defers_to_earlier_nested_failure() {
     let diagnostic = &result.diagnostics[0];
     assert_eq!(diagnostic.code, "E3001");
     assert!(diagnostic.message.contains("numeric arguments"));
-    let primary = diagnostic.primary.expect("nested numeric failure provenance");
+    let primary = diagnostic
+        .primary
+        .expect("nested numeric failure provenance");
     assert_eq!(&source[primary.start..primary.end], "{true}");
     assert_eq!(paragraph_text(&result), "0");
 }
