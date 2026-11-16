@@ -1331,13 +1331,17 @@ adds the missing NEW_EXECUTION evidence only. It compiles one source with:
 - a source-defined `overflow` callable that writes `state=mutated` and then
   recursively calls itself;
 - `max_materialized_elements=1024`, intentionally non-constraining;
-- `max_evaluation_depth=5`, chosen so the bounded failure occurs at the
-  recursive `.overflow` call rather than the preceding mutation call; and
+- `max_evaluation_depth=5`, for which the next attempted call at exhaustion
+  is the nested `.var {state} {mutated}` setter (source bytes 45..67), not the
+  following recursive `.overflow` call; and
 - post-failure `.state` plus `.sum {1} {2}` observations.
 
 The candidate requires exactly one `E3005` whose message identifies evaluator
-depth overflow and whose primary `SourceSpan` is the causal recursive
-`.overflow` call. It then requires output `root\n3`: `root` proves the
+depth overflow and whose primary `SourceSpan` precisely covers the attempted
+nested `.var {state} {mutated}` setter (bytes 45..67). The evaluator checks
+the active depth on call entry; the recursion is the cause, but the next call
+actually rejected by the guard is the setter. It then requires output
+`root\n3`: `root` proves the
 failed recursive invocation did not publish its caller-visible mutation, while
 `3` proves a later independent call can enter evaluation after failure and
 therefore the scoped active-depth guard was released.
@@ -1348,6 +1352,14 @@ Parser/source/asset/generated-output/timeout ceilings remain owned by their
 responsible stages. G2 must preserve scoped evaluator accounting and
 transaction ownership during runtime/session migration; G8 must requalify the
 integrated boundaries.
+
+The original S32 test at exact HEAD
+`5e55ed56999cae1392cdba6dd6c89f7324a72ecb` failed [CI #43808699078](https://github.com/luceat-lux-vestra/arkst/actions/runs/43808699078)
+on all three OSes: it incorrectly expected the *following* recursive call
+span 72..81, while the diagnostic consistently identified the first denied
+nested setter span 45..67. The same test also required a rustfmt line-wrap
+correction. This focused candidate corrects the expectation and formatting;
+it does not change the evaluator or mark execution qualified.
 
 **Classification candidate:**
 `CURRENT_TYPED_EVALUATOR_BOUNDS_MATERIALIZATION_FROZEN_DEPTH_OVERFLOW_ATOMICITY_NEW_EXECUTION_CANDIDATE_CI_PENDING_G2_G8`.

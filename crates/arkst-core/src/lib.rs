@@ -3941,9 +3941,11 @@ Yiddish"
             },
         );
 
-        let recursive_call = "    .overflow\n";
-        let recursion_start =
-            source.find(recursive_call).expect("recursive call source") + recursive_call.len() - ".overflow\n".len();
+        // Each recursive body enters the state setter before the next recursive
+        // call. At this budget, the guard rejects that attempted setter, so
+        // E3005 must retain its exact authored source span.
+        let nested_setter = ".var {state} {mutated}";
+        let exhausted_call_start = source.find(nested_setter).expect("nested setter source");
 
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3005");
@@ -3954,8 +3956,8 @@ Yiddish"
             result.diagnostics[0].primary,
             Some(arkst_source::SourceSpan::new(
                 source_id,
-                recursion_start,
-                recursion_start + ".overflow".len()
+                exhausted_call_start,
+                exhausted_call_start + nested_setter.len()
             ))
         );
         assert_eq!(output_text(&result), "root\n3");
