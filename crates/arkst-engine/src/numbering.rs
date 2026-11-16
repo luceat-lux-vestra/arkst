@@ -1,5 +1,5 @@
 use crate::builtins;
-use crate::value_conversion::InvocationValue;
+use crate::value_conversion::RuntimeValue;
 use arkst_ir::{
     IrDictionary, IrDocumentType, IrNumberingFormat, IrNumberingLayer, IrNumberingToken, IrValue,
 };
@@ -54,7 +54,7 @@ pub(crate) fn parse_numbering_format(text: &str) -> Result<IrNumberingFormat, St
 }
 
 fn format_from_value(value: &IrValue) -> Result<IrNumberingFormat, String> {
-    let text = builtins::scalar_string_conversion(&InvocationValue::static_value(value.clone()))
+    let text = builtins::scalar_string_conversion(&RuntimeValue::static_value(value.clone()))
         .map_err(|_| "numbering format must convert to String".to_string())?;
     parse_numbering_format(&text)
 }

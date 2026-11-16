@@ -59,7 +59,7 @@ use crate::invocation_binder::{
     self, BindingPlan, BodyPolicy, BoundSlot, Candidate, ParameterMetadata,
 };
 use crate::value_conversion::{
-    self, InvocationNamedArg, InvocationValue, RuntimeValue, ScalarTarget, ScalarValue,
+    self, RuntimeNamedArg, RuntimeValue, ScalarTarget, ScalarValue,
     ValueOrigin, ValueProvenance,
 };
 use crate::{ast_to_ir, builtins};
@@ -229,7 +229,7 @@ enum OwnedCallBody {
 struct ExtensionInvocation {
     target: FunctionTarget,
     parameters: LambdaParameters,
-    forwarded: Vec<Candidate<InvocationValue>>,
+    forwarded: Vec<Candidate<RuntimeValue>>,
     body: Option<OwnedCallBody>,
     raw_body: Option<IrRawBody>,
 }
@@ -502,7 +502,7 @@ struct FrontendCallInput<'a> {
     body: Option<&'a [FrontendBlock]>,
     source_id: SourceId,
     source_mode: Mode,
-    evaluated_previous: Option<(&'a InvocationValue, SourceSpan)>,
+    evaluated_previous: Option<(&'a RuntimeValue, SourceSpan)>,
 }
 
 struct FrontendStructuralCall {
@@ -547,7 +547,7 @@ enum ArgumentCandidate<'a> {
         source_order: usize,
     },
     Evaluated {
-        value: InvocationValue,
+        value: RuntimeValue,
         source_order: usize,
     },
 }
@@ -579,7 +579,7 @@ enum IterationBody<'a> {
 
 #[derive(Clone)]
 struct StackedArgument {
-    value: InvocationValue,
+    value: RuntimeValue,
     span: SourceSpan,
     parameter_span: Option<SourceSpan>,
 }
@@ -590,14 +590,14 @@ struct BoundStackedArguments {
 
 #[derive(Clone)]
 struct ContainerArgument {
-    value: InvocationValue,
+    value: RuntimeValue,
     span: SourceSpan,
     parameter_span: Option<SourceSpan>,
 }
 
 #[derive(Clone)]
 struct WhitespaceArgument {
-    value: InvocationValue,
+    value: RuntimeValue,
     span: SourceSpan,
     parameter_span: Option<SourceSpan>,
 }
@@ -1620,11 +1620,12 @@ fn callable_body_is_direct_source_markdown(body: &[IrNode]) -> bool {
     )
 }
 
-fn table_sort_order(value: &InvocationValue) -> Option<TableSortOrder> {
+fn table_sort_order(value: &RuntimeValue) -> Option<TableSortOrder> {
     if value.origin != ValueOrigin::Dynamic {
         return None;
     }
-    let name = match &value.value {
+    let semantic_value = value.semantic_value();
+    let name = match semantic_value.as_ref() {
         IrValue::String(name) | IrValue::Identifier(name) => name,
         _ => return None,
     };
@@ -5712,7 +5713,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
         ordered_args: Option<&[IrCallArgument]>,
-        implicit_argument: Option<InvocationValue>,
+        implicit_argument: Option<RuntimeValue>,
     ) -> CallOutcome {
         self.evaluate_call_value_with_input(
             name,
@@ -5774,7 +5775,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
         ordered_args: Option<&[IrCallArgument]>,
-        implicit_argument: Option<InvocationValue>,
+        implicit_argument: Option<RuntimeValue>,
         frontend: Option<FrontendCallInput<'_>>,
     ) -> CallOutcome {
         let _depth = match context.enter_evaluation_depth(*span, diagnostics) {
@@ -5821,7 +5822,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
         ordered_args: Option<&[IrCallArgument]>,
-        implicit_argument: Option<InvocationValue>,
+        implicit_argument: Option<RuntimeValue>,
         frontend: Option<FrontendCallInput<'_>>,
     ) -> CallOutcome {
         let source_defined_incremental_binding = context
@@ -6846,7 +6847,7 @@ impl Evaluator {
         &self,
         builtin: &builtins::BuiltinSpec,
         binding_plan: &BindingPlan,
-        candidates: Vec<Candidate<InvocationValue>>,
+        candidates: Vec<Candidate<RuntimeValue>>,
         body: Option<CallBody<'_>>,
         raw_body: Option<&IrRawBody>,
         span: SourceSpan,
@@ -6873,7 +6874,7 @@ impl Evaluator {
                         return CallOutcome::Failed;
                     };
                     Some(Candidate::Positional {
-                        value: InvocationValue::dynamic_value(IrValue::String(body_text)),
+                        value: RuntimeValue::dynamic_value(IrValue::String(body_text)),
                         // `IrRawBody::span` is local to its source. Binding
                         // diagnostics use the containing call span, matching
                         // the ordinary builtin invocation path.
@@ -6896,7 +6897,7 @@ impl Evaluator {
                         outcome => return outcome,
                     };
                     Some(Candidate::Positional {
-                        value: InvocationValue::static_value(body),
+                        value: RuntimeValue::static_value(body),
                         span: call_body_source_span(call_body, span),
                     })
                 } else {
@@ -6949,11 +6950,11 @@ impl Evaluator {
     fn convert_builtin_targets(
         &self,
         builtin: &builtins::BuiltinSpec,
-        mut bound: invocation_binder::BoundInvocation<InvocationValue>,
+        mut bound: invocation_binder::BoundInvocation<RuntimeValue>,
         call_span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-    ) -> Result<invocation_binder::BoundInvocation<InvocationValue>, CallOutcome> {
+    ) -> Result<invocation_binder::BoundInvocation<RuntimeValue>, CallOutcome> {
         if !matches!(
             builtin.kind,
             builtins::BuiltinKind::Plaintext | builtins::BuiltinKind::Text
@@ -6995,8 +6996,9 @@ impl Evaluator {
                     return Err(CallOutcome::Failed);
                 }
             };
-            value.value =
-                self.resolve_target_value(converted, *span, call_span, diagnostics, context)?;
+            value.replace_semantic_value(
+                self.resolve_target_value(converted, *span, call_span, diagnostics, context)?,
+            );
         }
         Ok(bound)
     }
@@ -7119,7 +7121,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         _first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -7170,7 +7172,7 @@ impl Evaluator {
                             ));
                             return CallOutcome::Failed;
                         };
-                        InvocationValue::dynamic_value(IrValue::String(text))
+                        RuntimeValue::dynamic_value(IrValue::String(text))
                     }
                     InvocationArgumentLocation::Positional(index) => {
                         let Some(source) = positional_args.get(index) else {
@@ -7191,7 +7193,7 @@ impl Evaluator {
                             }
                             CallOutcome::Failed => return CallOutcome::Failed,
                         };
-                        InvocationValue::dynamic_value(value)
+                        RuntimeValue::dynamic_value(value)
                     }
                     InvocationArgumentLocation::Named(index) => {
                         let Some(argument) = named_args.get(index) else {
@@ -7219,7 +7221,7 @@ impl Evaluator {
                             }
                             CallOutcome::Failed => return CallOutcome::Failed,
                         };
-                        InvocationValue::dynamic_value(value)
+                        RuntimeValue::dynamic_value(value)
                     }
                 }
             }};
@@ -7243,7 +7245,7 @@ impl Evaluator {
                 span: argument_span,
             }) => {
                 let value = evaluate_location!(*location);
-                if matches!(value.value, IrValue::None) {
+                if value.is_none() {
                     None
                 } else {
                     match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::String)
@@ -7308,11 +7310,11 @@ impl Evaluator {
                 let raw = raw_value!(*location);
                 let value = if let Some(raw) = raw.filter(|value| code_value_text(value).is_some())
                 {
-                    InvocationValue::dynamic_value(raw.clone())
+                    RuntimeValue::dynamic_value(raw.clone())
                 } else {
                     evaluate_location!(*location)
                 };
-                match parse_code_callouts(&value.value, *argument_span) {
+                match parse_code_callouts(value.semantic_value().as_ref(), *argument_span) {
                     Ok(callouts) => callouts,
                     Err(message) => {
                         diagnostics.push(chain_evaluation_error(message, *argument_span));
@@ -7329,7 +7331,7 @@ impl Evaluator {
                 span: argument_span,
             }) => {
                 let value = evaluate_location!(*location);
-                let Some(text) = code_value_text(&value.value) else {
+                let Some(text) = code_value_text(value.semantic_value().as_ref()) else {
                     diagnostics.push(chain_evaluation_error(
                         "`.code` `code` must resolve to evaluable text".to_string(),
                         *argument_span,
@@ -7370,7 +7372,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -7408,7 +7410,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
                 // Binding uses only the separate body's slot and provenance.
                 // Its Markdown nodes remain lazy until invocation validation passes.
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline center bodies are rejected above"),
@@ -7527,7 +7529,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -7565,7 +7567,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
                 // Binding uses only the separate body's slot and provenance.
                 // Its Markdown nodes remain lazy until invocation validation passes.
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline landscape bodies are rejected above"),
@@ -7665,7 +7667,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -7700,7 +7702,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
                 // The separate body stays lazy. Binding uses only its slot and
                 // provenance until every invocation-shape check has passed.
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline full-span bodies are rejected above"),
@@ -7819,7 +7821,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -7840,7 +7842,7 @@ impl Evaluator {
         let body_candidate = body.map(|body| Candidate::Positional {
             // Binding needs only the body slot and provenance here. The
             // indented source body remains lazy through shape conversion.
-            value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+            value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
             span: call_body_source_span(body, *span),
         });
         let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
@@ -7980,7 +7982,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -8155,7 +8157,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -8295,7 +8297,7 @@ impl Evaluator {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_text_collapse_inline_argument(
         &self,
-        value: &InvocationValue,
+        value: &RuntimeValue,
         argument_span: SourceSpan,
         parameter_name: &'static str,
         parameter_span: Option<SourceSpan>,
@@ -8361,7 +8363,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -8403,7 +8405,7 @@ impl Evaluator {
                     outcome => return outcome,
                 };
                 Some(Candidate::Positional {
-                    value: InvocationValue::static_value(value),
+                    value: RuntimeValue::static_value(value),
                     span: call_body_source_span(CallBody::Block(nodes), *span),
                 })
             }
@@ -8439,7 +8441,7 @@ impl Evaluator {
         }
 
         let title = match title_slot {
-            BoundSlot::Explicit { value, .. } if matches!(&value.value, IrValue::None) => None,
+            BoundSlot::Explicit { value, .. } if value.is_none() => None,
             BoundSlot::Explicit {
                 value,
                 span: argument_span,
@@ -8620,7 +8622,7 @@ impl Evaluator {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_box_title(
         &self,
-        value: &InvocationValue,
+        value: &RuntimeValue,
         argument_span: SourceSpan,
         parameter_span: Option<SourceSpan>,
         call_span: SourceSpan,
@@ -8681,7 +8683,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -8828,7 +8830,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
             diagnostics.push(speaker_note_argument_error(
@@ -8873,7 +8875,7 @@ impl Evaluator {
         let children = match body {
             Some(CallBody::Block(nodes)) => {
                 let body_candidate = Candidate::Positional {
-                    value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                    value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                     span: call_body_source_span(CallBody::Block(nodes), *span),
                 };
                 if let Err(error) = binding_plan.bind(&candidates, Some(&body_candidate), *span) {
@@ -8972,7 +8974,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
             diagnostics.push(fragment_argument_error(
@@ -9015,7 +9017,7 @@ impl Evaluator {
         };
         let body_candidate = match body {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline fragment bodies are rejected above"),
@@ -9156,7 +9158,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
         if binding_plan
-            .bind::<InvocationValue>(&[], None, *span)
+            .bind::<RuntimeValue>(&[], None, *span)
             .is_err()
         {
             return CallOutcome::Failed;
@@ -9322,7 +9324,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
         if binding_plan
-            .bind::<InvocationValue>(&[], None, *span)
+            .bind::<RuntimeValue>(&[], None, *span)
             .is_err()
         {
             return CallOutcome::Failed;
@@ -9693,7 +9695,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -9714,7 +9716,7 @@ impl Evaluator {
         let body_candidate = body.map(|body| Candidate::Positional {
             // Binding needs only the body slot and provenance here. The
             // indented source body remains lazy through alignment conversion.
-            value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+            value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
             span: call_body_source_span(body, *span),
         });
         let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
@@ -9891,7 +9893,7 @@ impl Evaluator {
             // Binding needs only the already-validated body slot and its
             // provenance here. The source body remains lazy until every
             // presentation argument has converted successfully.
-            value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+            value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
             span: call_body_source_span(body, *span),
         });
         let bound = match bind_container_arguments(
@@ -9907,7 +9909,7 @@ impl Evaluator {
         };
 
         let width = match bound.width.as_ref() {
-            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) if argument.value.is_none() => None,
             Some(argument) => match convert_container_size(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
@@ -9923,7 +9925,7 @@ impl Evaluator {
             None => None,
         };
         let height = match bound.height.as_ref() {
-            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) if argument.value.is_none() => None,
             Some(argument) => match convert_container_size(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
@@ -10014,7 +10016,7 @@ impl Evaluator {
             None => None,
         };
         let border_widths = match bound.border_widths.as_ref() {
-            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) if argument.value.is_none() => None,
             Some(argument) => match convert_container_border_widths(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
@@ -10030,7 +10032,7 @@ impl Evaluator {
             None => None,
         };
         let alignment = match bound.alignment.as_ref() {
-            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) if argument.value.is_none() => None,
             Some(argument) => match convert_align_alignment(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
@@ -10063,7 +10065,7 @@ impl Evaluator {
             None => None,
         };
         let margin = match bound.margin.as_ref() {
-            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) if argument.value.is_none() => None,
             Some(argument) => match convert_container_margin(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
@@ -10079,7 +10081,7 @@ impl Evaluator {
             None => None,
         };
         let padding = match bound.padding.as_ref() {
-            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) if argument.value.is_none() => None,
             Some(argument) => match convert_container_padding(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
@@ -10095,7 +10097,7 @@ impl Evaluator {
             None => None,
         };
         let radius = match bound.radius.as_ref() {
-            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) if argument.value.is_none() => None,
             Some(argument) => match convert_container_radius(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
@@ -10237,7 +10239,7 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
             None => match bound.body.as_ref() {
-                Some(argument) if matches!(&argument.value.value, IrValue::None) => Vec::new(),
+                Some(argument) if argument.value.is_none() => Vec::new(),
                 Some(argument) => {
                     let converted = match value_conversion::convert_target_with_origin(
                         &argument.value,
@@ -10358,7 +10360,7 @@ impl Evaluator {
         };
         let mut bound = bound;
         let default = |value| StackedArgument {
-            value: InvocationValue::static_value(value),
+            value: RuntimeValue::static_value(value),
             span: *span,
             parameter_span: None,
         };
@@ -10790,7 +10792,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -11081,7 +11083,7 @@ impl Evaluator {
 
     fn evaluate_page_format_builtin(
         &self,
-        bound: invocation_binder::BoundInvocation<InvocationValue>,
+        bound: invocation_binder::BoundInvocation<RuntimeValue>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -11113,7 +11115,7 @@ impl Evaluator {
             let parameter = parameter.name;
             match parameter.as_str() {
                 "side" => {
-                    if !matches!(&value.value, IrValue::None) {
+                    if !value.is_none() {
                         page_side = Some(match convert_pageformat_side(&value) {
                             Ok(value) => value,
                             Err(error) => {
@@ -11133,7 +11135,7 @@ impl Evaluator {
                     }
                 }
                 "pages" => {
-                    if !matches!(&value.value, IrValue::None) {
+                    if !value.is_none() {
                         page_range = Some(match convert_pageformat_pages(&value, candidate_span) {
                             Ok(value) => value,
                             Err(error) => {
@@ -11153,7 +11155,7 @@ impl Evaluator {
                     }
                 }
                 "alignment" => {
-                    if matches!(&value.value, IrValue::None) {
+                    if value.is_none() {
                         continue;
                     }
                     alignment = Some(
@@ -11176,7 +11178,7 @@ impl Evaluator {
                     );
                 }
                 "size" => {
-                    page_size_format = Some(if matches!(&value.value, IrValue::None) {
+                    page_size_format = Some(if value.is_none() {
                         None
                     } else {
                         Some(match convert_pageformat_size_format(&value) {
@@ -11216,7 +11218,7 @@ impl Evaluator {
                     });
                 }
                 "width" | "height" => {
-                    if matches!(&value.value, IrValue::None) {
+                    if value.is_none() {
                         continue;
                     }
                     let size = match convert_pageformat_size(&value) {
@@ -11242,7 +11244,7 @@ impl Evaluator {
                     }
                 }
                 "columns" => {
-                    columns = Some(if matches!(&value.value, IrValue::None) {
+                    columns = Some(if value.is_none() {
                         None
                     } else {
                         let value = match value_conversion::convert_integer_with_origin(&value) {
@@ -11265,7 +11267,7 @@ impl Evaluator {
                     });
                 }
                 "margin" => {
-                    margin = Some(if matches!(&value.value, IrValue::None) {
+                    margin = Some(if value.is_none() {
                         None
                     } else {
                         Some(match convert_pageformat_margin(&value) {
@@ -11287,7 +11289,7 @@ impl Evaluator {
                     });
                 }
                 "bordertop" | "borderright" | "borderbottom" | "borderleft" => {
-                    if matches!(&value.value, IrValue::None) {
+                    if value.is_none() {
                         continue;
                     }
                     let size = match convert_pageformat_size(&value) {
@@ -11315,7 +11317,7 @@ impl Evaluator {
                     }
                 }
                 "bordercolor" | "background" => {
-                    if matches!(&value.value, IrValue::None) {
+                    if value.is_none() {
                         continue;
                     }
                     let color = match convert_pageformat_color(&value) {
@@ -11440,7 +11442,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -11517,7 +11519,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -11558,9 +11560,9 @@ impl Evaluator {
             if implicit_argument.is_none() && named_args.is_empty() && positional_args.len() == 1 {
                 direct_variable_runtime_value(&positional_args[0], context)
                     .map(|value| value.with_origin(argument.origin))
-                    .unwrap_or_else(|| RuntimeValue::from(argument.clone()))
+                    .unwrap_or_else(|| argument.clone())
             } else {
-                RuntimeValue::from(argument.clone())
+                argument.clone()
             };
         let message = match builtins::logger_string_conversion(&runtime_argument) {
             Ok(message) => message,
@@ -11640,7 +11642,7 @@ impl Evaluator {
 
         if name == "libraries" {
             if binding_plan
-                .bind::<InvocationValue>(&[], None, *span)
+                .bind::<RuntimeValue>(&[], None, *span)
                 .is_err()
             {
                 return CallOutcome::Failed;
@@ -11803,7 +11805,7 @@ impl Evaluator {
             else {
                 continue;
             };
-            if matches!(value.value, IrValue::None) {
+            if value.is_none() {
                 continue;
             }
 
@@ -11921,7 +11923,7 @@ impl Evaluator {
             else {
                 continue;
             };
-            if matches!(value.value, IrValue::None) {
+            if value.is_none() {
                 continue;
             }
             let number =
@@ -12600,7 +12602,7 @@ impl Evaluator {
 
         // Upstream's nullable String parameter receives `.none` as null, and
         // the shared modify-or-echo helper therefore takes its getter path.
-        if matches!(&argument.value, IrValue::None) {
+        if argument.is_none() {
             return CallOutcome::Value(context.document_state_value("doclang"));
         }
 
@@ -12783,7 +12785,7 @@ impl Evaluator {
             let Some(BoundSlot::Explicit { value, span }) = bound.slots.into_iter().next() else {
                 return CallOutcome::Failed;
             };
-            (value.value, span, parameter_span)
+            (value.into_ir_value(), span, parameter_span)
         };
 
         let authors = match self.validate_document_authors(
@@ -13048,7 +13050,7 @@ impl Evaluator {
                 CaptionPositionArgumentLocation::Named(index) => {
                     let argument = &evaluated_named[index];
                     (
-                        InvocationValue::new(argument.value.clone(), argument.origin),
+                        argument.value.clone(),
                         argument.span,
                         Some(argument.name_span),
                     )
@@ -13061,16 +13063,17 @@ impl Evaluator {
                         return CallOutcome::Failed;
                     };
                     (
-                        InvocationValue::dynamic_value(IrValue::String(body_text)),
+                        RuntimeValue::dynamic_value(IrValue::String(body_text)),
                         *span,
                         None,
                     )
                 }
             };
 
-            let value = match argument.value {
-                IrValue::None => None,
-                _ => match value_conversion::convert_domain_with_origin(
+            let value = if argument.is_none() {
+                None
+            } else {
+                match value_conversion::convert_domain_with_origin(
                     &argument,
                     value_conversion::DomainTarget::ClosedEnum(
                         value_conversion::ClosedEnumTarget::CaptionPosition,
@@ -13103,7 +13106,7 @@ impl Evaluator {
                         ));
                         return CallOutcome::Failed;
                     }
-                },
+                }
             };
 
             match parameter {
@@ -13230,7 +13233,7 @@ impl Evaluator {
         };
         let parameters = bound.parameters;
         let mut slots = bound.slots.into_iter().enumerate();
-        let to_argument = |slot: Option<(usize, BoundSlot<InvocationValue>)>| match slot {
+        let to_argument = |slot: Option<(usize, BoundSlot<RuntimeValue>)>| match slot {
             Some((index, BoundSlot::Explicit { value, span })) => Some((
                 value,
                 span,
@@ -13243,12 +13246,12 @@ impl Evaluator {
         let color = to_argument(slots.next());
         let layout = to_argument(slots.next());
 
-        let normalize = |argument: InvocationValue| {
-            if matches!(argument.value, IrValue::None) {
+        let normalize = |argument: RuntimeValue| {
+            if argument.is_none() {
                 return Ok(None);
             }
             if !matches!(
-                argument.value,
+                argument.semantic_value().as_ref(),
                 IrValue::String(_)
                     | IrValue::Identifier(_)
                     | IrValue::Number(_)
@@ -14695,7 +14698,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
         let elements = match self.coerce_iterable(
-            InvocationValue::static_value(paths),
+            RuntimeValue::static_value(paths),
             &paths_span,
             diagnostics,
             context,
@@ -14989,8 +14992,8 @@ impl Evaluator {
     fn evaluate_collection_access(
         &self,
         name: &str,
-        positional_args: &[InvocationValue],
-        named_args: &[InvocationNamedArg],
+        positional_args: &[RuntimeValue],
+        named_args: &[RuntimeNamedArg],
         body: Option<CallBody<'_>>,
         raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
@@ -15112,9 +15115,9 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 }
                 if name == "prepended" {
-                    elements.insert(0, value.value);
+                    elements.insert(0, value.into_ir_value());
                 } else {
-                    elements.push(value.value);
+                    elements.push(value.into_ir_value());
                 }
                 CallOutcome::Value(IrValue::Collection(elements))
             }
@@ -15137,7 +15140,13 @@ impl Evaluator {
                     Ok(length) => length,
                     Err(outcome) => return outcome,
                 };
-                let index = match collection_index(&index, length, span, diagnostics) {
+                let index_semantic = index.semantic_value();
+                let index = match collection_index(
+                    index_semantic.as_ref(),
+                    length,
+                    span,
+                    diagnostics,
+                ) {
                     Ok(index) => index,
                     Err(outcome) => return outcome,
                 };
@@ -15218,7 +15227,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
         if binding_plan
-            .bind::<InvocationValue>(&[], None, *span)
+            .bind::<RuntimeValue>(&[], None, *span)
             .is_err()
         {
             return CallOutcome::Failed;
@@ -15256,8 +15265,8 @@ impl Evaluator {
     /// have been validated.
     fn evaluate_dictionary_lookup(
         &self,
-        positional_args: &[InvocationValue],
-        named_args: &[InvocationNamedArg],
+        positional_args: &[RuntimeValue],
+        named_args: &[RuntimeNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         binding_plan: &BindingPlan,
@@ -15265,7 +15274,10 @@ impl Evaluator {
         let candidates = invocation_candidates(
             positional_args
                 .iter()
-                .map(|argument| (argument.clone(), value_source_span(&argument.value, span)))
+                .map(|argument| (
+                    argument.clone(),
+                    value_source_span(argument.semantic_value().as_ref(), span),
+                ))
                 .collect(),
             named_args.to_vec(),
         );
@@ -15326,7 +15338,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
         let fallback = match slots.next() {
-            Some(BoundSlot::Explicit { value, .. }) => value.value,
+            Some(BoundSlot::Explicit { value, .. }) => value.into_ir_value(),
             Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => IrValue::None,
         };
         let dictionary_parameter_span =
@@ -16014,7 +16026,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -16054,7 +16066,7 @@ impl Evaluator {
         };
         let body_candidate = match body {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
@@ -16105,12 +16117,13 @@ impl Evaluator {
                 if diagnostics.len() != diagnostic_count {
                     return CallOutcome::Failed;
                 }
-                InvocationValue::static_value(IrValue::Content(evaluated))
+                RuntimeValue::static_value(IrValue::Content(evaluated))
             }
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
             None => bound_table_value,
         };
-        let IrValue::Content(nodes) = &table_value.value else {
+        let table_semantic = table_value.semantic_value();
+        let IrValue::Content(nodes) = table_semantic.as_ref() else {
             diagnostics.push(table_column_error(
                 name,
                 format!("`.{name}` requires evaluated Markdown table content"),
@@ -16258,7 +16271,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -16296,7 +16309,7 @@ impl Evaluator {
         };
         let body_candidate = match body {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
@@ -16359,12 +16372,13 @@ impl Evaluator {
                 if diagnostics.len() != diagnostic_count {
                     return CallOutcome::Failed;
                 }
-                InvocationValue::static_value(IrValue::Content(evaluated))
+                RuntimeValue::static_value(IrValue::Content(evaluated))
             }
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
             None => bound_table_value,
         };
-        let IrValue::Content(nodes) = &table_value.value else {
+        let table_semantic = table_value.semantic_value();
+        let IrValue::Content(nodes) = table_semantic.as_ref() else {
             diagnostics.push(table_sort_error(
                 "E3001",
                 "`.tablesort` requires evaluated Markdown table content".to_string(),
@@ -16508,7 +16522,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -16546,7 +16560,7 @@ impl Evaluator {
         };
         let body_candidate = match body {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
@@ -16585,7 +16599,7 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let IrValue::Callable(predicate) = predicate_value.value else {
+        let IrValue::Callable(predicate) = predicate_value.into_ir_value() else {
             diagnostics.push(table_filter_error(
                 "E3001",
                 "`.tablefilter` filter must be a one-argument callable".to_string(),
@@ -16616,12 +16630,13 @@ impl Evaluator {
                 if diagnostics.len() != diagnostic_count {
                     return CallOutcome::Failed;
                 }
-                InvocationValue::static_value(IrValue::Content(evaluated))
+                RuntimeValue::static_value(IrValue::Content(evaluated))
             }
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
             None => bound_table_value,
         };
-        let IrValue::Content(nodes) = &table_value.value else {
+        let table_semantic = table_value.semantic_value();
+        let IrValue::Content(nodes) = table_semantic.as_ref() else {
             diagnostics.push(table_filter_error(
                 "E3001",
                 "`.tablefilter` requires evaluated Markdown table content".to_string(),
@@ -16768,7 +16783,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -16806,7 +16821,7 @@ impl Evaluator {
         };
         let body_candidate = match body {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
@@ -16845,7 +16860,7 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let IrValue::Callable(compute) = compute_value.value else {
+        let IrValue::Callable(compute) = compute_value.into_ir_value() else {
             diagnostics.push(table_compute_error(
                 "E3001",
                 "`.tablecompute` compute must be a one-argument callable".to_string(),
@@ -16876,12 +16891,13 @@ impl Evaluator {
                 if diagnostics.len() != diagnostic_count {
                     return CallOutcome::Failed;
                 }
-                InvocationValue::static_value(IrValue::Content(evaluated))
+                RuntimeValue::static_value(IrValue::Content(evaluated))
             }
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
             None => bound_table_value,
         };
-        let IrValue::Content(nodes) = &table_value.value else {
+        let table_semantic = table_value.semantic_value();
+        let IrValue::Content(nodes) = table_semantic.as_ref() else {
             diagnostics.push(table_compute_error(
                 "E3001",
                 "`.tablecompute` requires evaluated Markdown table content".to_string(),
@@ -17102,7 +17118,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -17138,7 +17154,7 @@ impl Evaluator {
         };
         let body_candidate = match body {
             Some(CallBody::Block(nodes)) => Some(Candidate::Positional {
-                value: InvocationValue::static_value(IrValue::Content(Vec::new())),
+                value: RuntimeValue::static_value(IrValue::Content(Vec::new())),
                 span: call_body_source_span(CallBody::Block(nodes), *span),
             }),
             Some(CallBody::Inline(_)) => unreachable!("inline table rows were rejected above"),
@@ -17176,7 +17192,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 let body_span = call_body_source_span(CallBody::Block(nodes), *span);
                 match self.coerce_evidenced_iterable(
-                    InvocationValue::static_value(IrValue::Content(nodes.to_vec())),
+                    RuntimeValue::static_value(IrValue::Content(nodes.to_vec())),
                     &body_span,
                     diagnostics,
                     context,
@@ -17216,7 +17232,7 @@ impl Evaluator {
         for row in row_elements {
             let row_span = row.span;
             let cells = match self.coerce_evidenced_iterable(
-                InvocationValue::static_value(unwrap_source_backed_table_row(
+                RuntimeValue::static_value(unwrap_source_backed_table_row(
                     row.value.into_ir_value(),
                 )),
                 &row_span,
@@ -17421,7 +17437,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
+        implicit_argument: Option<&RuntimeValue>,
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
@@ -17440,7 +17456,7 @@ impl Evaluator {
             Err(outcome) => return outcome,
         };
         let body_candidate = body.map(|body| Candidate::Positional {
-            value: InvocationValue::static_value(IrValue::None),
+            value: RuntimeValue::static_value(IrValue::None),
             span: call_body_source_span(body, *span),
         });
         let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
@@ -17458,7 +17474,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
         let (separator, separator_span) = match slots.next() {
-            Some(BoundSlot::Explicit { value, span }) => (value.value, span),
+            Some(BoundSlot::Explicit { value, span }) => (value.into_ir_value(), span),
             Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => {
                 (IrValue::String(", ".to_string()), *span)
             }
@@ -17489,7 +17505,7 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
             None => match callback_slot {
-                Some(BoundSlot::Explicit { value, span }) => match value.value {
+                Some(BoundSlot::Explicit { value, span }) => match value.into_ir_value() {
                     IrValue::Callable(callable) => Some(callable),
                     value => {
                         diagnostics.push(iteration_error(
@@ -18269,7 +18285,7 @@ impl Evaluator {
 
     fn coerce_iterable(
         &self,
-        value: InvocationValue,
+        value: RuntimeValue,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -18382,7 +18398,7 @@ impl Evaluator {
             }
             IrValue::Range(range) => self.materialize_range(range, span, diagnostics),
             value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
-                let argument = InvocationValue::new(value, origin);
+                let argument = RuntimeValue::new(value, origin);
                 match value_conversion::convert_range_with_origin(&argument, *span) {
                     Ok(range) => self.materialize_range(range, span, diagnostics),
                     Err(_) => {
@@ -18447,7 +18463,7 @@ impl Evaluator {
             values
         } else {
             self.coerce_iterable(
-                InvocationValue::new(semantic_value, origin),
+                RuntimeValue::new(semantic_value, origin),
                 span,
                 diagnostics,
                 context,
@@ -18490,7 +18506,7 @@ impl Evaluator {
         match item.nodes.as_slice() {
             [IrNode::UnorderedList { .. }] | [IrNode::OrderedList { .. }] => self
                 .coerce_iterable(
-                    InvocationValue::static_value(IrValue::Content(item.nodes.clone())),
+                    RuntimeValue::static_value(IrValue::Content(item.nodes.clone())),
                     span,
                     diagnostics,
                     context,
@@ -18688,7 +18704,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-        implicit_argument: Option<InvocationValue>,
+        implicit_argument: Option<RuntimeValue>,
     ) -> CallOutcome {
         let bound = match &binding.parameters {
             LambdaParameters::Explicit(parameters) => {
@@ -18783,7 +18799,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-        implicit_argument: Option<InvocationValue>,
+        implicit_argument: Option<RuntimeValue>,
     ) -> CallOutcome {
         if binding.extension.is_some() {
             self.evaluate_extension_call(
@@ -18885,7 +18901,8 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         };
-        let target_name = match &target_value.value {
+        let target_semantic = target_value.semantic_value();
+        let target_name = match target_semantic.as_ref() {
             IrValue::Identifier(name) | IrValue::String(name)
                 if is_valid_normal_call_name(name) =>
             {
@@ -18951,7 +18968,7 @@ impl Evaluator {
         }
 
         let condition = match bound.slots.get(1) {
-            Some(BoundSlot::Explicit { value, span }) => match &value.value {
+            Some(BoundSlot::Explicit { value, span }) => match value.semantic_value().as_ref() {
                 IrValue::Callable(callable) => {
                     if let Some(parameters) = callable.parameters.as_deref() {
                         if let Some(parameter) = parameters
@@ -19130,7 +19147,7 @@ impl Evaluator {
     fn evaluate_extension_call_with_candidates(
         &self,
         binding: &FunctionBinding,
-        candidates: Vec<Candidate<InvocationValue>>,
+        candidates: Vec<Candidate<RuntimeValue>>,
         body: Option<&OwnedCallBody>,
         raw_body: Option<&IrRawBody>,
         span: SourceSpan,
@@ -19188,7 +19205,7 @@ impl Evaluator {
                     .slots
                     .iter()
                     .map(|slot| match slot {
-                        BoundSlot::Explicit { value, .. } => value.value.clone(),
+                        BoundSlot::Explicit { value, .. } => value.to_ir_value(),
                         BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None,
                     })
                     .collect::<Vec<_>>();
@@ -19202,7 +19219,7 @@ impl Evaluator {
                         ));
                         return CallOutcome::Failed;
                     };
-                    *last = body_value.value.clone();
+                    *last = body_value.to_ir_value();
                     if let Some(parameter) = binding.parameters.last_name() {
                         let body_span =
                             extension_body_candidate_span(extension.body_policy, body, span);
@@ -19220,13 +19237,13 @@ impl Evaluator {
                 let mut values = candidates
                     .iter()
                     .filter_map(|candidate| match candidate {
-                        Candidate::Positional { value, .. } => Some(value.value.clone()),
+                        Candidate::Positional { value, .. } => Some(value.to_ir_value()),
                         Candidate::Named { .. } => None,
                     })
                     .collect::<Vec<_>>();
                 let mut forwarded = candidates;
                 if let Some(body_value) = &body_value {
-                    values.push(body_value.value.clone());
+                    values.push(body_value.to_ir_value());
                     forwarded.push(Candidate::Positional {
                         value: body_value.clone(),
                         span: extension_body_candidate_span(extension.body_policy, body, span),
@@ -19263,7 +19280,7 @@ impl Evaluator {
                 CallOutcome::Failed => return CallOutcome::Failed,
                 CallOutcome::Unresolved => return CallOutcome::Unresolved,
             };
-            let condition = match resolve_boolean_value(&InvocationValue::static_value(
+            let condition = match resolve_boolean_value(&RuntimeValue::static_value(
                 condition_result.clone(),
             )) {
                 Ok(value) => value,
@@ -19414,7 +19431,7 @@ impl Evaluator {
     fn invoke_function_target(
         &self,
         target: &FunctionTarget,
-        candidates: Vec<Candidate<InvocationValue>>,
+        candidates: Vec<Candidate<RuntimeValue>>,
         body: Option<&OwnedCallBody>,
         raw_body: Option<&IrRawBody>,
         span: SourceSpan,
@@ -19478,7 +19495,7 @@ impl Evaluator {
     fn evaluate_user_function_with_candidates(
         &self,
         binding: &FunctionBinding,
-        candidates: Vec<Candidate<InvocationValue>>,
+        candidates: Vec<Candidate<RuntimeValue>>,
         body: Option<&CallBody<'_>>,
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
@@ -19500,7 +19517,7 @@ impl Evaluator {
                 let mut values = candidates
                     .into_iter()
                     .filter_map(|candidate| match candidate {
-                        Candidate::Positional { value, .. } => Some(value.value),
+                        Candidate::Positional { value, .. } => Some(value.into_ir_value()),
                         Candidate::Named { .. } => None,
                     })
                     .collect::<Vec<_>>();
@@ -19548,7 +19565,7 @@ impl Evaluator {
                     match self.evaluate_call_body_value_context(*body, &span, diagnostics, context)
                     {
                         CallOutcome::Value(value) => Ok(Candidate::Positional {
-                            value: InvocationValue::static_value(value),
+                            value: RuntimeValue::static_value(value),
                             span: call_body_source_span(*body, span),
                         }),
                         CallOutcome::NoValue => Err(CallOutcome::NoValue),
@@ -19592,7 +19609,7 @@ impl Evaluator {
                     .slots
                     .into_iter()
                     .map(|slot| match slot {
-                        BoundSlot::Explicit { value, .. } => value.value,
+                        BoundSlot::Explicit { value, .. } => value.into_ir_value(),
                         BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None,
                     })
                     .collect::<Vec<_>>();
@@ -19615,7 +19632,7 @@ impl Evaluator {
     fn evaluate_native_target_with_candidates(
         &self,
         name: &str,
-        candidates: Vec<Candidate<InvocationValue>>,
+        candidates: Vec<Candidate<RuntimeValue>>,
         body: Option<&CallBody<'_>>,
         raw_body: Option<&IrRawBody>,
         span: SourceSpan,
@@ -19762,7 +19779,7 @@ impl Evaluator {
                     CallOutcome::Unresolved => Err(CallOutcome::Unresolved),
                 }
             }
-            ArgumentCandidate::Evaluated { value, .. } => Ok(RuntimeValue::from(value.clone())),
+            ArgumentCandidate::Evaluated { value, .. } => Ok(value.clone()),
         }
     }
 
@@ -19939,7 +19956,7 @@ impl Evaluator {
     #[allow(clippy::too_many_arguments)]
     fn bind_implicit_callable_arguments(
         &self,
-        candidates: Vec<Candidate<InvocationValue>>,
+        candidates: Vec<Candidate<RuntimeValue>>,
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
@@ -19948,7 +19965,7 @@ impl Evaluator {
         let mut arguments = candidates
             .into_iter()
             .filter_map(|candidate| match candidate {
-                Candidate::Positional { value, .. } => Some(value.value),
+                Candidate::Positional { value, .. } => Some(value.into_ir_value()),
                 Candidate::Named { .. } => None,
             })
             .collect::<Vec<_>>();
@@ -20154,7 +20171,7 @@ impl Evaluator {
             // The previous result is always first. Explicit positional
             // arguments follow it in their original order; named arguments
             // remain in the named collection untouched.
-            let implicit_argument = InvocationValue::new(value.clone(), value_origin);
+            let implicit_argument = RuntimeValue::new(value.clone(), value_origin);
             positional_args.push(value);
             positional_args.extend(source_segment.positional_args.iter().cloned());
             let mut ordered_args = Vec::with_capacity(
@@ -20563,9 +20580,9 @@ impl Evaluator {
         let condition = if let IrValue::Identifier(name) = raw_condition {
             context
                 .get(name)
-                .map(|value| InvocationValue::dynamic_value(value.to_value()))
+                .map(|value| RuntimeValue::dynamic_value(value.to_value()))
                 .unwrap_or_else(|| {
-                    InvocationValue::new(
+                    RuntimeValue::new(
                         raw_condition.clone(),
                         first_origin.unwrap_or(ValueOrigin::Dynamic),
                     )
@@ -21332,7 +21349,7 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
-    ) -> Result<Vec<InvocationValue>, CallOutcome> {
+    ) -> Result<Vec<RuntimeValue>, CallOutcome> {
         let mut evaluated = Vec::new();
         if let Err(error) = evaluated.try_reserve(values.len()) {
             diagnostics.push(iteration_error(
@@ -21358,7 +21375,7 @@ impl Evaluator {
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             };
-            evaluated.push(InvocationValue::new(evaluated_value, origin));
+            evaluated.push(RuntimeValue::new(evaluated_value, origin));
         }
         Ok(evaluated)
     }
@@ -21376,8 +21393,8 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
-        implicit_argument: Option<&InvocationValue>,
-    ) -> Result<Vec<Candidate<InvocationValue>>, CallOutcome> {
+        implicit_argument: Option<&RuntimeValue>,
+    ) -> Result<Vec<Candidate<RuntimeValue>>, CallOutcome> {
         let Some(ordered) = ordered else {
             let evaluated_positional = self.evaluate_invocation_values(
                 positional,
@@ -21400,10 +21417,10 @@ impl Evaluator {
                 evaluated_named
                     .into_iter()
                     .map(|argument| Candidate::Named {
-                        name: argument.arg.name.clone(),
-                        name_span: argument.arg.name_span,
-                        span: argument.arg.span,
-                        value: InvocationValue::new(argument.arg.value, argument.origin),
+                        name: argument.name.clone(),
+                        name_span: argument.name_span,
+                        span: argument.span,
+                        value: argument.value,
                     }),
             );
             return Ok(candidates);
@@ -21473,7 +21490,7 @@ impl Evaluator {
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             };
-            let value = InvocationValue::new(value, origin);
+            let value = RuntimeValue::new(value, origin);
             candidates.push(match candidate {
                 CandidateKind::Positional(arg_span) => Candidate::Positional {
                     value,
@@ -21496,7 +21513,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-    ) -> Result<Vec<InvocationNamedArg>, CallOutcome> {
+    ) -> Result<Vec<RuntimeNamedArg>, CallOutcome> {
         let mut evaluated = Vec::new();
         if let Err(error) = evaluated.try_reserve(named.len()) {
             diagnostics.push(iteration_error(
@@ -21518,7 +21535,7 @@ impl Evaluator {
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             };
-            evaluated.push(InvocationNamedArg::new(
+            evaluated.push(RuntimeNamedArg::new(
                 IrNamedArg {
                     name: argument.name.clone(),
                     name_span: argument.name_span,
@@ -22261,7 +22278,7 @@ fn inspectable_stdlib_functions() -> Vec<String> {
 fn bind_whitespace_arguments(
     plan: &BindingPlan,
     positional: Vec<WhitespaceArgument>,
-    named: Vec<InvocationNamedArg>,
+    named: Vec<RuntimeNamedArg>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<BoundWhitespaceArguments, CallOutcome> {
@@ -22275,10 +22292,10 @@ fn bind_whitespace_arguments(
             }),
     );
     candidates.extend(named.into_iter().map(|argument| Candidate::Named {
-        name: argument.arg.name,
-        name_span: argument.arg.name_span,
-        value: InvocationValue::new(argument.arg.value, argument.origin),
-        span: argument.arg.span,
+        name: argument.name,
+        name_span: argument.name_span,
+        value: argument.value,
+        span: argument.span,
     }));
     let bound = plan.bind(&candidates, None, *span).map_err(|error| {
         diagnostics.push(binding_diagnostic(error));
@@ -22286,7 +22303,7 @@ fn bind_whitespace_arguments(
     })?;
     let mut slots = bound.slots.into_iter().enumerate();
     let parameters = bound.parameters;
-    let to_argument = |(index, slot): (usize, BoundSlot<InvocationValue>)| match slot {
+    let to_argument = |(index, slot): (usize, BoundSlot<RuntimeValue>)| match slot {
         BoundSlot::Explicit { value, span } => Some(WhitespaceArgument {
             value,
             span,
@@ -22432,7 +22449,7 @@ fn bounded_pageformat_shape(positional_size: bool, named_args: &[IrNamedArg]) ->
 }
 
 fn convert_pageformat_side(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrPageSide, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22446,7 +22463,7 @@ fn convert_pageformat_side(
 }
 
 fn convert_pageformat_pages(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
     span: SourceSpan,
 ) -> Result<IrPageRange, value_conversion::ConversionError> {
     let range = value_conversion::convert_range_with_origin(argument, span)?;
@@ -22460,7 +22477,7 @@ fn convert_pageformat_pages(
 }
 
 fn convert_pageformat_size_format(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrPageSizeFormat, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22476,7 +22493,7 @@ fn convert_pageformat_size_format(
 }
 
 fn convert_pageformat_orientation(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrPageOrientation, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22492,7 +22509,7 @@ fn convert_pageformat_orientation(
 }
 
 fn convert_pageformat_size(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrSize, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22506,7 +22523,7 @@ fn convert_pageformat_size(
 }
 
 fn convert_pageformat_margin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrPageMargins, value_conversion::ConversionError> {
     let [top, right, bottom, left] = convert_sizes(argument)?;
     Ok(IrPageMargins {
@@ -22518,7 +22535,7 @@ fn convert_pageformat_margin(
 }
 
 fn convert_sizes(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<[IrSize; 4], value_conversion::ConversionError> {
     if let Ok(size) = convert_pageformat_size(argument) {
         return Ok([size.clone(), size.clone(), size.clone(), size]);
@@ -22528,11 +22545,12 @@ fn convert_sizes(
     // reaches value evaluation as one plain content paragraph rather than a
     // scalar String. Preserve that typed boundary instead of widening generic
     // String conversion: only a paragraph made of Text/Whitespace is accepted.
-    let raw = match (&argument.value, argument.origin) {
+    let semantic_value = argument.semantic_value();
+    let raw = match (semantic_value.as_ref(), argument.origin) {
         (IrValue::String(value) | IrValue::Identifier(value), ValueOrigin::Dynamic) => {
             value.clone()
         }
-        (IrValue::Content(_), _) => sizes_plain_text(&argument.value).ok_or(
+        (IrValue::Content(_), _) => sizes_plain_text(semantic_value.as_ref()).ok_or(
             value_conversion::ConversionError::UnsupportedValue {
                 target: value_conversion::ConversionTarget::Size,
             },
@@ -22545,7 +22563,7 @@ fn convert_sizes(
     };
     let parts = raw.split_whitespace().collect::<Vec<_>>();
     let parse = |value: &str| {
-        convert_pageformat_size(&InvocationValue::dynamic_value(IrValue::String(
+        convert_pageformat_size(&RuntimeValue::dynamic_value(IrValue::String(
             value.to_string(),
         )))
     };
@@ -22589,7 +22607,7 @@ fn sizes_plain_text(value: &IrValue) -> Option<String> {
 }
 
 fn convert_pageformat_color(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrColor, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22603,9 +22621,9 @@ fn convert_pageformat_color(
 }
 
 fn convert_box_padding(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrSize>, value_conversion::ConversionError> {
-    if matches!(&argument.value, IrValue::None) {
+    if argument.is_none() {
         return Ok(None);
     }
     match value_conversion::convert_domain_with_origin(
@@ -22620,9 +22638,9 @@ fn convert_box_padding(
 }
 
 fn convert_optional_color(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrColor>, value_conversion::ConversionError> {
-    if matches!(&argument.value, IrValue::None) {
+    if argument.is_none() {
         return Ok(None);
     }
     value_conversion::convert_color_with_origin(argument).map(Some)
@@ -22636,9 +22654,9 @@ fn zero_pageformat_size() -> IrSize {
 }
 
 fn convert_whitespace_size(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrSize>, value_conversion::ConversionError> {
-    if matches!(&argument.value, IrValue::None) {
+    if argument.is_none() {
         return Ok(None);
     }
     match value_conversion::convert_domain_with_origin(
@@ -22662,8 +22680,8 @@ fn zero_whitespace_size() -> IrSize {
 fn bind_container_arguments(
     plan: &BindingPlan,
     positional: Vec<ContainerArgument>,
-    named: Vec<InvocationNamedArg>,
-    body: Option<&Candidate<InvocationValue>>,
+    named: Vec<RuntimeNamedArg>,
+    body: Option<&Candidate<RuntimeValue>>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<BoundContainerArguments, CallOutcome> {
@@ -22695,7 +22713,7 @@ fn bind_container_arguments(
     })?;
     let mut slots = bound.slots.into_iter().enumerate();
     let parameters = bound.parameters;
-    let take = |slot: Option<(usize, BoundSlot<InvocationValue>)>| match slot {
+    let take = |slot: Option<(usize, BoundSlot<RuntimeValue>)>| match slot {
         Some((index, BoundSlot::Explicit { value, span })) => Some(ContainerArgument {
             value,
             span,
@@ -22750,7 +22768,7 @@ fn bind_container_arguments(
 }
 
 fn convert_container_margin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrContainerMargin, value_conversion::ConversionError> {
     let [top, right, bottom, left] = convert_sizes(argument)?;
     Ok(IrContainerMargin {
@@ -22762,7 +22780,7 @@ fn convert_container_margin(
 }
 
 fn convert_container_padding(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrContainerPadding, value_conversion::ConversionError> {
     let [top, right, bottom, left] = convert_sizes(argument)?;
     Ok(IrContainerPadding {
@@ -22774,7 +22792,7 @@ fn convert_container_padding(
 }
 
 fn convert_container_border_widths(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrContainerBorderWidths, value_conversion::ConversionError> {
     let [top, right, bottom, left] = convert_sizes(argument)?;
     Ok(IrContainerBorderWidths {
@@ -22786,7 +22804,7 @@ fn convert_container_border_widths(
 }
 
 fn convert_container_radius(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrContainerRadius, value_conversion::ConversionError> {
     let [top_left, top_right, bottom_right, bottom_left] = convert_sizes(argument)?;
     Ok(IrContainerRadius {
@@ -22798,9 +22816,9 @@ fn convert_container_radius(
 }
 
 fn convert_container_size(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrSize, value_conversion::ConversionError> {
-    if matches!(&argument.value, IrValue::None) {
+    if argument.is_none() {
         return Err(value_conversion::ConversionError::UnsupportedValue {
             target: value_conversion::ConversionTarget::Size,
         });
@@ -22817,7 +22835,7 @@ fn convert_container_size(
 }
 
 fn convert_container_boolean(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<bool, value_conversion::ConversionError> {
     match value_conversion::convert_scalar_with_origin(argument, ScalarTarget::Boolean)? {
         ScalarValue::Boolean(value) => Ok(value),
@@ -22863,7 +22881,7 @@ fn container_argument_error_at(message: String, span: SourceSpan) -> Diagnostic 
 }
 
 fn convert_align_alignment(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrContainerAlignment, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22887,7 +22905,7 @@ fn bind_stacked_arguments(
     plan: &BindingPlan,
     name: &str,
     positional: Vec<StackedArgument>,
-    named: Vec<InvocationNamedArg>,
+    named: Vec<RuntimeNamedArg>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<BoundStackedArguments, CallOutcome> {
@@ -22937,7 +22955,7 @@ fn bind_stacked_arguments(
 }
 
 fn convert_stacked_main_axis(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrMainAxisAlignment, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22960,7 +22978,7 @@ fn convert_stacked_main_axis(
 }
 
 fn convert_stacked_cross_axis(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrCrossAxisAlignment, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22983,7 +23001,7 @@ fn convert_stacked_cross_axis(
 }
 
 fn convert_stacked_size(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrSize, value_conversion::ConversionError> {
     match value_conversion::convert_domain_with_origin(
         argument,
@@ -22997,9 +23015,9 @@ fn convert_stacked_size(
 }
 
 fn convert_optional_stacked_size(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrSize>, value_conversion::ConversionError> {
-    if matches!(argument.value, IrValue::None) {
+    if argument.is_none() {
         Ok(None)
     } else {
         convert_stacked_size(argument).map(Some)
@@ -23178,7 +23196,7 @@ fn bounded_document_author_string(
             target: value_conversion::ConversionTarget::String,
         });
     }
-    builtins::scalar_string_conversion(&InvocationValue::static_value(value.clone()))
+    builtins::scalar_string_conversion(&RuntimeValue::static_value(value.clone()))
 }
 
 /// Applies only the scalar-to-string families already evidenced by the
@@ -23195,7 +23213,7 @@ fn bounded_document_keyword_string(
             target: value_conversion::ConversionTarget::String,
         });
     }
-    builtins::scalar_string_conversion(&InvocationValue::static_value(value.clone()))
+    builtins::scalar_string_conversion(&RuntimeValue::static_value(value.clone()))
 }
 
 fn plain_dictionary_key(content: &[IrInline]) -> Option<String> {
@@ -24251,17 +24269,20 @@ fn optionality_operands(
 
 fn collection_access_operand(
     name: &str,
-    positional_args: &[InvocationValue],
-    named_args: &[InvocationNamedArg],
-    body: Option<&Candidate<InvocationValue>>,
+    positional_args: &[RuntimeValue],
+    named_args: &[RuntimeNamedArg],
+    body: Option<&Candidate<RuntimeValue>>,
     binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<InvocationValue, CallOutcome> {
+) -> Result<RuntimeValue, CallOutcome> {
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| (argument.clone(), value_source_span(&argument.value, span)))
+            .map(|argument| (
+                    argument.clone(),
+                    value_source_span(argument.semantic_value().as_ref(), span),
+                ))
             .collect(),
         named_args.to_vec(),
     );
@@ -24300,16 +24321,19 @@ fn collection_access_operand(
 
 fn collection_affix_operands(
     name: &str,
-    positional_args: &[InvocationValue],
-    named_args: &[InvocationNamedArg],
+    positional_args: &[RuntimeValue],
+    named_args: &[RuntimeNamedArg],
     binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(InvocationValue, InvocationValue), CallOutcome> {
+) -> Result<(RuntimeValue, RuntimeValue), CallOutcome> {
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| (argument.clone(), value_source_span(&argument.value, span)))
+            .map(|argument| (
+                    argument.clone(),
+                    value_source_span(argument.semantic_value().as_ref(), span),
+                ))
             .collect(),
         named_args.to_vec(),
     );
@@ -24411,16 +24435,19 @@ fn range_arguments(
 }
 
 fn getat_operands(
-    positional_args: &[InvocationValue],
-    named_args: &[InvocationNamedArg],
+    positional_args: &[RuntimeValue],
+    named_args: &[RuntimeNamedArg],
     binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(InvocationValue, InvocationValue, IrValue), CallOutcome> {
+) -> Result<(RuntimeValue, RuntimeValue, IrValue), CallOutcome> {
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| (argument.clone(), value_source_span(&argument.value, span)))
+            .map(|argument| (
+                    argument.clone(),
+                    value_source_span(argument.semantic_value().as_ref(), span),
+                ))
             .collect(),
         named_args.to_vec(),
     );
@@ -24474,7 +24501,7 @@ fn getat_operands(
         return Err(CallOutcome::Failed);
     };
     let fallback = match slots.next() {
-        Some(BoundSlot::Explicit { value, .. }) => value.value,
+        Some(BoundSlot::Explicit { value, .. }) => value.into_ir_value(),
         Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => IrValue::None,
     };
     Ok((collection, index, fallback))
@@ -24866,7 +24893,7 @@ fn repeat_count(value: &IrValue) -> Result<i32, String> {
 /// boundary. The explicit comparisons avoid relying on Rust's float-to-int
 /// cast behavior as language semantics.
 fn number_to_range_endpoint(
-    value: &InvocationValue,
+    value: &RuntimeValue,
 ) -> Result<i32, value_conversion::ConversionError> {
     let number = match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Number)? {
         ScalarValue::Number(number) => number,
@@ -26243,7 +26270,7 @@ fn argument_candidates<'a>(
     fallback_span: SourceSpan,
     context: &EvaluationContext<'_>,
     first_origin: Option<ValueOrigin>,
-    implicit_argument: Option<&InvocationValue>,
+    implicit_argument: Option<&RuntimeValue>,
 ) -> Result<Vec<Candidate<ArgumentCandidate<'a>>>, CallOutcome> {
     if let Some(ordered) = ordered {
         let mut candidates = Vec::with_capacity(ordered.len());
@@ -26467,9 +26494,9 @@ fn call_body_source_span(body: CallBody<'_>, fallback: SourceSpan) -> SourceSpan
 }
 
 fn invocation_candidates(
-    positional: Vec<(InvocationValue, SourceSpan)>,
-    named: Vec<InvocationNamedArg>,
-) -> Vec<Candidate<InvocationValue>> {
+    positional: Vec<(RuntimeValue, SourceSpan)>,
+    named: Vec<RuntimeNamedArg>,
+) -> Vec<Candidate<RuntimeValue>> {
     let mut candidates = Vec::with_capacity(positional.len() + named.len());
     candidates.extend(
         positional
@@ -26477,10 +26504,10 @@ fn invocation_candidates(
             .map(|(value, span)| Candidate::Positional { value, span }),
     );
     candidates.extend(named.into_iter().map(|argument| Candidate::Named {
-        name: argument.arg.name,
-        name_span: argument.arg.name_span,
-        value: InvocationValue::new(argument.arg.value, argument.origin),
-        span: argument.arg.span,
+        name: argument.name,
+        name_span: argument.name_span,
+        value: argument.value,
+        span: argument.span,
     }));
     candidates
 }
@@ -26731,8 +26758,8 @@ fn split_extension_target(
 }
 
 fn forwarded_extension_candidates(
-    bound: &invocation_binder::BoundInvocation<InvocationValue>,
-) -> Vec<Candidate<InvocationValue>> {
+    bound: &invocation_binder::BoundInvocation<RuntimeValue>,
+) -> Vec<Candidate<RuntimeValue>> {
     bound
         .slots
         .iter()
@@ -26750,10 +26777,10 @@ fn forwarded_extension_candidates(
 }
 
 fn merge_extension_candidates(
-    outer: &[Candidate<InvocationValue>],
-    overrides: &[Candidate<InvocationValue>],
+    outer: &[Candidate<RuntimeValue>],
+    overrides: &[Candidate<RuntimeValue>],
     parameters: &LambdaParameters,
-) -> Vec<Candidate<InvocationValue>> {
+) -> Vec<Candidate<RuntimeValue>> {
     if matches!(parameters, LambdaParameters::Implicit) {
         return outer
             .iter()
@@ -26761,7 +26788,7 @@ fn merge_extension_candidates(
             .chain(overrides.iter().cloned())
             .collect();
     }
-    let mut merged = BTreeMap::<String, Candidate<InvocationValue>>::new();
+    let mut merged = BTreeMap::<String, Candidate<RuntimeValue>>::new();
     for candidate in outer.iter().chain(overrides) {
         let name = match candidate {
             Candidate::Named { name, .. } => name.clone(),
@@ -26797,7 +26824,7 @@ fn extension_body_value(
     span: SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
     context: &mut EvaluationContext<'_>,
-) -> Result<Option<InvocationValue>, CallOutcome> {
+) -> Result<Option<RuntimeValue>, CallOutcome> {
     let Some(body) = body else {
         return Ok(None);
     };
@@ -26811,7 +26838,7 @@ fn extension_body_value(
                 diagnostics,
                 context,
             ) {
-                CallOutcome::Value(value) => Ok(Some(InvocationValue::static_value(value))),
+                CallOutcome::Value(value) => Ok(Some(RuntimeValue::static_value(value))),
                 CallOutcome::NoValue => Err(CallOutcome::NoValue),
                 CallOutcome::Failed => Err(CallOutcome::Failed),
                 CallOutcome::Unresolved => Err(CallOutcome::Unresolved),
@@ -26832,7 +26859,7 @@ fn extension_body_value(
                 ));
                 return Err(CallOutcome::Failed);
             };
-            Ok(Some(InvocationValue::dynamic_value(IrValue::String(text))))
+            Ok(Some(RuntimeValue::dynamic_value(IrValue::String(text))))
         }
     }
 }
@@ -26875,11 +26902,11 @@ fn raw_invocation_locations(
 
 fn bind_evaluated_arguments(
     plan: &BindingPlan,
-    positional: Vec<(InvocationValue, SourceSpan)>,
-    named: Vec<InvocationNamedArg>,
-    body: Option<&Candidate<InvocationValue>>,
+    positional: Vec<(RuntimeValue, SourceSpan)>,
+    named: Vec<RuntimeNamedArg>,
+    body: Option<&Candidate<RuntimeValue>>,
     call_span: SourceSpan,
-) -> Result<invocation_binder::BoundInvocation<InvocationValue>, invocation_binder::BindingError> {
+) -> Result<invocation_binder::BoundInvocation<RuntimeValue>, invocation_binder::BindingError> {
     let candidates = invocation_candidates(positional, named);
     plan.bind(&candidates, body, call_span)
 }
@@ -26889,7 +26916,7 @@ fn source_backed_body_candidate(
     raw_body: Option<&IrRawBody>,
     target: &str,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<Option<Candidate<InvocationValue>>, CallOutcome> {
+) -> Result<Option<Candidate<RuntimeValue>>, CallOutcome> {
     match (body_span, raw_body) {
         (None, _) => Ok(None),
         (Some(span), Some(raw_body)) => {
@@ -26902,7 +26929,7 @@ fn source_backed_body_candidate(
                 return Err(CallOutcome::Failed);
             };
             Ok(Some(Candidate::Positional {
-                value: InvocationValue::dynamic_value(IrValue::String(body_text)),
+                value: RuntimeValue::dynamic_value(IrValue::String(body_text)),
                 // `raw_body.span` is source-local. The containing call span
                 // remains the evaluator-side diagnostic provenance.
                 span,
@@ -26995,7 +27022,7 @@ fn validate_localization_dictionary(
                     return Err(());
                 }
             };
-            let value = match builtins::scalar_string_conversion(&InvocationValue::static_value(
+            let value = match builtins::scalar_string_conversion(&RuntimeValue::static_value(
                 entry_pair.second.as_ref().clone(),
             )) {
                 Ok(value) => value,
@@ -27057,7 +27084,7 @@ enum SlidesConfigurationConversion<T> {
 }
 
 fn convert_nullable_slides_boolean(
-    slot: Option<BoundSlot<InvocationValue>>,
+    slot: Option<BoundSlot<RuntimeValue>>,
     parameter_name: &str,
     parameter_span: Option<SourceSpan>,
     call_span: SourceSpan,
@@ -27069,7 +27096,7 @@ fn convert_nullable_slides_boolean(
     else {
         return SlidesConfigurationConversion::Value(None);
     };
-    if matches!(value.value, IrValue::None) {
+    if value.is_none() {
         return SlidesConfigurationConversion::Value(None);
     }
     match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Boolean) {
@@ -27094,7 +27121,7 @@ fn convert_nullable_slides_boolean(
 }
 
 fn convert_nullable_slide_transition_style(
-    slot: Option<BoundSlot<InvocationValue>>,
+    slot: Option<BoundSlot<RuntimeValue>>,
     parameter_span: Option<SourceSpan>,
     call_span: SourceSpan,
 ) -> SlidesConfigurationConversion<Option<IrSlideTransitionStyle>> {
@@ -27105,7 +27132,7 @@ fn convert_nullable_slide_transition_style(
     else {
         return SlidesConfigurationConversion::Value(None);
     };
-    if matches!(value.value, IrValue::None) {
+    if value.is_none() {
         return SlidesConfigurationConversion::Value(None);
     }
     match value_conversion::convert_domain_with_origin(
@@ -27135,7 +27162,7 @@ fn convert_nullable_slide_transition_style(
 }
 
 fn convert_slide_transition_speed(
-    slot: Option<BoundSlot<InvocationValue>>,
+    slot: Option<BoundSlot<RuntimeValue>>,
     parameter_span: Option<SourceSpan>,
     call_span: SourceSpan,
 ) -> SlidesConfigurationConversion<IrSlideTransitionSpeed> {
@@ -28018,7 +28045,7 @@ fn whitespace_conversion_error(
 
 /// Resolves a value to a boolean, handling variable references.
 fn resolve_boolean_value(
-    value: &InvocationValue,
+    value: &RuntimeValue,
 ) -> Result<bool, value_conversion::ConversionError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Boolean) {
         Ok(ScalarValue::Boolean(value)) => Ok(value),
@@ -29843,7 +29870,7 @@ mod tests {
 
     #[test]
     fn phase3h_evaluated_predecessor_candidate_keeps_origin_and_slot_zero() {
-        let previous = InvocationValue::dynamic_value(IrValue::Number(7.0));
+        let previous = RuntimeValue::dynamic_value(IrValue::Number(7.0));
         let predecessor_span = SourceSpan::new(SourceId(22), 13, 19);
         let candidates = frontend_argument_candidates(FrontendCallInput {
             arguments: &[],
@@ -29865,7 +29892,7 @@ mod tests {
         };
         assert_eq!(*source_order, 0);
         assert_eq!(*span, predecessor_span);
-        assert_eq!(value.value, IrValue::Number(7.0));
+        assert_eq!(value.to_ir_value(), IrValue::Number(7.0));
         assert_eq!(value.origin, ValueOrigin::Dynamic);
     }
 
@@ -30227,7 +30254,7 @@ mod tests {
 
     #[test]
     fn phase3i_previous_and_flat_authored_candidates_keep_order_origin_and_spans() {
-        let previous = InvocationValue::dynamic_value(IrValue::Number(7.0));
+        let previous = RuntimeValue::dynamic_value(IrValue::Number(7.0));
         let predecessor_span = SourceSpan::new(SourceId(25), 13, 19);
         let authored_span = SourceSpan::new(SourceId(25), 28, 34);
         let arguments = [FrontendCallArgument::Positional {
@@ -30255,7 +30282,7 @@ mod tests {
         };
         assert_eq!(*first_order, 0);
         assert_eq!(*first_span, predecessor_span);
-        assert_eq!(first.value, IrValue::Number(7.0));
+        assert_eq!(first.to_ir_value(), IrValue::Number(7.0));
         assert_eq!(first.origin, ValueOrigin::Dynamic);
 
         let Candidate::Positional {
@@ -32479,16 +32506,16 @@ mod tests {
             (f64::from(i32::MAX), i32::MAX),
         ] {
             assert_eq!(
-                number_to_range_endpoint(&InvocationValue::static_value(IrValue::Number(number))),
+                number_to_range_endpoint(&RuntimeValue::static_value(IrValue::Number(number))),
                 Ok(expected)
             );
         }
         assert!(
-            number_to_range_endpoint(&InvocationValue::static_value(IrValue::Boolean(true)))
+            number_to_range_endpoint(&RuntimeValue::static_value(IrValue::Boolean(true)))
                 .is_err()
         );
         assert_eq!(
-            number_to_range_endpoint(&InvocationValue::dynamic_value(IrValue::String(
+            number_to_range_endpoint(&RuntimeValue::dynamic_value(IrValue::String(
                 "3".to_string()
             ))),
             Ok(3)
@@ -32527,7 +32554,7 @@ mod tests {
         ] {
             let mut diagnostics = Vec::new();
             let Ok(elements) = evaluator.coerce_iterable(
-                InvocationValue::static_value(IrValue::Range(range)),
+                RuntimeValue::static_value(IrValue::Range(range)),
                 &span(0, 10),
                 &mut diagnostics,
                 &mut context,
@@ -32563,7 +32590,7 @@ mod tests {
         ] {
             let mut diagnostics = Vec::new();
             let Ok(elements) = evaluator.coerce_iterable(
-                InvocationValue::static_value(IrValue::Range(range)),
+                RuntimeValue::static_value(IrValue::Range(range)),
                 &span(0, 10),
                 &mut diagnostics,
                 &mut context,
@@ -32576,7 +32603,7 @@ mod tests {
 
         let mut diagnostics = Vec::new();
         let result = evaluator.coerce_iterable(
-            InvocationValue::static_value(IrValue::Range(IrRange {
+            RuntimeValue::static_value(IrValue::Range(IrRange {
                 start: Some(3),
                 end: None,
                 span: span(10, 13),
@@ -32601,7 +32628,7 @@ mod tests {
         let mut diagnostics = Vec::new();
         let at_limit = evaluator
             .coerce_iterable(
-                InvocationValue::static_value(IrValue::Range(IrRange {
+                RuntimeValue::static_value(IrValue::Range(IrRange {
                     start: Some(1),
                     end: Some(3),
                     span: span(10, 15),
@@ -32616,7 +32643,7 @@ mod tests {
 
         let repeated_independent = evaluator
             .coerce_iterable(
-                InvocationValue::static_value(IrValue::Range(IrRange {
+                RuntimeValue::static_value(IrValue::Range(IrRange {
                     start: Some(10),
                     end: Some(12),
                     span: span(30, 35),
@@ -32631,7 +32658,7 @@ mod tests {
 
         let mut diagnostics = Vec::new();
         let over_limit = evaluator.coerce_iterable(
-            InvocationValue::static_value(IrValue::Range(IrRange {
+            RuntimeValue::static_value(IrValue::Range(IrRange {
                 start: Some(1),
                 end: Some(4),
                 span: span(50, 55),
@@ -32651,7 +32678,7 @@ mod tests {
 
         let mut diagnostics = Vec::new();
         let huge = evaluator.coerce_iterable(
-            InvocationValue::static_value(IrValue::Range(IrRange {
+            RuntimeValue::static_value(IrValue::Range(IrRange {
                 start: Some(i32::MIN),
                 end: Some(i32::MAX),
                 span: span(70, 80),
@@ -32676,7 +32703,7 @@ mod tests {
         let mut diagnostics = Vec::new();
         let values = evaluator
             .coerce_iterable(
-                InvocationValue::static_value(IrValue::Range(IrRange {
+                RuntimeValue::static_value(IrValue::Range(IrRange {
                     start: Some(3),
                     end: Some(1),
                     span: span(0, 4),
