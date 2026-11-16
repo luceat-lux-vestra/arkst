@@ -750,7 +750,7 @@ fn recovery_body_content_end(source: &arkst_source::SourceText, span: ByteSpan) 
     let body = source.slice(span)?;
     let line_ending_len = if body.ends_with("\r\n") {
         2
-    } else if body.ends_with(['\n', '\r']) {
+    } else if body.ends_with('\n') || body.ends_with('\r') {
         1
     } else {
         0
