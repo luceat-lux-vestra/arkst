@@ -30492,23 +30492,14 @@ mod tests {
         let body_candidate =
             frontend_body_candidate(frontend, SourceSpan::new(SourceId(11), 0, 33))
                 .expect("frontend block body candidate");
-        let body_shape = candidate_shape(&body_candidate);
         let parameters = [ParameterMetadata::required("content")];
-        let plan = invocation_binder::plan(
-            &parameters,
-            &candidate_shapes(&candidates),
-            Some(&body_shape),
-            BodyPolicy::BindFinal,
-            SourceSpan::new(SourceId(11), 0, 33),
-        )
-        .expect("body fills final callable parameter");
 
         let evaluator = Evaluator::new();
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
         let bound = evaluator
-            .bind_explicit_callable_candidate_set(
-                &plan,
+            .bind_source_ordered_explicit_callable_candidate_set(
+                &parameters,
                 candidates,
                 Some(body_candidate),
                 &SourceSpan::new(SourceId(11), 0, 33),
