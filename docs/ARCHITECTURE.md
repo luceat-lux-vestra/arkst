@@ -388,8 +388,10 @@ used. The platform-neutral compiler model can receive equivalent logical
 source/resource data directly in memory from an embedder. That capability is
 WASM-compilable, but it is not a shipped public Arkst WASM project/resource
 binding; #191 owns that binding and native/WASM end-to-end evidence. This is a
-read-only project capability: there is no evaluator write, directory-listing,
-or network-fetch API.
+read-only project capability: the evaluator has no write or network-fetch API.
+Directory listing, where explicitly provided, is limited to project-scoped logical
+names/kinds from `ResourceProvider::list_directory` and does not expose ambient
+host filesystem metadata or authority.
 
 - CLI builds `VirtualProject` from disk
 - In-memory hosts can build `VirtualProject` from explicitly supplied sources/assets

@@ -1223,6 +1223,82 @@ subprocess structured source spans, or stronger subprocess package isolation.
 S30 does not implement G6/G8, complete G0, authorize G1, or permit #746 to
 merge.
 
+
+## S31 host isolation — frozen current baseline
+
+S31 freezes the current platform-neutral compiler/evaluator capability boundary
+without pretending that every native adapter is sandbox-equivalent.
+
+At exact #746 HEAD
+`c740276dab5863fc62a11cc892b3cf251d5d44cf`, required CI #43761996802
+completed **SUCCESS**. The `wasm` job checks `arkst-core` and `arkst-typst`
+for `wasm32-unknown-unknown --all-features`; the native matrix simultaneously
+runs the full workspace/all-targets/all-features tests on Ubuntu ARM64, macOS,
+and Windows. The required `Merge Gate` succeeded and Security Audit was
+scope-skipped.
+
+### Platform-neutral evaluator and resource boundary
+
+`EnvironmentInputs` is the complete explicit authority for Quarkdown
+`.env`. Omitting it denies environment access with source-backed E3004;
+supplying an empty snapshot authorizes lookup but makes every name absent; and
+repeated evaluations observe only the immutable snapshot supplied to that
+evaluation. The default/native CLI composition does not inherit the host
+process environment, and the production core/engine environment path is
+guarded against ambient `std::env` lookup.
+
+`ResourceProvider` exposes semantic logical resource operations only.
+Optional metadata/directory operations fail closed unless a provider explicitly
+implements them. `VirtualProjectResourceProvider` implements the current
+operations over immutable `VirtualProject` state. Paths are source-relative
+logical identities; URI/nonlocal references, absolute or Windows paths, and
+project-root escape are rejected. `list_directory` is an explicit
+project-scoped read-only logical directory capability returning logical
+names/kinds only; it does not expose host directory metadata or ambient
+filesystem authority.
+
+`arkst-typst` remains the pure lowering boundary. Its dependency/source guard
+rejects upward/native execution dependencies and production use of
+`std::fs`, `std::process`, native `PathBuf`, or `tempfile`.
+
+### Explicit native adapter boundaries
+
+The native CLI owns project filesystem ingestion, canonicalization, and
+symlink policy before constructing `VirtualProject`.
+
+`InProcessBackend` builds Typst's `World` only from the completed
+`VirtualProject`, embedded/project fonts, and generated source. It does not
+discover the host filesystem, consult the process clock, or provide a package
+network resolver. Missing date capability and package requests—including
+runtime-generated package access—fail closed.
+
+`SubprocessBackend` is deliberately different. It explicitly owns process
+execution and a temporary project mirror, constrains staged project resources
+with logical paths and Typst `--root`, rejects file/directory symlink escape,
+and sanitizes native host paths from diagnostics. Its package/network resolver
+is **not** hard-isolated by static preflight. Static preflight is only
+best-effort validation and is not a sandbox. This residual capability is an
+intentional documented adapter divergence, not a hidden escalation.
+
+The bounded G0 invariant is therefore: **platform-neutral evaluation/lowering
+does not implicitly acquire process, environment, network, or host-filesystem
+authority; native authority appears only at explicit host/adapter boundaries
+with documented fail-closed behavior or residual policy.**
+
+Public WASM project/resource bindings and native↔WASM end-to-end parity remain
+#191/M6 product work. They are not required to freeze the current architecture
+baseline.
+
+G2 must preserve explicit environment/resource/capability ownership when
+runtime state moves into evaluator/session structures. G8 must requalify the
+WASM build and native adapter isolation after integration.
+
+**Classification:**
+`CURRENT_WASM_BUILD_AND_EXPLICIT_HOST_CAPABILITY_ISOLATION_FROZEN_G2_G8_PENDING`.
+
+S31 does not implement G2/G8 or #191, complete G0, authorize G1, or permit
+#746 to merge.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.
