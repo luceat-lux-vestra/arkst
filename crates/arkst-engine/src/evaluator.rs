@@ -724,7 +724,10 @@ fn recoverable_invocation_failure_node(
         return None;
     }
     let primary = diagnostic.primary?;
-    if primary.source_id != span.source_id || primary.start < span.start || primary.end > span.end {
+    let primary_matches_recovery = primary.source_id == span.source_id
+        && ((primary.start >= span.start && primary.end <= span.end)
+            || (primary.start == span.start && primary.end >= span.end));
+    if !primary_matches_recovery {
         return None;
     }
 
