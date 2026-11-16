@@ -1299,6 +1299,62 @@ WASM build and native adapter isolation after integration.
 S31 does not implement G2/G8 or #191, complete G0, authorize G1, or permit
 #746 to merge.
 
+
+## S32 evaluator bounds — depth-overflow NEW_EXECUTION candidate
+
+S32 separates evaluator-owned semantic budgets from host/project/backend
+resource limits. Current `EvaluationLimits` owns two immutable values per
+compilation: `max_materialized_elements` and `max_evaluation_depth`.
+
+At exact pre-S32 #746 HEAD
+`4a00e45f04b8e40d52b307029047583f2308defe`, CI #43780573434 completed
+**SUCCESS** across the native matrix, WASM, and required `Merge Gate`.
+Existing current-head evidence already freezes the materialization half of the
+contract: low public `CompileOptions` budgets produce source-backed `E3005`,
+and range, foreach, collection, CSV, and table consumers reuse the same
+per-operation ceiling without publishing partial document output. R10 requires
+checked finite cardinality before conversion/reservation/iteration and
+deliberately does not claim aggregate output budgeting.
+
+Existing depth evidence is narrower. Successful recursive source-defined
+functions use the shared callable path, and
+`loadable_library_recursion_is_bounded_by_evaluation_depth` proves self and
+mutual loadable-library recursion terminate under a depth-8 evaluator budget.
+That test does not freeze the complete public-compile depth-overflow contract.
+
+### Fresh bounded candidate
+
+`arkst-core::tests::compile_recursive_depth_limit_rolls_back_state_and_releases_guard`
+adds the missing NEW_EXECUTION evidence only. It compiles one source with:
+
+- a caller-visible `state=root`;
+- a source-defined `overflow` callable that writes `state=mutated` and then
+  recursively calls itself;
+- `max_materialized_elements=1024`, intentionally non-constraining;
+- `max_evaluation_depth=5`, chosen so the bounded failure occurs at the
+  recursive `.overflow` call rather than the preceding mutation call; and
+- post-failure `.state` plus `.sum {1} {2}` observations.
+
+The candidate requires exactly one `E3005` whose message identifies evaluator
+depth overflow and whose primary `SourceSpan` is the causal recursive
+`.overflow` call. It then requires output `root\n3`: `root` proves the
+failed recursive invocation did not publish its caller-visible mutation, while
+`3` proves a later independent call can enter evaluation after failure and
+therefore the scoped active-depth guard was released.
+
+No production behavior, public API, default limit, dependency, parser limit,
+host/project limit, or aggregate output policy changes in this candidate.
+Parser/source/asset/generated-output/timeout ceilings remain owned by their
+responsible stages. G2 must preserve scoped evaluator accounting and
+transaction ownership during runtime/session migration; G8 must requalify the
+integrated boundaries.
+
+**Classification candidate:**
+`CURRENT_TYPED_EVALUATOR_BOUNDS_MATERIALIZATION_FROZEN_DEPTH_OVERFLOW_ATOMICITY_NEW_EXECUTION_CANDIDATE_CI_PENDING_G2_G8`.
+
+S32 remains unqualified until exact-head CI succeeds. This candidate does not
+complete G0, authorize G1, implement G2/G8, or permit #746 to merge.
+
 ## S05/S06/S07 executable normal-vs-legacy migration proof
 
 At test candidate `ecf486cf27b575b08f0c04d0f454ad8c8c5a8919`, three additional parser-clean sources were added to `crates/arkst-core/tests/g0_runtime_differential.rs`. Their common oracle requires complete `IrDocument` equality and exact normalized diagnostic equality (code, severity, message, primary/secondary source spans and hints) between the public frontend `compile` entrypoint and the legacy AST→IR→Evaluator entrypoint.

@@ -3917,6 +3917,51 @@ Yiddish"
     }
 
     #[test]
+    fn compile_recursive_depth_limit_rolls_back_state_and_releases_guard() {
+        let source = ".var {state} {root}\n.function {overflow}\n    .var {state} {mutated}\n    .overflow\n\n.overflow\n.state\n.sum {1} {2}\n";
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .expect("valid project");
+        let source_id = project
+            .sources()
+            .get_id(project.entry())
+            .expect("entry source id");
+        let result = super::compile(
+            &project,
+            &CompileOptions {
+                compatibility_profile: None,
+                evaluation_limits: EvaluationLimits {
+                    max_materialized_elements: 1_024,
+                    max_evaluation_depth: 5,
+                },
+            },
+        );
+
+        let recursive_call = "    .overflow\n";
+        let recursion_start =
+            source.find(recursive_call).expect("recursive call source") + recursive_call.len() - ".overflow\n".len();
+
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3005");
+        assert!(result.diagnostics[0]
+            .message
+            .contains("evaluation depth limit exceeded"));
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(arkst_source::SourceSpan::new(
+                source_id,
+                recursion_start,
+                recursion_start + ".overflow".len()
+            ))
+        );
+        assert_eq!(output_text(&result), "root\n3");
+    }
+
+    #[test]
     fn compile_user_function_multi_statement_body_preserves_last_semantic_value() {
         let source = ".function {f}\n    .var {x} {2}\n    .sum {.x} {1}\n\n.sum {.f} {1}\n";
         let (result, _) = compile_source(source);
