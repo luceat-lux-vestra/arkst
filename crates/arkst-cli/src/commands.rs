@@ -905,14 +905,16 @@ fn invocation_failure_diagnostic_matches_component(
     let Some(primary) = diagnostic.primary else {
         return false;
     };
+    let primary_matches_recovery = primary.source_id == component.span.source_id
+        && ((primary.start >= component.span.start && primary.end <= component.span.end)
+            || (primary.start == component.span.start && primary.end >= component.span.end));
+
     diagnostic.code == "E3001"
         && matches!(&diagnostic.severity, arkst_core::Severity::Error)
         && diagnostic.message == component.message
         && !component.source_echo.trim().is_empty()
         && component.span.end.saturating_sub(component.span.start) == component.source_echo.len()
-        && primary.source_id == component.span.source_id
-        && primary.start >= component.span.start
-        && primary.end <= component.span.end
+        && primary_matches_recovery
 }
 
 #[derive(Debug, Default)]
