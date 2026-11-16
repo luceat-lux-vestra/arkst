@@ -787,6 +787,49 @@ fn frontend_invocation_recovery_span(
     (end >= start && end <= invocation.span.end).then_some(SourceSpan::new(source_id, start, end))
 }
 
+fn regular_builtin_binds_raw_final_body(name: &str) -> bool {
+    matches!(
+        builtins::lookup(name).map(|builtin| builtin.body_policy),
+        Some(builtins::BuiltinBodyPolicy::BindRaw)
+    )
+}
+
+fn ir_direct_recovery_span(
+    name: &str,
+    span: SourceSpan,
+    raw_body: Option<&IrRawBody>,
+) -> Option<SourceSpan> {
+    regular_builtin_binds_raw_final_body(name)
+        .then(|| ir_invocation_recovery_span(span, raw_body))
+        .flatten()
+}
+
+fn ir_chain_recovery_span(
+    span: SourceSpan,
+    chain: &[IrCallSegment],
+    raw_body: Option<&IrRawBody>,
+) -> Option<SourceSpan> {
+    (chain.len() >= 2
+        && chain
+            .iter()
+            .any(|segment| regular_builtin_binds_raw_final_body(&segment.name)))
+    .then(|| ir_invocation_recovery_span(span, raw_body))
+    .flatten()
+}
+
+fn frontend_chain_recovery_span(
+    invocation: FrontendInvocation<'_>,
+    source_id: SourceId,
+) -> Option<SourceSpan> {
+    (invocation.chain.len() >= 2
+        && invocation
+            .chain
+            .iter()
+            .any(|segment| regular_builtin_binds_raw_final_body(&segment.name)))
+    .then(|| frontend_invocation_recovery_span(invocation, source_id))
+    .flatten()
+}
+
 fn materialize_document_invocation_outcome(
     outcome: CallOutcome,
     recovery_span: Option<SourceSpan>,
@@ -4056,7 +4099,7 @@ impl Evaluator {
                     if !matches!(outcome, CallOutcome::Unresolved) {
                         return Some(materialize_document_invocation_outcome(
                             outcome,
-                            frontend_invocation_recovery_span(invocation, source_id),
+                            None,
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4088,7 +4131,11 @@ impl Evaluator {
                         );
                         Some(materialize_document_invocation_outcome(
                             outcome,
-                            ir_invocation_recovery_span(call.span, call.raw_body.as_ref()),
+                            ir_direct_recovery_span(
+                                &call.name,
+                                call.span,
+                                call.raw_body.as_ref(),
+                            ),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4152,7 +4199,7 @@ impl Evaluator {
                         );
                         return Some(materialize_document_invocation_outcome(
                             outcome,
-                            frontend_invocation_recovery_span(invocation, source_id),
+                            frontend_chain_recovery_span(invocation, source_id),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4182,7 +4229,11 @@ impl Evaluator {
                         );
                         Some(materialize_document_invocation_outcome(
                             outcome,
-                            ir_invocation_recovery_span(chain.span, chain.raw_body.as_ref()),
+                            ir_chain_recovery_span(
+                                chain.span,
+                                &chain.chain,
+                                chain.raw_body.as_ref(),
+                            ),
                             diagnostics_before,
                             evaluation_diagnostics,
                             context,
@@ -4322,7 +4373,7 @@ impl Evaluator {
                     );
                     out.extend(materialize_document_invocation_outcome(
                         outcome,
-                        ir_invocation_recovery_span(*span, raw_body.as_ref()),
+                        ir_direct_recovery_span(name, *span, raw_body.as_ref()),
                         diagnostics_before,
                         diagnostics,
                         context,
@@ -4349,7 +4400,7 @@ impl Evaluator {
                     );
                     out.extend(materialize_document_invocation_outcome(
                         outcome,
-                        ir_invocation_recovery_span(*span, raw_body.as_ref()),
+                        ir_chain_recovery_span(*span, chain, raw_body.as_ref()),
                         diagnostics_before,
                         diagnostics,
                         context,
