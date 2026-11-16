@@ -1029,6 +1029,123 @@ mod tests {
     }
 
     #[test]
+    fn compile_source_defined_binding_evaluates_valid_mixed_candidates_left_to_right() {
+        let source = concat!(
+            ".var {count} {0}\n",
+            ".function {tick}\n",
+            "    .var {count} {.count::sum {1}}\n",
+            "    .count\n",
+            "\n",
+            ".function {target}\n",
+            "    first second:\n",
+            "    .sum {.multiply {.first} {10}} {.second}\n",
+            "\n",
+            ".target {.tick} second:{.tick}\n",
+            ".count\n",
+        );
+        let (result, _) = compile_source(source);
+
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "12\n2");
+    }
+
+    #[test]
+    fn compile_source_defined_binding_surfaces_earlier_failure_before_later_positional_defect() {
+        let source = concat!(
+            ".var {count} {0}\n",
+            ".function {tick}\n",
+            "    .var {count} {.count::sum {1}}\n",
+            "    .count\n",
+            "\n",
+            ".function {target}\n",
+            "    first second:\n",
+            "    .sum {.first} {.second}\n",
+            "\n",
+            ".target first:{.sum {true} {2}} {.tick}\n",
+            ".count\n",
+        );
+        let (result, source_id) = compile_source(source);
+
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3001");
+        assert!(diagnostic.message.contains("numeric arguments"));
+        let failure_start = source.find("{true}").expect("nested failing argument");
+        assert_eq!(
+            diagnostic.primary,
+            Some(arkst_source::SourceSpan::new(
+                source_id,
+                failure_start,
+                failure_start + "{true}".len(),
+            ))
+        );
+        assert_eq!(output_text(&result), "0");
+    }
+
+    #[test]
+    fn compile_source_defined_binding_surfaces_earlier_failure_before_later_duplicate() {
+        let source = concat!(
+            ".var {count} {0}\n",
+            ".function {tick}\n",
+            "    .var {count} {.count::sum {1}}\n",
+            "    .count\n",
+            "\n",
+            ".function {target}\n",
+            "    first second?:\n",
+            "    .first\n",
+            "\n",
+            ".target first:{.sum {true} {2}} first:{.tick}\n",
+            ".count\n",
+        );
+        let (result, source_id) = compile_source(source);
+
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3001");
+        assert!(diagnostic.message.contains("numeric arguments"));
+        let failure_start = source.find("{true}").expect("nested failing argument");
+        assert_eq!(
+            diagnostic.primary,
+            Some(arkst_source::SourceSpan::new(
+                source_id,
+                failure_start,
+                failure_start + "{true}".len(),
+            ))
+        );
+        assert_eq!(output_text(&result), "0");
+    }
+
+    #[test]
+    fn compile_source_defined_binding_keeps_later_duplicate_diagnostic_after_successful_prefix() {
+        let source = concat!(
+            ".function {target}\n",
+            "    first second?:\n",
+            "    .first\n",
+            "\n",
+            ".target first:{one} first:{two}\n",
+        );
+        let (result, source_id) = compile_source(source);
+
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3003");
+        assert_eq!(
+            diagnostic.message,
+            "named argument `first` was supplied more than once"
+        );
+        let second_name = source.rfind("first:").expect("duplicate named argument");
+        assert_eq!(
+            diagnostic.primary,
+            Some(arkst_source::SourceSpan::new(
+                source_id,
+                second_name,
+                second_name + "first".len(),
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
     fn compile_reports_no_diagnostics_for_valid_input() {
         let (result, _) = compile_source(".foo {bar}\n");
         assert!(result.diagnostics.is_empty());
