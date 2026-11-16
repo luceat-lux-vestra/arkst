@@ -882,11 +882,7 @@ fn collect_invocation_failure_components_at_depth<'a>(
             }
             IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
                 for item in items {
-                    collect_invocation_failure_components_at_depth(
-                        &item.nodes,
-                        false,
-                        collection,
-                    );
+                    collect_invocation_failure_components_at_depth(&item.nodes, false, collection);
                 }
             }
             _ => {}
@@ -977,9 +973,13 @@ fn classify_build_errors(
                 invocation_failure_diagnostic_matches_component(diagnostic, component)
             })
         {
-            classification
-                .invocation_messages
-                .push(invocation_components.recoverable.remove(index).message.clone());
+            classification.invocation_messages.push(
+                invocation_components
+                    .recoverable
+                    .remove(index)
+                    .message
+                    .clone(),
+            );
             continue;
         }
 
@@ -1820,13 +1820,10 @@ mod tests {
             metadata: Default::default(),
         };
 
-        let classification =
-            classify_build_errors(std::slice::from_ref(&diagnostic), &direct);
+        let classification = classify_build_errors(std::slice::from_ref(&diagnostic), &direct);
         assert_eq!(classification.invocation_messages, vec![message.clone()]);
         assert_eq!(classification.fatal_errors, 0);
-        assert!(
-            ensure_no_fatal_build_errors(std::slice::from_ref(&diagnostic), &direct).is_ok()
-        );
+        assert!(ensure_no_fatal_build_errors(std::slice::from_ref(&diagnostic), &direct).is_ok());
 
         let missing_component = IrDocument {
             nodes: Vec::new(),
@@ -1850,8 +1847,7 @@ mod tests {
             }],
             metadata: Default::default(),
         };
-        let classification =
-            classify_build_errors(std::slice::from_ref(&diagnostic), &nested);
+        let classification = classify_build_errors(std::slice::from_ref(&diagnostic), &nested);
         assert!(classification.invocation_messages.is_empty());
         assert_eq!(classification.fatal_errors, 1);
     }
