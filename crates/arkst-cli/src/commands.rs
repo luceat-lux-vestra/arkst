@@ -815,14 +815,49 @@ fn collect_invocation_failure_components_at_depth<'a>(
                 }
             }
             IrNode::Component {
-                component:
-                    IrComponent::Stacked(component)
-                    | IrComponent::Container(component)
-                    | IrComponent::Landscape(component)
-                    | IrComponent::Clip(component)
-                    | IrComponent::Todo(component)
-                    | IrComponent::SpeakerNote(component)
-                    | IrComponent::Fragment(component),
+                component: IrComponent::Stacked(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Container(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Landscape(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Clip(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Todo(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::SpeakerNote(component),
+            } => collect_invocation_failure_components_at_depth(
+                &component.children,
+                false,
+                collection,
+            ),
+            IrNode::Component {
+                component: IrComponent::Fragment(component),
             } => collect_invocation_failure_components_at_depth(
                 &component.children,
                 false,
