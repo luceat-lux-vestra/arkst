@@ -59,8 +59,7 @@ use crate::invocation_binder::{
     self, BindingPlan, BodyPolicy, BoundSlot, Candidate, ParameterMetadata,
 };
 use crate::value_conversion::{
-    self, RuntimeNamedArg, RuntimeValue, ScalarTarget, ScalarValue,
-    ValueOrigin, ValueProvenance,
+    self, RuntimeNamedArg, RuntimeValue, ScalarTarget, ScalarValue, ValueOrigin, ValueProvenance,
 };
 use crate::{ast_to_ir, builtins};
 use crate::{
@@ -6996,9 +6995,13 @@ impl Evaluator {
                     return Err(CallOutcome::Failed);
                 }
             };
-            value.replace_semantic_value(
-                self.resolve_target_value(converted, *span, call_span, diagnostics, context)?,
-            );
+            value.replace_semantic_value(self.resolve_target_value(
+                converted,
+                *span,
+                call_span,
+                diagnostics,
+                context,
+            )?);
         }
         Ok(bound)
     }
@@ -9157,10 +9160,7 @@ impl Evaluator {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
         };
-        if binding_plan
-            .bind::<RuntimeValue>(&[], None, *span)
-            .is_err()
-        {
+        if binding_plan.bind::<RuntimeValue>(&[], None, *span).is_err() {
             return CallOutcome::Failed;
         }
         if let Some(parameters) = lambda_parameters {
@@ -9323,10 +9323,7 @@ impl Evaluator {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
         };
-        if binding_plan
-            .bind::<RuntimeValue>(&[], None, *span)
-            .is_err()
-        {
+        if binding_plan.bind::<RuntimeValue>(&[], None, *span).is_err() {
             return CallOutcome::Failed;
         }
         if let Some(parameters) = lambda_parameters {
@@ -11641,10 +11638,7 @@ impl Evaluator {
         );
 
         if name == "libraries" {
-            if binding_plan
-                .bind::<RuntimeValue>(&[], None, *span)
-                .is_err()
-            {
+            if binding_plan.bind::<RuntimeValue>(&[], None, *span).is_err() {
                 return CallOutcome::Failed;
             }
             return CallOutcome::Value(IrValue::Collection(
@@ -15141,15 +15135,11 @@ impl Evaluator {
                     Err(outcome) => return outcome,
                 };
                 let index_semantic = index.semantic_value();
-                let index = match collection_index(
-                    index_semantic.as_ref(),
-                    length,
-                    span,
-                    diagnostics,
-                ) {
-                    Ok(index) => index,
-                    Err(outcome) => return outcome,
-                };
+                let index =
+                    match collection_index(index_semantic.as_ref(), length, span, diagnostics) {
+                        Ok(index) => index,
+                        Err(outcome) => return outcome,
+                    };
                 CallOutcome::Value(
                     index
                         .and_then(|index| elements.get(index).cloned())
@@ -15226,10 +15216,7 @@ impl Evaluator {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
         };
-        if binding_plan
-            .bind::<RuntimeValue>(&[], None, *span)
-            .is_err()
-        {
+        if binding_plan.bind::<RuntimeValue>(&[], None, *span).is_err() {
             return CallOutcome::Failed;
         }
         let body = match body {
@@ -15274,10 +15261,12 @@ impl Evaluator {
         let candidates = invocation_candidates(
             positional_args
                 .iter()
-                .map(|argument| (
-                    argument.clone(),
-                    value_source_span(argument.semantic_value().as_ref(), span),
-                ))
+                .map(|argument| {
+                    (
+                        argument.clone(),
+                        value_source_span(argument.semantic_value().as_ref(), span),
+                    )
+                })
                 .collect(),
             named_args.to_vec(),
         );
@@ -24279,10 +24268,12 @@ fn collection_access_operand(
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| (
+            .map(|argument| {
+                (
                     argument.clone(),
                     value_source_span(argument.semantic_value().as_ref(), span),
-                ))
+                )
+            })
             .collect(),
         named_args.to_vec(),
     );
@@ -24330,10 +24321,12 @@ fn collection_affix_operands(
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| (
+            .map(|argument| {
+                (
                     argument.clone(),
                     value_source_span(argument.semantic_value().as_ref(), span),
-                ))
+                )
+            })
             .collect(),
         named_args.to_vec(),
     );
@@ -24444,10 +24437,12 @@ fn getat_operands(
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| (
+            .map(|argument| {
+                (
                     argument.clone(),
                     value_source_span(argument.semantic_value().as_ref(), span),
-                ))
+                )
+            })
             .collect(),
         named_args.to_vec(),
     );
@@ -28044,9 +28039,7 @@ fn whitespace_conversion_error(
 }
 
 /// Resolves a value to a boolean, handling variable references.
-fn resolve_boolean_value(
-    value: &RuntimeValue,
-) -> Result<bool, value_conversion::ConversionError> {
+fn resolve_boolean_value(value: &RuntimeValue) -> Result<bool, value_conversion::ConversionError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Boolean) {
         Ok(ScalarValue::Boolean(value)) => Ok(value),
         Ok(_) => Err(value_conversion::ConversionError::UnsupportedValue {
@@ -32511,8 +32504,7 @@ mod tests {
             );
         }
         assert!(
-            number_to_range_endpoint(&RuntimeValue::static_value(IrValue::Boolean(true)))
-                .is_err()
+            number_to_range_endpoint(&RuntimeValue::static_value(IrValue::Boolean(true))).is_err()
         );
         assert_eq!(
             number_to_range_endpoint(&RuntimeValue::dynamic_value(IrValue::String(

@@ -289,7 +289,6 @@ impl RuntimeValue {
             _ => None,
         }
     }
-
 }
 
 /// One evaluated named argument at the evaluator-owned runtime boundary.
@@ -1139,7 +1138,9 @@ fn convert_structured_target(
             return Ok(TargetValue::Value(argument.to_ir_value()));
         }
         _ => {
-            if let IrValue::String(value) | IrValue::Identifier(value) = argument.semantic_value().as_ref() {
+            if let IrValue::String(value) | IrValue::Identifier(value) =
+                argument.semantic_value().as_ref()
+            {
                 if argument.origin == ValueOrigin::Dynamic {
                     return Ok(TargetValue::RawMarkdown {
                         target: raw_target,
@@ -1479,27 +1480,30 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::StackedMainAxisAlignment => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)) => Ok(
-                    DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(*value)),
-                ),
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    STACKED_MAIN_AXIS_SPEC
-                        .value_for(value)
-                        .map(|value| {
-                            DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value))
-                        })
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
+            ClosedEnumTarget::StackedMainAxisAlignment => {
+                match argument.semantic_value().as_ref() {
+                    IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)) => Ok(
+                        DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(*value)),
+                    ),
+                    IrValue::String(value) | IrValue::Identifier(value)
+                        if argument.origin == ValueOrigin::Dynamic =>
+                    {
+                        STACKED_MAIN_AXIS_SPEC
+                            .value_for(value)
+                            .map(|value| {
+                                DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value))
+                            })
+                            .ok_or(ConversionError::InvalidText {
+                                target: ConversionTarget::Enum,
+                            })
+                    }
+                    _ => Err(ConversionError::UnsupportedValue {
+                        target: ConversionTarget::Enum,
+                    }),
                 }
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Enum,
-                }),
-            },
-            ClosedEnumTarget::StackedCrossAxisAlignment => match argument.semantic_value().as_ref() {
+            }
+            ClosedEnumTarget::StackedCrossAxisAlignment => match argument.semantic_value().as_ref()
+            {
                 IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value)) => Ok(
                     DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(*value)),
                 ),
@@ -1881,9 +1885,7 @@ pub(crate) fn convert_text_alignment_with_origin(
 /// Converts a Quarkdown `Int` boundary without truncating fractional values.
 /// Dynamic text follows the reviewed NumberValue parsing order, while static
 /// strings remain strings and cannot acquire integer meaning.
-pub(crate) fn convert_integer_with_origin(
-    argument: &RuntimeValue,
-) -> Result<i32, ConversionError> {
+pub(crate) fn convert_integer_with_origin(argument: &RuntimeValue) -> Result<i32, ConversionError> {
     let number = match argument.semantic_value().as_ref() {
         IrValue::Number(value) => Some(*value),
         IrValue::String(value) | IrValue::Identifier(value)
@@ -3138,8 +3140,8 @@ mod tests {
         convert_text_size_with_origin, convert_text_style_with_origin,
         convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
         ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
-        DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue, ScalarTarget,
-        ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
+        DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue, ScalarTarget, ScalarValue,
+        TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
@@ -4059,9 +4061,9 @@ mod tests {
             ("all", Some(IrTextDecoration::All)),
         ] {
             assert_eq!(
-                convert_text_decoration_with_origin(&RuntimeValue::dynamic_value(
-                    IrValue::String(text.to_string()),
-                )),
+                convert_text_decoration_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
+                    text.to_string()
+                ),)),
                 Ok(expected),
                 "{text}"
             );
@@ -4098,9 +4100,9 @@ mod tests {
             ("justify", IrDocumentAlignment::Justify),
         ] {
             assert_eq!(
-                convert_text_alignment_with_origin(&RuntimeValue::dynamic_value(
-                    IrValue::String(text.to_string()),
-                )),
+                convert_text_alignment_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
+                    text.to_string()
+                ),)),
                 Ok(Some(expected)),
                 "{text}"
             );
@@ -4457,9 +4459,7 @@ mod tests {
             })
         ));
         assert!(matches!(
-            convert_integer_with_origin(&RuntimeValue::static_value(IrValue::String(
-                "2".into()
-            ))),
+            convert_integer_with_origin(&RuntimeValue::static_value(IrValue::String("2".into()))),
             Err(ConversionError::UnsupportedValue {
                 target: ConversionTarget::Integer
             })
@@ -4510,9 +4510,9 @@ mod tests {
         ));
         assert!(matches!(
             convert_domain_with_origin(
-                &RuntimeValue::static_value(IrValue::Enum(
-                    IrEnumValue::StackedMainAxisAlignment(IrMainAxisAlignment::Center)
-                )),
+                &RuntimeValue::static_value(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
+                    IrMainAxisAlignment::Center
+                ))),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
             ),
             Err(ConversionError::UnsupportedValue {
