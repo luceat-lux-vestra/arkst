@@ -7,12 +7,12 @@
 //! never stringify an evaluated value and feed it back through Markdown.
 
 use arkst_ir::{
-    IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrContainerAlignment,
-    IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrFragmentBehavior,
-    IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition, IrPageOrientation,
-    IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
-    IrSlideTransitionStyle, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
-    IrTextWeight, IrValue,
+    IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrComponent,
+    IrContainerAlignment, IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue,
+    IrFragmentBehavior, IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition,
+    IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlideTransitionSpeed, IrSlideTransitionStyle, IrTextCase, IrTextDecoration, IrTextSize,
+    IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::borrow::Cow;
@@ -158,11 +158,12 @@ impl ValueProvenance {
 
 /// First evaluator-owned runtime value carrier.
 ///
-/// Primitive values, textual leaves, Range, closed domain values, and
-/// Collections are evaluator-owned; each nested element retains its own origin
+/// Primitive values, textual leaves, Range, closed domain values, Components,
+/// and Collections are evaluator-owned; each nested element retains its own origin
 /// and provenance. Complex categories still use a temporary semantic leaf until
 /// their later G1 migration. A `SemanticLeaf` must never contain Unit, None,
-/// Boolean, Number, String, Identifier, Range, Size, Color, Enum, or Collection.
+/// Boolean, Number, String, Identifier, Range, Size, Color, Enum, Component,
+/// or Collection.
 #[derive(Debug, Clone, PartialEq)]
 enum RuntimeValueKind {
     Unit,
@@ -175,6 +176,7 @@ enum RuntimeValueKind {
     Size(IrSize),
     Color(IrColor),
     Enum(IrEnumValue),
+    Component(IrComponent),
     SemanticLeaf(IrValue),
     Collection(Vec<RuntimeValue>),
 }
@@ -199,6 +201,7 @@ impl RuntimeValue {
             IrValue::Size(value) => RuntimeValueKind::Size(value),
             IrValue::Color(value) => RuntimeValueKind::Color(value),
             IrValue::Enum(value) => RuntimeValueKind::Enum(value),
+            IrValue::Component(value) => RuntimeValueKind::Component(value),
             IrValue::Collection(values) => {
                 return Self::collection(
                     values
@@ -279,6 +282,7 @@ impl RuntimeValue {
             RuntimeValueKind::Size(value) => Cow::Owned(IrValue::Size(value.clone())),
             RuntimeValueKind::Color(value) => Cow::Owned(IrValue::Color(value.clone())),
             RuntimeValueKind::Enum(value) => Cow::Owned(IrValue::Enum(*value)),
+            RuntimeValueKind::Component(value) => Cow::Owned(IrValue::Component(value.clone())),
             RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
                 elements.iter().map(Self::to_ir_value).collect(),
@@ -321,6 +325,7 @@ impl RuntimeValue {
             RuntimeValueKind::Size(value) => IrValue::Size(value.clone()),
             RuntimeValueKind::Color(value) => IrValue::Color(value.clone()),
             RuntimeValueKind::Enum(value) => IrValue::Enum(*value),
+            RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
             RuntimeValueKind::SemanticLeaf(value) => value.clone(),
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.iter().map(Self::to_ir_value).collect())
@@ -340,6 +345,7 @@ impl RuntimeValue {
             RuntimeValueKind::Size(value) => IrValue::Size(value),
             RuntimeValueKind::Color(value) => IrValue::Color(value),
             RuntimeValueKind::Enum(value) => IrValue::Enum(value),
+            RuntimeValueKind::Component(value) => IrValue::Component(value),
             RuntimeValueKind::SemanticLeaf(value) => value,
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.into_iter().map(Self::into_ir_value).collect())
@@ -1046,8 +1052,8 @@ pub(crate) fn convert_target_with_origin(
         ConversionTarget::BlockContent => {
             convert_content_target(argument, RawMarkdownTarget::Block, span, true)
         }
-        ConversionTarget::Node => match argument.semantic_value().as_ref() {
-            IrValue::Component(component) => {
+        ConversionTarget::Node => match &argument.kind {
+            RuntimeValueKind::Component(component) => {
                 Ok(TargetValue::Value(IrValue::Component(component.clone())))
             }
             _ => Err(ConversionError::UnsupportedValue {
@@ -3238,6 +3244,103 @@ mod tests {
             runtime_identifier.into_ir_value(),
             IrValue::Identifier(identifier.into())
         );
+    }
+
+    #[test]
+    fn runtime_component_leaf_is_engine_owned_and_roundtrips_exact_semantics() {
+        let component = IrComponent::Stacked(IrStackedComponent {
+            layout: IrStackedLayout::Row,
+            main_axis_alignment: Some(IrMainAxisAlignment::Start),
+            cross_axis_alignment: IrCrossAxisAlignment::Stretch,
+            row_gap: None,
+            column_gap: None,
+            children: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "child".into(),
+                    span: span(),
+                }],
+                span: span(),
+            }],
+            span: span(),
+        });
+        let runtime = RuntimeValue::dynamic_value(IrValue::Component(component.clone()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text(
+                "component-source",
+            ));
+
+        assert!(matches!(
+            &runtime.kind,
+            RuntimeValueKind::Component(value) if value == &component
+        ));
+        assert_eq!(runtime.origin, ValueOrigin::Dynamic);
+        assert_eq!(
+            runtime.source_backed_markdown_text(),
+            Some("component-source")
+        );
+        assert_eq!(
+            runtime.semantic_value().as_ref(),
+            &IrValue::Component(component.clone())
+        );
+        assert_eq!(runtime.to_ir_value(), IrValue::Component(component.clone()));
+        assert_eq!(runtime.into_ir_value(), IrValue::Component(component));
+    }
+
+    #[test]
+    fn runtime_component_collection_replacement_and_node_adaptation_preserve_contracts() {
+        let component = IrComponent::Stacked(IrStackedComponent {
+            layout: IrStackedLayout::Column,
+            main_axis_alignment: None,
+            cross_axis_alignment: IrCrossAxisAlignment::Stretch,
+            row_gap: None,
+            column_gap: None,
+            children: Vec::new(),
+            span: span(),
+        });
+        let child = RuntimeValue::dynamic_value(IrValue::Component(component.clone()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text(
+                "component-source",
+            ));
+        let collection = RuntimeValue::collection(vec![child], ValueOrigin::Static);
+        let elements = collection.into_collection().expect("runtime collection");
+
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].origin, ValueOrigin::Dynamic);
+        assert_eq!(
+            elements[0].source_backed_markdown_text(),
+            Some("component-source")
+        );
+        assert!(matches!(
+            &elements[0].kind,
+            RuntimeValueKind::Component(value) if value == &component
+        ));
+
+        let mut replaced = RuntimeValue::dynamic_value(IrValue::String("discarded".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("discarded"));
+        replaced.replace_semantic_value(IrValue::Component(component.clone()));
+
+        assert_eq!(replaced.origin, ValueOrigin::Dynamic);
+        assert!(replaced.provenance().is_materialized());
+        assert!(matches!(
+            &replaced.kind,
+            RuntimeValueKind::Component(value) if value == &component
+        ));
+        assert_eq!(
+            convert_target_with_origin(&replaced, ConversionTarget::Node, span()),
+            Ok(TargetValue::Value(IrValue::Component(component)))
+        );
+
+        for target in [
+            ConversionTarget::InlineContent,
+            ConversionTarget::BlockContent,
+            ConversionTarget::Iterable,
+            ConversionTarget::Dictionary,
+            ConversionTarget::Callable,
+        ] {
+            assert_eq!(
+                convert_target_with_origin(&replaced, target, span()),
+                Err(ConversionError::UnsupportedValue { target })
+            );
+        }
     }
 
     #[test]
