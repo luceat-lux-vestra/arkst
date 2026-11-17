@@ -158,10 +158,11 @@ impl ValueProvenance {
 
 /// First evaluator-owned runtime value carrier.
 ///
-/// Primitive values, Range, and Collections are evaluator-owned; each nested
-/// element retains its own origin and provenance. Complex categories still use
-/// a temporary semantic leaf until their later G1 migration. A `SemanticLeaf`
-/// must never contain Unit, None, Boolean, Number, Range, or Collection.
+/// Primitive values, Range, closed domain values, and Collections are
+/// evaluator-owned; each nested element retains its own origin and provenance.
+/// Complex categories still use a temporary semantic leaf until their later G1
+/// migration. A `SemanticLeaf` must never contain Unit, None, Boolean, Number,
+/// Range, Size, Color, Enum, or Collection.
 #[derive(Debug, Clone, PartialEq)]
 enum RuntimeValueKind {
     Unit,
@@ -169,6 +170,9 @@ enum RuntimeValueKind {
     Boolean(bool),
     Number(f64),
     Range(IrRange),
+    Size(IrSize),
+    Color(IrColor),
+    Enum(IrEnumValue),
     SemanticLeaf(IrValue),
     Collection(Vec<RuntimeValue>),
 }
@@ -188,6 +192,9 @@ impl RuntimeValue {
             IrValue::Boolean(value) => RuntimeValueKind::Boolean(value),
             IrValue::Number(value) => RuntimeValueKind::Number(value),
             IrValue::Range(value) => RuntimeValueKind::Range(value),
+            IrValue::Size(value) => RuntimeValueKind::Size(value),
+            IrValue::Color(value) => RuntimeValueKind::Color(value),
+            IrValue::Enum(value) => RuntimeValueKind::Enum(value),
             IrValue::Collection(values) => {
                 return Self::collection(
                     values
@@ -263,6 +270,9 @@ impl RuntimeValue {
             RuntimeValueKind::Boolean(value) => Cow::Owned(IrValue::Boolean(*value)),
             RuntimeValueKind::Number(value) => Cow::Owned(IrValue::Number(*value)),
             RuntimeValueKind::Range(value) => Cow::Owned(IrValue::Range(value.clone())),
+            RuntimeValueKind::Size(value) => Cow::Owned(IrValue::Size(value.clone())),
+            RuntimeValueKind::Color(value) => Cow::Owned(IrValue::Color(value.clone())),
+            RuntimeValueKind::Enum(value) => Cow::Owned(IrValue::Enum(*value)),
             RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
                 elements.iter().map(Self::to_ir_value).collect(),
@@ -286,6 +296,9 @@ impl RuntimeValue {
             RuntimeValueKind::Boolean(value) => IrValue::Boolean(*value),
             RuntimeValueKind::Number(value) => IrValue::Number(*value),
             RuntimeValueKind::Range(value) => IrValue::Range(value.clone()),
+            RuntimeValueKind::Size(value) => IrValue::Size(value.clone()),
+            RuntimeValueKind::Color(value) => IrValue::Color(value.clone()),
+            RuntimeValueKind::Enum(value) => IrValue::Enum(*value),
             RuntimeValueKind::SemanticLeaf(value) => value.clone(),
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.iter().map(Self::to_ir_value).collect())
@@ -300,6 +313,9 @@ impl RuntimeValue {
             RuntimeValueKind::Boolean(value) => IrValue::Boolean(value),
             RuntimeValueKind::Number(value) => IrValue::Number(value),
             RuntimeValueKind::Range(value) => IrValue::Range(value),
+            RuntimeValueKind::Size(value) => IrValue::Size(value),
+            RuntimeValueKind::Color(value) => IrValue::Color(value),
+            RuntimeValueKind::Enum(value) => IrValue::Enum(value),
             RuntimeValueKind::SemanticLeaf(value) => value,
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.into_iter().map(Self::into_ir_value).collect())
@@ -1348,299 +1364,264 @@ pub(crate) fn convert_domain_with_origin(
     target: DomainTarget,
 ) -> Result<DomainValue, ConversionError> {
     match target {
-        DomainTarget::Size => match argument.semantic_value().as_ref() {
-            IrValue::Size(value) => Ok(DomainValue::Size(value.clone())),
-            // ValueFactory.size accepts a dynamic numeric value through its
-            // textual representation. Non-finite values still fail the
-            // decimal-only parser below.
-            IrValue::Number(value) => parse_size(&number_to_text(*value))
-                .map(DomainValue::Size)
-                .ok_or(ConversionError::InvalidText {
-                    target: ConversionTarget::Size,
-                }),
-            IrValue::String(value) | IrValue::Identifier(value)
-                if argument.origin == ValueOrigin::Dynamic =>
-            {
-                parse_size(value)
+        DomainTarget::Size => {
+            match &argument.kind {
+                RuntimeValueKind::Size(value) => Ok(DomainValue::Size(value.clone())),
+                // ValueFactory.size accepts a dynamic numeric value through its
+                // textual representation. Non-finite values still fail the
+                // decimal-only parser below.
+                RuntimeValueKind::Number(value) => parse_size(&number_to_text(*value))
                     .map(DomainValue::Size)
                     .ok_or(ConversionError::InvalidText {
                         target: ConversionTarget::Size,
-                    })
+                    }),
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => parse_size(value)
+                    .map(DomainValue::Size)
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Size,
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Size,
+                }),
             }
-            _ => Err(ConversionError::UnsupportedValue {
-                target: ConversionTarget::Size,
-            }),
-        },
-        DomainTarget::Color => match argument.semantic_value().as_ref() {
-            IrValue::Color(value) => Ok(DomainValue::Color(value.clone())),
-            IrValue::String(value) | IrValue::Identifier(value)
-                if argument.origin == ValueOrigin::Dynamic =>
-            {
-                parse_color(value)
+        }
+        DomainTarget::Color => {
+            match &argument.kind {
+                RuntimeValueKind::Color(value) => Ok(DomainValue::Color(value.clone())),
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => parse_color(value)
                     .map(DomainValue::Color)
                     .ok_or(ConversionError::InvalidText {
                         target: ConversionTarget::Color,
-                    })
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Color,
+                }),
             }
-            _ => Err(ConversionError::UnsupportedValue {
-                target: ConversionTarget::Color,
-            }),
-        },
+        }
         DomainTarget::ClosedEnum(enum_target) => match enum_target {
-            ClosedEnumTarget::DocumentType => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::DocumentType(value)) => {
+            ClosedEnumTarget::DocumentType => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::DocumentType(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::DocumentType(*value)))
                 }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    parse_document_type(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::DocumentType(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Enum,
-                }),
-            },
-            ClosedEnumTarget::PageSizeFormat => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::PageSizeFormat(value)) => {
-                    Ok(DomainValue::Enum(IrEnumValue::PageSizeFormat(*value)))
-                }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    PAGE_SIZE_FORMAT_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::PageSizeFormat(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Enum,
-                }),
-            },
-            ClosedEnumTarget::PageOrientation => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::PageOrientation(value)) => {
-                    Ok(DomainValue::Enum(IrEnumValue::PageOrientation(*value)))
-                }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    PAGE_ORIENTATION_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::PageOrientation(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Enum,
-                }),
-            },
-            ClosedEnumTarget::PageSide => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::PageSide(value)) => {
-                    Ok(DomainValue::Enum(IrEnumValue::PageSide(*value)))
-                }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    PAGE_SIDE_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::PageSide(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Enum,
-                }),
-            },
-            ClosedEnumTarget::PageMarginPosition => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::PageMarginPosition(value)) => {
-                    Ok(DomainValue::Enum(IrEnumValue::PageMarginPosition(*value)))
-                }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    PAGE_MARGIN_POSITION_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::PageMarginPosition(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Enum,
-                }),
-            },
-            ClosedEnumTarget::CaptionPosition => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::CaptionPosition(value)) => {
-                    Ok(DomainValue::Enum(IrEnumValue::CaptionPosition(*value)))
-                }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    CAPTION_POSITION_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::CaptionPosition(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Enum,
-                }),
-            },
-            ClosedEnumTarget::StackedMainAxisAlignment => {
-                match argument.semantic_value().as_ref() {
-                    IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)) => Ok(
-                        DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(*value)),
-                    ),
-                    IrValue::String(value) | IrValue::Identifier(value)
-                        if argument.origin == ValueOrigin::Dynamic =>
-                    {
-                        STACKED_MAIN_AXIS_SPEC
-                            .value_for(value)
-                            .map(|value| {
-                                DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value))
-                            })
-                            .ok_or(ConversionError::InvalidText {
-                                target: ConversionTarget::Enum,
-                            })
-                    }
-                    _ => Err(ConversionError::UnsupportedValue {
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => parse_document_type(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::DocumentType(value)))
+                    .ok_or(ConversionError::InvalidText {
                         target: ConversionTarget::Enum,
                     }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::PageSizeFormat => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::PageSizeFormat(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::PageSizeFormat(*value)))
                 }
-            }
-            ClosedEnumTarget::StackedCrossAxisAlignment => match argument.semantic_value().as_ref()
-            {
-                IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value)) => Ok(
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => PAGE_SIZE_FORMAT_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::PageSizeFormat(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::PageOrientation => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::PageOrientation(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::PageOrientation(*value)))
+                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => PAGE_ORIENTATION_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::PageOrientation(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::PageSide => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::PageSide(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::PageSide(*value)))
+                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => PAGE_SIDE_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::PageSide(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::PageMarginPosition => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::PageMarginPosition(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::PageMarginPosition(*value)))
+                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => PAGE_MARGIN_POSITION_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::PageMarginPosition(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::CaptionPosition => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::CaptionPosition(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::CaptionPosition(*value)))
+                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => CAPTION_POSITION_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::CaptionPosition(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::StackedMainAxisAlignment => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::StackedMainAxisAlignment(value)) => Ok(
+                    DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(*value)),
+                ),
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => STACKED_MAIN_AXIS_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::StackedCrossAxisAlignment => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::StackedCrossAxisAlignment(value)) => Ok(
                     DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(*value)),
                 ),
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    STACKED_CROSS_AXIS_SPEC
-                        .value_for(value)
-                        .map(|value| {
-                            DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value))
-                        })
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => STACKED_CROSS_AXIS_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::ContainerAlignment => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::ContainerAlignment(value)) => {
+            ClosedEnumTarget::ContainerAlignment => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::ContainerAlignment(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::ContainerAlignment(*value)))
                 }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    CONTAINER_ALIGNMENT_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::ContainerAlignment(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => CONTAINER_ALIGNMENT_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::ContainerAlignment(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::BoxType => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::BoxType(value)) => {
+            ClosedEnumTarget::BoxType => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::BoxType(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::BoxType(*value)))
                 }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    BOX_TYPE_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::BoxType(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => BOX_TYPE_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::BoxType(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::ClipShape => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::ClipShape(value)) => {
+            ClosedEnumTarget::ClipShape => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::ClipShape(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::ClipShape(*value)))
                 }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    CLIP_SHAPE_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::ClipShape(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => CLIP_SHAPE_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::ClipShape(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::SlideTransitionStyle => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::SlideTransitionStyle(value)) => {
+            ClosedEnumTarget::SlideTransitionStyle => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::SlideTransitionStyle(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::SlideTransitionStyle(*value)))
                 }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    SLIDE_TRANSITION_STYLE_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionStyle(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => SLIDE_TRANSITION_STYLE_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionStyle(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::SlideTransitionSpeed => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::SlideTransitionSpeed(value)) => {
+            ClosedEnumTarget::SlideTransitionSpeed => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::SlideTransitionSpeed(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(*value)))
                 }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    SLIDE_TRANSITION_SPEED_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => SLIDE_TRANSITION_SPEED_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::FragmentBehavior => match argument.semantic_value().as_ref() {
-                IrValue::Enum(IrEnumValue::FragmentBehavior(value)) => {
+            ClosedEnumTarget::FragmentBehavior => match &argument.kind {
+                RuntimeValueKind::Enum(IrEnumValue::FragmentBehavior(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::FragmentBehavior(*value)))
                 }
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    FRAGMENT_BEHAVIOR_SPEC
-                        .value_for(value)
-                        .map(|value| DomainValue::Enum(IrEnumValue::FragmentBehavior(value)))
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
-                }
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => FRAGMENT_BEHAVIOR_SPEC
+                    .value_for(value)
+                    .map(|value| DomainValue::Enum(IrEnumValue::FragmentBehavior(value)))
+                    .ok_or(ConversionError::InvalidText {
+                        target: ConversionTarget::Enum,
+                    }),
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -3370,6 +3351,145 @@ mod tests {
         assert_eq!(parsed.start, Some(2));
         assert_eq!(parsed.end, None);
         assert_eq!(parsed.span, caller_span);
+    }
+
+    #[test]
+    fn runtime_domain_leaves_are_engine_owned_and_roundtrip_exact_values() {
+        let size = IrSize {
+            value: -0.0,
+            unit: IrSizeUnit::Em,
+        };
+        let color = IrColor {
+            red: 1,
+            green: 2,
+            blue: 3,
+            alpha: -0.0,
+        };
+        let enumeration = IrEnumValue::ContainerAlignment(IrContainerAlignment::End);
+
+        let runtime_size = RuntimeValue::static_value(IrValue::Size(size.clone()));
+        let runtime_color = RuntimeValue::dynamic_value(IrValue::Color(color.clone()));
+        let runtime_enum = RuntimeValue::static_value(IrValue::Enum(enumeration));
+
+        assert!(matches!(
+            &runtime_size.kind,
+            RuntimeValueKind::Size(actual)
+                if actual.value.to_bits() == (-0.0_f64).to_bits()
+                    && actual.unit == IrSizeUnit::Em
+        ));
+        assert!(matches!(
+            &runtime_color.kind,
+            RuntimeValueKind::Color(actual)
+                if actual.red == 1
+                    && actual.green == 2
+                    && actual.blue == 3
+                    && actual.alpha.to_bits() == (-0.0_f64).to_bits()
+        ));
+        assert!(matches!(
+            &runtime_enum.kind,
+            RuntimeValueKind::Enum(actual) if *actual == enumeration
+        ));
+
+        let IrValue::Size(projected_size) = runtime_size.to_ir_value() else {
+            panic!("expected typed Size projection");
+        };
+        assert_eq!(projected_size.value.to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(projected_size.unit, IrSizeUnit::Em);
+
+        let IrValue::Color(projected_color) = runtime_color.to_ir_value() else {
+            panic!("expected typed Color projection");
+        };
+        assert_eq!(projected_color.alpha.to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(runtime_enum.into_ir_value(), IrValue::Enum(enumeration));
+    }
+
+    #[test]
+    fn runtime_domain_collection_children_keep_independent_origin_and_provenance() {
+        let size = RuntimeValue::dynamic_value(IrValue::Size(IrSize {
+            value: 12.5,
+            unit: IrSizeUnit::Cm,
+        }))
+        .with_provenance(ValueProvenance::source_backed_markdown_text("12.5cm"));
+        let color = RuntimeValue::static_value(IrValue::Color(IrColor {
+            red: 51,
+            green: 102,
+            blue: 153,
+            alpha: 0.5,
+        }));
+        let enumeration = RuntimeValue::dynamic_value(IrValue::Enum(IrEnumValue::CaptionPosition(
+            IrCaptionPosition::Top,
+        )))
+        .with_provenance(ValueProvenance::source_backed_markdown_text("top"));
+
+        let collection =
+            RuntimeValue::collection(vec![size, color, enumeration], ValueOrigin::Static);
+        let elements = collection.into_collection().expect("runtime collection");
+
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0].origin, ValueOrigin::Dynamic);
+        assert_eq!(elements[0].source_backed_markdown_text(), Some("12.5cm"));
+        assert!(matches!(&elements[0].kind, RuntimeValueKind::Size(_)));
+        assert_eq!(elements[1].origin, ValueOrigin::Static);
+        assert!(elements[1].provenance().is_materialized());
+        assert!(matches!(&elements[1].kind, RuntimeValueKind::Color(_)));
+        assert_eq!(elements[2].origin, ValueOrigin::Dynamic);
+        assert_eq!(elements[2].source_backed_markdown_text(), Some("top"));
+        assert!(matches!(
+            &elements[2].kind,
+            RuntimeValueKind::Enum(IrEnumValue::CaptionPosition(IrCaptionPosition::Top))
+        ));
+    }
+
+    #[test]
+    fn runtime_domain_replacement_and_direct_conversion_preserve_closed_contracts() {
+        let mut size = RuntimeValue::dynamic_value(IrValue::String("discarded".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("discarded"));
+        let expected_size = IrSize {
+            value: 8.0,
+            unit: IrSizeUnit::Pt,
+        };
+        size.replace_semantic_value(IrValue::Size(expected_size.clone()));
+        assert!(matches!(&size.kind, RuntimeValueKind::Size(_)));
+        assert_eq!(size.origin, ValueOrigin::Dynamic);
+        assert!(size.provenance().is_materialized());
+        assert_eq!(
+            convert_domain_with_origin(&size, DomainTarget::Size),
+            Ok(DomainValue::Size(expected_size))
+        );
+
+        let expected_color = IrColor {
+            red: 255,
+            green: 0,
+            blue: 17,
+            alpha: 0.25,
+        };
+        let color = RuntimeValue::static_value(IrValue::Color(expected_color.clone()));
+        assert_eq!(
+            convert_domain_with_origin(&color, DomainTarget::Color),
+            Ok(DomainValue::Color(expected_color))
+        );
+
+        let enumeration = RuntimeValue::static_value(IrValue::Enum(
+            IrEnumValue::ContainerAlignment(IrContainerAlignment::Center),
+        ));
+        assert_eq!(
+            convert_domain_with_origin(
+                &enumeration,
+                DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
+            ),
+            Ok(DomainValue::Enum(IrEnumValue::ContainerAlignment(
+                IrContainerAlignment::Center,
+            )))
+        );
+        assert_eq!(
+            convert_domain_with_origin(
+                &enumeration,
+                DomainTarget::ClosedEnum(ClosedEnumTarget::StackedMainAxisAlignment),
+            ),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum,
+            })
+        );
     }
 
     #[test]
