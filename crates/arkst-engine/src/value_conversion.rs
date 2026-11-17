@@ -158,13 +158,16 @@ impl ValueProvenance {
 
 /// First evaluator-owned runtime value carrier.
 ///
-/// This bounded foundation decomposes Collections immediately so every element
-/// owns its own origin/provenance. Non-Collection semantic categories remain a
-/// temporary leaf bridge while the wider evaluator migrates away from the
-/// current one-IR model. A `SemanticLeaf` must never contain
-/// `IrValue::Collection`.
+/// Primitive values and Collections are evaluator-owned; each nested element
+/// retains its own origin and provenance. Complex categories still use a
+/// temporary semantic leaf until their later G1 migration. A `SemanticLeaf`
+/// must never contain Unit, None, Boolean, Number, or Collection.
 #[derive(Debug, Clone, PartialEq)]
 enum RuntimeValueKind {
+    Unit,
+    None,
+    Boolean(bool),
+    Number(f64),
     SemanticLeaf(IrValue),
     Collection(Vec<RuntimeValue>),
 }
@@ -178,19 +181,26 @@ pub(crate) struct RuntimeValue {
 
 impl RuntimeValue {
     pub(crate) fn new(value: IrValue, origin: ValueOrigin) -> Self {
-        match value {
-            IrValue::Collection(values) => Self::collection(
-                values
-                    .into_iter()
-                    .map(|value| Self::new(value, origin))
-                    .collect(),
-                origin,
-            ),
-            value => Self {
-                kind: RuntimeValueKind::SemanticLeaf(value),
-                origin,
-                provenance: ValueProvenance::Materialized,
-            },
+        let kind = match value {
+            IrValue::Unit => RuntimeValueKind::Unit,
+            IrValue::None => RuntimeValueKind::None,
+            IrValue::Boolean(value) => RuntimeValueKind::Boolean(value),
+            IrValue::Number(value) => RuntimeValueKind::Number(value),
+            IrValue::Collection(values) => {
+                return Self::collection(
+                    values
+                        .into_iter()
+                        .map(|value| Self::new(value, origin))
+                        .collect(),
+                    origin,
+                );
+            }
+            value => RuntimeValueKind::SemanticLeaf(value),
+        };
+        Self {
+            kind,
+            origin,
+            provenance: ValueProvenance::Materialized,
         }
     }
 
@@ -246,6 +256,10 @@ impl RuntimeValue {
     /// requires an IrValue during the G1 migration.
     pub(crate) fn semantic_value(&self) -> Cow<'_, IrValue> {
         match &self.kind {
+            RuntimeValueKind::Unit => Cow::Owned(IrValue::Unit),
+            RuntimeValueKind::None => Cow::Owned(IrValue::None),
+            RuntimeValueKind::Boolean(value) => Cow::Owned(IrValue::Boolean(*value)),
+            RuntimeValueKind::Number(value) => Cow::Owned(IrValue::Number(*value)),
             RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
                 elements.iter().map(Self::to_ir_value).collect(),
@@ -254,7 +268,7 @@ impl RuntimeValue {
     }
 
     pub(crate) fn is_none(&self) -> bool {
-        matches!(self.semantic_value().as_ref(), IrValue::None)
+        matches!(&self.kind, RuntimeValueKind::None)
     }
 
     pub(crate) fn replace_semantic_value(&mut self, value: IrValue) {
@@ -264,6 +278,10 @@ impl RuntimeValue {
 
     pub(crate) fn to_ir_value(&self) -> IrValue {
         match &self.kind {
+            RuntimeValueKind::Unit => IrValue::Unit,
+            RuntimeValueKind::None => IrValue::None,
+            RuntimeValueKind::Boolean(value) => IrValue::Boolean(*value),
+            RuntimeValueKind::Number(value) => IrValue::Number(*value),
             RuntimeValueKind::SemanticLeaf(value) => value.clone(),
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.iter().map(Self::to_ir_value).collect())
@@ -273,6 +291,10 @@ impl RuntimeValue {
 
     pub(crate) fn into_ir_value(self) -> IrValue {
         match self.kind {
+            RuntimeValueKind::Unit => IrValue::Unit,
+            RuntimeValueKind::None => IrValue::None,
+            RuntimeValueKind::Boolean(value) => IrValue::Boolean(value),
+            RuntimeValueKind::Number(value) => IrValue::Number(value),
             RuntimeValueKind::SemanticLeaf(value) => value,
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.into_iter().map(Self::into_ir_value).collect())
@@ -1189,58 +1211,47 @@ pub(crate) fn convert_scalar_with_origin(
     argument: &RuntimeValue,
     target: ScalarTarget,
 ) -> Result<ScalarValue, ConversionError> {
-    let semantic_value = argument.semantic_value();
-    let value = semantic_value.as_ref();
     match target {
-        ScalarTarget::Number => match value {
-            IrValue::Number(value) => Ok(ScalarValue::Number(*value)),
-            IrValue::String(value) | IrValue::Identifier(value)
-                if argument.origin == ValueOrigin::Dynamic =>
-            {
-                parse_number(value)
+        ScalarTarget::Number => {
+            match &argument.kind {
+                RuntimeValueKind::Number(value) => Ok(ScalarValue::Number(*value)),
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => parse_number(value)
                     .map(ScalarValue::Number)
                     .ok_or(ConversionError::InvalidText {
                         target: target.into(),
-                    })
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: target.into(),
+                }),
             }
-            _ => Err(ConversionError::UnsupportedValue {
-                target: target.into(),
-            }),
-        },
-        ScalarTarget::Boolean => match value {
-            IrValue::Boolean(value) => Ok(ScalarValue::Boolean(*value)),
-            IrValue::String(value) | IrValue::Identifier(value)
-                if argument.origin == ValueOrigin::Dynamic =>
-            {
-                parse_boolean(value)
+        }
+        ScalarTarget::Boolean => {
+            match &argument.kind {
+                RuntimeValueKind::Boolean(value) => Ok(ScalarValue::Boolean(*value)),
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => parse_boolean(value)
                     .map(ScalarValue::Boolean)
                     .ok_or(ConversionError::InvalidText {
                         target: target.into(),
-                    })
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: target.into(),
+                }),
             }
-            _ => Err(ConversionError::UnsupportedValue {
-                target: target.into(),
-            }),
-        },
-        ScalarTarget::String => match value {
-            IrValue::String(value) | IrValue::Identifier(value) => {
+        }
+        ScalarTarget::String => match &argument.kind {
+            RuntimeValueKind::SemanticLeaf(IrValue::String(value) | IrValue::Identifier(value)) => {
                 Ok(ScalarValue::String(value.clone()))
             }
-            IrValue::Number(value) => Ok(ScalarValue::String(number_to_text(*value))),
-            IrValue::Boolean(value) => Ok(ScalarValue::String(value.to_string())),
-            IrValue::Range(value) => Ok(ScalarValue::String(range_to_text(value))),
-            IrValue::Unit
-            | IrValue::None
-            | IrValue::Collection(_)
-            | IrValue::Pair(_)
-            | IrValue::Dictionary(_)
-            | IrValue::Content(_)
-            | IrValue::Callable(_)
-            | IrValue::InlineBody(_)
-            | IrValue::Size(_)
-            | IrValue::Color(_)
-            | IrValue::Enum(_)
-            | IrValue::Component(_) => Err(ConversionError::UnsupportedValue {
+            RuntimeValueKind::Number(value) => Ok(ScalarValue::String(number_to_text(*value))),
+            RuntimeValueKind::Boolean(value) => Ok(ScalarValue::String(value.to_string())),
+            RuntimeValueKind::SemanticLeaf(IrValue::Range(value)) => {
+                Ok(ScalarValue::String(range_to_text(value)))
+            }
+            _ => Err(ConversionError::UnsupportedValue {
                 target: target.into(),
             }),
         },
@@ -1886,9 +1897,9 @@ pub(crate) fn convert_text_alignment_with_origin(
 /// Dynamic text follows the reviewed NumberValue parsing order, while static
 /// strings remain strings and cannot acquire integer meaning.
 pub(crate) fn convert_integer_with_origin(argument: &RuntimeValue) -> Result<i32, ConversionError> {
-    let number = match argument.semantic_value().as_ref() {
-        IrValue::Number(value) => Some(*value),
-        IrValue::String(value) | IrValue::Identifier(value)
+    let number = match &argument.kind {
+        RuntimeValueKind::Number(value) => Some(*value),
+        RuntimeValueKind::SemanticLeaf(IrValue::String(value) | IrValue::Identifier(value))
             if argument.origin == ValueOrigin::Dynamic =>
         {
             parse_number(value)
@@ -3140,8 +3151,8 @@ mod tests {
         convert_text_size_with_origin, convert_text_style_with_origin,
         convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
         ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
-        DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue, ScalarTarget, ScalarValue,
-        TargetValue, ValueOrigin, ValueProvenance,
+        DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue, RuntimeValueKind, ScalarTarget,
+        ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
@@ -3162,6 +3173,117 @@ mod tests {
             SourceText::new(source.to_owned()),
             ByteSpan::new(0, source.len()),
         )
+    }
+
+    #[test]
+    fn runtime_primitive_leaves_are_engine_owned_and_preserve_unit_none_distinction() {
+        let unit = RuntimeValue::static_value(IrValue::Unit);
+        let none = RuntimeValue::dynamic_value(IrValue::None);
+        let boolean = RuntimeValue::static_value(IrValue::Boolean(true));
+        let negative_zero = RuntimeValue::dynamic_value(IrValue::Number(-0.0));
+
+        assert!(matches!(&unit.kind, RuntimeValueKind::Unit));
+        assert!(matches!(&none.kind, RuntimeValueKind::None));
+        assert!(matches!(&boolean.kind, RuntimeValueKind::Boolean(true)));
+        assert!(matches!(
+            &negative_zero.kind,
+            RuntimeValueKind::Number(value)
+                if value.to_bits() == (-0.0_f64).to_bits()
+        ));
+        assert!(!unit.is_none());
+        assert!(none.is_none());
+        assert!(!boolean.is_none());
+        assert_eq!(unit.semantic_value().as_ref(), &IrValue::Unit);
+        assert_eq!(none.semantic_value().as_ref(), &IrValue::None);
+        assert_eq!(boolean.semantic_value().as_ref(), &IrValue::Boolean(true));
+        assert_eq!(negative_zero.origin, ValueOrigin::Dynamic);
+        assert!(matches!(
+            negative_zero.to_ir_value(),
+            IrValue::Number(value) if value.to_bits() == (-0.0_f64).to_bits()
+        ));
+        assert!(matches!(
+            negative_zero.into_ir_value(),
+            IrValue::Number(value) if value.to_bits() == (-0.0_f64).to_bits()
+        ));
+    }
+
+    #[test]
+    fn runtime_primitive_collection_children_keep_independent_origin_and_provenance() {
+        let expected = IrValue::Collection(vec![
+            IrValue::Unit,
+            IrValue::None,
+            IrValue::Boolean(false),
+            IrValue::Number(7.5),
+            IrValue::Collection(vec![IrValue::Boolean(true), IrValue::Number(-2.0)]),
+        ]);
+        let runtime = RuntimeValue::new(expected.clone(), ValueOrigin::Dynamic);
+        assert_eq!(runtime.to_ir_value(), expected);
+
+        let elements = runtime.into_collection().expect("runtime collection");
+        assert_eq!(elements.len(), 5);
+        assert!(elements
+            .iter()
+            .all(|value| value.origin == ValueOrigin::Dynamic));
+        assert!(elements
+            .iter()
+            .all(|value| value.provenance().is_materialized()));
+        assert!(matches!(&elements[0].kind, RuntimeValueKind::Unit));
+        assert!(matches!(&elements[1].kind, RuntimeValueKind::None));
+        assert!(matches!(
+            &elements[2].kind,
+            RuntimeValueKind::Boolean(false)
+        ));
+        assert!(matches!(
+            &elements[3].kind,
+            RuntimeValueKind::Number(value) if value.to_bits() == 7.5_f64.to_bits()
+        ));
+
+        let nested = elements[4]
+            .clone()
+            .into_collection()
+            .expect("nested collection");
+        assert!(matches!(&nested[0].kind, RuntimeValueKind::Boolean(true)));
+        assert!(matches!(
+            &nested[1].kind,
+            RuntimeValueKind::Number(value) if value.to_bits() == (-2.0_f64).to_bits()
+        ));
+        assert!(nested
+            .iter()
+            .all(|value| value.origin == ValueOrigin::Dynamic));
+    }
+
+    #[test]
+    fn primitive_replacement_and_target_conversion_do_not_widen_string_policy() {
+        let mut value = RuntimeValue::dynamic_value(IrValue::Boolean(false))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("false"));
+        value.replace_semantic_value(IrValue::Number(4.0));
+        assert!(matches!(
+            &value.kind,
+            RuntimeValueKind::Number(number) if number.to_bits() == 4.0_f64.to_bits()
+        ));
+        assert_eq!(value.origin, ValueOrigin::Dynamic);
+        assert!(value.provenance().is_materialized());
+        assert_eq!(
+            convert_scalar_with_origin(&value, ScalarTarget::Number),
+            Ok(ScalarValue::Number(4.0))
+        );
+        assert_eq!(
+            convert_scalar_with_origin(&value, ScalarTarget::String),
+            Ok(ScalarValue::String("4".into()))
+        );
+        assert_eq!(convert_integer_with_origin(&value), Ok(4));
+
+        for rejected in [IrValue::Unit, IrValue::None] {
+            let argument = RuntimeValue::static_value(rejected);
+            assert_eq!(
+                convert_scalar_with_origin(&argument, ScalarTarget::String),
+                Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::String,
+                })
+            );
+        }
+        let static_text = RuntimeValue::static_value(IrValue::String("4".into()));
+        assert!(convert_scalar_with_origin(&static_text, ScalarTarget::Number).is_err());
     }
 
     #[test]
