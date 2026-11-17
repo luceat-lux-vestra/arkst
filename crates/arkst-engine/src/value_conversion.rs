@@ -1212,36 +1212,36 @@ pub(crate) fn convert_scalar_with_origin(
     target: ScalarTarget,
 ) -> Result<ScalarValue, ConversionError> {
     match target {
-        ScalarTarget::Number => match &argument.kind {
-            RuntimeValueKind::Number(value) => Ok(ScalarValue::Number(*value)),
-            RuntimeValueKind::SemanticLeaf(IrValue::String(value) | IrValue::Identifier(value))
-                if argument.origin == ValueOrigin::Dynamic =>
-            {
-                parse_number(value)
+        ScalarTarget::Number => {
+            match &argument.kind {
+                RuntimeValueKind::Number(value) => Ok(ScalarValue::Number(*value)),
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => parse_number(value)
                     .map(ScalarValue::Number)
                     .ok_or(ConversionError::InvalidText {
                         target: target.into(),
-                    })
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: target.into(),
+                }),
             }
-            _ => Err(ConversionError::UnsupportedValue {
-                target: target.into(),
-            }),
-        },
-        ScalarTarget::Boolean => match &argument.kind {
-            RuntimeValueKind::Boolean(value) => Ok(ScalarValue::Boolean(*value)),
-            RuntimeValueKind::SemanticLeaf(IrValue::String(value) | IrValue::Identifier(value))
-                if argument.origin == ValueOrigin::Dynamic =>
-            {
-                parse_boolean(value)
+        }
+        ScalarTarget::Boolean => {
+            match &argument.kind {
+                RuntimeValueKind::Boolean(value) => Ok(ScalarValue::Boolean(*value)),
+                RuntimeValueKind::SemanticLeaf(
+                    IrValue::String(value) | IrValue::Identifier(value),
+                ) if argument.origin == ValueOrigin::Dynamic => parse_boolean(value)
                     .map(ScalarValue::Boolean)
                     .ok_or(ConversionError::InvalidText {
                         target: target.into(),
-                    })
+                    }),
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: target.into(),
+                }),
             }
-            _ => Err(ConversionError::UnsupportedValue {
-                target: target.into(),
-            }),
-        },
+        }
         ScalarTarget::String => match &argument.kind {
             RuntimeValueKind::SemanticLeaf(IrValue::String(value) | IrValue::Identifier(value)) => {
                 Ok(ScalarValue::String(value.clone()))
@@ -3151,8 +3151,8 @@ mod tests {
         convert_text_size_with_origin, convert_text_style_with_origin,
         convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
         ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
-        DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue, RuntimeValueKind,
-        ScalarTarget, ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
+        DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue, RuntimeValueKind, ScalarTarget,
+        ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
@@ -3221,23 +3221,35 @@ mod tests {
 
         let elements = runtime.into_collection().expect("runtime collection");
         assert_eq!(elements.len(), 5);
-        assert!(elements.iter().all(|value| value.origin == ValueOrigin::Dynamic));
-        assert!(elements.iter().all(|value| value.provenance().is_materialized()));
+        assert!(elements
+            .iter()
+            .all(|value| value.origin == ValueOrigin::Dynamic));
+        assert!(elements
+            .iter()
+            .all(|value| value.provenance().is_materialized()));
         assert!(matches!(&elements[0].kind, RuntimeValueKind::Unit));
         assert!(matches!(&elements[1].kind, RuntimeValueKind::None));
-        assert!(matches!(&elements[2].kind, RuntimeValueKind::Boolean(false)));
+        assert!(matches!(
+            &elements[2].kind,
+            RuntimeValueKind::Boolean(false)
+        ));
         assert!(matches!(
             &elements[3].kind,
             RuntimeValueKind::Number(value) if value.to_bits() == 7.5_f64.to_bits()
         ));
 
-        let nested = elements[4].clone().into_collection().expect("nested collection");
+        let nested = elements[4]
+            .clone()
+            .into_collection()
+            .expect("nested collection");
         assert!(matches!(&nested[0].kind, RuntimeValueKind::Boolean(true)));
         assert!(matches!(
             &nested[1].kind,
             RuntimeValueKind::Number(value) if value.to_bits() == (-2.0_f64).to_bits()
         ));
-        assert!(nested.iter().all(|value| value.origin == ValueOrigin::Dynamic));
+        assert!(nested
+            .iter()
+            .all(|value| value.origin == ValueOrigin::Dynamic));
     }
 
     #[test]
