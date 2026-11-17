@@ -1167,13 +1167,15 @@ fn convert_content_target(
             Ok(literal_content_value("None".to_string(), span))
         }
         RuntimeValueKind::String(value) if !block_target => {
-            Ok(TargetValue::Value(IrValue::Content(vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: value.clone(),
+            Ok(TargetValue::Value(IrValue::Content(vec![
+                IrNode::Paragraph {
+                    content: vec![IrInline::Text {
+                        content: value.clone(),
+                        span,
+                    }],
                     span,
-                }],
-                span,
-            }])))
+                },
+            ])))
         }
         _ => Err(ConversionError::UnsupportedValue {
             target: if block_target {
@@ -1406,41 +1408,48 @@ pub(crate) fn convert_domain_with_origin(
                         target: ConversionTarget::Size,
                     }),
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => parse_size(value)
-                    .map(DomainValue::Size)
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Size,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    parse_size(value)
+                        .map(DomainValue::Size)
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Size,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Size,
                 }),
             }
         }
-        DomainTarget::Color => {
-            match &argument.kind {
-                RuntimeValueKind::Color(value) => Ok(DomainValue::Color(value.clone())),
-                RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => parse_color(value)
+        DomainTarget::Color => match &argument.kind {
+            RuntimeValueKind::Color(value) => Ok(DomainValue::Color(value.clone())),
+            RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
+                if argument.origin == ValueOrigin::Dynamic =>
+            {
+                parse_color(value)
                     .map(DomainValue::Color)
                     .ok_or(ConversionError::InvalidText {
                         target: ConversionTarget::Color,
-                    }),
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Color,
-                }),
+                    })
             }
-        }
+            _ => Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Color,
+            }),
+        },
         DomainTarget::ClosedEnum(enum_target) => match enum_target {
             ClosedEnumTarget::DocumentType => match &argument.kind {
                 RuntimeValueKind::Enum(IrEnumValue::DocumentType(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::DocumentType(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => parse_document_type(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::DocumentType(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    parse_document_type(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::DocumentType(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1450,12 +1459,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::PageSizeFormat(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => PAGE_SIZE_FORMAT_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::PageSizeFormat(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    PAGE_SIZE_FORMAT_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::PageSizeFormat(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1465,12 +1477,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::PageOrientation(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => PAGE_ORIENTATION_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::PageOrientation(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    PAGE_ORIENTATION_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::PageOrientation(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1480,12 +1495,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::PageSide(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => PAGE_SIDE_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::PageSide(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    PAGE_SIDE_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::PageSide(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1495,12 +1513,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::PageMarginPosition(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => PAGE_MARGIN_POSITION_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::PageMarginPosition(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    PAGE_MARGIN_POSITION_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::PageMarginPosition(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1510,12 +1531,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::CaptionPosition(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => CAPTION_POSITION_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::CaptionPosition(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    CAPTION_POSITION_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::CaptionPosition(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1525,12 +1549,17 @@ pub(crate) fn convert_domain_with_origin(
                     DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(*value)),
                 ),
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => STACKED_MAIN_AXIS_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    STACKED_MAIN_AXIS_SPEC
+                        .value_for(value)
+                        .map(|value| {
+                            DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value))
+                        })
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1540,12 +1569,17 @@ pub(crate) fn convert_domain_with_origin(
                     DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(*value)),
                 ),
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => STACKED_CROSS_AXIS_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    STACKED_CROSS_AXIS_SPEC
+                        .value_for(value)
+                        .map(|value| {
+                            DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value))
+                        })
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1555,12 +1589,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::ContainerAlignment(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => CONTAINER_ALIGNMENT_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::ContainerAlignment(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    CONTAINER_ALIGNMENT_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::ContainerAlignment(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1570,12 +1607,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::BoxType(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => BOX_TYPE_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::BoxType(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    BOX_TYPE_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::BoxType(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1585,12 +1625,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::ClipShape(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => CLIP_SHAPE_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::ClipShape(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    CLIP_SHAPE_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::ClipShape(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1600,12 +1643,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::SlideTransitionStyle(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => SLIDE_TRANSITION_STYLE_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionStyle(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    SLIDE_TRANSITION_STYLE_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionStyle(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1615,12 +1661,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => SLIDE_TRANSITION_SPEED_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    SLIDE_TRANSITION_SPEED_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -1630,12 +1679,15 @@ pub(crate) fn convert_domain_with_origin(
                     Ok(DomainValue::Enum(IrEnumValue::FragmentBehavior(*value)))
                 }
                 RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic => FRAGMENT_BEHAVIOR_SPEC
-                    .value_for(value)
-                    .map(|value| DomainValue::Enum(IrEnumValue::FragmentBehavior(value)))
-                    .ok_or(ConversionError::InvalidText {
-                        target: ConversionTarget::Enum,
-                    }),
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    FRAGMENT_BEHAVIOR_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::FragmentBehavior(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
                 _ => Err(ConversionError::UnsupportedValue {
                     target: ConversionTarget::Enum,
                 }),
@@ -3252,20 +3304,21 @@ mod tests {
     #[test]
     fn runtime_text_content_targets_preserve_static_string_identifier_asymmetry() {
         let static_string = RuntimeValue::static_value(IrValue::String("*literal*".into()));
-        let static_identifier =
-            RuntimeValue::static_value(IrValue::Identifier("*literal*".into()));
+        let static_identifier = RuntimeValue::static_value(IrValue::Identifier("*literal*".into()));
         let dynamic_identifier =
             RuntimeValue::dynamic_value(IrValue::Identifier("*dynamic*".into()));
 
         assert_eq!(
             convert_target_with_origin(&static_string, ConversionTarget::InlineContent, span()),
-            Ok(TargetValue::Value(IrValue::Content(vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: "*literal*".into(),
+            Ok(TargetValue::Value(IrValue::Content(vec![
+                IrNode::Paragraph {
+                    content: vec![IrInline::Text {
+                        content: "*literal*".into(),
+                        span: span(),
+                    }],
                     span: span(),
-                }],
-                span: span(),
-            }])))
+                }
+            ])))
         );
         assert_eq!(
             convert_target_with_origin(&static_string, ConversionTarget::BlockContent, span()),
