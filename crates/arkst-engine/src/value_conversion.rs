@@ -158,16 +158,17 @@ impl ValueProvenance {
 
 /// First evaluator-owned runtime value carrier.
 ///
-/// Primitive values and Collections are evaluator-owned; each nested element
-/// retains its own origin and provenance. Complex categories still use a
-/// temporary semantic leaf until their later G1 migration. A `SemanticLeaf`
-/// must never contain Unit, None, Boolean, Number, or Collection.
+/// Primitive values, Range, and Collections are evaluator-owned; each nested
+/// element retains its own origin and provenance. Complex categories still use
+/// a temporary semantic leaf until their later G1 migration. A `SemanticLeaf`
+/// must never contain Unit, None, Boolean, Number, Range, or Collection.
 #[derive(Debug, Clone, PartialEq)]
 enum RuntimeValueKind {
     Unit,
     None,
     Boolean(bool),
     Number(f64),
+    Range(IrRange),
     SemanticLeaf(IrValue),
     Collection(Vec<RuntimeValue>),
 }
@@ -186,6 +187,7 @@ impl RuntimeValue {
             IrValue::None => RuntimeValueKind::None,
             IrValue::Boolean(value) => RuntimeValueKind::Boolean(value),
             IrValue::Number(value) => RuntimeValueKind::Number(value),
+            IrValue::Range(value) => RuntimeValueKind::Range(value),
             IrValue::Collection(values) => {
                 return Self::collection(
                     values
@@ -260,6 +262,7 @@ impl RuntimeValue {
             RuntimeValueKind::None => Cow::Owned(IrValue::None),
             RuntimeValueKind::Boolean(value) => Cow::Owned(IrValue::Boolean(*value)),
             RuntimeValueKind::Number(value) => Cow::Owned(IrValue::Number(*value)),
+            RuntimeValueKind::Range(value) => Cow::Owned(IrValue::Range(value.clone())),
             RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
                 elements.iter().map(Self::to_ir_value).collect(),
@@ -282,6 +285,7 @@ impl RuntimeValue {
             RuntimeValueKind::None => IrValue::None,
             RuntimeValueKind::Boolean(value) => IrValue::Boolean(*value),
             RuntimeValueKind::Number(value) => IrValue::Number(*value),
+            RuntimeValueKind::Range(value) => IrValue::Range(value.clone()),
             RuntimeValueKind::SemanticLeaf(value) => value.clone(),
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.iter().map(Self::to_ir_value).collect())
@@ -295,6 +299,7 @@ impl RuntimeValue {
             RuntimeValueKind::None => IrValue::None,
             RuntimeValueKind::Boolean(value) => IrValue::Boolean(value),
             RuntimeValueKind::Number(value) => IrValue::Number(value),
+            RuntimeValueKind::Range(value) => IrValue::Range(value),
             RuntimeValueKind::SemanticLeaf(value) => value,
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.into_iter().map(Self::into_ir_value).collect())
@@ -1248,9 +1253,7 @@ pub(crate) fn convert_scalar_with_origin(
             }
             RuntimeValueKind::Number(value) => Ok(ScalarValue::String(number_to_text(*value))),
             RuntimeValueKind::Boolean(value) => Ok(ScalarValue::String(value.to_string())),
-            RuntimeValueKind::SemanticLeaf(IrValue::Range(value)) => {
-                Ok(ScalarValue::String(range_to_text(value)))
-            }
+            RuntimeValueKind::Range(value) => Ok(ScalarValue::String(range_to_text(value))),
             _ => Err(ConversionError::UnsupportedValue {
                 target: target.into(),
             }),
@@ -1265,9 +1268,9 @@ pub(crate) fn convert_range_with_origin(
     argument: &RuntimeValue,
     span: SourceSpan,
 ) -> Result<IrRange, ConversionError> {
-    match argument.semantic_value().as_ref() {
-        IrValue::Range(range) => Ok(range.clone()),
-        IrValue::String(value) | IrValue::Identifier(value)
+    match &argument.kind {
+        RuntimeValueKind::Range(range) => Ok(range.clone()),
+        RuntimeValueKind::SemanticLeaf(IrValue::String(value) | IrValue::Identifier(value))
             if argument.origin == ValueOrigin::Dynamic =>
         {
             parse_range(value, span).ok_or(ConversionError::InvalidText {
@@ -3284,6 +3287,89 @@ mod tests {
         }
         let static_text = RuntimeValue::static_value(IrValue::String("4".into()));
         assert!(convert_scalar_with_origin(&static_text, ScalarTarget::Number).is_err());
+    }
+
+    #[test]
+    fn runtime_range_leaf_is_engine_owned_and_roundtrips_exact_span() {
+        let original = IrRange {
+            start: None,
+            end: Some(5),
+            span: SourceSpan::new(SourceId(11), 3, 7),
+        };
+        let runtime = RuntimeValue::dynamic_value(IrValue::Range(original.clone()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("..5"));
+
+        assert!(matches!(
+            &runtime.kind,
+            RuntimeValueKind::Range(range) if range == &original
+        ));
+        assert_eq!(runtime.origin, ValueOrigin::Dynamic);
+        assert_eq!(runtime.source_backed_markdown_text(), Some("..5"));
+        assert_eq!(
+            runtime.semantic_value().as_ref(),
+            &IrValue::Range(original.clone())
+        );
+        assert_eq!(runtime.to_ir_value(), IrValue::Range(original.clone()));
+        assert_eq!(runtime.into_ir_value(), IrValue::Range(original));
+    }
+
+    #[test]
+    fn runtime_range_collection_child_keeps_origin_provenance_and_span() {
+        let range = IrRange {
+            start: Some(-2),
+            end: None,
+            span: SourceSpan::new(SourceId(13), 4, 8),
+        };
+        let child = RuntimeValue::dynamic_value(IrValue::Range(range.clone()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("-2.."));
+        let collection = RuntimeValue::collection(vec![child], ValueOrigin::Static);
+
+        let elements = collection.into_collection().expect("runtime collection");
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].origin, ValueOrigin::Dynamic);
+        assert_eq!(elements[0].source_backed_markdown_text(), Some("-2.."));
+        assert!(matches!(
+            &elements[0].kind,
+            RuntimeValueKind::Range(actual) if actual == &range
+        ));
+    }
+
+    #[test]
+    fn runtime_range_replacement_and_conversion_preserve_existing_contracts() {
+        let original = IrRange {
+            start: Some(1),
+            end: Some(3),
+            span: SourceSpan::new(SourceId(15), 2, 6),
+        };
+        let caller_span = SourceSpan::new(SourceId(99), 0, 1);
+        let mut runtime = RuntimeValue::dynamic_value(IrValue::String("discarded".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("discarded"));
+
+        runtime.replace_semantic_value(IrValue::Range(original.clone()));
+
+        assert!(matches!(
+            &runtime.kind,
+            RuntimeValueKind::Range(actual) if actual == &original
+        ));
+        assert_eq!(runtime.origin, ValueOrigin::Dynamic);
+        assert!(runtime.provenance().is_materialized());
+        assert_eq!(
+            convert_range_with_origin(&runtime, caller_span),
+            Ok(original.clone())
+        );
+        assert_eq!(
+            convert_scalar_with_origin(&runtime, ScalarTarget::String),
+            Ok(ScalarValue::String("1..3".into()))
+        );
+
+        let parsed = convert_range_with_origin(
+            &RuntimeValue::dynamic_value(IrValue::String("2..".into())),
+            caller_span,
+        )
+        .expect("dynamic textual range");
+        assert_eq!(parsed.start, Some(2));
+        assert_eq!(parsed.end, None);
+        assert_eq!(parsed.span, caller_span);
     }
 
     #[test]
