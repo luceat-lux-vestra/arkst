@@ -11,10 +11,10 @@ use crate::unicode_case::{
     simple_uppercase as unicode_simple_uppercase, UNICODE_VERSION,
 };
 #[cfg(test)]
-use crate::value_conversion::InvocationNamedArg;
+use crate::value_conversion::RuntimeNamedArg;
 #[cfg(test)]
 use crate::value_conversion::ValueOrigin;
-use crate::value_conversion::{self, InvocationValue, RuntimeValue, ScalarTarget, ScalarValue};
+use crate::value_conversion::{self, RuntimeValue, ScalarTarget, ScalarValue};
 use arkst_ir::{
     IrColor, IrDictionary, IrInline, IrKeybindingPart, IrNode, IrTextDecoration, IrTextScript,
     IrValue,
@@ -47,10 +47,10 @@ const _: () = {
 };
 
 #[cfg(test)]
-type Arguments<'a> = &'a [InvocationValue];
+type Arguments<'a> = &'a [RuntimeValue];
 #[cfg(test)]
-type NamedArguments<'a> = &'a [InvocationNamedArg];
-type BoundArguments = Vec<Option<InvocationValue>>;
+type NamedArguments<'a> = &'a [RuntimeNamedArg];
+type BoundArguments = Vec<Option<RuntimeValue>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BuiltinError {
@@ -626,12 +626,12 @@ pub(crate) fn evaluate(
     let positional = positional_args
         .iter()
         .cloned()
-        .map(InvocationValue::dynamic_value)
+        .map(RuntimeValue::dynamic_value)
         .collect::<Vec<_>>();
     let named = named_args
         .iter()
         .cloned()
-        .map(|arg| InvocationNamedArg::new(arg, ValueOrigin::Dynamic))
+        .map(|arg| RuntimeNamedArg::new(arg, ValueOrigin::Dynamic))
         .collect::<Vec<_>>();
     let builtin =
         lookup(name).ok_or_else(|| error(format!("`.{name}` has no builtin implementation")))?;
@@ -664,11 +664,11 @@ pub(crate) fn evaluate_with_origins(
     candidates.extend(named_args.iter().map(|argument| Candidate::Named {
         name: argument.name.clone(),
         name_span: argument.name_span,
-        value: InvocationValue::new(argument.arg.value.clone(), argument.origin),
-        span: argument.arg.span,
+        value: argument.value.clone(),
+        span: argument.span,
     }));
     let body = has_body.then_some(Candidate::Positional {
-        value: InvocationValue::static_value(IrValue::None),
+        value: RuntimeValue::static_value(IrValue::None),
         span: fallback_span,
     });
     let plan = invocation_binder::plan(
@@ -690,7 +690,7 @@ pub(crate) fn evaluate_with_origins(
 /// positional/named assignment or argument-count validation.
 pub(crate) fn evaluate_bound(
     builtin: &BuiltinSpec,
-    bound: BoundInvocation<InvocationValue>,
+    bound: BoundInvocation<RuntimeValue>,
     call_span: SourceSpan,
     is_block_call: bool,
 ) -> Result<IrValue, BuiltinError> {
@@ -817,7 +817,7 @@ fn evaluate_color(mut arguments: BoundArguments) -> Result<IrValue, BuiltinError
 }
 
 fn color_channel(
-    argument: Option<InvocationValue>,
+    argument: Option<RuntimeValue>,
     parameter: &str,
     default: u8,
 ) -> Result<u8, BuiltinError> {
@@ -879,7 +879,12 @@ fn evaluate_equals(
     let right = arguments
         .remove(0)
         .ok_or_else(|| error("`.equals` requires a `to` value argument".to_string()))?;
-    Ok(IrValue::Boolean(values_equal(&left, &right)))
+    let left_semantic = left.semantic_value();
+    let right_semantic = right.semantic_value();
+    Ok(IrValue::Boolean(values_equal(
+        left_semantic.as_ref(),
+        right_semantic.as_ref(),
+    )))
 }
 
 fn evaluate_not(
@@ -924,7 +929,7 @@ fn evaluate_string(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
-    if matches!(&value.value, IrValue::Unit) {
+    if matches!(value.semantic_value().as_ref(), IrValue::Unit) {
         return Ok(IrValue::String("kotlin.Unit".to_string()));
     }
     let text = scalar_string_argument_result(&value, "value").map_err(|error| {
@@ -1187,9 +1192,10 @@ fn evaluate_math(
         .ok_or_else(|| error("`.math` requires TeX content".to_string()))?;
     let source = scalar_string_argument_result(&content, "content")?;
     let block = arguments.remove(0);
-    match block.as_ref().map(|value| &value.value) {
-        Some(IrValue::Boolean(true)) => {}
-        None | Some(IrValue::None) if is_block_call => {}
+    match block.as_ref() {
+        Some(value) if matches!(value.semantic_value().as_ref(), IrValue::Boolean(true)) => {}
+        None if is_block_call => {}
+        Some(value) if is_block_call && value.is_none() => {}
         _ => {
             return Err(error(
                 "`.math` requires block:true or an indented block body; inline math is unsupported"
@@ -1198,7 +1204,7 @@ fn evaluate_math(
         }
     }
     if let Some(reference) = arguments.remove(0) {
-        if !matches!(reference.value, IrValue::None) {
+        if !reference.is_none() {
             return Err(error(
                 "`.math` ref indexing is not implemented in this bounded block slice".to_string(),
             ));
@@ -1272,10 +1278,11 @@ fn evaluate_keybinding(
 /// autolink. Preserve that exact URL without broadening scalar String
 /// conversion to arbitrary formatted or linked content.
 fn text_url_string_conversion(
-    value: &InvocationValue,
+    value: &RuntimeValue,
 ) -> Result<String, value_conversion::ConversionError> {
     scalar_string_conversion(value).or_else(|error| {
-        let IrValue::Content(nodes) = &value.value else {
+        let semantic_value = value.semantic_value();
+        let IrValue::Content(nodes) = semantic_value.as_ref() else {
             return Err(error);
         };
         let [IrNode::Paragraph { content, .. }] = nodes.as_slice() else {
@@ -1341,7 +1348,7 @@ fn evaluate_text(
         .ok_or_else(|| error("`.text` requires inline content".to_string()))?;
     let url = arguments
         .remove(0)
-        .map(|value| match &value.value {
+        .map(|value| match value.semantic_value().as_ref() {
             IrValue::None => Ok(None),
             _ => {
                 let url = text_url_string_conversion(&value).map_err(|cause| {
@@ -1359,7 +1366,7 @@ fn evaluate_text(
     let bold = arguments
         .remove(0)
         .map(|value| {
-            if matches!(&value.value, IrValue::None) {
+            if matches!(value.semantic_value().as_ref(), IrValue::None) {
                 return Ok(false);
             }
             let weight = scalar_string_argument_result(&value, "weight")?;
@@ -1372,7 +1379,7 @@ fn evaluate_text(
     let italic = arguments
         .remove(0)
         .map(|value| {
-            if matches!(&value.value, IrValue::None) {
+            if matches!(value.semantic_value().as_ref(), IrValue::None) {
                 return Ok(false);
             }
             let style = scalar_string_argument_result(&value, "style")?;
@@ -1385,7 +1392,7 @@ fn evaluate_text(
     let decoration = arguments
         .remove(0)
         .map(|value| {
-            if matches!(&value.value, IrValue::None) {
+            if matches!(value.semantic_value().as_ref(), IrValue::None) {
                 return Ok(None);
             }
             let decoration = scalar_string_argument_result(&value, "decoration")?;
@@ -1401,7 +1408,7 @@ fn evaluate_text(
     let size = arguments
         .remove(0)
         .map(|value| {
-            if matches!(&value.value, IrValue::None) {
+            if matches!(value.semantic_value().as_ref(), IrValue::None) {
                 return Ok(None);
             }
             let size = scalar_string_argument_result(&value, "size")?;
@@ -1417,7 +1424,7 @@ fn evaluate_text(
     let text_case = arguments
         .remove(0)
         .map(|value| {
-            if matches!(&value.value, IrValue::None) {
+            if matches!(value.semantic_value().as_ref(), IrValue::None) {
                 return Ok(None);
             }
             let text_case = scalar_string_argument_result(&value, "case")?;
@@ -1433,7 +1440,7 @@ fn evaluate_text(
     let variant = arguments
         .remove(0)
         .map(|value| {
-            if matches!(&value.value, IrValue::None) {
+            if matches!(value.semantic_value().as_ref(), IrValue::None) {
                 return Ok(None);
             }
             let variant = scalar_string_argument_result(&value, "variant")?;
@@ -1446,7 +1453,7 @@ fn evaluate_text(
     let script = arguments
         .remove(0)
         .map(|value| {
-            if matches!(&value.value, IrValue::None) {
+            if matches!(value.semantic_value().as_ref(), IrValue::None) {
                 return Ok(None);
             }
             let script = scalar_string_argument_result(&value, "script")?;
@@ -1463,7 +1470,7 @@ fn evaluate_text(
     let color = arguments
         .remove(0)
         .map(|value| {
-            if matches!(&value.value, IrValue::None) {
+            if matches!(value.semantic_value().as_ref(), IrValue::None) {
                 return Ok(None);
             }
             value_conversion::convert_color_with_origin(&value)
@@ -1478,7 +1485,7 @@ fn evaluate_text(
         })
         .transpose()?
         .flatten();
-    match value.value {
+    match value.into_ir_value() {
         IrValue::Content(nodes)
             if url.is_none()
                 && !bold
@@ -1602,7 +1609,8 @@ fn evaluate_plaintext(
     let content = arguments
         .remove(0)
         .ok_or_else(|| error("`.plaintext` requires one content argument".to_string()))?;
-    let text = plain_text_argument(&content).ok_or_else(|| {
+    let content_semantic = content.semantic_value();
+    let text = plain_text_argument(content_semantic.as_ref()).ok_or_else(|| {
         error(
             "`.plaintext` requires already-parsed inline content or a supported scalar value"
                 .to_string(),
@@ -1611,11 +1619,11 @@ fn evaluate_plaintext(
     Ok(IrValue::String(text))
 }
 
-fn numeric_argument(value: &InvocationValue, parameter: &str) -> Result<f32, BuiltinError> {
+fn numeric_argument(value: &RuntimeValue, parameter: &str) -> Result<f32, BuiltinError> {
     Ok(numeric_argument_value(value, parameter)? as f32)
 }
 
-fn numeric_argument_value(value: &InvocationValue, parameter: &str) -> Result<f64, BuiltinError> {
+fn numeric_argument_value(value: &RuntimeValue, parameter: &str) -> Result<f64, BuiltinError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Number) {
         Ok(ScalarValue::Number(number)) => Ok(number),
         Ok(_) => Err(conversion_error(
@@ -1633,7 +1641,7 @@ fn numeric_argument_value(value: &InvocationValue, parameter: &str) -> Result<f6
     }
 }
 
-fn boolean_argument(value: &InvocationValue, parameter: &str) -> Result<bool, BuiltinError> {
+fn boolean_argument(value: &RuntimeValue, parameter: &str) -> Result<bool, BuiltinError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Boolean) {
         Ok(ScalarValue::Boolean(value)) => Ok(value),
         Ok(_) => Err(conversion_error(
@@ -1872,10 +1880,10 @@ fn evaluate_otherwise(
     let fallback = arguments
         .remove(0)
         .ok_or_else(|| error("`.otherwise` requires a fallback argument".to_string()))?;
-    if matches!(value.value, IrValue::None) {
-        Ok(fallback.value)
+    if value.is_none() {
+        Ok(fallback.into_ir_value())
     } else {
-        Ok(value.value)
+        Ok(value.into_ir_value())
     }
 }
 
@@ -1893,7 +1901,7 @@ fn evaluate_isnone(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.isnone` requires one value argument".to_string()))?;
-    Ok(IrValue::Boolean(matches!(value.value, IrValue::None)))
+    Ok(IrValue::Boolean(value.is_none()))
 }
 
 fn evaluate_numeric(
@@ -2090,8 +2098,8 @@ fn number_value_is_integral(value: f32) -> bool {
 /// after the DynamicValue Number conversion and NumberValue normalization.
 /// Static StringValue text and fractional NumberValue results are not silently
 /// converted to an Int.
-fn integer_argument(value: &InvocationValue, parameter: &str) -> Result<i32, BuiltinError> {
-    let number = match &value.value {
+fn integer_argument(value: &RuntimeValue, parameter: &str) -> Result<i32, BuiltinError> {
+    let number = match value.semantic_value().as_ref() {
         IrValue::Number(value) => Some(*value as f32),
         IrValue::String(text) | IrValue::Identifier(text)
             if value.origin == crate::value_conversion::ValueOrigin::Dynamic =>
@@ -2207,14 +2215,14 @@ fn conversion_error(
 /// builtins. Rich content remains the separate `.plaintext`/native-content
 /// path; it is not silently serialized or reparsed here.
 pub(crate) fn scalar_string_conversion(
-    value: &InvocationValue,
+    value: &RuntimeValue,
 ) -> Result<String, value_conversion::ConversionError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::String) {
         Ok(ScalarValue::String(value)) => Ok(value),
         Ok(_) => Err(value_conversion::ConversionError::UnsupportedValue {
             target: value_conversion::ConversionTarget::String,
         }),
-        Err(error) => match &value.value {
+        Err(error) => match value.semantic_value().as_ref() {
             IrValue::Content(nodes) => plain_scalar_content_argument(nodes).ok_or(error),
             _ => Err(error),
         },
@@ -2238,15 +2246,19 @@ pub(crate) fn scalar_string_conversion(
 pub(crate) fn logger_string_conversion(
     runtime: &RuntimeValue,
 ) -> Result<String, value_conversion::ConversionError> {
-    let value = runtime.invocation_value();
-    match scalar_string_conversion(&value) {
+    match scalar_string_conversion(runtime) {
         Ok(value) => Ok(value),
-        Err(error) => logger_structured_string_value(&value.value)
-            .or_else(|| match &value.value {
-                IrValue::Content(_) => runtime.source_backed_markdown_text().map(ToOwned::to_owned),
-                _ => None,
-            })
-            .ok_or(error),
+        Err(error) => {
+            let semantic_value = runtime.semantic_value();
+            logger_structured_string_value(semantic_value.as_ref())
+                .or_else(|| match semantic_value.as_ref() {
+                    IrValue::Content(_) => {
+                        runtime.source_backed_markdown_text().map(ToOwned::to_owned)
+                    }
+                    _ => None,
+                })
+                .ok_or(error)
+        }
     }
 }
 
@@ -2348,7 +2360,7 @@ fn logger_dictionary_plain_entry_text(nodes: &[IrNode]) -> Option<String> {
 }
 
 fn scalar_string_argument_result(
-    value: &InvocationValue,
+    value: &RuntimeValue,
     parameter: &str,
 ) -> Result<String, BuiltinError> {
     scalar_string_conversion(value).map_err(|error| {
@@ -2416,7 +2428,7 @@ mod tests {
         REFERENCE_JVM_VENDOR_VERSION, REFERENCE_JVM_VERSION, SCALAR_MAPPING_RECORD_COUNT,
         UNICODE_VERSION, UTF16_CHAR_RECORD_COUNT,
     };
-    use crate::value_conversion::InvocationValue;
+    use crate::value_conversion::RuntimeValue;
     use arkst_ir::{
         IrCallable, IrColor, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrSize, IrSizeUnit,
         IrValue,
@@ -2691,8 +2703,8 @@ mod tests {
         assert!(evaluate_with_origins(
             lookup("truncate").expect("truncate is in the regular inventory"),
             &[
-                InvocationValue::dynamic_value(number(1.0)),
-                InvocationValue::static_value(IrValue::String("2".into())),
+                RuntimeValue::dynamic_value(number(1.0)),
+                RuntimeValue::static_value(IrValue::String("2".into())),
             ],
             &[],
             false,

@@ -15,7 +15,7 @@ use arkst_ir::{
     IrTextWeight, IrValue,
 };
 use arkst_source::SourceSpan;
-use std::ops::Deref;
+use std::borrow::Cow;
 
 /// Materialize the Quarkdown body `DynamicValue` only at a conversion target
 /// that explicitly requests it. The source slice is lossless and shared;
@@ -241,6 +241,27 @@ impl RuntimeValue {
         )
     }
 
+    /// Borrow the transitional semantic leaf directly, materializing only a
+    /// runtime Collection view when an existing semantic consumer explicitly
+    /// requires an IrValue during the G1 migration.
+    pub(crate) fn semantic_value(&self) -> Cow<'_, IrValue> {
+        match &self.kind {
+            RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
+            RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
+                elements.iter().map(Self::to_ir_value).collect(),
+            )),
+        }
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self.semantic_value().as_ref(), IrValue::None)
+    }
+
+    pub(crate) fn replace_semantic_value(&mut self, value: IrValue) {
+        let origin = self.origin;
+        *self = Self::new(value, origin);
+    }
+
     pub(crate) fn to_ir_value(&self) -> IrValue {
         match &self.kind {
             RuntimeValueKind::SemanticLeaf(value) => value.clone(),
@@ -268,69 +289,25 @@ impl RuntimeValue {
             _ => None,
         }
     }
-
-    pub(crate) fn invocation_value(&self) -> InvocationValue {
-        InvocationValue::new(self.to_ir_value(), self.origin)
-    }
 }
 
-impl From<InvocationValue> for RuntimeValue {
-    fn from(value: InvocationValue) -> Self {
-        Self::new(value.value, value.origin)
-    }
-}
-
-/// An evaluated invocation argument plus the binder-origin distinction used by
-/// the existing target-conversion API.
-///
-/// Provenance deliberately does not live here anymore. This remains a bounded
-/// compatibility adapter while conversion call sites migrate to `RuntimeValue`.
+/// One evaluated named argument at the evaluator-owned runtime boundary.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InvocationValue {
-    pub value: IrValue,
-    pub origin: ValueOrigin,
+pub(crate) struct RuntimeNamedArg {
+    pub name: String,
+    pub name_span: SourceSpan,
+    pub value: RuntimeValue,
+    pub span: SourceSpan,
 }
 
-impl InvocationValue {
-    pub(crate) fn new(value: IrValue, origin: ValueOrigin) -> Self {
-        Self { value, origin }
-    }
-
-    pub(crate) fn static_value(value: IrValue) -> Self {
-        Self::new(value, ValueOrigin::Static)
-    }
-
-    pub(crate) fn dynamic_value(value: IrValue) -> Self {
-        Self::new(value, ValueOrigin::Dynamic)
-    }
-}
-
-impl Deref for InvocationValue {
-    type Target = IrValue;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-/// Named invocation argument carrying the same evaluator-local origin bit.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InvocationNamedArg {
-    pub arg: IrNamedArg,
-    pub origin: ValueOrigin,
-}
-
-impl InvocationNamedArg {
+impl RuntimeNamedArg {
     pub(crate) fn new(arg: IrNamedArg, origin: ValueOrigin) -> Self {
-        Self { arg, origin }
-    }
-}
-
-impl Deref for InvocationNamedArg {
-    type Target = IrNamedArg;
-
-    fn deref(&self) -> &Self::Target {
-        &self.arg
+        Self {
+            name: arg.name,
+            name_span: arg.name_span,
+            value: RuntimeValue::new(arg.value, origin),
+            span: arg.span,
+        }
     }
 }
 
@@ -968,12 +945,12 @@ pub(crate) enum RawMarkdownTarget {
 /// consumers. The returned raw requests correspond to the pinned
 /// `DynamicValueConverter` branches and preserve the value's dynamic origin.
 pub(crate) fn convert_target_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
     target: ConversionTarget,
     span: SourceSpan,
 ) -> Result<TargetValue, ConversionError> {
     match target {
-        ConversionTarget::Dynamic => Ok(TargetValue::Value(argument.value.clone())),
+        ConversionTarget::Dynamic => Ok(TargetValue::Value(argument.to_ir_value())),
         ConversionTarget::Number => {
             convert_scalar_with_origin(argument, ScalarTarget::Number).map(scalar_value_to_ir)
         }
@@ -1002,7 +979,7 @@ pub(crate) fn convert_target_with_origin(
         ConversionTarget::BlockContent => {
             convert_content_target(argument, RawMarkdownTarget::Block, span, true)
         }
-        ConversionTarget::Node => match &argument.value {
+        ConversionTarget::Node => match argument.semantic_value().as_ref() {
             IrValue::Component(component) => {
                 Ok(TargetValue::Value(IrValue::Component(component.clone())))
             }
@@ -1025,7 +1002,7 @@ pub(crate) fn convert_target_with_origin(
             RawMarkdownTarget::Dictionary,
             &[IrValueKind::Dictionary],
         ),
-        ConversionTarget::Callable => match &argument.value {
+        ConversionTarget::Callable => match argument.semantic_value().as_ref() {
             IrValue::Callable(value) => Ok(TargetValue::Value(IrValue::Callable(value.clone()))),
             IrValue::InlineBody(body) => Ok(TargetValue::Value(IrValue::Callable(IrCallable {
                 parameters: body.parameters.clone(),
@@ -1073,12 +1050,12 @@ enum IrValueKind {
 }
 
 fn convert_content_target(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
     raw_target: RawMarkdownTarget,
     span: SourceSpan,
     block_target: bool,
 ) -> Result<TargetValue, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         // MarkdownContentValue adapts to InlineMarkdownContentValue in the
         // pinned value model. The IR keeps one structured content carrier, so
         // both content targets preserve that carrier without flattening it.
@@ -1144,11 +1121,11 @@ fn literal_content_value(text: String, span: SourceSpan) -> TargetValue {
 }
 
 fn convert_structured_target(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
     raw_target: RawMarkdownTarget,
     accepted: &[IrValueKind],
 ) -> Result<TargetValue, ConversionError> {
-    let kind = match &argument.value {
+    let kind = match argument.semantic_value().as_ref() {
         IrValue::Collection(_) => IrValueKind::Collection,
         IrValue::Pair(_) => IrValueKind::Pair,
         IrValue::Dictionary(_) => IrValueKind::Dictionary,
@@ -1158,10 +1135,12 @@ fn convert_structured_target(
         // evaluator can materialize its elements without reparsing or
         // stringifying the already parsed list.
         IrValue::Content(_) if raw_target == RawMarkdownTarget::Iterable => {
-            return Ok(TargetValue::Value(argument.value.clone()));
+            return Ok(TargetValue::Value(argument.to_ir_value()));
         }
         _ => {
-            if let IrValue::String(value) | IrValue::Identifier(value) = &argument.value {
+            if let IrValue::String(value) | IrValue::Identifier(value) =
+                argument.semantic_value().as_ref()
+            {
                 if argument.origin == ValueOrigin::Dynamic {
                     return Ok(TargetValue::RawMarkdown {
                         target: raw_target,
@@ -1185,7 +1164,7 @@ fn convert_structured_target(
             },
         });
     }
-    Ok(TargetValue::Value(argument.value.clone()))
+    Ok(TargetValue::Value(argument.to_ir_value()))
 }
 
 /// Converts a typed evaluator value to one of the supported scalar targets.
@@ -1198,7 +1177,7 @@ pub(crate) fn convert_scalar(
     value: &IrValue,
     target: ScalarTarget,
 ) -> Result<ScalarValue, ConversionError> {
-    convert_scalar_with_origin(&InvocationValue::dynamic_value(value.clone()), target)
+    convert_scalar_with_origin(&RuntimeValue::dynamic_value(value.clone()), target)
 }
 
 /// Converts an invocation argument using upstream's DynamicValue gate.
@@ -1207,10 +1186,11 @@ pub(crate) fn convert_scalar(
 /// argument. Static StringValue-shaped values remain String values and do not
 /// acquire unrelated numeric, boolean, or iterable meaning.
 pub(crate) fn convert_scalar_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
     target: ScalarTarget,
 ) -> Result<ScalarValue, ConversionError> {
-    let value = &argument.value;
+    let semantic_value = argument.semantic_value();
+    let value = semantic_value.as_ref();
     match target {
         ScalarTarget::Number => match value {
             IrValue::Number(value) => Ok(ScalarValue::Number(*value)),
@@ -1271,10 +1251,10 @@ pub(crate) fn convert_scalar_with_origin(
 /// an existing typed range or attaching the caller's reliable argument span
 /// to a newly parsed textual range.
 pub(crate) fn convert_range_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
     span: SourceSpan,
 ) -> Result<IrRange, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         IrValue::Range(range) => Ok(range.clone()),
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
@@ -1291,7 +1271,7 @@ pub(crate) fn convert_range_with_origin(
 
 #[cfg(test)]
 pub(crate) fn convert_range(value: &IrValue, span: SourceSpan) -> Result<IrRange, ConversionError> {
-    convert_range_with_origin(&InvocationValue::dynamic_value(value.clone()), span)
+    convert_range_with_origin(&RuntimeValue::dynamic_value(value.clone()), span)
 }
 
 /// Converts a public Color argument while preserving the dynamic-value
@@ -1301,9 +1281,9 @@ pub(crate) fn convert_range(value: &IrValue, span: SourceSpan) -> Result<IrRange
 /// paragraph before target conversion. Only that plain Text-only shape is
 /// projected back to dynamic scalar text; static/rich content remains closed.
 pub(crate) fn convert_color_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrColor, ConversionError> {
-    let convert = |candidate: &InvocationValue| match convert_domain_with_origin(
+    let convert = |candidate: &RuntimeValue| match convert_domain_with_origin(
         candidate,
         DomainTarget::Color,
     )? {
@@ -1317,13 +1297,14 @@ pub(crate) fn convert_color_with_origin(
         if argument.origin != ValueOrigin::Dynamic {
             return Err(error);
         }
-        let IrValue::Content(nodes) = &argument.value else {
+        let semantic_value = argument.semantic_value();
+        let IrValue::Content(nodes) = semantic_value.as_ref() else {
             return Err(error);
         };
         let Some(text) = plain_dynamic_color_content(nodes) else {
             return Err(error);
         };
-        convert(&InvocationValue::dynamic_value(IrValue::String(text)))
+        convert(&RuntimeValue::dynamic_value(IrValue::String(text)))
     })
 }
 
@@ -1349,11 +1330,11 @@ fn plain_dynamic_color_content(nodes: &[IrNode]) -> Option<String> {
 /// typed domain values retain their domain, while textual parsing is gated by
 /// the invocation origin exactly like the reviewed DynamicValue boundary.
 pub(crate) fn convert_domain_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
     target: DomainTarget,
 ) -> Result<DomainValue, ConversionError> {
     match target {
-        DomainTarget::Size => match &argument.value {
+        DomainTarget::Size => match argument.semantic_value().as_ref() {
             IrValue::Size(value) => Ok(DomainValue::Size(value.clone())),
             // ValueFactory.size accepts a dynamic numeric value through its
             // textual representation. Non-finite values still fail the
@@ -1376,7 +1357,7 @@ pub(crate) fn convert_domain_with_origin(
                 target: ConversionTarget::Size,
             }),
         },
-        DomainTarget::Color => match &argument.value {
+        DomainTarget::Color => match argument.semantic_value().as_ref() {
             IrValue::Color(value) => Ok(DomainValue::Color(value.clone())),
             IrValue::String(value) | IrValue::Identifier(value)
                 if argument.origin == ValueOrigin::Dynamic =>
@@ -1392,7 +1373,7 @@ pub(crate) fn convert_domain_with_origin(
             }),
         },
         DomainTarget::ClosedEnum(enum_target) => match enum_target {
-            ClosedEnumTarget::DocumentType => match &argument.value {
+            ClosedEnumTarget::DocumentType => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::DocumentType(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::DocumentType(*value)))
                 }
@@ -1409,7 +1390,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::PageSizeFormat => match &argument.value {
+            ClosedEnumTarget::PageSizeFormat => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::PageSizeFormat(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::PageSizeFormat(*value)))
                 }
@@ -1427,7 +1408,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::PageOrientation => match &argument.value {
+            ClosedEnumTarget::PageOrientation => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::PageOrientation(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::PageOrientation(*value)))
                 }
@@ -1445,7 +1426,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::PageSide => match &argument.value {
+            ClosedEnumTarget::PageSide => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::PageSide(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::PageSide(*value)))
                 }
@@ -1463,7 +1444,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::PageMarginPosition => match &argument.value {
+            ClosedEnumTarget::PageMarginPosition => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::PageMarginPosition(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::PageMarginPosition(*value)))
                 }
@@ -1481,7 +1462,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::CaptionPosition => match &argument.value {
+            ClosedEnumTarget::CaptionPosition => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::CaptionPosition(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::CaptionPosition(*value)))
                 }
@@ -1499,27 +1480,30 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::StackedMainAxisAlignment => match &argument.value {
-                IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)) => Ok(
-                    DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(*value)),
-                ),
-                IrValue::String(value) | IrValue::Identifier(value)
-                    if argument.origin == ValueOrigin::Dynamic =>
-                {
-                    STACKED_MAIN_AXIS_SPEC
-                        .value_for(value)
-                        .map(|value| {
-                            DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value))
-                        })
-                        .ok_or(ConversionError::InvalidText {
-                            target: ConversionTarget::Enum,
-                        })
+            ClosedEnumTarget::StackedMainAxisAlignment => {
+                match argument.semantic_value().as_ref() {
+                    IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)) => Ok(
+                        DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(*value)),
+                    ),
+                    IrValue::String(value) | IrValue::Identifier(value)
+                        if argument.origin == ValueOrigin::Dynamic =>
+                    {
+                        STACKED_MAIN_AXIS_SPEC
+                            .value_for(value)
+                            .map(|value| {
+                                DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value))
+                            })
+                            .ok_or(ConversionError::InvalidText {
+                                target: ConversionTarget::Enum,
+                            })
+                    }
+                    _ => Err(ConversionError::UnsupportedValue {
+                        target: ConversionTarget::Enum,
+                    }),
                 }
-                _ => Err(ConversionError::UnsupportedValue {
-                    target: ConversionTarget::Enum,
-                }),
-            },
-            ClosedEnumTarget::StackedCrossAxisAlignment => match &argument.value {
+            }
+            ClosedEnumTarget::StackedCrossAxisAlignment => match argument.semantic_value().as_ref()
+            {
                 IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value)) => Ok(
                     DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(*value)),
                 ),
@@ -1539,7 +1523,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::ContainerAlignment => match &argument.value {
+            ClosedEnumTarget::ContainerAlignment => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::ContainerAlignment(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::ContainerAlignment(*value)))
                 }
@@ -1557,7 +1541,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::BoxType => match &argument.value {
+            ClosedEnumTarget::BoxType => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::BoxType(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::BoxType(*value)))
                 }
@@ -1575,7 +1559,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::ClipShape => match &argument.value {
+            ClosedEnumTarget::ClipShape => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::ClipShape(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::ClipShape(*value)))
                 }
@@ -1593,7 +1577,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::SlideTransitionStyle => match &argument.value {
+            ClosedEnumTarget::SlideTransitionStyle => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::SlideTransitionStyle(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::SlideTransitionStyle(*value)))
                 }
@@ -1611,7 +1595,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::SlideTransitionSpeed => match &argument.value {
+            ClosedEnumTarget::SlideTransitionSpeed => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::SlideTransitionSpeed(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(*value)))
                 }
@@ -1629,7 +1613,7 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
-            ClosedEnumTarget::FragmentBehavior => match &argument.value {
+            ClosedEnumTarget::FragmentBehavior => match argument.semantic_value().as_ref() {
                 IrValue::Enum(IrEnumValue::FragmentBehavior(value)) => {
                     Ok(DomainValue::Enum(IrEnumValue::FragmentBehavior(*value)))
                 }
@@ -1658,9 +1642,9 @@ pub(crate) fn convert_domain_with_origin(
 /// accepted only from a dynamic invocation value; a static String produced by
 /// another call cannot silently acquire enum meaning.
 pub(crate) fn convert_text_size_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrTextSize>, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         IrValue::None => Ok(None),
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
@@ -1696,9 +1680,9 @@ pub(crate) fn parse_text_size(value: &str) -> Option<Option<IrTextSize>> {
 /// `normal` and explicit `None` are semantic identity. Textual enum names are
 /// accepted only from a dynamic invocation value.
 pub(crate) fn convert_text_weight_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrTextWeight>, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         IrValue::None => Ok(None),
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
@@ -1729,9 +1713,9 @@ pub(crate) fn parse_text_weight(value: &str) -> Option<Option<IrTextWeight>> {
 /// `normal` and explicit `None` are semantic identity. Textual enum names are
 /// accepted only from a dynamic invocation value.
 pub(crate) fn convert_text_style_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrTextStyle>, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         IrValue::None => Ok(None),
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
@@ -1763,9 +1747,9 @@ pub(crate) fn parse_text_style(value: &str) -> Option<Option<IrTextStyle>> {
 /// `none` and explicit `None` are semantic identity. Textual enum names are
 /// accepted only from a dynamic invocation value.
 pub(crate) fn convert_text_decoration_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrTextDecoration>, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         IrValue::None => Ok(None),
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
@@ -1800,9 +1784,9 @@ pub(crate) fn parse_text_decoration(value: &str) -> Option<Option<IrTextDecorati
 /// `none` and explicit `None` are semantic identity. Textual enum names are
 /// accepted only from a dynamic invocation value.
 pub(crate) fn convert_text_case_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrTextCase>, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         IrValue::None => Ok(None),
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
@@ -1835,9 +1819,9 @@ pub(crate) fn parse_text_case(value: &str) -> Option<Option<IrTextCase>> {
 /// `normal` and explicit `None` are semantic identity. Textual enum names are
 /// accepted only from a dynamic invocation value.
 pub(crate) fn convert_text_variant_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrTextVariant>, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         IrValue::None => Ok(None),
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
@@ -1869,9 +1853,9 @@ pub(crate) fn parse_text_variant(value: &str) -> Option<Option<IrTextVariant>> {
 /// conversion boundary. A nested/static String does not silently acquire a
 /// new domain identity.
 pub(crate) fn convert_document_alignment_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<IrDocumentAlignment, ConversionError> {
-    match &argument.value {
+    match argument.semantic_value().as_ref() {
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
         {
@@ -1890,9 +1874,9 @@ pub(crate) fn convert_document_alignment_with_origin(
 /// Converts the nullable four-value text-alignment domain used by
 /// component-local style consumers. Explicit `None` is semantic identity.
 pub(crate) fn convert_text_alignment_with_origin(
-    argument: &InvocationValue,
+    argument: &RuntimeValue,
 ) -> Result<Option<IrDocumentAlignment>, ConversionError> {
-    if matches!(argument.value, IrValue::None) {
+    if matches!(argument.semantic_value().as_ref(), IrValue::None) {
         return Ok(None);
     }
     convert_document_alignment_with_origin(argument).map(Some)
@@ -1901,10 +1885,8 @@ pub(crate) fn convert_text_alignment_with_origin(
 /// Converts a Quarkdown `Int` boundary without truncating fractional values.
 /// Dynamic text follows the reviewed NumberValue parsing order, while static
 /// strings remain strings and cannot acquire integer meaning.
-pub(crate) fn convert_integer_with_origin(
-    argument: &InvocationValue,
-) -> Result<i32, ConversionError> {
-    let number = match &argument.value {
+pub(crate) fn convert_integer_with_origin(argument: &RuntimeValue) -> Result<i32, ConversionError> {
+    let number = match argument.semantic_value().as_ref() {
         IrValue::Number(value) => Some(*value),
         IrValue::String(value) | IrValue::Identifier(value)
             if argument.origin == ValueOrigin::Dynamic =>
@@ -3158,8 +3140,8 @@ mod tests {
         convert_text_size_with_origin, convert_text_style_with_origin,
         convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
         ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
-        DomainTarget, DomainValue, InvocationValue, RawMarkdownTarget, RuntimeValue, ScalarTarget,
-        ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
+        DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue, ScalarTarget, ScalarValue,
+        TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
@@ -3260,7 +3242,7 @@ mod tests {
     fn target_conversion_keeps_scalar_content_and_origin_ordering_explicit() {
         assert_eq!(
             convert_target_with_origin(
-                &InvocationValue::dynamic_value(IrValue::String("2".into())),
+                &RuntimeValue::dynamic_value(IrValue::String("2".into())),
                 ConversionTarget::Number,
                 span(),
             ),
@@ -3268,7 +3250,7 @@ mod tests {
         );
         assert!(matches!(
             convert_target_with_origin(
-                &InvocationValue::static_value(IrValue::String("2".into())),
+                &RuntimeValue::static_value(IrValue::String("2".into())),
                 ConversionTarget::Number,
                 span(),
             ),
@@ -3278,7 +3260,7 @@ mod tests {
         ));
 
         let static_string = convert_target_with_origin(
-            &InvocationValue::static_value(IrValue::String("*text*".into())),
+            &RuntimeValue::static_value(IrValue::String("*text*".into())),
             ConversionTarget::InlineContent,
             span(),
         )
@@ -3291,7 +3273,7 @@ mod tests {
 
         assert_eq!(
             convert_target_with_origin(
-                &InvocationValue::dynamic_value(IrValue::String("*text*".into())),
+                &RuntimeValue::dynamic_value(IrValue::String("*text*".into())),
                 ConversionTarget::InlineContent,
                 span(),
             ),
@@ -3302,7 +3284,7 @@ mod tests {
         );
         assert_eq!(
             convert_target_with_origin(
-                &InvocationValue::static_value(IrValue::String("**text**".into())),
+                &RuntimeValue::static_value(IrValue::String("**text**".into())),
                 ConversionTarget::BlockContent,
                 span(),
             ),
@@ -3316,7 +3298,7 @@ mod tests {
             (IrValue::Boolean(true), "true"),
         ] {
             let converted = convert_target_with_origin(
-                &InvocationValue::static_value(value),
+                &RuntimeValue::static_value(value),
                 ConversionTarget::BlockContent,
                 span(),
             )
@@ -3332,7 +3314,7 @@ mod tests {
         for value in [IrValue::Number(2.0), IrValue::Boolean(true)] {
             assert!(matches!(
                 convert_target_with_origin(
-                    &InvocationValue::static_value(value),
+                    &RuntimeValue::static_value(value),
                     ConversionTarget::InlineContent,
                     span(),
                 ),
@@ -3356,7 +3338,7 @@ mod tests {
         }));
         assert_eq!(
             convert_target_with_origin(
-                &InvocationValue::static_value(component.clone()),
+                &RuntimeValue::static_value(component.clone()),
                 ConversionTarget::Node,
                 span(),
             ),
@@ -3377,7 +3359,7 @@ mod tests {
         });
         assert!(matches!(
             convert_target_with_origin(
-                &InvocationValue::static_value(inline_body),
+                &RuntimeValue::static_value(inline_body),
                 ConversionTarget::Callable,
                 span(),
             ),
@@ -3391,7 +3373,7 @@ mod tests {
         });
         assert!(matches!(
             convert_target_with_origin(
-                &InvocationValue::static_value(pair),
+                &RuntimeValue::static_value(pair),
                 ConversionTarget::Iterable,
                 span(),
             ),
@@ -3404,7 +3386,7 @@ mod tests {
         });
         assert!(matches!(
             convert_target_with_origin(
-                &InvocationValue::static_value(dictionary.clone()),
+                &RuntimeValue::static_value(dictionary.clone()),
                 ConversionTarget::Dictionary,
                 span(),
             ),
@@ -3412,7 +3394,7 @@ mod tests {
         ));
         assert!(matches!(
             convert_target_with_origin(
-                &InvocationValue::dynamic_value(IrValue::String("- key: value".into())),
+                &RuntimeValue::dynamic_value(IrValue::String("- key: value".into())),
                 ConversionTarget::Dictionary,
                 span(),
             ),
@@ -3423,7 +3405,7 @@ mod tests {
         ));
 
         let none = convert_target_with_origin(
-            &InvocationValue::static_value(IrValue::None),
+            &RuntimeValue::static_value(IrValue::None),
             ConversionTarget::BlockContent,
             span(),
         )
@@ -3446,7 +3428,7 @@ mod tests {
         ] {
             assert!(
                 convert_target_with_origin(
-                    &InvocationValue::static_value(IrValue::None),
+                    &RuntimeValue::static_value(IrValue::None),
                     target,
                     span(),
                 )
@@ -3584,24 +3566,24 @@ mod tests {
 
     #[test]
     fn conversion_requires_dynamic_origin_for_textual_target_adaptation() {
-        let static_number = InvocationValue::static_value(IrValue::String("-3.5".into()));
-        let dynamic_number = InvocationValue::dynamic_value(IrValue::String("-3.5".into()));
+        let static_number = RuntimeValue::static_value(IrValue::String("-3.5".into()));
+        let dynamic_number = RuntimeValue::dynamic_value(IrValue::String("-3.5".into()));
         assert!(convert_scalar_with_origin(&static_number, ScalarTarget::Number).is_err());
         assert_eq!(
             convert_scalar_with_origin(&dynamic_number, ScalarTarget::Number),
             Ok(ScalarValue::Number(-3.5))
         );
 
-        let static_boolean = InvocationValue::static_value(IrValue::String("YES".into()));
-        let dynamic_boolean = InvocationValue::dynamic_value(IrValue::String("YES".into()));
+        let static_boolean = RuntimeValue::static_value(IrValue::String("YES".into()));
+        let dynamic_boolean = RuntimeValue::dynamic_value(IrValue::String("YES".into()));
         assert!(convert_scalar_with_origin(&static_boolean, ScalarTarget::Boolean).is_err());
         assert_eq!(
             convert_scalar_with_origin(&dynamic_boolean, ScalarTarget::Boolean),
             Ok(ScalarValue::Boolean(true))
         );
 
-        let static_range = InvocationValue::static_value(IrValue::String("2..4".into()));
-        let dynamic_range = InvocationValue::dynamic_value(IrValue::String("2..4".into()));
+        let static_range = RuntimeValue::static_value(IrValue::String("2..4".into()));
+        let dynamic_range = RuntimeValue::dynamic_value(IrValue::String("2..4".into()));
         assert!(convert_range_with_origin(&static_range, span()).is_err());
         assert_eq!(
             convert_range_with_origin(&dynamic_range, span()),
@@ -3624,7 +3606,7 @@ mod tests {
             children: Vec::new(),
             span: span(),
         }));
-        let argument = InvocationValue::dynamic_value(component);
+        let argument = RuntimeValue::dynamic_value(component);
 
         for target in [
             ScalarTarget::Number,
@@ -3676,7 +3658,7 @@ mod tests {
         ] {
             assert_eq!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::String(text.into())),
                     DomainTarget::Size,
                 ),
                 Ok(DomainValue::Size(IrSize { value, unit }))
@@ -3688,7 +3670,7 @@ mod tests {
         ] {
             assert!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::String(text.into())),
                     DomainTarget::Size,
                 )
                 .is_err(),
@@ -3705,13 +3687,13 @@ mod tests {
         };
         assert_eq!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::Size(size.clone())),
+                &RuntimeValue::static_value(IrValue::Size(size.clone())),
                 DomainTarget::Size,
             ),
             Ok(DomainValue::Size(size))
         );
         assert!(convert_domain_with_origin(
-            &InvocationValue::static_value(IrValue::String("10px".into())),
+            &RuntimeValue::static_value(IrValue::String("10px".into())),
             DomainTarget::Size,
         )
         .is_err());
@@ -3724,13 +3706,13 @@ mod tests {
         };
         assert_eq!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::Color(color.clone())),
+                &RuntimeValue::static_value(IrValue::Color(color.clone())),
                 DomainTarget::Color,
             ),
             Ok(DomainValue::Color(color))
         );
         assert!(convert_domain_with_origin(
-            &InvocationValue::static_value(IrValue::String("red".into())),
+            &RuntimeValue::static_value(IrValue::String("red".into())),
             DomainTarget::Color,
         )
         .is_err());
@@ -3877,7 +3859,7 @@ mod tests {
         ] {
             assert_eq!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::String(text.into())),
                     DomainTarget::Color,
                 ),
                 Ok(DomainValue::Color(expected)),
@@ -3907,7 +3889,7 @@ mod tests {
         ] {
             assert!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::String(text.into())),
                     DomainTarget::Color,
                 )
                 .is_err(),
@@ -3927,7 +3909,7 @@ mod tests {
             span: source_span,
         }]);
         assert_eq!(
-            super::convert_color_with_origin(&InvocationValue::dynamic_value(content.clone())),
+            super::convert_color_with_origin(&RuntimeValue::dynamic_value(content.clone())),
             Ok(IrColor {
                 red: 1,
                 green: 2,
@@ -3935,7 +3917,7 @@ mod tests {
                 alpha: 0.5,
             })
         );
-        assert!(super::convert_color_with_origin(&InvocationValue::static_value(content)).is_err());
+        assert!(super::convert_color_with_origin(&RuntimeValue::static_value(content)).is_err());
 
         let rich = IrValue::Content(vec![IrNode::Paragraph {
             content: vec![IrInline::Emphasis {
@@ -3947,7 +3929,7 @@ mod tests {
             }],
             span: source_span,
         }]);
-        assert!(super::convert_color_with_origin(&InvocationValue::dynamic_value(rich)).is_err());
+        assert!(super::convert_color_with_origin(&RuntimeValue::dynamic_value(rich)).is_err());
     }
 
     #[test]
@@ -3962,7 +3944,7 @@ mod tests {
             ("huge", Some(IrTextSize::Huge)),
         ] {
             assert_eq!(
-                convert_text_size_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                convert_text_size_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                     text.to_string(),
                 ))),
                 Ok(expected),
@@ -3971,11 +3953,11 @@ mod tests {
         }
 
         assert_eq!(
-            convert_text_size_with_origin(&InvocationValue::static_value(IrValue::None)),
+            convert_text_size_with_origin(&RuntimeValue::static_value(IrValue::None)),
             Ok(None)
         );
         assert_eq!(
-            convert_text_size_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+            convert_text_size_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                 "giant".to_string(),
             ))),
             Err(ConversionError::InvalidText {
@@ -3983,7 +3965,7 @@ mod tests {
             })
         );
         assert_eq!(
-            convert_text_size_with_origin(&InvocationValue::static_value(IrValue::String(
+            convert_text_size_with_origin(&RuntimeValue::static_value(IrValue::String(
                 "large".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
@@ -4000,7 +3982,7 @@ mod tests {
             ("BOLD", Some(IrTextWeight::Bold)),
         ] {
             assert_eq!(
-                convert_text_weight_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                convert_text_weight_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                     text.to_string()
                 ),)),
                 Ok(expected),
@@ -4009,11 +3991,11 @@ mod tests {
         }
 
         assert_eq!(
-            convert_text_weight_with_origin(&InvocationValue::static_value(IrValue::None)),
+            convert_text_weight_with_origin(&RuntimeValue::static_value(IrValue::None)),
             Ok(None)
         );
         assert_eq!(
-            convert_text_weight_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+            convert_text_weight_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                 "heavy".to_string(),
             ))),
             Err(ConversionError::InvalidText {
@@ -4021,7 +4003,7 @@ mod tests {
             })
         );
         assert_eq!(
-            convert_text_weight_with_origin(&InvocationValue::static_value(IrValue::String(
+            convert_text_weight_with_origin(&RuntimeValue::static_value(IrValue::String(
                 "bold".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
@@ -4038,7 +4020,7 @@ mod tests {
             ("ITALIC", Some(IrTextStyle::Italic)),
         ] {
             assert_eq!(
-                convert_text_style_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                convert_text_style_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                     text.to_string()
                 ),)),
                 Ok(expected),
@@ -4047,11 +4029,11 @@ mod tests {
         }
 
         assert_eq!(
-            convert_text_style_with_origin(&InvocationValue::static_value(IrValue::None)),
+            convert_text_style_with_origin(&RuntimeValue::static_value(IrValue::None)),
             Ok(None)
         );
         assert_eq!(
-            convert_text_style_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+            convert_text_style_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                 "oblique".to_string(),
             ))),
             Err(ConversionError::InvalidText {
@@ -4059,7 +4041,7 @@ mod tests {
             })
         );
         assert_eq!(
-            convert_text_style_with_origin(&InvocationValue::static_value(IrValue::String(
+            convert_text_style_with_origin(&RuntimeValue::static_value(IrValue::String(
                 "italic".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
@@ -4079,20 +4061,20 @@ mod tests {
             ("all", Some(IrTextDecoration::All)),
         ] {
             assert_eq!(
-                convert_text_decoration_with_origin(&InvocationValue::dynamic_value(
-                    IrValue::String(text.to_string()),
-                )),
+                convert_text_decoration_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
+                    text.to_string()
+                ),)),
                 Ok(expected),
                 "{text}"
             );
         }
 
         assert_eq!(
-            convert_text_decoration_with_origin(&InvocationValue::static_value(IrValue::None)),
+            convert_text_decoration_with_origin(&RuntimeValue::static_value(IrValue::None)),
             Ok(None)
         );
         assert_eq!(
-            convert_text_decoration_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+            convert_text_decoration_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                 "blink".to_string(),
             ))),
             Err(ConversionError::InvalidText {
@@ -4100,7 +4082,7 @@ mod tests {
             })
         );
         assert_eq!(
-            convert_text_decoration_with_origin(&InvocationValue::static_value(IrValue::String(
+            convert_text_decoration_with_origin(&RuntimeValue::static_value(IrValue::String(
                 "underline".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
@@ -4118,20 +4100,20 @@ mod tests {
             ("justify", IrDocumentAlignment::Justify),
         ] {
             assert_eq!(
-                convert_text_alignment_with_origin(&InvocationValue::dynamic_value(
-                    IrValue::String(text.to_string()),
-                )),
+                convert_text_alignment_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
+                    text.to_string()
+                ),)),
                 Ok(Some(expected)),
                 "{text}"
             );
         }
 
         assert_eq!(
-            convert_text_alignment_with_origin(&InvocationValue::static_value(IrValue::None)),
+            convert_text_alignment_with_origin(&RuntimeValue::static_value(IrValue::None)),
             Ok(None)
         );
         assert_eq!(
-            convert_text_alignment_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+            convert_text_alignment_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                 "sideways".to_string(),
             ))),
             Err(ConversionError::InvalidText {
@@ -4139,7 +4121,7 @@ mod tests {
             })
         );
         assert_eq!(
-            convert_text_alignment_with_origin(&InvocationValue::static_value(IrValue::String(
+            convert_text_alignment_with_origin(&RuntimeValue::static_value(IrValue::String(
                 "center".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
@@ -4157,7 +4139,7 @@ mod tests {
             ("Capitalize", Some(IrTextCase::Capitalize)),
         ] {
             assert_eq!(
-                convert_text_case_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                convert_text_case_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                     text.to_string()
                 ),)),
                 Ok(expected),
@@ -4166,11 +4148,11 @@ mod tests {
         }
 
         assert_eq!(
-            convert_text_case_with_origin(&InvocationValue::static_value(IrValue::None)),
+            convert_text_case_with_origin(&RuntimeValue::static_value(IrValue::None)),
             Ok(None)
         );
         assert_eq!(
-            convert_text_case_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+            convert_text_case_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                 "titlecase".to_string(),
             ))),
             Err(ConversionError::InvalidText {
@@ -4178,7 +4160,7 @@ mod tests {
             })
         );
         assert_eq!(
-            convert_text_case_with_origin(&InvocationValue::static_value(IrValue::String(
+            convert_text_case_with_origin(&RuntimeValue::static_value(IrValue::String(
                 "uppercase".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
@@ -4195,7 +4177,7 @@ mod tests {
             ("SMALLCAPS", Some(IrTextVariant::SmallCaps)),
         ] {
             assert_eq!(
-                convert_text_variant_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+                convert_text_variant_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                     text.to_string()
                 ),)),
                 Ok(expected),
@@ -4204,11 +4186,11 @@ mod tests {
         }
 
         assert_eq!(
-            convert_text_variant_with_origin(&InvocationValue::static_value(IrValue::None)),
+            convert_text_variant_with_origin(&RuntimeValue::static_value(IrValue::None)),
             Ok(None)
         );
         assert_eq!(
-            convert_text_variant_with_origin(&InvocationValue::dynamic_value(IrValue::String(
+            convert_text_variant_with_origin(&RuntimeValue::dynamic_value(IrValue::String(
                 "petitecaps".to_string(),
             ))),
             Err(ConversionError::InvalidText {
@@ -4216,7 +4198,7 @@ mod tests {
             })
         );
         assert_eq!(
-            convert_text_variant_with_origin(&InvocationValue::static_value(IrValue::String(
+            convert_text_variant_with_origin(&RuntimeValue::static_value(IrValue::String(
                 "smallcaps".to_string(),
             ))),
             Err(ConversionError::UnsupportedValue {
@@ -4230,7 +4212,7 @@ mod tests {
         for text in ["plain", "PLAIN", "Plain"] {
             assert_eq!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::String(text.into())),
                     DomainTarget::ClosedEnum(ClosedEnumTarget::DocumentType),
                 ),
                 Ok(DomainValue::Enum(IrEnumValue::DocumentType(
@@ -4241,18 +4223,18 @@ mod tests {
         let typed = IrEnumValue::DocumentType(IrDocumentType::Paged);
         assert_eq!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::Enum(typed)),
+                &RuntimeValue::static_value(IrValue::Enum(typed)),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::DocumentType),
             ),
             Ok(DomainValue::Enum(typed))
         );
         assert!(convert_domain_with_origin(
-            &InvocationValue::static_value(IrValue::String("paged".into())),
+            &RuntimeValue::static_value(IrValue::String("paged".into())),
             DomainTarget::ClosedEnum(ClosedEnumTarget::DocumentType),
         )
         .is_err());
         assert!(convert_domain_with_origin(
-            &InvocationValue::dynamic_value(IrValue::String("page_d".into())),
+            &RuntimeValue::dynamic_value(IrValue::String("page_d".into())),
             DomainTarget::ClosedEnum(ClosedEnumTarget::DocumentType),
         )
         .is_err());
@@ -4283,7 +4265,7 @@ mod tests {
         ] {
             assert_eq!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::Identifier(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::Identifier(text.into())),
                     DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
                 ),
                 Ok(DomainValue::Enum(IrEnumValue::CaptionPosition(expected)))
@@ -4293,14 +4275,14 @@ mod tests {
         let typed = IrEnumValue::CaptionPosition(IrCaptionPosition::Top);
         assert_eq!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::Enum(typed)),
+                &RuntimeValue::static_value(IrValue::Enum(typed)),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
             ),
             Ok(DomainValue::Enum(typed))
         );
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::dynamic_value(IrValue::String("middle".into())),
+                &RuntimeValue::dynamic_value(IrValue::String("middle".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
             ),
             Err(ConversionError::InvalidText {
@@ -4309,7 +4291,7 @@ mod tests {
         ));
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::String("top".into())),
+                &RuntimeValue::static_value(IrValue::String("top".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
             ),
             Err(ConversionError::UnsupportedValue {
@@ -4328,7 +4310,7 @@ mod tests {
         ] {
             assert_eq!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::Identifier(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::Identifier(text.into())),
                     DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionStyle),
                 ),
                 Ok(DomainValue::Enum(IrEnumValue::SlideTransitionStyle(
@@ -4343,7 +4325,7 @@ mod tests {
         ] {
             assert_eq!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::Identifier(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::Identifier(text.into())),
                     DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionSpeed),
                 ),
                 Ok(DomainValue::Enum(IrEnumValue::SlideTransitionSpeed(
@@ -4355,14 +4337,14 @@ mod tests {
         let typed = IrEnumValue::SlideTransitionStyle(IrSlideTransitionStyle::Fade);
         assert_eq!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::Enum(typed)),
+                &RuntimeValue::static_value(IrValue::Enum(typed)),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionStyle),
             ),
             Ok(DomainValue::Enum(typed))
         );
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::dynamic_value(IrValue::String("spin".into())),
+                &RuntimeValue::dynamic_value(IrValue::String("spin".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionStyle),
             ),
             Err(ConversionError::InvalidText {
@@ -4371,7 +4353,7 @@ mod tests {
         ));
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::String("fast".into())),
+                &RuntimeValue::static_value(IrValue::String("fast".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::SlideTransitionSpeed),
             ),
             Err(ConversionError::UnsupportedValue {
@@ -4391,7 +4373,7 @@ mod tests {
         ] {
             assert_eq!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::Identifier(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::Identifier(text.into())),
                     DomainTarget::ClosedEnum(ClosedEnumTarget::BoxType),
                 ),
                 Ok(DomainValue::Enum(IrEnumValue::BoxType(expected)))
@@ -4401,14 +4383,14 @@ mod tests {
         let typed = IrEnumValue::BoxType(IrBoxType::Warning);
         assert_eq!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::Enum(typed)),
+                &RuntimeValue::static_value(IrValue::Enum(typed)),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::BoxType),
             ),
             Ok(DomainValue::Enum(typed))
         );
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::dynamic_value(IrValue::String("urgent".into())),
+                &RuntimeValue::dynamic_value(IrValue::String("urgent".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::BoxType),
             ),
             Err(ConversionError::InvalidText {
@@ -4417,7 +4399,7 @@ mod tests {
         ));
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::String("warning".into())),
+                &RuntimeValue::static_value(IrValue::String("warning".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::BoxType),
             ),
             Err(ConversionError::UnsupportedValue {
@@ -4431,7 +4413,7 @@ mod tests {
         for text in ["start", "CENTER", "spacebetween", "SpaceEvenly"] {
             assert!(matches!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::String(text.into())),
                     DomainTarget::ClosedEnum(ClosedEnumTarget::StackedMainAxisAlignment),
                 ),
                 Ok(DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(_)))
@@ -4440,19 +4422,19 @@ mod tests {
         for text in ["start", "center", "end", "stretch"] {
             assert!(matches!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::String(text.into())),
                     DomainTarget::ClosedEnum(ClosedEnumTarget::StackedCrossAxisAlignment),
                 ),
                 Ok(DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(_)))
             ));
         }
         assert!(convert_domain_with_origin(
-            &InvocationValue::dynamic_value(IrValue::String("spacebetween".into())),
+            &RuntimeValue::dynamic_value(IrValue::String("spacebetween".into())),
             DomainTarget::ClosedEnum(ClosedEnumTarget::StackedCrossAxisAlignment),
         )
         .is_err());
         assert!(convert_domain_with_origin(
-            &InvocationValue::static_value(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
+            &RuntimeValue::static_value(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
                 IrMainAxisAlignment::Center
             ),)),
             DomainTarget::ClosedEnum(ClosedEnumTarget::StackedCrossAxisAlignment),
@@ -4460,26 +4442,24 @@ mod tests {
         .is_err());
 
         for value in [
-            InvocationValue::dynamic_value(IrValue::Number(2.0)),
-            InvocationValue::dynamic_value(IrValue::String("2".into())),
-            InvocationValue::dynamic_value(IrValue::String("2.0".into())),
+            RuntimeValue::dynamic_value(IrValue::Number(2.0)),
+            RuntimeValue::dynamic_value(IrValue::String("2".into())),
+            RuntimeValue::dynamic_value(IrValue::String("2.0".into())),
         ] {
             assert_eq!(convert_integer_with_origin(&value), Ok(2));
         }
         assert_eq!(
-            convert_integer_with_origin(&InvocationValue::dynamic_value(IrValue::Number(-1.0))),
+            convert_integer_with_origin(&RuntimeValue::dynamic_value(IrValue::Number(-1.0))),
             Ok(-1)
         );
         assert!(matches!(
-            convert_integer_with_origin(&InvocationValue::dynamic_value(IrValue::Number(2.5))),
+            convert_integer_with_origin(&RuntimeValue::dynamic_value(IrValue::Number(2.5))),
             Err(ConversionError::InvalidText {
                 target: ConversionTarget::Integer
             })
         ));
         assert!(matches!(
-            convert_integer_with_origin(&InvocationValue::static_value(IrValue::String(
-                "2".into()
-            ))),
+            convert_integer_with_origin(&RuntimeValue::static_value(IrValue::String("2".into()))),
             Err(ConversionError::UnsupportedValue {
                 target: ConversionTarget::Integer
             })
@@ -4495,7 +4475,7 @@ mod tests {
         ] {
             assert_eq!(
                 convert_domain_with_origin(
-                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    &RuntimeValue::dynamic_value(IrValue::String(text.into())),
                     DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
                 ),
                 Ok(DomainValue::Enum(IrEnumValue::ContainerAlignment(expected)))
@@ -4505,14 +4485,14 @@ mod tests {
         let typed = IrEnumValue::ContainerAlignment(IrContainerAlignment::Center);
         assert_eq!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::Enum(typed)),
+                &RuntimeValue::static_value(IrValue::Enum(typed)),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
             ),
             Ok(DomainValue::Enum(typed))
         );
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::String("center".into())),
+                &RuntimeValue::static_value(IrValue::String("center".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
             ),
             Err(ConversionError::UnsupportedValue {
@@ -4521,7 +4501,7 @@ mod tests {
         ));
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::dynamic_value(IrValue::String("middle".into())),
+                &RuntimeValue::dynamic_value(IrValue::String("middle".into())),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
             ),
             Err(ConversionError::InvalidText {
@@ -4530,9 +4510,9 @@ mod tests {
         ));
         assert!(matches!(
             convert_domain_with_origin(
-                &InvocationValue::static_value(IrValue::Enum(
-                    IrEnumValue::StackedMainAxisAlignment(IrMainAxisAlignment::Center)
-                )),
+                &RuntimeValue::static_value(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
+                    IrMainAxisAlignment::Center
+                ))),
                 DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
             ),
             Err(ConversionError::UnsupportedValue {
