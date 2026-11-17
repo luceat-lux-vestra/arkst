@@ -7,12 +7,12 @@
 //! never stringify an evaluated value and feed it back through Markdown.
 
 use arkst_ir::{
-    IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
-    IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrFragmentBehavior,
-    IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition, IrPageOrientation,
-    IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
-    IrSlideTransitionStyle, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
-    IrTextWeight, IrValue,
+    IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrComponent,
+    IrContainerAlignment, IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue,
+    IrFragmentBehavior, IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition,
+    IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlideTransitionSpeed, IrSlideTransitionStyle, IrTextCase, IrTextDecoration, IrTextSize,
+    IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::borrow::Cow;
@@ -3264,7 +3264,9 @@ mod tests {
             span: span(),
         });
         let runtime = RuntimeValue::dynamic_value(IrValue::Component(component.clone()))
-            .with_provenance(ValueProvenance::source_backed_markdown_text("component-source"));
+            .with_provenance(ValueProvenance::source_backed_markdown_text(
+                "component-source",
+            ));
 
         assert!(matches!(
             &runtime.kind,
@@ -3295,7 +3297,9 @@ mod tests {
             span: span(),
         });
         let child = RuntimeValue::dynamic_value(IrValue::Component(component.clone()))
-            .with_provenance(ValueProvenance::source_backed_markdown_text("component-source"));
+            .with_provenance(ValueProvenance::source_backed_markdown_text(
+                "component-source",
+            ));
         let collection = RuntimeValue::collection(vec![child], ValueOrigin::Static);
         let elements = collection.into_collection().expect("runtime collection");
 
