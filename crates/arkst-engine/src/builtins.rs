@@ -744,16 +744,10 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::IsEmpty | BuiltinKind::IsNotEmpty => evaluate_empty_check(builtin, arguments),
         BuiltinKind::StartsWith => evaluate_startswith(builtin, arguments),
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
-        BuiltinKind::Text => evaluate_text(arguments, call_span).map(RuntimeValue::static_value),
-        BuiltinKind::Codespan => {
-            evaluate_codespan(arguments, call_span).map(RuntimeValue::static_value)
-        }
-        BuiltinKind::Math => {
-            evaluate_math(arguments, call_span, is_block_call).map(RuntimeValue::static_value)
-        }
-        BuiltinKind::Keybinding => {
-            evaluate_keybinding(arguments, call_span).map(RuntimeValue::static_value)
-        }
+        BuiltinKind::Text => evaluate_text(arguments, call_span),
+        BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
+        BuiltinKind::Math => evaluate_math(arguments, call_span, is_block_call),
+        BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
         BuiltinKind::LoremIpsum => Ok(RuntimeValue::static_value(IrValue::String(
             LOREM_IPSUM_TEXT.to_string(),
         ))),
@@ -1186,12 +1180,12 @@ fn is_final_sigma(characters: &[char], index: usize, boundaries: &[bool]) -> boo
 fn evaluate_codespan(
     mut arguments: BoundArguments,
     call_span: SourceSpan,
-) -> Result<IrValue, BuiltinError> {
+) -> Result<RuntimeValue, BuiltinError> {
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.codespan` requires a text argument".to_string()))?;
     let content = scalar_string_argument_result(&value, "text")?;
-    Ok(IrValue::Content(vec![IrNode::Paragraph {
+    static_result(IrValue::Content(vec![IrNode::Paragraph {
         content: vec![IrInline::Code {
             content,
             span: call_span,
@@ -1209,7 +1203,7 @@ fn evaluate_math(
     mut arguments: BoundArguments,
     call_span: SourceSpan,
     is_block_call: bool,
-) -> Result<IrValue, BuiltinError> {
+) -> Result<RuntimeValue, BuiltinError> {
     let content = arguments
         .remove(0)
         .ok_or_else(|| error("`.math` requires TeX content".to_string()))?;
@@ -1248,7 +1242,7 @@ fn evaluate_math(
                 .to_string(),
         ));
     }
-    Ok(IrValue::Content(vec![IrNode::Math {
+    static_result(IrValue::Content(vec![IrNode::Math {
         source,
         display: true,
         span: call_span,
@@ -1259,7 +1253,7 @@ fn evaluate_math(
 fn evaluate_keybinding(
     mut arguments: BoundArguments,
     span: SourceSpan,
-) -> Result<IrValue, BuiltinError> {
+) -> Result<RuntimeValue, BuiltinError> {
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("keybinding requires input".to_string()))?;
@@ -1287,7 +1281,7 @@ fn evaluate_keybinding(
     if parts.is_empty() {
         return Err(error("keybinding requires at least one key".to_string()));
     }
-    Ok(IrValue::Content(vec![IrNode::Paragraph {
+    static_result(IrValue::Content(vec![IrNode::Paragraph {
         content: vec![IrInline::Keybinding { parts, span }],
         span,
     }]))
@@ -1365,7 +1359,7 @@ fn wrap_text_decoration(
 fn evaluate_text(
     mut arguments: BoundArguments,
     call_span: SourceSpan,
-) -> Result<IrValue, BuiltinError> {
+) -> Result<RuntimeValue, BuiltinError> {
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.text` requires inline content".to_string()))?;
@@ -1623,6 +1617,7 @@ fn evaluate_text(
             "`.text` requires a single inline paragraph, not block content".to_string(),
         )),
     }
+    .map(RuntimeValue::static_value)
 }
 
 fn evaluate_plaintext(
