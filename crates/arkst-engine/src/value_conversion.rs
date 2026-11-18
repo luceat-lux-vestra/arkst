@@ -322,9 +322,7 @@ impl RuntimeCallable {
             parameters: self.parameters,
             body: self.body,
             span: self.span,
-            capture: self
-                .capture
-                .map(|capture| Box::new((*capture).into_ir())),
+            capture: self.capture.map(|capture| Box::new((*capture).into_ir())),
         }
     }
 }
@@ -638,9 +636,7 @@ impl RuntimeValue {
             RuntimeValueKind::Content(value) => Cow::Owned(IrValue::Content(value.clone())),
             RuntimeValueKind::Component(value) => Cow::Owned(IrValue::Component(value.clone())),
             RuntimeValueKind::Callable(value) => Cow::Owned(IrValue::Callable(value.to_ir())),
-            RuntimeValueKind::InlineBody(value) => {
-                Cow::Owned(IrValue::InlineBody(value.to_ir()))
-            }
+            RuntimeValueKind::InlineBody(value) => Cow::Owned(IrValue::InlineBody(value.to_ir())),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
                 elements.iter().map(Self::to_ir_value).collect(),
             )),
