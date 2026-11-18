@@ -2820,7 +2820,11 @@ impl<'a> EvaluationContext<'a> {
     /// installation deliberately use `set_value` directly and are therefore
     /// not treated as user assignments.
     fn assign_value(&mut self, name: String, value: impl Into<RuntimeValue>) {
-        let value = value.into();
+        // Direct Markdown source spelling is authority owned by the declaration
+        // that supplied it, not transferable runtime provenance. Keep the
+        // source-backed classification while dropping that one-shot evidence;
+        // a directly authored list body is re-marked on its exact owner below.
+        let value = without_direct_markdown_source_evidence(value.into());
         let has_forwarded_owner = self.has_forwarded_variable_owner(&name);
         if !self.assign_to_real_owner(&name, value.clone()) {
             // A lambda parameter is a lookup binding, not a variable owner.
@@ -11690,14 +11694,15 @@ impl Evaluator {
         else {
             return LegacyCallOutcome::Failed;
         };
-        let runtime_argument =
+        let direct_runtime_argument =
             if implicit_argument.is_none() && named_args.is_empty() && positional_args.len() == 1 {
                 direct_variable_runtime_value(&positional_args[0], context)
                     .map(|value| value.with_origin(argument.origin))
-                    .unwrap_or_else(|| argument.clone())
             } else {
-                argument.clone()
+                None
             };
+        let runtime_argument = direct_runtime_argument
+            .unwrap_or_else(|| without_direct_markdown_source_evidence(argument.clone()));
         let message = match builtins::logger_string_conversion(&runtime_argument) {
             Ok(message) => message,
             Err(error) => {
@@ -28375,6 +28380,24 @@ fn call_result_origin(name: &str, context: &EvaluationContext<'_>) -> ValueOrigi
     } else {
         ValueOrigin::Static
     }
+}
+
+/// Removes the exact source-spelling authority used only by the logger's
+/// independently evidenced direct-variable Markdown-list conversion.
+///
+/// The broader SourceBackedMarkdown classification remains attached so G1-J
+/// can preserve runtime provenance across aliases, captures, and scope
+/// storage without promoting those boundaries into direct source owners.
+fn without_direct_markdown_source_evidence(mut value: RuntimeValue) -> RuntimeValue {
+    if matches!(
+        value.provenance(),
+        ValueProvenance::SourceBackedMarkdown {
+            source_text: Some(_)
+        }
+    ) {
+        value.set_provenance(ValueProvenance::source_backed_markdown());
+    }
+    value
 }
 
 /// Returns the evaluator runtime value only when this exact raw argument is a
