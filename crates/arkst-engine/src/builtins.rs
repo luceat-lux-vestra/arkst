@@ -784,6 +784,7 @@ pub(crate) fn evaluate_bound(
 fn static_result(value: IrValue) -> Result<RuntimeValue, BuiltinError> {
     Ok(RuntimeValue::static_value(value))
 }
+
 fn evaluate_color(mut arguments: BoundArguments) -> Result<RuntimeValue, BuiltinError> {
     let base = arguments
         .remove(0)
@@ -2064,7 +2065,7 @@ fn numeric_result(value: f32) -> RuntimeValue {
         return RuntimeValue::static_value(IrValue::Number(f64::NAN));
     }
     if value.ceil() == value.floor() {
-        return RuntimeValue::static_value(IrValue::Number(f64::from(kotlin_float_to_int(value)));
+        return RuntimeValue::static_value(IrValue::Number(f64::from(kotlin_float_to_int(value))));
     }
     RuntimeValue::static_value(IrValue::Number(f64::from(value)))
 }
