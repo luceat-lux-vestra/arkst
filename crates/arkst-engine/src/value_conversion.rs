@@ -383,16 +383,18 @@ impl RuntimeValue {
             RuntimeValueKind::Pair(_) => Cow::Owned(IrValue::Pair(
                 self.to_ir_pair().expect("runtime pair invariant"),
             )),
-            RuntimeValueKind::Dictionary(value) => {
-                Cow::Owned(IrValue::Dictionary(IrDictionary {
-                    entries: value
-                        .entries
-                        .iter()
-                        .map(|entry| entry.to_ir_pair().expect("runtime dictionary entry invariant"))
-                        .collect(),
-                    span: value.span,
-                }))
-            }
+            RuntimeValueKind::Dictionary(value) => Cow::Owned(IrValue::Dictionary(IrDictionary {
+                entries: value
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        entry
+                            .to_ir_pair()
+                            .expect("runtime dictionary entry invariant")
+                    })
+                    .collect(),
+                span: value.span,
+            })),
             RuntimeValueKind::Component(value) => Cow::Owned(IrValue::Component(value.clone())),
             RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
@@ -443,7 +445,11 @@ impl RuntimeValue {
                 entries: value
                     .entries
                     .iter()
-                    .map(|entry| entry.to_ir_pair().expect("runtime dictionary entry invariant"))
+                    .map(|entry| {
+                        entry
+                            .to_ir_pair()
+                            .expect("runtime dictionary entry invariant")
+                    })
                     .collect(),
                 span: value.span,
             }),
@@ -3332,10 +3338,9 @@ mod tests {
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
         IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType, IrEnumValue,
         IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize,
-        IrSizeUnit,
-        IrSlideTransitionSpeed, IrSlideTransitionStyle, IrStackedComponent, IrStackedLayout,
-        IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight,
-        IrValue,
+        IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle, IrStackedComponent,
+        IrStackedLayout, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
+        IrTextWeight, IrValue,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
 
@@ -3563,9 +3568,8 @@ mod tests {
         }));
         let pair = RuntimeValue::pair(first, second, pair_span, ValueOrigin::Dynamic)
             .with_provenance(ValueProvenance::source_backed_markdown_text("pair-source"));
-        let dictionary =
-            RuntimeValue::dictionary(vec![pair], dictionary_span, ValueOrigin::Static)
-                .expect("runtime dictionary accepts Pair entries");
+        let dictionary = RuntimeValue::dictionary(vec![pair], dictionary_span, ValueOrigin::Static)
+            .expect("runtime dictionary accepts Pair entries");
 
         assert_eq!(dictionary.origin, ValueOrigin::Static);
         assert!(dictionary.provenance().is_materialized());
@@ -3596,7 +3600,9 @@ mod tests {
         ));
 
         assert!(RuntimeValue::dictionary(
-            vec![RuntimeValue::static_value(IrValue::String("not-pair".into()))],
+            vec![RuntimeValue::static_value(IrValue::String(
+                "not-pair".into()
+            ))],
             dictionary_span,
             ValueOrigin::Static,
         )
