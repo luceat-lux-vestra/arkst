@@ -31056,8 +31056,8 @@ mod tests {
             panic!("expected explicit callable binding");
         };
         assert!(matches!(
-            values.as_slice(),
-            [IrValue::Content(nodes)]
+            values[0].to_ir_value(),
+            IrValue::Content(nodes)
                 if matches!(
                     nodes.as_slice(),
                     [IrNode::Paragraph { content, .. }]
@@ -31180,10 +31180,16 @@ mod tests {
             panic!("expected implicit callable binding");
         };
         assert_eq!(values.len(), 3);
-        assert!(matches!(&values[0], IrValue::String(value) if value == "one"));
-        assert!(matches!(&values[1], IrValue::Number(value) if *value == 2.0));
         assert!(matches!(
-            &values[2],
+            values[0].to_ir_value(),
+            IrValue::String(value) if value == "one"
+        ));
+        assert!(matches!(
+            values[1].to_ir_value(),
+            IrValue::Number(value) if value == 2.0
+        ));
+        assert!(matches!(
+            values[2].to_ir_value(),
             IrValue::Content(nodes)
                 if matches!(
                     nodes.as_slice(),
@@ -34313,7 +34319,7 @@ mod tests {
         assert_eq!(
             repeated,
             match repeated_again {
-                LegacyCallOutcome::Value(value) => value,
+                CallOutcome::Value(value) => value,
                 _ => panic!("expected deterministic distinct result"),
             }
         );
@@ -38320,7 +38326,7 @@ mod tests {
         assert_eq!(stored.runtime_value().origin, ValueOrigin::Dynamic);
         assert_eq!(
             stored.runtime_value().provenance(),
-            ValueProvenance::source_backed_markdown()
+            &ValueProvenance::source_backed_markdown()
         );
         assert_eq!(
             stored.runtime_value().to_ir_value(),
@@ -38336,7 +38342,7 @@ mod tests {
         assert_eq!(stored.runtime_value().origin, ValueOrigin::Static);
         assert_eq!(
             stored.runtime_value().provenance(),
-            ValueProvenance::Materialized
+            &ValueProvenance::Materialized
         );
         assert_eq!(stored.runtime_value().to_ir_value(), IrValue::Number(7.0));
     }
@@ -38364,10 +38370,10 @@ mod tests {
         assert_eq!(values[0].origin, ValueOrigin::Dynamic);
         assert_eq!(
             values[0].provenance(),
-            ValueProvenance::source_backed_markdown()
+            &ValueProvenance::source_backed_markdown()
         );
         assert_eq!(values[1].origin, ValueOrigin::Static);
-        assert_eq!(values[1].provenance(), ValueProvenance::Materialized);
+        assert_eq!(values[1].provenance(), &ValueProvenance::Materialized);
         assert_eq!(values[0], dynamic);
         assert_eq!(values[1], materialized);
     }
