@@ -6961,7 +6961,7 @@ impl Evaluator {
                 Ok(values) => values,
                 Err(outcome) => return outcome,
             };
-            return (self.evaluate_builtin_with_candidates(
+            return self.evaluate_builtin_with_candidates(
                 builtin,
                 binding_plan,
                 evaluated_candidates,
@@ -6970,8 +6970,7 @@ impl Evaluator {
                 *span,
                 diagnostics,
                 context,
-            ))
-            .into();
+            );
         }
 
         // Ordinary output context preserves unresolved calls. A chain wrapper
@@ -6990,7 +6989,7 @@ impl Evaluator {
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-    ) -> LegacyCallOutcome {
+    ) -> CallOutcome {
         let body_value = match builtin.body_policy {
             builtins::BuiltinBodyPolicy::Reject => None,
             builtins::BuiltinBodyPolicy::BindRaw | builtins::BuiltinBodyPolicy::BindRawFirst => {
@@ -7000,7 +6999,7 @@ impl Evaluator {
                             "This body conversion requires source-backed raw body text".to_string(),
                             call_body_source_span(call_body, span),
                         ));
-                        return LegacyCallOutcome::Failed;
+                        return CallOutcome::Failed;
                     };
                     let Some(body_text) = value_conversion::raw_body_dynamic_text(raw_body) else {
                         diagnostics.push(chain_evaluation_error(
@@ -7008,7 +7007,7 @@ impl Evaluator {
                                 .to_string(),
                             call_body_source_span(call_body, span),
                         ));
-                        return LegacyCallOutcome::Failed;
+                        return CallOutcome::Failed;
                     };
                     Some(Candidate::Positional {
                         value: RuntimeValue::dynamic_value(IrValue::String(body_text)),
@@ -7024,17 +7023,17 @@ impl Evaluator {
             builtins::BuiltinBodyPolicy::BindEvaluatedContent
             | builtins::BuiltinBodyPolicy::BindEvaluatedFirst => {
                 if let Some(call_body) = body {
-                    let body = match self.evaluate_ir_call_body_value_context(
+                    let body = match self.evaluate_call_body_value_context(
                         call_body,
                         &span,
                         diagnostics,
                         context,
                     ) {
-                        LegacyCallOutcome::Value(value) => value,
+                        CallOutcome::Value(value) => value,
                         outcome => return outcome,
                     };
                     Some(Candidate::Positional {
-                        value: RuntimeValue::static_value(body),
+                        value: body,
                         span: call_body_source_span(call_body, span),
                     })
                 } else {
@@ -7046,12 +7045,12 @@ impl Evaluator {
             Ok(bound) => bound,
             Err(error) => {
                 diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
-                return LegacyCallOutcome::Failed;
+                return CallOutcome::Failed;
             }
         };
         let bound = match self.convert_builtin_targets(builtin, bound, span, diagnostics, context) {
             Ok(bound) => bound,
-            Err(outcome) => return outcome,
+            Err(outcome) => return outcome.into(),
         };
         match builtins::evaluate_bound(
             builtin,
@@ -7059,7 +7058,7 @@ impl Evaluator {
             span,
             matches!(body, Some(CallBody::Block(_))),
         ) {
-            Ok(value) => LegacyCallOutcome::Value(value),
+            Ok(value) => CallOutcome::Value(value),
             Err(error) => {
                 if let Some(conversion) = error.conversion {
                     diagnostics.push(conversion_failure_diagnostic(
@@ -7075,7 +7074,7 @@ impl Evaluator {
                 } else {
                     diagnostics.push(chain_evaluation_error(error.message, span));
                 }
-                LegacyCallOutcome::Failed
+                CallOutcome::Failed
             }
         }
     }
@@ -19900,7 +19899,6 @@ impl Evaluator {
             diagnostics,
             context,
         )
-        .into()
     }
 
     fn evaluate_argument_candidate(
