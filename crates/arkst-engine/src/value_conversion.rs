@@ -10,11 +10,10 @@ use arkst_ir::{
     IrBoxType, IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
     IrCapturedFunction, IrCapturedVariable, IrClipShape, IrColor, IrComponent,
     IrContainerAlignment, IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType,
-    IrEnumValue, IrFragmentBehavior, IrInline, IrInlineBody, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
-    IrSlideTransitionStyle, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
-    IrTextWeight, IrValue,
+    IrEnumValue, IrFragmentBehavior, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode,
+    IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair, IrParameter,
+    IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle,
+    IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
 use arkst_source::{SourceId, SourceSpan};
 use std::borrow::Cow;
@@ -547,6 +546,24 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::Content(_))
     }
 
+    pub(crate) fn is_unit(&self) -> bool {
+        matches!(&self.kind, RuntimeValueKind::Unit)
+    }
+
+    pub(crate) fn into_pair_parts(self) -> Option<(Self, Self, SourceSpan)> {
+        let RuntimeValueKind::Pair(pair) = self.kind else {
+            return None;
+        };
+        Some((*pair.first, *pair.second, pair.span))
+    }
+
+    pub(crate) fn into_dictionary_entries(self) -> Option<(Vec<Self>, SourceSpan)> {
+        let RuntimeValueKind::Dictionary(dictionary) = self.kind else {
+            return None;
+        };
+        Some((dictionary.entries, dictionary.span))
+    }
+
     pub(crate) fn callable(value: RuntimeCallable, origin: ValueOrigin) -> Self {
         Self {
             kind: RuntimeValueKind::Callable(value),
@@ -753,6 +770,24 @@ impl RuntimeValue {
     }
 }
 
+impl From<IrValue> for RuntimeValue {
+    fn from(value: IrValue) -> Self {
+        Self::static_value(value)
+    }
+}
+
+impl PartialEq<IrValue> for RuntimeValue {
+    fn eq(&self, other: &IrValue) -> bool {
+        self.semantic_value().as_ref() == other
+    }
+}
+
+impl PartialEq<RuntimeValue> for IrValue {
+    fn eq(&self, other: &RuntimeValue) -> bool {
+        self == other.semantic_value().as_ref()
+    }
+}
+
 /// One evaluated named argument at the evaluator-owned runtime boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RuntimeNamedArg {
@@ -760,17 +795,6 @@ pub(crate) struct RuntimeNamedArg {
     pub name_span: SourceSpan,
     pub value: RuntimeValue,
     pub span: SourceSpan,
-}
-
-impl RuntimeNamedArg {
-    pub(crate) fn new(arg: IrNamedArg, origin: ValueOrigin) -> Self {
-        Self {
-            name: arg.name,
-            name_span: arg.name_span,
-            value: RuntimeValue::new(arg.value, origin),
-            span: arg.span,
-        }
-    }
 }
 
 /// The scalar targets supported by this bounded conversion policy.
