@@ -745,19 +745,31 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::StartsWith => evaluate_startswith(builtin, arguments),
         BuiltinKind::Plaintext => evaluate_plaintext(builtin, arguments),
         BuiltinKind::Text => evaluate_text(arguments, call_span).map(RuntimeValue::static_value),
-        BuiltinKind::Codespan => evaluate_codespan(arguments, call_span).map(RuntimeValue::static_value),
-        BuiltinKind::Math => evaluate_math(arguments, call_span, is_block_call).map(RuntimeValue::static_value),
-        BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span).map(RuntimeValue::static_value),
-        BuiltinKind::LoremIpsum => Ok(RuntimeValue::static_value(IrValue::String(LOREM_IPSUM_TEXT.to_string()))),
+        BuiltinKind::Codespan => {
+            evaluate_codespan(arguments, call_span).map(RuntimeValue::static_value)
+        }
+        BuiltinKind::Math => {
+            evaluate_math(arguments, call_span, is_block_call).map(RuntimeValue::static_value)
+        }
+        BuiltinKind::Keybinding => {
+            evaluate_keybinding(arguments, call_span).map(RuntimeValue::static_value)
+        }
+        BuiltinKind::LoremIpsum => Ok(RuntimeValue::static_value(IrValue::String(
+            LOREM_IPSUM_TEXT.to_string(),
+        ))),
         BuiltinKind::None => evaluate_none(builtin, arguments),
-        BuiltinKind::Otherwise => evaluate_otherwise(builtin, arguments).map(RuntimeValue::static_value),
+        BuiltinKind::Otherwise => {
+            evaluate_otherwise(builtin, arguments).map(RuntimeValue::static_value)
+        }
         BuiltinKind::IsNone => evaluate_isnone(builtin, arguments),
         BuiltinKind::IsLower | BuiltinKind::IsGreater => evaluate_ordering(builtin, arguments),
         BuiltinKind::Equals => evaluate_equals(builtin, arguments),
         BuiltinKind::Not => evaluate_not(builtin, arguments),
         BuiltinKind::And | BuiltinKind::Or => evaluate_boolean_binary(builtin, arguments),
         BuiltinKind::Color => evaluate_color(arguments),
-        BuiltinKind::EmptyCollection => Ok(RuntimeValue::static_value(IrValue::Collection(Vec::new()))),
+        BuiltinKind::EmptyCollection => {
+            Ok(RuntimeValue::static_value(IrValue::Collection(Vec::new())))
+        }
         BuiltinKind::EmptyDictionary => Ok(RuntimeValue::static_value(IrValue::Dictionary(
             IrDictionary {
                 entries: Vec::new(),
@@ -1981,7 +1993,10 @@ fn evaluate_transcendental(
     )))
 }
 
-fn evaluate_pi(_builtin: &BuiltinSpec, arguments: BoundArguments) -> Result<RuntimeValue, BuiltinError> {
+fn evaluate_pi(
+    _builtin: &BuiltinSpec,
+    arguments: BoundArguments,
+) -> Result<RuntimeValue, BuiltinError> {
     debug_assert!(arguments.is_empty());
 
     // Quarkdown passes kotlin.math.PI as a Double to NumberValue. Keep this
