@@ -49,16 +49,11 @@ fn is_local_resource_reference(value: &str) -> bool {
     let Some((scheme, _)) = value.split_once(':') else {
         return true;
     };
-    if scheme.is_empty()
+    scheme.is_empty()
         || !scheme.as_bytes()[0].is_ascii_alphabetic()
         || !scheme
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
-    {
-        return true;
-    }
-
-    false
 }
 
 struct LoweringContext {
