@@ -1334,7 +1334,11 @@ impl CallableBodyValueAccumulator {
 
         let current = std::mem::replace(self, Self::Empty);
         let mut nodes = current.into_content_nodes(diagnostics)?;
-        nodes.extend(value_into_content_nodes(value, span, diagnostics)?);
+        nodes.extend(value_into_content_nodes(
+            value.into_ir_value(),
+            span,
+            diagnostics,
+        )?);
         *self = Self::Content(nodes);
         Ok(())
     }
@@ -4588,7 +4592,11 @@ impl Evaluator {
                     });
                 }
                 CallOutcome::Value(value) => {
-                    pending.extend(self.materialize_inline_value(Some(value.into_ir_value()), span, diagnostics));
+                    pending.extend(self.materialize_inline_value(
+                        Some(value.into_ir_value()),
+                        span,
+                        diagnostics,
+                    ));
                 }
                 CallOutcome::NoValue | CallOutcome::Failed => {}
                 CallOutcome::Unresolved => {
@@ -4803,7 +4811,11 @@ impl Evaluator {
                     out.push(IrInline::ExplicitError { component });
                 }
                 CallOutcome::Value(value) => {
-                    out.extend(self.materialize_inline_value(Some(value.into_ir_value()), span, diagnostics));
+                    out.extend(self.materialize_inline_value(
+                        Some(value.into_ir_value()),
+                        span,
+                        diagnostics,
+                    ));
                 }
                 CallOutcome::NoValue | CallOutcome::Failed => {}
                 CallOutcome::Unresolved => {
@@ -5451,7 +5463,9 @@ impl Evaluator {
             diagnostics,
             context,
         ) {
-            CallOutcome::Value(value) if value.is_unit() && !unit_is_observable_value_reference => Vec::new(),
+            CallOutcome::Value(value) if value.is_unit() && !unit_is_observable_value_reference => {
+                Vec::new()
+            }
             CallOutcome::Value(value) => {
                 self.materialize_inline_value(Some(value.into_ir_value()), span, diagnostics)
             }
@@ -6037,7 +6051,8 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
         if is_logger(name) && context.get_function(name).is_none() {
             return (self.evaluate_logger_builtin(
@@ -6051,7 +6066,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_environment(name) && context.get_function(name).is_none() {
@@ -6065,7 +6081,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_conditional(name) {
@@ -6141,14 +6158,17 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
 
         if is_page_break(name) && context.get_function(name).is_none() {
             let Some(_binding_plan) = native_binding_plan.as_ref() else {
                 return CallOutcome::Failed;
             };
-            return CallOutcome::Value(IrValue::Content(vec![IrNode::PageBreak { span: *span }]).into());
+            return CallOutcome::Value(
+                IrValue::Content(vec![IrNode::PageBreak { span: *span }]).into(),
+            );
         }
 
         if is_localization(name) && context.get_function(name).is_none() {
@@ -6165,7 +6185,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_html(name) {
@@ -6178,7 +6199,8 @@ impl Evaluator {
                 diagnostics,
                 context,
                 native_binding_plan.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_markdown(name) {
@@ -6191,7 +6213,8 @@ impl Evaluator {
                 diagnostics,
                 context,
                 native_binding_plan.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         // Adding a native resource name must not steal a source-defined callable
@@ -6210,7 +6233,8 @@ impl Evaluator {
                 diagnostics,
                 context,
                 native_binding_plan.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_deferred(name) {
@@ -6431,7 +6455,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_table_sort(name) {
@@ -6447,7 +6472,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_table_filter(name) {
@@ -6512,7 +6538,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_center(name) {
@@ -6528,7 +6555,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_align(name) {
@@ -6544,7 +6572,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_container(name) {
@@ -6558,7 +6587,8 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
 
         if is_full_span(name) {
@@ -6574,7 +6604,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_landscape(name) {
@@ -6590,7 +6621,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_clip(name) {
@@ -6606,7 +6638,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_collapse(name) {
@@ -6622,7 +6655,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_text_collapse(name) {
@@ -6638,7 +6672,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_box(name) {
@@ -6654,7 +6689,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_todo(name) {
@@ -6670,7 +6706,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_speaker_note(name) {
@@ -6686,7 +6723,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_fragment(name) {
@@ -6702,7 +6740,8 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
                 implicit_argument.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_br(name) {
@@ -6714,7 +6753,8 @@ impl Evaluator {
                 span,
                 diagnostics,
                 native_binding_plan.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_page_margin(name) {
@@ -6729,7 +6769,8 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
 
         if is_page_counter(name) {
@@ -6739,7 +6780,8 @@ impl Evaluator {
                 span,
                 diagnostics,
                 native_binding_plan.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_page_number_marker(name) {
@@ -6753,7 +6795,8 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
 
         if is_last_heading(name) {
@@ -6766,7 +6809,8 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
 
         if is_whitespace(name) {
@@ -6780,7 +6824,8 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
 
         if is_stacked_layout(name) {
@@ -6795,7 +6840,8 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
 
         if is_range(name) {
@@ -6808,7 +6854,8 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
-            )).into();
+            ))
+            .into();
         }
 
         if is_pair(name) {
@@ -6820,7 +6867,8 @@ impl Evaluator {
                 diagnostics,
                 context,
                 native_binding_plan.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_dictionary(name) {
@@ -6832,7 +6880,8 @@ impl Evaluator {
                 diagnostics,
                 context,
                 native_binding_plan.as_ref(),
-            )).into();
+            ))
+            .into();
         }
 
         if is_dictionary_lookup(name) {
@@ -6860,7 +6909,8 @@ impl Evaluator {
                 span,
                 diagnostics,
                 binding_plan,
-            )).into();
+            ))
+            .into();
         }
 
         if is_collection_access(name) {
@@ -6892,7 +6942,8 @@ impl Evaluator {
                 diagnostics,
                 context,
                 binding_plan,
-            )).into();
+            ))
+            .into();
         }
 
         if let Some(builtin) = builtins::lookup(name) {
@@ -6921,7 +6972,8 @@ impl Evaluator {
                 *span,
                 diagnostics,
                 context,
-            )).into();
+            ))
+            .into();
         }
 
         // Ordinary output context preserves unresolved calls. A chain wrapper
@@ -7290,28 +7342,28 @@ impl Evaluator {
                         let Some(argument) = named_args.get(index) else {
                             return LegacyCallOutcome::Failed;
                         };
-                        let value = match self.evaluate_ir_value(&argument.value, diagnostics, context)
-                        {
-                            LegacyCallOutcome::Value(value) => value,
-                            LegacyCallOutcome::Unresolved => {
-                                match self.preserve_value_expression(
-                                    &argument.value,
-                                    diagnostics,
-                                    context,
-                                ) {
-                                    Ok(value) => value,
-                                    Err(outcome) => return outcome.into(),
+                        let value =
+                            match self.evaluate_ir_value(&argument.value, diagnostics, context) {
+                                LegacyCallOutcome::Value(value) => value,
+                                LegacyCallOutcome::Unresolved => {
+                                    match self.preserve_value_expression(
+                                        &argument.value,
+                                        diagnostics,
+                                        context,
+                                    ) {
+                                        Ok(value) => value,
+                                        Err(outcome) => return outcome.into(),
+                                    }
                                 }
-                            }
-                            LegacyCallOutcome::NoValue => {
-                                diagnostics.push(no_value_required(value_source_span(
-                                    &argument.value,
-                                    span,
-                                )));
-                                return LegacyCallOutcome::Failed;
-                            }
-                            LegacyCallOutcome::Failed => return LegacyCallOutcome::Failed,
-                        };
+                                LegacyCallOutcome::NoValue => {
+                                    diagnostics.push(no_value_required(value_source_span(
+                                        &argument.value,
+                                        span,
+                                    )));
+                                    return LegacyCallOutcome::Failed;
+                                }
+                                LegacyCallOutcome::Failed => return LegacyCallOutcome::Failed,
+                            };
                         RuntimeValue::dynamic_value(value)
                     }
                 }
@@ -7522,7 +7574,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -7679,7 +7731,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -7814,7 +7866,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -7989,7 +8041,7 @@ impl Evaluator {
         let body_slot = slots.next().unwrap_or(BoundSlot::Omitted);
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -8096,7 +8148,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -8491,7 +8543,7 @@ impl Evaluator {
         };
         let body_candidate = match body {
             Some(CallBody::Block(nodes)) => {
-                let value = match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                let value = match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => IrValue::Content(nodes),
                     outcome => return outcome.into(),
                 };
@@ -8796,7 +8848,7 @@ impl Evaluator {
                 {
                     return LegacyCallOutcome::Failed;
                 }
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -8973,7 +9025,7 @@ impl Evaluator {
                     diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
                     return LegacyCallOutcome::Failed;
                 }
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -9167,7 +9219,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -9372,7 +9424,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -9846,7 +9898,7 @@ impl Evaluator {
         let body_slot = slots.next().unwrap_or(BoundSlot::Omitted);
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -10311,7 +10363,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -10650,7 +10702,7 @@ impl Evaluator {
         }
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome.into(),
                 }
@@ -12192,12 +12244,12 @@ impl Evaluator {
                 first_origin,
             ) {
                 Ok(v) => v,
-                Err(o) => return o,
+                Err(o) => return o.into(),
             };
             let evaluated_named =
                 match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
                     Ok(v) => v,
-                    Err(o) => return o,
+                    Err(o) => return o.into(),
                 };
             let bound = match bind_evaluated_arguments(
                 binding_plan,
@@ -12942,7 +12994,10 @@ impl Evaluator {
                 return LegacyCallOutcome::Failed;
             };
             let values = match self.coerce_iterable(value, &span, diagnostics, context) {
-                Ok(values) => values.into_iter().map(|value| (value, span)).collect(),
+                Ok(values) => values
+                    .into_iter()
+                    .map(|value| (value.into_ir_value(), span))
+                    .collect(),
                 Err(outcome) => {
                     return outcome.into();
                 }
@@ -13007,8 +13062,8 @@ impl Evaluator {
                 values
                     .into_iter()
                     .map(|value| {
-                        let value_span = value_source_span(&value, &argument_span);
-                        (value, value_span)
+                        let value_span = runtime_value_source_span(&value, &argument_span);
+                        (value.into_ir_value(), value_span)
                     })
                     .collect(),
                 argument_span,
@@ -13844,7 +13899,8 @@ impl Evaluator {
                     };
                     IrValue::String(body_text)
                 } else {
-                    match self.evaluate_ir_call_body_value_context(body, span, diagnostics, context) {
+                    match self.evaluate_ir_call_body_value_context(body, span, diagnostics, context)
+                    {
                         LegacyCallOutcome::Value(value) => value,
                         outcome => return outcome.into(),
                     }
@@ -14751,13 +14807,17 @@ impl Evaluator {
         let body_candidate = match body {
             Some(body) => {
                 let body_span = call_body_source_span(body, *span);
-                let value =
-                    match self.evaluate_ir_call_body_value_context(body, span, diagnostics, context) {
-                        LegacyCallOutcome::Value(value) => value,
-                        LegacyCallOutcome::NoValue => IrValue::Content(Vec::new()),
-                        LegacyCallOutcome::Failed => return LegacyCallOutcome::Failed,
-                        LegacyCallOutcome::Unresolved => return LegacyCallOutcome::Unresolved,
-                    };
+                let value = match self.evaluate_ir_call_body_value_context(
+                    body,
+                    span,
+                    diagnostics,
+                    context,
+                ) {
+                    LegacyCallOutcome::Value(value) => value,
+                    LegacyCallOutcome::NoValue => IrValue::Content(Vec::new()),
+                    LegacyCallOutcome::Failed => return LegacyCallOutcome::Failed,
+                    LegacyCallOutcome::Unresolved => return LegacyCallOutcome::Unresolved,
+                };
                 Some(Candidate::Positional {
                     value,
                     span: body_span,
@@ -14799,7 +14859,8 @@ impl Evaluator {
             return LegacyCallOutcome::Failed;
         }
         for (index, element) in elements.into_iter().enumerate() {
-            let Some(reference) = builtins::adapt_string_argument(&element) else {
+            let element_semantic = element.to_ir_value();
+            let Some(reference) = builtins::adapt_string_argument(&element_semantic) else {
                 diagnostics.push(resource_diagnostic(
                     "E3003",
                     format!("`.includeall` path at index {index} must adapt to String"),
@@ -15122,27 +15183,55 @@ impl Evaluator {
                         Err(outcome) => outcome.into(),
                     },
                     "first" => {
-                        LegacyCallOutcome::Value(elements.first().cloned().unwrap_or(IrValue::None))
+                        LegacyCallOutcome::Value(
+                            elements
+                                .first()
+                                .cloned()
+                                .map(RuntimeValue::into_ir_value)
+                                .unwrap_or(IrValue::None),
+                        )
                     }
                     "second" => {
-                        LegacyCallOutcome::Value(elements.get(1).cloned().unwrap_or(IrValue::None))
+                        LegacyCallOutcome::Value(
+                            elements
+                                .get(1)
+                                .cloned()
+                                .map(RuntimeValue::into_ir_value)
+                                .unwrap_or(IrValue::None),
+                        )
                     }
                     "third" => {
-                        LegacyCallOutcome::Value(elements.get(2).cloned().unwrap_or(IrValue::None))
+                        LegacyCallOutcome::Value(
+                            elements
+                                .get(2)
+                                .cloned()
+                                .map(RuntimeValue::into_ir_value)
+                                .unwrap_or(IrValue::None),
+                        )
                     }
-                    "last" => LegacyCallOutcome::Value(elements.last().cloned().unwrap_or(IrValue::None)),
-                    "sumall" => LegacyCallOutcome::Value(IrValue::Number(collection_sum_all(&elements))),
-                    "average" => match collection_average(&elements, span, diagnostics) {
+                    "last" => {
+                        LegacyCallOutcome::Value(
+                            elements
+                                .last()
+                                .cloned()
+                                .map(RuntimeValue::into_ir_value)
+                                .unwrap_or(IrValue::None),
+                        )
+                    }
+                    "sumall" => {
+                        LegacyCallOutcome::Value(IrValue::Number(collection_sum_all(&project_runtime_values(&elements))))
+                    }
+                    "average" => match collection_average(&project_runtime_values(&elements), span, diagnostics) {
                         Ok(average) => LegacyCallOutcome::Value(IrValue::Number(average)),
                         Err(outcome) => outcome.into(),
                     },
-                    "distinct" => distinct_collection_values(elements, *span, diagnostics),
+                    "distinct" => distinct_collection_values(project_owned_runtime_values(elements), *span, diagnostics),
                     "reversed" => {
                         let mut reversed = elements;
                         reversed.reverse();
-                        LegacyCallOutcome::Value(IrValue::Collection(reversed))
+                        LegacyCallOutcome::Value(IrValue::Collection(project_owned_runtime_values(reversed)))
                     }
-                    "groupvalues" => group_collection_values(elements, *span, diagnostics),
+                    "groupvalues" => group_collection_values(project_owned_runtime_values(elements), *span, diagnostics),
                     "withindices" => {
                         if let Err(outcome) =
                             exact_collection_length(elements.len(), span, diagnostics)
@@ -15160,7 +15249,7 @@ impl Evaluator {
                         entries.extend(elements.into_iter().enumerate().map(|(index, value)| {
                             IrPair {
                                 first: Box::new(IrValue::Number((index + 1) as f64)),
-                                second: Box::new(value),
+                                second: Box::new(value.into_ir_value()),
                                 span: *span,
                             }
                         }));
@@ -15197,11 +15286,13 @@ impl Evaluator {
                     return LegacyCallOutcome::Failed;
                 }
                 if name == "prepended" {
-                    elements.insert(0, value.into_ir_value());
+                    elements.insert(0, value);
                 } else {
-                    elements.push(value.into_ir_value());
+                    elements.push(value);
                 }
-                LegacyCallOutcome::Value(IrValue::Collection(elements))
+                LegacyCallOutcome::Value(IrValue::Collection(project_owned_runtime_values(
+                    elements,
+                )))
             }
             "getat" => {
                 let (value, index, fallback) = match getat_operands(
@@ -15231,6 +15322,7 @@ impl Evaluator {
                 LegacyCallOutcome::Value(
                     index
                         .and_then(|index| elements.get(index).cloned())
+                        .map(RuntimeValue::into_ir_value)
                         .unwrap_or(fallback),
                 )
             }
@@ -15740,11 +15832,12 @@ impl Evaluator {
             }
         }
 
+        let value_origin = invocation_origin(&value, context);
         let value = match self.evaluate_value(&value, diagnostics, context) {
             CallOutcome::Value(value) => value,
             CallOutcome::Unresolved => {
                 match self.preserve_value_expression(&value, diagnostics, context) {
-                    Ok(value) => value,
+                    Ok(value) => RuntimeValue::new(value, value_origin),
                     Err(outcome) => return outcome,
                 }
             }
@@ -16016,11 +16109,13 @@ impl Evaluator {
             return Err(CallOutcome::Failed);
         }
 
+        let count_origin = invocation_origin(&count_argument, context);
         let count_value = match self.evaluate_value(&count_argument, diagnostics, context) {
             CallOutcome::Value(value) => value,
-            CallOutcome::Unresolved => {
-                self.preserve_value_expression(&count_argument, diagnostics, context)?
-            }
+            CallOutcome::Unresolved => RuntimeValue::new(
+                self.preserve_value_expression(&count_argument, diagnostics, context)?,
+                count_origin,
+            ),
             CallOutcome::NoValue => {
                 diagnostics.push(no_value_required(value_source_span(&count_argument, span)));
                 return Err(CallOutcome::Failed);
@@ -17400,11 +17495,12 @@ impl Evaluator {
             }
             None => match raw_callback {
                 Some(value) => {
+                    let callback_origin = invocation_origin(&value, context);
                     let value = match self.evaluate_value(&value, diagnostics, context) {
                         CallOutcome::Value(value) => value,
                         CallOutcome::Unresolved => {
                             match self.preserve_value_expression(&value, diagnostics, context) {
-                                Ok(value) => value,
+                                Ok(value) => RuntimeValue::new(value, callback_origin),
                                 Err(outcome) => return outcome,
                             }
                         }
@@ -17626,7 +17722,8 @@ impl Evaluator {
                 },
                 None => element,
             };
-            let content = match value_into_content_nodes(value.into_ir_value(), *span, diagnostics) {
+            let content = match value_into_content_nodes(value.into_ir_value(), *span, diagnostics)
+            {
                 Ok(content) => content,
                 Err(outcome) => return outcome,
             };
@@ -17665,11 +17762,12 @@ impl Evaluator {
             Ok(operands) => operands,
             Err(outcome) => return outcome,
         };
+        let value_origin = invocation_origin(&raw_value, context);
         let value = match self.evaluate_value(&raw_value, diagnostics, context) {
             CallOutcome::Value(value) => value,
             CallOutcome::Unresolved => {
                 match self.preserve_value_expression(&raw_value, diagnostics, context) {
-                    Ok(value) => value,
+                    Ok(value) => RuntimeValue::new(value, value_origin),
                     Err(outcome) => return outcome,
                 }
             }
@@ -17706,8 +17804,7 @@ impl Evaluator {
                 let callback = match self.evaluate_value(&raw_callback, diagnostics, context) {
                     CallOutcome::Value(value) => {
                         let callback_span = runtime_value_source_span(&value, span);
-                        let Some(callable) = value.into_callable()
-                        else {
+                        let Some(callable) = value.into_callable() else {
                             diagnostics.push(iteration_error(
                                 format!("`.{name}` callback must be a first-class callable"),
                                 callback_span,
@@ -18322,7 +18419,10 @@ impl Evaluator {
             let key = match SortKey::try_from_value(&key) {
                 Ok(key) => key,
                 Err(message) => {
-                    diagnostics.push(iteration_error(message, runtime_value_source_span(&key, &span)));
+                    diagnostics.push(iteration_error(
+                        message,
+                        runtime_value_source_span(&key, &span),
+                    ));
                     return CallOutcome::Failed;
                 }
             };
@@ -18383,7 +18483,12 @@ impl Evaluator {
             Ok(value_conversion::TargetValue::Value(value)) => value,
             Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                 if let Ok(range) = value_conversion::convert_range_with_origin(&value, *span) {
-                    return self.materialize_range(range, span, diagnostics);
+                    return self.materialize_range(range, span, diagnostics).map(|values| {
+                        values
+                            .into_iter()
+                            .map(|value| RuntimeValue::new(value, origin))
+                            .collect()
+                    });
                 }
                 let nodes = self.parse_dynamic_markdown_content(
                     &text,
@@ -18405,13 +18510,14 @@ impl Evaluator {
                 );
                 if is_expression {
                     match self.evaluate_value(&fallback, diagnostics, context) {
-                        CallOutcome::Value(
+                        CallOutcome::Value(value) => match value.into_ir_value() {
                             value @ (IrValue::Collection(_)
                             | IrValue::Pair(_)
                             | IrValue::Dictionary(_)
-                            | IrValue::Range(_)),
-                        ) => value,
-                        CallOutcome::Value(_) | CallOutcome::Unresolved => fallback,
+                            | IrValue::Range(_)) => value,
+                            _ => fallback,
+                        },
+                        CallOutcome::Unresolved => fallback,
                         CallOutcome::NoValue => {
                             diagnostics.push(no_value_required(*span));
                             return Err(CallOutcome::Failed);
@@ -18420,7 +18526,7 @@ impl Evaluator {
                     }
                 } else {
                     match self.evaluate_value(&fallback, diagnostics, context) {
-                        CallOutcome::Value(value) => value,
+                        CallOutcome::Value(value) => value.into_ir_value(),
                         CallOutcome::Unresolved => fallback,
                         CallOutcome::NoValue => {
                             diagnostics.push(no_value_required(*span));
@@ -18495,7 +18601,12 @@ impl Evaluator {
             value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
                 let argument = RuntimeValue::new(value, origin);
                 match value_conversion::convert_range_with_origin(&argument, *span) {
-                    Ok(range) => self.materialize_range(range, span, diagnostics),
+                    Ok(range) => self.materialize_range(range, span, diagnostics).map(|values| {
+                        values
+                            .into_iter()
+                            .map(|value| RuntimeValue::new(value, origin))
+                            .collect()
+                    }),
                     Err(_) => {
                         diagnostics.push(iteration_error(
                             "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
@@ -18518,9 +18629,12 @@ impl Evaluator {
                         return Err(CallOutcome::Failed);
                     }
                     for item in items {
-                        values.push(RuntimeValue::static_value(
-                            self.list_item_value(item, span, diagnostics, context)?,
-                        ));
+                        values.push(RuntimeValue::static_value(self.list_item_value(
+                            item,
+                            span,
+                            diagnostics,
+                            context,
+                        )?));
                     }
                     Ok(values)
                 }
@@ -18565,9 +18679,6 @@ impl Evaluator {
                 diagnostics,
                 context,
             )?
-            .into_iter()
-            .map(RuntimeValue::static_value)
-            .collect()
         };
         let use_captured_spans = element_spans.len() == values.len();
         let mut elements = Vec::new();
@@ -18608,6 +18719,7 @@ impl Evaluator {
                     diagnostics,
                     context,
                 )
+                .map(project_owned_runtime_values)
                 .map(IrValue::Collection),
             [IrNode::Paragraph { content, .. }] => {
                 let mut text = String::new();
@@ -19382,7 +19494,10 @@ impl Evaluator {
                     diagnostics.push(conversion_failure_diagnostic(
                         value_conversion::ConversionFailure::new(
                             error,
-                            Some(runtime_value_source_span(&condition_result, &condition.span)),
+                            Some(runtime_value_source_span(
+                                &condition_result,
+                                &condition.span,
+                            )),
                             None::<String>,
                             None,
                             span,
@@ -19914,9 +20029,7 @@ impl Evaluator {
                     value,
                     span: value_span,
                 } => Candidate::Positional {
-                    value: self
-                        .evaluate_argument_candidate(&value, span, diagnostics, context)?
-                        ,
+                    value: self.evaluate_argument_candidate(&value, span, diagnostics, context)?,
                     span: value_span,
                 },
                 Candidate::Named {
@@ -19927,9 +20040,7 @@ impl Evaluator {
                 } => Candidate::Named {
                     name,
                     name_span,
-                    value: self
-                        .evaluate_argument_candidate(&value, span, diagnostics, context)?
-                        ,
+                    value: self.evaluate_argument_candidate(&value, span, diagnostics, context)?,
                     span: value_span,
                 },
             };
@@ -19957,9 +20068,7 @@ impl Evaluator {
                 value,
                 span: body_span,
             }) => Some(Candidate::Positional {
-                value: self
-                    .evaluate_argument_candidate(&value, span, diagnostics, context)?
-                    ,
+                value: self.evaluate_argument_candidate(&value, span, diagnostics, context)?,
                 span: body_span,
             }),
             Some(Candidate::Named {
@@ -19970,9 +20079,7 @@ impl Evaluator {
             }) => Some(Candidate::Named {
                 name,
                 name_span,
-                value: self
-                    .evaluate_argument_candidate(&value, span, diagnostics, context)?
-                    ,
+                value: self.evaluate_argument_candidate(&value, span, diagnostics, context)?,
                 span: body_span,
             }),
             None => None,
@@ -20039,10 +20146,12 @@ impl Evaluator {
 
         let mut arguments = Vec::with_capacity(selected.len());
         for candidate in selected {
-            arguments.push(
-                self.evaluate_argument_candidate(&candidate, span, diagnostics, context)?
-                    ,
-            );
+            arguments.push(self.evaluate_argument_candidate(
+                &candidate,
+                span,
+                diagnostics,
+                context,
+            )?);
         }
         Ok(BoundLambdaArguments::Implicit(arguments))
     }
@@ -20587,6 +20696,16 @@ impl Evaluator {
         CallOutcome::Value(IrValue::Content(output).into())
     }
 
+    fn evaluate_evidenced_output_body_legacy(
+        &self,
+        nodes: &[IrNode],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> LegacyCallOutcome {
+        self.evaluate_evidenced_output_body(nodes, diagnostics, context)
+            .into()
+    }
+
     /// Evaluates a call body only after its callee has selected that strategy.
     fn evaluate_call_body(
         &self,
@@ -20745,10 +20864,12 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         match self.evaluate_value(value, diagnostics, context) {
-            CallOutcome::Value(value) => match self.scalar_or_content(value.into_ir_value(), span, diagnostics) {
-                Ok(value) => CallOutcome::Value(value.into()),
-                Err(outcome) => outcome,
-            },
+            CallOutcome::Value(value) => {
+                match self.scalar_or_content(value.into_ir_value(), span, diagnostics) {
+                    Ok(value) => CallOutcome::Value(value.into()),
+                    Err(outcome) => outcome,
+                }
+            }
             CallOutcome::NoValue => {
                 diagnostics.push(no_value_required(value_source_span(value, span)));
                 CallOutcome::Failed
@@ -21483,17 +21604,18 @@ impl Evaluator {
                 invocation_origin(value, context)
             };
             let evaluated_value = match self.evaluate_value(value, diagnostics, context) {
-                CallOutcome::Value(value) => value,
-                CallOutcome::Unresolved => {
-                    self.preserve_value_expression(value, diagnostics, context)?
-                }
+                CallOutcome::Value(value) => value.with_origin(origin),
+                CallOutcome::Unresolved => RuntimeValue::new(
+                    self.preserve_value_expression(value, diagnostics, context)?,
+                    origin,
+                ),
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(value_source_span(value, span)));
                     return Err(CallOutcome::Failed);
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             };
-            evaluated.push(RuntimeValue::new(evaluated_value, origin));
+            evaluated.push(evaluated_value);
         }
         Ok(evaluated)
     }
@@ -21598,17 +21720,17 @@ impl Evaluator {
                 _ => invocation_origin(raw, context),
             };
             let value = match self.evaluate_value(raw, diagnostics, context) {
-                CallOutcome::Value(value) => value,
-                CallOutcome::Unresolved => {
-                    self.preserve_value_expression(raw, diagnostics, context)?
-                }
+                CallOutcome::Value(value) => value.with_origin(origin),
+                CallOutcome::Unresolved => RuntimeValue::new(
+                    self.preserve_value_expression(raw, diagnostics, context)?,
+                    origin,
+                ),
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(value_source_span(raw, span)));
                     return Err(CallOutcome::Failed);
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             };
-            let value = RuntimeValue::new(value, origin);
             candidates.push(match candidate {
                 CandidateKind::Positional(arg_span) => Candidate::Positional {
                     value,
@@ -21643,25 +21765,23 @@ impl Evaluator {
         for argument in named {
             let origin = invocation_origin(&argument.value, context);
             let value = match self.evaluate_value(&argument.value, diagnostics, context) {
-                CallOutcome::Value(value) => value,
-                CallOutcome::Unresolved => {
-                    self.preserve_value_expression(&argument.value, diagnostics, context)?
-                }
+                CallOutcome::Value(value) => value.with_origin(origin),
+                CallOutcome::Unresolved => RuntimeValue::new(
+                    self.preserve_value_expression(&argument.value, diagnostics, context)?,
+                    origin,
+                ),
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(value_source_span(&argument.value, span)));
                     return Err(CallOutcome::Failed);
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             };
-            evaluated.push(RuntimeNamedArg::new(
-                IrNamedArg {
-                    name: argument.name.clone(),
-                    name_span: argument.name_span,
-                    value,
-                    span: argument.span,
-                },
-                origin,
-            ));
+            evaluated.push(RuntimeNamedArg {
+                name: argument.name.clone(),
+                name_span: argument.name_span,
+                value,
+                span: argument.span,
+            });
         }
         Ok(evaluated)
     }
@@ -21683,7 +21803,7 @@ impl Evaluator {
         }
         for arg in named {
             let value = match self.evaluate_value(&arg.value, diagnostics, context) {
-                CallOutcome::Value(value) => value,
+                CallOutcome::Value(value) => value.into_ir_value(),
                 CallOutcome::Unresolved => {
                     self.preserve_value_expression(&arg.value, diagnostics, context)?
                 }
@@ -21714,6 +21834,7 @@ impl Evaluator {
         for value in values {
             match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
+                    let value = value.into_ir_value();
                     self.validate_preserved_value(&value, diagnostics)?;
                     evaluated.push(value);
                 }
@@ -21741,6 +21862,7 @@ impl Evaluator {
         for arg in named {
             let value = match self.evaluate_value(&arg.value, diagnostics, context) {
                 CallOutcome::Value(value) => {
+                    let value = value.into_ir_value();
                     self.validate_preserved_value(&value, diagnostics)?;
                     value
                 }
@@ -24699,6 +24821,17 @@ fn collection_index(
 /// possible, while Boolean, None, structured values, and callables stringify
 /// to non-numeric values in the upstream implementation and therefore also
 /// become zero.
+fn project_runtime_values(values: &[RuntimeValue]) -> Vec<IrValue> {
+    values.iter().map(RuntimeValue::to_ir_value).collect()
+}
+
+fn project_owned_runtime_values(values: Vec<RuntimeValue>) -> Vec<IrValue> {
+    values
+        .into_iter()
+        .map(RuntimeValue::into_ir_value)
+        .collect()
+}
+
 fn collection_value_as_double(value: &IrValue) -> f64 {
     match value {
         IrValue::Number(value) => *value,
@@ -29500,7 +29633,9 @@ mod tests {
             &mut legacy_evaluation_diagnostics,
             &mut legacy_context,
         );
-        let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) =
+            project_legacy_outcome(&(outcome))
+        else {
             panic!("legacy chain must materialize terminal content");
         };
         assert!(
@@ -29720,7 +29855,9 @@ mod tests {
             &mut legacy_evaluation_diagnostics,
             &mut legacy_context,
         );
-        let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) =
+            project_legacy_outcome(&(outcome))
+        else {
             panic!("legacy chain must materialize terminal content");
         };
         assert!(
@@ -29855,7 +29992,9 @@ mod tests {
             &mut legacy_evaluation_diagnostics,
             &mut legacy_context,
         );
-        let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) =
+            project_legacy_outcome(&(outcome))
+        else {
             panic!("legacy implicit chain must materialize terminal content");
         };
         assert!(
@@ -30120,7 +30259,9 @@ mod tests {
                 &mut legacy_diagnostics,
                 &mut legacy_context,
             );
-            let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) = project_legacy_outcome(&(outcome)) else {
+            let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) =
+                project_legacy_outcome(&(outcome))
+            else {
                 panic!("legacy tail must materialize content");
             };
             assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
@@ -30517,7 +30658,9 @@ mod tests {
                     &mut legacy_diagnostics,
                     &mut legacy_context,
                 );
-                let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) = project_legacy_outcome(&(outcome)) else {
+                let LegacyCallOutcome::Value(IrValue::Content(legacy_nodes)) =
+                    project_legacy_outcome(&(outcome))
+                else {
                     panic!("legacy tail must materialize content");
                 };
                 assert!(legacy_diagnostics.is_empty(), "{legacy_diagnostics:?}");
@@ -32059,7 +32202,9 @@ mod tests {
             &mut context,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let LegacyCallOutcome::Value(IrValue::Collection(values)) = project_legacy_outcome(&(found)) else {
+        let LegacyCallOutcome::Value(IrValue::Collection(values)) =
+            project_legacy_outcome(&(found))
+        else {
             panic!("expected matching dictionary pairs")
         };
         assert_eq!(values.len(), 2);
@@ -32181,7 +32326,9 @@ mod tests {
             &mut context,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let LegacyCallOutcome::Value(IrValue::Collection(values)) = project_legacy_outcome(&(sorted)) else {
+        let LegacyCallOutcome::Value(IrValue::Collection(values)) =
+            project_legacy_outcome(&(sorted))
+        else {
             panic!("expected sorted collection")
         };
         assert!(matches!(values[0], IrValue::Pair(_)));
@@ -32242,7 +32389,9 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        let LegacyCallOutcome::Value(IrValue::Collection(values)) = project_legacy_outcome(&(nan_sorted)) else {
+        let LegacyCallOutcome::Value(IrValue::Collection(values)) =
+            project_legacy_outcome(&(nan_sorted))
+        else {
             panic!("expected NaN sort result")
         };
         assert_eq!(values[0], IrValue::Number(0.0));
@@ -32516,7 +32665,8 @@ mod tests {
             &mut context,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert!(matches!(project_legacy_outcome(&(outcome)),
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
             LegacyCallOutcome::Value(IrValue::Range(IrRange {
                 start: None,
                 end: Some(3),
@@ -32552,7 +32702,8 @@ mod tests {
                 &mut context,
             );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
-            assert!(matches!(project_legacy_outcome(&(outcome)),
+            assert!(matches!(
+                project_legacy_outcome(&(outcome)),
                 LegacyCallOutcome::Value(IrValue::Range(IrRange {
                     start: Some(2),
                     end: Some(4),
@@ -32603,7 +32754,9 @@ mod tests {
                 &mut context,
             );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
-            let LegacyCallOutcome::Value(IrValue::Range(actual)) = project_legacy_outcome(&(outcome)) else {
+            let LegacyCallOutcome::Value(IrValue::Range(actual)) =
+                project_legacy_outcome(&(outcome))
+            else {
                 panic!("expected typed Range")
             };
             assert_eq!(actual, expected);
@@ -32940,7 +33093,10 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(outcome)), LegacyCallOutcome::Value(IrValue::Range(_))));
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
+            LegacyCallOutcome::Value(IrValue::Range(_))
+        ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
@@ -33027,7 +33183,10 @@ mod tests {
             &mut context,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert!(matches!(project_legacy_outcome(&(outcome)), LegacyCallOutcome::Value(IrValue::Number(4.0))));
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
+            LegacyCallOutcome::Value(IrValue::Number(4.0))
+        ));
 
         let outcome = evaluator.evaluate_call_value(
             "first",
@@ -33039,7 +33198,10 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(outcome)), LegacyCallOutcome::Value(IrValue::Number(1.0))));
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
+            LegacyCallOutcome::Value(IrValue::Number(1.0))
+        ));
 
         let outcome = evaluator.evaluate_call_value(
             "getat",
@@ -33130,7 +33292,9 @@ mod tests {
             &mut context,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let LegacyCallOutcome::Value(IrValue::Dictionary(dictionary)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Dictionary(dictionary)) =
+            project_legacy_outcome(&(outcome))
+        else {
             panic!("expected indexed dictionary")
         };
         assert_eq!(dictionary.span, operation_span);
@@ -33253,7 +33417,10 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(outcome)), LegacyCallOutcome::Value(IrValue::None)));
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
+            LegacyCallOutcome::Value(IrValue::None)
+        ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
         let numeric_key_dictionary =
@@ -33621,7 +33788,10 @@ mod tests {
                 &mut diagnostics,
                 &mut context,
             );
-            assert!(matches!(project_legacy_outcome(&(outcome)), LegacyCallOutcome::Value(IrValue::None)));
+            assert!(matches!(
+                project_legacy_outcome(&(outcome)),
+                LegacyCallOutcome::Value(IrValue::None)
+            ));
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
         }
 
@@ -33643,7 +33813,10 @@ mod tests {
                 &mut diagnostics,
                 &mut context,
             );
-            assert!(matches!(project_legacy_outcome(&(outcome)), LegacyCallOutcome::Value(IrValue::None)));
+            assert!(matches!(
+                project_legacy_outcome(&(outcome)),
+                LegacyCallOutcome::Value(IrValue::None)
+            ));
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
         }
 
@@ -33659,7 +33832,8 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(outcome)),
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
             LegacyCallOutcome::Value(IrValue::Boolean(true))
         ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -33725,7 +33899,10 @@ mod tests {
                     &mut diagnostics,
                     &mut context,
                 );
-                assert!(matches!(project_legacy_outcome(&(outcome)), LegacyCallOutcome::Value(IrValue::None)));
+                assert!(matches!(
+                    project_legacy_outcome(&(outcome)),
+                    LegacyCallOutcome::Value(IrValue::None)
+                ));
                 assert!(diagnostics.is_empty(), "{diagnostics:?}");
             }
         }
@@ -33744,7 +33921,8 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(outcome)),
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
             LegacyCallOutcome::Value(IrValue::Boolean(true))
         ));
 
@@ -33769,7 +33947,10 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(getat)), LegacyCallOutcome::Value(IrValue::Boolean(true))));
+        assert!(matches!(
+            project_legacy_outcome(&(getat)),
+            LegacyCallOutcome::Value(IrValue::Boolean(true))
+        ));
 
         let dictionary = IrValue::Dictionary(IrDictionary {
             entries: vec![
@@ -33795,7 +33976,10 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(outcome)), LegacyCallOutcome::Value(IrValue::None)));
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
+            LegacyCallOutcome::Value(IrValue::None)
+        ));
         let outcome = collection_call(
             &evaluator,
             "second",
@@ -33936,7 +34120,9 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        let LegacyCallOutcome::Value(IrValue::Collection(distinct_values)) = project_legacy_outcome(&(distinct)) else {
+        let LegacyCallOutcome::Value(IrValue::Collection(distinct_values)) =
+            project_legacy_outcome(&(distinct))
+        else {
             panic!("expected distinct collection")
         };
         assert_eq!(distinct_values.len(), 10);
@@ -34307,7 +34493,9 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(sum)), LegacyCallOutcome::Value(IrValue::Number(value)) if value == 3.0));
+        assert!(
+            matches!(project_legacy_outcome(&(sum)), LegacyCallOutcome::Value(IrValue::Number(value)) if value == 3.0)
+        );
         let average = collection_call(
             &evaluator,
             "average",
@@ -34317,7 +34505,9 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(average)), LegacyCallOutcome::Value(IrValue::Number(value)) if value == 0.5));
+        assert!(
+            matches!(project_legacy_outcome(&(average)), LegacyCallOutcome::Value(IrValue::Number(value)) if value == 0.5)
+        );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
         let empty = IrValue::Collection(Vec::new());
@@ -34330,7 +34520,9 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(sum)), LegacyCallOutcome::Value(IrValue::Number(value)) if value == 0.0));
+        assert!(
+            matches!(project_legacy_outcome(&(sum)), LegacyCallOutcome::Value(IrValue::Number(value)) if value == 0.0)
+        );
         let average = collection_call(
             &evaluator,
             "average",
@@ -34340,7 +34532,9 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(average)), LegacyCallOutcome::Value(IrValue::Number(value)) if value.is_nan()));
+        assert!(
+            matches!(project_legacy_outcome(&(average)), LegacyCallOutcome::Value(IrValue::Number(value)) if value.is_nan())
+        );
 
         let special = IrValue::Collection(vec![
             IrValue::Number(f64::INFINITY),
@@ -34355,7 +34549,9 @@ mod tests {
             &mut diagnostics,
             &mut context,
         );
-        assert!(matches!(project_legacy_outcome(&(sum)), LegacyCallOutcome::Value(IrValue::Number(value)) if value.is_nan()));
+        assert!(
+            matches!(project_legacy_outcome(&(sum)), LegacyCallOutcome::Value(IrValue::Number(value)) if value.is_nan())
+        );
         let average = collection_call(
             &evaluator,
             "average",
@@ -34489,7 +34685,9 @@ mod tests {
             &mut context,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let LegacyCallOutcome::Value(IrValue::Collection(values)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Collection(values)) =
+            project_legacy_outcome(&(outcome))
+        else {
             panic!("expected typed iteration result")
         };
         assert_eq!(values.len(), 2);
@@ -34690,7 +34888,8 @@ mod tests {
             &mut context,
         );
 
-        let LegacyCallOutcome::Value(IrValue::Content(nodes)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Content(nodes)) = project_legacy_outcome(&(outcome))
+        else {
             panic!("expected composed content");
         };
         assert_eq!(nodes.len(), 2);
@@ -34864,7 +35063,8 @@ mod tests {
         );
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert!(matches!(project_legacy_outcome(&(outcome)),
+        assert!(matches!(
+            project_legacy_outcome(&(outcome)),
             LegacyCallOutcome::Value(IrValue::Collection(_))
         ));
         assert_eq!(
@@ -37381,7 +37581,9 @@ mod tests {
             &mut context,
         );
 
-        let LegacyCallOutcome::Value(IrValue::Collection(values)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Collection(values)) =
+            project_legacy_outcome(&(outcome))
+        else {
             panic!("expected a materialized callback result: {outcome:?}");
         };
         assert_eq!(values.len(), elements.len());
@@ -37538,7 +37740,9 @@ mod tests {
             &mut context,
         );
 
-        let LegacyCallOutcome::Value(IrValue::Collection(values)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Collection(values)) =
+            project_legacy_outcome(&(outcome))
+        else {
             panic!("expected a materialized callback result: {outcome:?}");
         };
         assert_eq!(values.len(), elements.len());
@@ -37697,7 +37901,8 @@ mod tests {
             &mut context,
         );
 
-        let LegacyCallOutcome::Value(IrValue::Content(nodes)) = project_legacy_outcome(&(outcome)) else {
+        let LegacyCallOutcome::Value(IrValue::Content(nodes)) = project_legacy_outcome(&(outcome))
+        else {
             panic!("expected selected block body content");
         };
         assert_paragraph_text(&nodes, "7");
@@ -38112,9 +38317,14 @@ mod tests {
         let replacement = RuntimeValue::static_value(IrValue::Number(7.0))
             .with_provenance(ValueProvenance::Materialized);
         context.assign_value("owned".to_string(), replacement);
-        let stored = context.get("owned").expect("reassigned runtime-owned variable");
+        let stored = context
+            .get("owned")
+            .expect("reassigned runtime-owned variable");
         assert_eq!(stored.runtime_value().origin, ValueOrigin::Static);
-        assert_eq!(stored.runtime_value().provenance(), ValueProvenance::Materialized);
+        assert_eq!(
+            stored.runtime_value().provenance(),
+            ValueProvenance::Materialized
+        );
         assert_eq!(stored.runtime_value().to_ir_value(), IrValue::Number(7.0));
     }
 
@@ -38148,5 +38358,4 @@ mod tests {
         assert_eq!(values[0], dynamic);
         assert_eq!(values[1], materialized);
     }
-
 }
