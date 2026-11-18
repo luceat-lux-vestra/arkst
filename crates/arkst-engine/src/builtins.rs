@@ -2446,11 +2446,11 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 mod tests {
     use super::{
         canonical_lowercase, deterministic_transcendental, evaluate, evaluate_runtime_with_origins,
-        evaluate_with_origins, lookup,
-        regular_builtins, simple_lowercase as unicode_simple_lowercase,
-        simple_uppercase as unicode_simple_uppercase, unicode_titlecase, BuiltinBodyPolicy,
-        PINNED_JVM_ARCHIVE_SHA256, PINNED_JVM_RUNTIME_VERSION, PINNED_JVM_UNICODE_VERSION,
-        PINNED_JVM_VENDOR_VERSION, PINNED_JVM_VERSION, PINNED_ORACLE_OUTPUT_SHA256,
+        evaluate_with_origins, lookup, regular_builtins,
+        simple_lowercase as unicode_simple_lowercase, simple_uppercase as unicode_simple_uppercase,
+        unicode_titlecase, BuiltinBodyPolicy, PINNED_JVM_ARCHIVE_SHA256,
+        PINNED_JVM_RUNTIME_VERSION, PINNED_JVM_UNICODE_VERSION, PINNED_JVM_VENDOR_VERSION,
+        PINNED_JVM_VERSION, PINNED_ORACLE_OUTPUT_SHA256,
     };
     use crate::unicode_case::{
         full_lowercase as unicode_full_lowercase, full_uppercase as unicode_full_uppercase,
@@ -2532,7 +2532,9 @@ mod tests {
         .expect("None should select the supplied fallback");
 
         assert_eq!(actual, fallback);
-        let children = actual.into_collection().expect("fallback must remain a collection");
+        let children = actual
+            .into_collection()
+            .expect("fallback must remain a collection");
         assert_eq!(children, vec![source_backed_child, materialized_child]);
     }
 
