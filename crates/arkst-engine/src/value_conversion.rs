@@ -172,12 +172,12 @@ struct RuntimeDictionary {
 /// First evaluator-owned runtime value carrier.
 ///
 /// Primitive values, textual leaves, Range, closed domain values, recursive
-/// Pair/Dictionary aggregates, Components, and Collections are evaluator-owned;
-/// each nested value retains its own origin and provenance. Content and
-/// execution-stage carriers still use a temporary semantic leaf until their
+/// Pair/Dictionary aggregates, Content, Components, and Collections are
+/// evaluator-owned; each nested value retains its own origin and provenance.
+/// Execution-stage carriers still use a temporary semantic leaf until their
 /// later G1 migration. A `SemanticLeaf` must never contain Unit, None,
 /// Boolean, Number, String, Identifier, Range, Size, Color, Enum, Pair,
-/// Dictionary, Component, or Collection.
+/// Dictionary, Content, Component, or Collection.
 #[derive(Debug, Clone, PartialEq)]
 enum RuntimeValueKind {
     Unit,
@@ -192,6 +192,7 @@ enum RuntimeValueKind {
     Enum(IrEnumValue),
     Pair(RuntimePair),
     Dictionary(RuntimeDictionary),
+    Content(Vec<IrNode>),
     Component(IrComponent),
     SemanticLeaf(IrValue),
     Collection(Vec<RuntimeValue>),
@@ -251,6 +252,7 @@ impl RuntimeValue {
                 return Self::dictionary(entries, span, origin)
                     .expect("IR dictionary entries are always pairs");
             }
+            IrValue::Content(value) => RuntimeValueKind::Content(value),
             IrValue::Component(value) => RuntimeValueKind::Component(value),
             IrValue::Collection(values) => {
                 return Self::collection(
@@ -337,10 +339,7 @@ impl RuntimeValue {
     }
 
     pub(crate) fn is_content(&self) -> bool {
-        matches!(
-            &self.kind,
-            RuntimeValueKind::SemanticLeaf(IrValue::Content(_))
-        )
+        matches!(&self.kind, RuntimeValueKind::Content(_))
     }
 
     fn to_ir_pair(&self) -> Option<IrPair> {
@@ -395,6 +394,7 @@ impl RuntimeValue {
                     .collect(),
                 span: value.span,
             })),
+            RuntimeValueKind::Content(value) => Cow::Owned(IrValue::Content(value.clone())),
             RuntimeValueKind::Component(value) => Cow::Owned(IrValue::Component(value.clone())),
             RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
@@ -453,6 +453,7 @@ impl RuntimeValue {
                     .collect(),
                 span: value.span,
             }),
+            RuntimeValueKind::Content(value) => IrValue::Content(value.clone()),
             RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
             RuntimeValueKind::SemanticLeaf(value) => value.clone(),
             RuntimeValueKind::Collection(elements) => {
@@ -490,6 +491,7 @@ impl RuntimeValue {
                     .collect(),
                 span: value.span,
             }),
+            RuntimeValueKind::Content(value) => IrValue::Content(value),
             RuntimeValueKind::Component(value) => IrValue::Component(value),
             RuntimeValueKind::SemanticLeaf(value) => value,
             RuntimeValueKind::Collection(elements) => {
@@ -1279,9 +1281,7 @@ fn convert_content_target(
         // MarkdownContentValue adapts to InlineMarkdownContentValue in the
         // pinned value model. The IR keeps one structured content carrier, so
         // both content targets preserve that carrier without flattening it.
-        RuntimeValueKind::SemanticLeaf(IrValue::Content(nodes)) => {
-            Ok(TargetValue::Value(IrValue::Content(nodes.clone())))
-        }
+        RuntimeValueKind::Content(nodes) => Ok(TargetValue::Value(IrValue::Content(nodes.clone()))),
         // An inline contextual body is not a block body. It remains inline
         // content until the selected target asks for it.
         RuntimeValueKind::SemanticLeaf(IrValue::InlineBody(body)) if !block_target => {
@@ -1362,10 +1362,8 @@ fn convert_structured_target(
         // upstream dynamic iterable adapter. Keep it structured here so the
         // evaluator can materialize its elements without reparsing or
         // stringifying the already parsed list.
-        RuntimeValueKind::SemanticLeaf(IrValue::Content(_))
-            if raw_target == RawMarkdownTarget::Iterable =>
-        {
-            return Ok(TargetValue::Value(argument.to_ir_value()));
+        RuntimeValueKind::Content(nodes) if raw_target == RawMarkdownTarget::Iterable => {
+            return Ok(TargetValue::Value(IrValue::Content(nodes.clone())));
         }
         _ => {
             if let Some(value) = argument.dynamic_text() {
@@ -1510,8 +1508,7 @@ pub(crate) fn convert_color_with_origin(
         if argument.origin != ValueOrigin::Dynamic {
             return Err(error);
         }
-        let semantic_value = argument.semantic_value();
-        let IrValue::Content(nodes) = semantic_value.as_ref() else {
+        let RuntimeValueKind::Content(nodes) = &argument.kind else {
             return Err(error);
         };
         let Some(text) = plain_dynamic_color_content(nodes) else {
@@ -3484,6 +3481,164 @@ mod tests {
             assert_eq!(
                 convert_target_with_origin(&replaced, target, span()),
                 Err(ConversionError::UnsupportedValue { target })
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_content_is_engine_owned_and_roundtrips_exact_tree() {
+        let call_span = SourceSpan::new(SourceId(7), 30, 48);
+        let nested_span = SourceSpan::new(SourceId(7), 49, 60);
+        let content = vec![
+            IrNode::Paragraph {
+                content: vec![IrInline::Emphasis {
+                    content: vec![IrInline::Text {
+                        content: "nested".into(),
+                        span: nested_span,
+                    }],
+                    span: nested_span,
+                }],
+                span: nested_span,
+            },
+            IrNode::FunctionCall {
+                name: "unresolved".into(),
+                positional_args: vec![IrValue::String("arg".into())],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: Some(vec![IrNode::Paragraph {
+                    content: vec![IrInline::Text {
+                        content: "body".into(),
+                        span: call_span,
+                    }],
+                    span: call_span,
+                }]),
+                raw_body: None,
+                span: call_span,
+            },
+        ];
+        let value = IrValue::Content(content.clone());
+        let runtime = RuntimeValue::dynamic_value(value.clone()).with_provenance(
+            ValueProvenance::source_backed_markdown_text("source-backed-content"),
+        );
+
+        assert!(runtime.is_content());
+        assert!(matches!(
+            &runtime.kind,
+            RuntimeValueKind::Content(nodes) if nodes == &content
+        ));
+        assert_eq!(runtime.origin, ValueOrigin::Dynamic);
+        assert_eq!(
+            runtime.source_backed_markdown_text(),
+            Some("source-backed-content")
+        );
+        assert_eq!(runtime.semantic_value().as_ref(), &value);
+        assert_eq!(runtime.to_ir_value(), value);
+        assert_eq!(runtime.into_ir_value(), IrValue::Content(content));
+    }
+
+    #[test]
+    fn runtime_content_collection_and_replacement_preserve_provenance_contracts() {
+        let source_backed =
+            RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "source".into(),
+                    span: span(),
+                }],
+                span: span(),
+            }]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
+        let materialized = RuntimeValue::static_value(IrValue::Content(Vec::new()));
+        let collection =
+            RuntimeValue::collection(vec![source_backed, materialized], ValueOrigin::Static);
+        let elements = collection.into_collection().expect("runtime collection");
+
+        assert_eq!(elements.len(), 2);
+        assert!(matches!(&elements[0].kind, RuntimeValueKind::Content(_)));
+        assert_eq!(elements[0].origin, ValueOrigin::Dynamic);
+        assert_eq!(elements[0].source_backed_markdown_text(), Some("source"));
+        assert!(matches!(&elements[1].kind, RuntimeValueKind::Content(_)));
+        assert_eq!(elements[1].origin, ValueOrigin::Static);
+        assert!(elements[1].provenance().is_materialized());
+
+        let replacement = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "replacement".into(),
+                span: span(),
+            }],
+            span: span(),
+        }]);
+        let mut replaced = RuntimeValue::dynamic_value(IrValue::Identifier("discarded".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("discarded"));
+        replaced.replace_semantic_value(replacement.clone());
+
+        assert_eq!(replaced.origin, ValueOrigin::Dynamic);
+        assert!(replaced.provenance().is_materialized());
+        assert!(matches!(&replaced.kind, RuntimeValueKind::Content(_)));
+        assert_eq!(replaced.to_ir_value(), replacement);
+    }
+
+    #[test]
+    fn runtime_content_targets_and_color_adaptation_preserve_existing_contracts() {
+        let plain = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "rgba(1,2,3,0.5)".into(),
+                span: span(),
+            }],
+            span: span(),
+        }]);
+        let source_backed = RuntimeValue::dynamic_value(plain.clone()).with_provenance(
+            ValueProvenance::source_backed_markdown_text("rgba(1,2,3,0.5)"),
+        );
+
+        for target in [
+            ConversionTarget::InlineContent,
+            ConversionTarget::BlockContent,
+            ConversionTarget::Iterable,
+        ] {
+            assert_eq!(
+                convert_target_with_origin(&source_backed, target, span()),
+                Ok(TargetValue::Value(plain.clone()))
+            );
+        }
+        assert_eq!(
+            super::convert_color_with_origin(&source_backed),
+            Ok(IrColor {
+                red: 1,
+                green: 2,
+                blue: 3,
+                alpha: 0.5,
+            })
+        );
+        assert!(
+            super::convert_color_with_origin(&RuntimeValue::static_value(plain.clone())).is_err()
+        );
+
+        let rich = RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Emphasis {
+                content: vec![IrInline::Text {
+                    content: "red".into(),
+                    span: span(),
+                }],
+                span: span(),
+            }],
+            span: span(),
+        }]));
+        assert!(super::convert_color_with_origin(&rich).is_err());
+
+        for target in [
+            ConversionTarget::Number,
+            ConversionTarget::String,
+            ConversionTarget::Range,
+            ConversionTarget::Size,
+            ConversionTarget::Enum,
+            ConversionTarget::Node,
+            ConversionTarget::Dictionary,
+            ConversionTarget::Callable,
+        ] {
+            assert!(
+                convert_target_with_origin(&source_backed, target, span()).is_err(),
+                "Content unexpectedly converted to {target:?}"
             );
         }
     }
