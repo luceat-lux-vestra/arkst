@@ -8543,10 +8543,11 @@ impl Evaluator {
         };
         let body_candidate = match body {
             Some(CallBody::Block(nodes)) => {
-                let value = match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
-                    LegacyCallOutcome::Value(IrValue::Content(nodes)) => IrValue::Content(nodes),
-                    outcome => return outcome.into(),
-                };
+                let value =
+                    match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
+                        LegacyCallOutcome::Value(IrValue::Content(nodes)) => IrValue::Content(nodes),
+                        outcome => return outcome.into(),
+                    };
                 Some(Candidate::Positional {
                     value: RuntimeValue::static_value(value),
                     span: call_body_source_span(CallBody::Block(nodes), *span),
@@ -15218,20 +15219,34 @@ impl Evaluator {
                                 .unwrap_or(IrValue::None),
                         )
                     }
-                    "sumall" => {
-                        LegacyCallOutcome::Value(IrValue::Number(collection_sum_all(&project_runtime_values(&elements))))
-                    }
-                    "average" => match collection_average(&project_runtime_values(&elements), span, diagnostics) {
+                    "sumall" => LegacyCallOutcome::Value(IrValue::Number(collection_sum_all(
+                        &project_runtime_values(&elements),
+                    ))),
+                    "average" => match collection_average(
+                        &project_runtime_values(&elements),
+                        span,
+                        diagnostics,
+                    ) {
                         Ok(average) => LegacyCallOutcome::Value(IrValue::Number(average)),
                         Err(outcome) => outcome.into(),
                     },
-                    "distinct" => distinct_collection_values(project_owned_runtime_values(elements), *span, diagnostics),
+                    "distinct" => distinct_collection_values(
+                        project_owned_runtime_values(elements),
+                        *span,
+                        diagnostics,
+                    ),
                     "reversed" => {
                         let mut reversed = elements;
                         reversed.reverse();
-                        LegacyCallOutcome::Value(IrValue::Collection(project_owned_runtime_values(reversed)))
+                        LegacyCallOutcome::Value(IrValue::Collection(
+                            project_owned_runtime_values(reversed),
+                        ))
                     }
-                    "groupvalues" => group_collection_values(project_owned_runtime_values(elements), *span, diagnostics),
+                    "groupvalues" => group_collection_values(
+                        project_owned_runtime_values(elements),
+                        *span,
+                        diagnostics,
+                    ),
                     "withindices" => {
                         if let Err(outcome) =
                             exact_collection_length(elements.len(), span, diagnostics)
@@ -18595,9 +18610,12 @@ impl Evaluator {
                 );
                 Ok(values)
             }
-            IrValue::Range(range) => self
-                .materialize_range(range, span, diagnostics)
-                .map(|values| values.into_iter().map(RuntimeValue::static_value).collect()),
+            IrValue::Range(range) => self.materialize_range(range, span, diagnostics).map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| RuntimeValue::new(value, origin))
+                    .collect()
+            }),
             value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
                 let argument = RuntimeValue::new(value, origin);
                 match value_conversion::convert_range_with_origin(&argument, *span) {
