@@ -547,6 +547,24 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::Content(_))
     }
 
+    pub(crate) fn is_unit(&self) -> bool {
+        matches!(&self.kind, RuntimeValueKind::Unit)
+    }
+
+    pub(crate) fn into_pair_parts(self) -> Option<(Self, Self, SourceSpan)> {
+        let RuntimeValueKind::Pair(pair) = self.kind else {
+            return None;
+        };
+        Some((*pair.first, *pair.second, pair.span))
+    }
+
+    pub(crate) fn into_dictionary_entries(self) -> Option<(Vec<Self>, SourceSpan)> {
+        let RuntimeValueKind::Dictionary(dictionary) = self.kind else {
+            return None;
+        };
+        Some((dictionary.entries, dictionary.span))
+    }
+
     pub(crate) fn callable(value: RuntimeCallable, origin: ValueOrigin) -> Self {
         Self {
             kind: RuntimeValueKind::Callable(value),
@@ -750,6 +768,24 @@ impl RuntimeValue {
             } => Some(elements),
             _ => None,
         }
+    }
+}
+
+impl From<IrValue> for RuntimeValue {
+    fn from(value: IrValue) -> Self {
+        Self::static_value(value)
+    }
+}
+
+impl PartialEq<IrValue> for RuntimeValue {
+    fn eq(&self, other: &IrValue) -> bool {
+        self.semantic_value().as_ref() == other
+    }
+}
+
+impl PartialEq<RuntimeValue> for IrValue {
+    fn eq(&self, other: &RuntimeValue) -> bool {
+        self == other.semantic_value().as_ref()
     }
 }
 
