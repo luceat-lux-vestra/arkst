@@ -631,7 +631,12 @@ pub(crate) fn evaluate(
     let named = named_args
         .iter()
         .cloned()
-        .map(|arg| RuntimeNamedArg::new(arg, ValueOrigin::Dynamic))
+        .map(|arg| RuntimeNamedArg {
+            name: arg.name,
+            name_span: arg.name_span,
+            value: RuntimeValue::new(arg.value, ValueOrigin::Dynamic),
+            span: arg.span,
+        })
         .collect::<Vec<_>>();
     let builtin =
         lookup(name).ok_or_else(|| error(format!("`.{name}` has no builtin implementation")))?;
