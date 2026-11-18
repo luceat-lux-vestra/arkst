@@ -1281,9 +1281,7 @@ fn convert_content_target(
         // MarkdownContentValue adapts to InlineMarkdownContentValue in the
         // pinned value model. The IR keeps one structured content carrier, so
         // both content targets preserve that carrier without flattening it.
-        RuntimeValueKind::Content(nodes) => {
-            Ok(TargetValue::Value(IrValue::Content(nodes.clone())))
-        }
+        RuntimeValueKind::Content(nodes) => Ok(TargetValue::Value(IrValue::Content(nodes.clone()))),
         // An inline contextual body is not a block body. It remains inline
         // content until the selected target asks for it.
         RuntimeValueKind::SemanticLeaf(IrValue::InlineBody(body)) if !block_target => {
@@ -3541,16 +3539,15 @@ mod tests {
 
     #[test]
     fn runtime_content_collection_and_replacement_preserve_provenance_contracts() {
-        let source_backed = RuntimeValue::dynamic_value(IrValue::Content(vec![
-            IrNode::Paragraph {
+        let source_backed =
+            RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "source".into(),
                     span: span(),
                 }],
                 span: span(),
-            },
-        ]))
-        .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
+            }]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
         let materialized = RuntimeValue::static_value(IrValue::Content(Vec::new()));
         let collection =
             RuntimeValue::collection(vec![source_backed, materialized], ValueOrigin::Static);
