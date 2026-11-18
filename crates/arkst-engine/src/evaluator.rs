@@ -70,6 +70,8 @@ use crate::{
     ResourceAccessError, ResourceEntryKind, ResourceProvider, ResourceRoot, ResourceText,
 };
 use arkst_diagnostics::{Diagnostic, Severity};
+#[cfg(test)]
+use arkst_ir::IrCallable;
 use arkst_ir::{
     IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCaptionPositionInfo,
     IrClipComponent, IrCodeCallout, IrCollapseComponent, IrColor, IrComponent,
@@ -97,8 +99,6 @@ use arkst_markdown::{
 };
 use arkst_quarkdown::is_valid_normal_call_name;
 use arkst_source::{ByteSpan, SourceId, SourceSpan};
-#[cfg(test)]
-use arkst_ir::IrCallable;
 use regex::RegexBuilder;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -15747,8 +15747,7 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 };
                 let callback_span = value_source_span(&callback, span);
-                let Some(callable) =
-                    RuntimeValue::static_value(callback).into_callable_target()
+                let Some(callable) = RuntimeValue::static_value(callback).into_callable_target()
                 else {
                     diagnostics.push(iteration_error(
                         "`.foreach` inline body must be a callable".to_string(),
@@ -15920,8 +15919,7 @@ impl Evaluator {
                     return Err(CallOutcome::Failed);
                 };
                 let callback_span = value_source_span(&callback, span);
-                let Some(callable) =
-                    RuntimeValue::static_value(callback).into_callable_target()
+                let Some(callable) = RuntimeValue::static_value(callback).into_callable_target()
                 else {
                     diagnostics.push(iteration_error(
                         "`.repeat` inline body must be a callable".to_string(),
@@ -17488,9 +17486,7 @@ impl Evaluator {
             }
             None => match callback_slot {
                 Some(BoundSlot::Explicit { value, span }) => match value.into_callable() {
-                    Some(callable) => {
-                        Some(self.materialize_runtime_callable(callable, context))
-                    }
+                    Some(callable) => Some(self.materialize_runtime_callable(callable, context)),
                     None => {
                         diagnostics.push(iteration_error(
                             "`.join` body must be a one-element callable".to_string(),
@@ -17618,8 +17614,7 @@ impl Evaluator {
                 let callback = match self.evaluate_value(&raw_callback, diagnostics, context) {
                     CallOutcome::Value(value) => {
                         let callback_span = value_source_span(&value, span);
-                        let Some(callable) =
-                            RuntimeValue::static_value(value).into_callable()
+                        let Some(callable) = RuntimeValue::static_value(value).into_callable()
                         else {
                             diagnostics.push(iteration_error(
                                 format!("`.{name}` callback must be a first-class callable"),
@@ -21189,10 +21184,8 @@ impl Evaluator {
             return Ok(value.with_origin(origin));
         }
         if let IrValue::Callable(callable) = value {
-            let callable = self.materialize_runtime_callable(
-                RuntimeCallable::from_ir(callable.clone()),
-                context,
-            );
+            let callable = self
+                .materialize_runtime_callable(RuntimeCallable::from_ir(callable.clone()), context);
             return Ok(RuntimeValue::callable(callable, origin));
         }
         #[cfg(test)]
