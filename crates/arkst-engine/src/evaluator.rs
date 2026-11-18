@@ -117,12 +117,6 @@ struct VariableValue {
 }
 
 impl VariableValue {
-    fn from_evaluated_value(value: IrValue) -> Self {
-        Self {
-            runtime: RuntimeValue::static_value(value),
-        }
-    }
-
     fn from_runtime_value(runtime: RuntimeValue) -> Self {
         Self { runtime }
     }
@@ -7033,7 +7027,7 @@ impl Evaluator {
                         context,
                     ) {
                         LegacyCallOutcome::Value(value) => value,
-                        outcome => return outcome.into(),
+                        outcome => return outcome,
                     };
                     Some(Candidate::Positional {
                         value: RuntimeValue::static_value(body),
@@ -7053,7 +7047,7 @@ impl Evaluator {
         };
         let bound = match self.convert_builtin_targets(builtin, bound, span, diagnostics, context) {
             Ok(bound) => bound,
-            Err(outcome) => return outcome.into(),
+            Err(outcome) => return outcome,
         };
         match builtins::evaluate_bound(
             builtin,
@@ -7576,7 +7570,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => unreachable!("inline center bodies are rejected above"),
@@ -7627,7 +7621,7 @@ impl Evaluator {
                         ));
                         return LegacyCallOutcome::Failed;
                     }
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
         };
@@ -7733,7 +7727,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => unreachable!("inline landscape bodies are rejected above"),
@@ -7784,7 +7778,7 @@ impl Evaluator {
                         ));
                         return LegacyCallOutcome::Failed;
                     }
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
         };
@@ -7868,7 +7862,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => unreachable!("inline full-span bodies are rejected above"),
@@ -7919,7 +7913,7 @@ impl Evaluator {
                         ));
                         return LegacyCallOutcome::Failed;
                     }
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
         };
@@ -8043,7 +8037,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => {
@@ -8100,7 +8094,7 @@ impl Evaluator {
                         ));
                         return LegacyCallOutcome::Failed;
                     }
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
         };
@@ -8150,7 +8144,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => {
@@ -8213,7 +8207,7 @@ impl Evaluator {
                 match self.resolve_target_value(converted, title_span, *span, diagnostics, context)
                 {
                     Ok(value) => value,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
             Err(error) => {
@@ -8372,7 +8366,7 @@ impl Evaluator {
             context,
         ) {
             Ok(content) => content,
-            Err(outcome) => return outcome.into(),
+            Err(outcome) => return outcome,
         };
 
         let Some(BoundSlot::Explicit {
@@ -8396,7 +8390,7 @@ impl Evaluator {
             context,
         ) {
             Ok(content) => content,
-            Err(outcome) => return outcome.into(),
+            Err(outcome) => return outcome,
         };
 
         let is_open = match slots.next() {
@@ -8545,8 +8539,10 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 let value =
                     match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
-                        LegacyCallOutcome::Value(IrValue::Content(nodes)) => IrValue::Content(nodes),
-                        outcome => return outcome.into(),
+                        LegacyCallOutcome::Value(IrValue::Content(nodes)) => {
+                            IrValue::Content(nodes)
+                        }
+                        outcome => return outcome,
                     };
                 Some(Candidate::Positional {
                     value: RuntimeValue::static_value(value),
@@ -8598,7 +8594,7 @@ impl Evaluator {
                 context,
             ) {
                 Ok(title) => Some(title),
-                Err(outcome) => return outcome.into(),
+                Err(outcome) => return outcome,
             },
             BoundSlot::Omitted | BoundSlot::Defaulted => None,
         };
@@ -8741,7 +8737,7 @@ impl Evaluator {
                     ));
                     return LegacyCallOutcome::Failed;
                 }
-                Err(outcome) => return outcome.into(),
+                Err(outcome) => return outcome,
             };
 
         if title.is_none() && context.document_state.borrow().locale.is_some() {
@@ -8851,7 +8847,7 @@ impl Evaluator {
                 }
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => {
@@ -8932,7 +8928,7 @@ impl Evaluator {
                         ));
                         return LegacyCallOutcome::Failed;
                     }
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
         };
@@ -9028,7 +9024,7 @@ impl Evaluator {
                 }
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => {
@@ -9092,7 +9088,7 @@ impl Evaluator {
                         ));
                         return LegacyCallOutcome::Failed;
                     }
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
         };
@@ -9222,7 +9218,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => unreachable!("inline fragment bodies are rejected above"),
@@ -9273,7 +9269,7 @@ impl Evaluator {
                         ));
                         return LegacyCallOutcome::Failed;
                     }
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
         };
@@ -9427,7 +9423,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => {
@@ -9901,7 +9897,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => {
@@ -9955,7 +9951,7 @@ impl Evaluator {
                         ));
                         return LegacyCallOutcome::Failed;
                     }
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
         };
@@ -10366,7 +10362,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => {
@@ -10410,7 +10406,7 @@ impl Evaluator {
                             ));
                             return LegacyCallOutcome::Failed;
                         }
-                        Err(outcome) => return outcome.into(),
+                        Err(outcome) => return outcome,
                     }
                 }
                 None => Vec::new(),
@@ -10705,7 +10701,7 @@ impl Evaluator {
             Some(CallBody::Block(nodes)) => {
                 match self.evaluate_evidenced_output_body_legacy(nodes, diagnostics, context) {
                     LegacyCallOutcome::Value(IrValue::Content(nodes)) => nodes,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             Some(CallBody::Inline(_)) => {
@@ -10859,7 +10855,7 @@ impl Evaluator {
                     diagnostics,
                 ) {
                     Ok(nodes) => nodes,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 let entries = match self.evaluate_dictionary_entries(
                     &nodes,
@@ -10869,7 +10865,7 @@ impl Evaluator {
                     ".numbering",
                 ) {
                     Ok(entries) => entries,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 IrDictionary {
                     entries,
@@ -11167,7 +11163,7 @@ impl Evaluator {
                     diagnostics,
                 ) {
                     Ok(nodes) => nodes,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 let entries = match self.evaluate_dictionary_entries(
                     &nodes,
@@ -11177,7 +11173,7 @@ impl Evaluator {
                     ".localization",
                 ) {
                     Ok(entries) => entries,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 IrDictionary {
                     entries,
@@ -12841,7 +12837,7 @@ impl Evaluator {
                     ) {
                         Ok(nodes) => nodes,
                         Err(outcome) => {
-                            return outcome.into();
+                            return outcome;
                         }
                     };
                     let entries = match self.evaluate_dictionary_entries(
@@ -12853,7 +12849,7 @@ impl Evaluator {
                     ) {
                         Ok(entries) => entries,
                         Err(outcome) => {
-                            return outcome.into();
+                            return outcome;
                         }
                     };
                     IrValue::Dictionary(IrDictionary {
@@ -12932,7 +12928,7 @@ impl Evaluator {
         ) {
             Ok(authors) => authors,
             Err(outcome) => {
-                return outcome.into();
+                return outcome;
             }
         };
 
@@ -13081,7 +13077,7 @@ impl Evaluator {
         ) {
             Ok(keywords) => keywords,
             Err(outcome) => {
-                return outcome.into();
+                return outcome;
             }
         };
         context.replace_document_keywords(keywords);
@@ -13741,7 +13737,7 @@ impl Evaluator {
                 };
                 match self.evaluate_html_body(body, raw_body, span, diagnostics, context) {
                     LegacyCallOutcome::Value(value) => value,
-                    outcome => return outcome.into(),
+                    outcome => return outcome,
                 }
             }
             InvocationArgumentLocation::Positional(index) => {
@@ -13903,7 +13899,7 @@ impl Evaluator {
                     match self.evaluate_ir_call_body_value_context(body, span, diagnostics, context)
                     {
                         LegacyCallOutcome::Value(value) => value,
-                        outcome => return outcome.into(),
+                        outcome => return outcome,
                     }
                 }
             }
@@ -14677,7 +14673,7 @@ impl Evaluator {
                 CsvMode::Markdown => {
                     match self.csv_markdown_cell_inlines(&column.header, *span, diagnostics) {
                         Ok(content) => content,
-                        Err(outcome) => return outcome.into(),
+                        Err(outcome) => return outcome,
                     }
                 }
             };
@@ -14721,7 +14717,7 @@ impl Evaluator {
                         diagnostics,
                     ) {
                         Ok(content) => content,
-                        Err(outcome) => return outcome.into(),
+                        Err(outcome) => return outcome,
                     },
                 };
                 cells.push(IrTableCell {
@@ -15183,42 +15179,34 @@ impl Evaluator {
                         Ok(length) => LegacyCallOutcome::Value(IrValue::Number(length)),
                         Err(outcome) => outcome.into(),
                     },
-                    "first" => {
-                        LegacyCallOutcome::Value(
-                            elements
-                                .first()
-                                .cloned()
-                                .map(RuntimeValue::into_ir_value)
-                                .unwrap_or(IrValue::None),
-                        )
-                    }
-                    "second" => {
-                        LegacyCallOutcome::Value(
-                            elements
-                                .get(1)
-                                .cloned()
-                                .map(RuntimeValue::into_ir_value)
-                                .unwrap_or(IrValue::None),
-                        )
-                    }
-                    "third" => {
-                        LegacyCallOutcome::Value(
-                            elements
-                                .get(2)
-                                .cloned()
-                                .map(RuntimeValue::into_ir_value)
-                                .unwrap_or(IrValue::None),
-                        )
-                    }
-                    "last" => {
-                        LegacyCallOutcome::Value(
-                            elements
-                                .last()
-                                .cloned()
-                                .map(RuntimeValue::into_ir_value)
-                                .unwrap_or(IrValue::None),
-                        )
-                    }
+                    "first" => LegacyCallOutcome::Value(
+                        elements
+                            .first()
+                            .cloned()
+                            .map(RuntimeValue::into_ir_value)
+                            .unwrap_or(IrValue::None),
+                    ),
+                    "second" => LegacyCallOutcome::Value(
+                        elements
+                            .get(1)
+                            .cloned()
+                            .map(RuntimeValue::into_ir_value)
+                            .unwrap_or(IrValue::None),
+                    ),
+                    "third" => LegacyCallOutcome::Value(
+                        elements
+                            .get(2)
+                            .cloned()
+                            .map(RuntimeValue::into_ir_value)
+                            .unwrap_or(IrValue::None),
+                    ),
+                    "last" => LegacyCallOutcome::Value(
+                        elements
+                            .last()
+                            .cloned()
+                            .map(RuntimeValue::into_ir_value)
+                            .unwrap_or(IrValue::None),
+                    ),
                     "sumall" => LegacyCallOutcome::Value(IrValue::Number(collection_sum_all(
                         &project_runtime_values(&elements),
                     ))),
@@ -15238,9 +15226,9 @@ impl Evaluator {
                     "reversed" => {
                         let mut reversed = elements;
                         reversed.reverse();
-                        LegacyCallOutcome::Value(IrValue::Collection(
-                            project_owned_runtime_values(reversed),
-                        ))
+                        LegacyCallOutcome::Value(IrValue::Collection(project_owned_runtime_values(
+                            reversed,
+                        )))
                     }
                     "groupvalues" => group_collection_values(
                         project_owned_runtime_values(elements),
@@ -15433,7 +15421,7 @@ impl Evaluator {
             ".dictionary",
         ) {
             Ok(entries) => entries,
-            Err(outcome) => return outcome.into(),
+            Err(outcome) => return outcome,
         };
         LegacyCallOutcome::Value(IrValue::Dictionary(IrDictionary {
             entries,
@@ -17915,7 +17903,7 @@ impl Evaluator {
                     first_origin,
                 ) {
                     Ok(value) => Some(value),
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
             None => None,
@@ -17925,7 +17913,7 @@ impl Evaluator {
                 match self.evaluate_range_endpoint(&value, "end", span, diagnostics, context, None)
                 {
                     Ok(value) => Some(value),
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 }
             }
             None => None,
@@ -18498,12 +18486,14 @@ impl Evaluator {
             Ok(value_conversion::TargetValue::Value(value)) => value,
             Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                 if let Ok(range) = value_conversion::convert_range_with_origin(&value, *span) {
-                    return self.materialize_range(range, span, diagnostics).map(|values| {
-                        values
-                            .into_iter()
-                            .map(|value| RuntimeValue::new(value, origin))
-                            .collect()
-                    });
+                    return self
+                        .materialize_range(range, span, diagnostics)
+                        .map(|values| {
+                            values
+                                .into_iter()
+                                .map(|value| RuntimeValue::new(value, origin))
+                                .collect()
+                        });
                 }
                 let nodes = self.parse_dynamic_markdown_content(
                     &text,
@@ -18610,21 +18600,26 @@ impl Evaluator {
                 );
                 Ok(values)
             }
-            IrValue::Range(range) => self.materialize_range(range, span, diagnostics).map(|values| {
-                values
-                    .into_iter()
-                    .map(|value| RuntimeValue::new(value, origin))
-                    .collect()
-            }),
-            value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
-                let argument = RuntimeValue::new(value, origin);
-                match value_conversion::convert_range_with_origin(&argument, *span) {
-                    Ok(range) => self.materialize_range(range, span, diagnostics).map(|values| {
+            IrValue::Range(range) => {
+                self.materialize_range(range, span, diagnostics)
+                    .map(|values| {
                         values
                             .into_iter()
                             .map(|value| RuntimeValue::new(value, origin))
                             .collect()
-                    }),
+                    })
+            }
+            value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
+                let argument = RuntimeValue::new(value, origin);
+                match value_conversion::convert_range_with_origin(&argument, *span) {
+                    Ok(range) => self
+                        .materialize_range(range, span, diagnostics)
+                        .map(|values| {
+                            values
+                                .into_iter()
+                                .map(|value| RuntimeValue::new(value, origin))
+                                .collect()
+                        }),
                     Err(_) => {
                         diagnostics.push(iteration_error(
                             "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
