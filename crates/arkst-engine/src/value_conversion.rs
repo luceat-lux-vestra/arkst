@@ -7,14 +7,16 @@
 //! never stringify an evaluated value and feed it back through Markdown.
 
 use arkst_ir::{
-    IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrComponent,
+    IrBoxType, IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
+    IrCapturedFunction, IrCapturedVariable, IrClipShape, IrColor, IrComponent,
     IrContainerAlignment, IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType,
-    IrEnumValue, IrFragmentBehavior, IrInline, IrMainAxisAlignment, IrNamedArg, IrNode,
-    IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle, IrTextCase,
-    IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
+    IrEnumValue, IrFragmentBehavior, IrInline, IrInlineBody, IrMainAxisAlignment, IrNamedArg,
+    IrNode, IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair,
+    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed,
+    IrSlideTransitionStyle, IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant,
+    IrTextWeight, IrValue,
 };
-use arkst_source::SourceSpan;
+use arkst_source::{SourceId, SourceSpan};
 use std::borrow::Cow;
 
 /// Materialize the Quarkdown body `DynamicValue` only at a conversion target
@@ -169,15 +171,214 @@ struct RuntimeDictionary {
     span: SourceSpan,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeCallableResourceContext {
+    pub(crate) current_source: SourceId,
+    pub(crate) subdocument_root: Option<SourceId>,
+    pub(crate) loadable_libraries: bool,
+}
+
+impl From<IrCallableResourceContext> for RuntimeCallableResourceContext {
+    fn from(value: IrCallableResourceContext) -> Self {
+        Self {
+            current_source: value.current_source,
+            subdocument_root: value.subdocument_root,
+            loadable_libraries: value.loadable_libraries,
+        }
+    }
+}
+
+impl From<RuntimeCallableResourceContext> for IrCallableResourceContext {
+    fn from(value: RuntimeCallableResourceContext) -> Self {
+        Self {
+            current_source: value.current_source,
+            subdocument_root: value.subdocument_root,
+            loadable_libraries: value.loadable_libraries,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeCapturedVariable {
+    pub(crate) name: String,
+    pub(crate) value: RuntimeValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeCapturedFunction {
+    pub(crate) name: String,
+    pub(crate) callable: RuntimeCallable,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeCallableCapture {
+    pub(crate) variables: Vec<RuntimeCapturedVariable>,
+    pub(crate) functions: Vec<RuntimeCapturedFunction>,
+    pub(crate) resource_context: Option<RuntimeCallableResourceContext>,
+}
+
+impl RuntimeCallableCapture {
+    fn from_ir(value: IrCallableCapture) -> Self {
+        Self {
+            variables: value
+                .variables
+                .into_iter()
+                .map(|variable| RuntimeCapturedVariable {
+                    name: variable.name,
+                    value: RuntimeValue::static_value(variable.value),
+                })
+                .collect(),
+            functions: value
+                .functions
+                .into_iter()
+                .map(|function| RuntimeCapturedFunction {
+                    name: function.name,
+                    callable: RuntimeCallable::from_ir(function.callable),
+                })
+                .collect(),
+            resource_context: value.resource_context.map(Into::into),
+        }
+    }
+
+    fn to_ir(&self) -> IrCallableCapture {
+        IrCallableCapture {
+            variables: self
+                .variables
+                .iter()
+                .map(|variable| IrCapturedVariable {
+                    name: variable.name.clone(),
+                    value: variable.value.to_ir_value(),
+                })
+                .collect(),
+            functions: self
+                .functions
+                .iter()
+                .map(|function| IrCapturedFunction {
+                    name: function.name.clone(),
+                    callable: function.callable.to_ir(),
+                })
+                .collect(),
+            resource_context: self.resource_context.map(Into::into),
+        }
+    }
+
+    fn into_ir(self) -> IrCallableCapture {
+        IrCallableCapture {
+            variables: self
+                .variables
+                .into_iter()
+                .map(|variable| IrCapturedVariable {
+                    name: variable.name,
+                    value: variable.value.into_ir_value(),
+                })
+                .collect(),
+            functions: self
+                .functions
+                .into_iter()
+                .map(|function| IrCapturedFunction {
+                    name: function.name,
+                    callable: function.callable.into_ir(),
+                })
+                .collect(),
+            resource_context: self.resource_context.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeCallable {
+    pub(crate) parameters: Option<Vec<IrParameter>>,
+    pub(crate) body: Vec<IrNode>,
+    pub(crate) span: SourceSpan,
+    pub(crate) capture: Option<Box<RuntimeCallableCapture>>,
+}
+
+impl RuntimeCallable {
+    pub(crate) fn from_ir(value: IrCallable) -> Self {
+        Self {
+            parameters: value.parameters,
+            body: value.body,
+            span: value.span,
+            capture: value
+                .capture
+                .map(|capture| Box::new(RuntimeCallableCapture::from_ir(*capture))),
+        }
+    }
+
+    pub(crate) fn to_ir(&self) -> IrCallable {
+        IrCallable {
+            parameters: self.parameters.clone(),
+            body: self.body.clone(),
+            span: self.span,
+            capture: self
+                .capture
+                .as_deref()
+                .map(|capture| Box::new(capture.to_ir())),
+        }
+    }
+
+    pub(crate) fn into_ir(self) -> IrCallable {
+        IrCallable {
+            parameters: self.parameters,
+            body: self.body,
+            span: self.span,
+            capture: self.capture.map(|capture| Box::new((*capture).into_ir())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeInlineBody {
+    pub(crate) content: Vec<IrNode>,
+    pub(crate) parameters: Option<Vec<IrParameter>>,
+    pub(crate) body: Vec<IrNode>,
+    pub(crate) span: SourceSpan,
+}
+
+impl RuntimeInlineBody {
+    fn from_ir(value: IrInlineBody) -> Self {
+        Self {
+            content: value.content,
+            parameters: value.parameters,
+            body: value.body,
+            span: value.span,
+        }
+    }
+
+    fn to_ir(&self) -> IrInlineBody {
+        IrInlineBody {
+            content: self.content.clone(),
+            parameters: self.parameters.clone(),
+            body: self.body.clone(),
+            span: self.span,
+        }
+    }
+
+    fn into_ir(self) -> IrInlineBody {
+        IrInlineBody {
+            content: self.content,
+            parameters: self.parameters,
+            body: self.body,
+            span: self.span,
+        }
+    }
+
+    fn into_callable(self) -> RuntimeCallable {
+        RuntimeCallable {
+            parameters: self.parameters,
+            body: self.body,
+            span: self.span,
+            capture: None,
+        }
+    }
+}
+
 /// First evaluator-owned runtime value carrier.
 ///
-/// Primitive values, textual leaves, Range, closed domain values, recursive
-/// Pair/Dictionary aggregates, Content, Components, and Collections are
-/// evaluator-owned; each nested value retains its own origin and provenance.
-/// Execution-stage carriers still use a temporary semantic leaf until their
-/// later G1 migration. A `SemanticLeaf` must never contain Unit, None,
-/// Boolean, Number, String, Identifier, Range, Size, Color, Enum, Pair,
-/// Dictionary, Content, Component, or Collection.
+/// All runtime value families are evaluator-owned; nested values retain their
+/// own origin and provenance. Callable captures recursively retain runtime
+/// values and evaluator-only lexical resource identity without storing
+/// execution-stage state in durable `IrValue`.
 #[derive(Debug, Clone, PartialEq)]
 enum RuntimeValueKind {
     Unit,
@@ -194,7 +395,8 @@ enum RuntimeValueKind {
     Dictionary(RuntimeDictionary),
     Content(Vec<IrNode>),
     Component(IrComponent),
-    SemanticLeaf(IrValue),
+    Callable(RuntimeCallable),
+    InlineBody(RuntimeInlineBody),
     Collection(Vec<RuntimeValue>),
 }
 
@@ -254,6 +456,10 @@ impl RuntimeValue {
             }
             IrValue::Content(value) => RuntimeValueKind::Content(value),
             IrValue::Component(value) => RuntimeValueKind::Component(value),
+            IrValue::Callable(value) => RuntimeValueKind::Callable(RuntimeCallable::from_ir(value)),
+            IrValue::InlineBody(value) => {
+                RuntimeValueKind::InlineBody(RuntimeInlineBody::from_ir(value))
+            }
             IrValue::Collection(values) => {
                 return Self::collection(
                     values
@@ -263,7 +469,6 @@ impl RuntimeValue {
                     origin,
                 );
             }
-            value => RuntimeValueKind::SemanticLeaf(value),
         };
         Self {
             kind,
@@ -342,6 +547,40 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::Content(_))
     }
 
+    pub(crate) fn callable(value: RuntimeCallable, origin: ValueOrigin) -> Self {
+        Self {
+            kind: RuntimeValueKind::Callable(value),
+            origin,
+            provenance: ValueProvenance::Materialized,
+        }
+    }
+
+    pub(crate) fn is_callable(&self) -> bool {
+        matches!(&self.kind, RuntimeValueKind::Callable(_))
+    }
+
+    pub(crate) fn as_callable(&self) -> Option<&RuntimeCallable> {
+        let RuntimeValueKind::Callable(value) = &self.kind else {
+            return None;
+        };
+        Some(value)
+    }
+
+    pub(crate) fn into_callable(self) -> Option<RuntimeCallable> {
+        let RuntimeValueKind::Callable(value) = self.kind else {
+            return None;
+        };
+        Some(value)
+    }
+
+    pub(crate) fn into_callable_target(self) -> Option<RuntimeCallable> {
+        match self.kind {
+            RuntimeValueKind::Callable(value) => Some(value),
+            RuntimeValueKind::InlineBody(value) => Some(value.into_callable()),
+            _ => None,
+        }
+    }
+
     fn to_ir_pair(&self) -> Option<IrPair> {
         let RuntimeValueKind::Pair(pair) = &self.kind else {
             return None;
@@ -396,7 +635,8 @@ impl RuntimeValue {
             })),
             RuntimeValueKind::Content(value) => Cow::Owned(IrValue::Content(value.clone())),
             RuntimeValueKind::Component(value) => Cow::Owned(IrValue::Component(value.clone())),
-            RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
+            RuntimeValueKind::Callable(value) => Cow::Owned(IrValue::Callable(value.to_ir())),
+            RuntimeValueKind::InlineBody(value) => Cow::Owned(IrValue::InlineBody(value.to_ir())),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
                 elements.iter().map(Self::to_ir_value).collect(),
             )),
@@ -455,7 +695,8 @@ impl RuntimeValue {
             }),
             RuntimeValueKind::Content(value) => IrValue::Content(value.clone()),
             RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
-            RuntimeValueKind::SemanticLeaf(value) => value.clone(),
+            RuntimeValueKind::Callable(value) => IrValue::Callable(value.to_ir()),
+            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.to_ir()),
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.iter().map(Self::to_ir_value).collect())
             }
@@ -493,7 +734,8 @@ impl RuntimeValue {
             }),
             RuntimeValueKind::Content(value) => IrValue::Content(value),
             RuntimeValueKind::Component(value) => IrValue::Component(value),
-            RuntimeValueKind::SemanticLeaf(value) => value,
+            RuntimeValueKind::Callable(value) => IrValue::Callable(value.into_ir()),
+            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.into_ir()),
             RuntimeValueKind::Collection(elements) => {
                 IrValue::Collection(elements.into_iter().map(Self::into_ir_value).collect())
             }
@@ -1223,17 +1465,12 @@ pub(crate) fn convert_target_with_origin(
             &[IrValueKind::Dictionary],
         ),
         ConversionTarget::Callable => match &argument.kind {
-            RuntimeValueKind::SemanticLeaf(IrValue::Callable(value)) => {
-                Ok(TargetValue::Value(IrValue::Callable(value.clone())))
+            RuntimeValueKind::Callable(value) => {
+                Ok(TargetValue::Value(IrValue::Callable(value.to_ir())))
             }
-            RuntimeValueKind::SemanticLeaf(IrValue::InlineBody(body)) => {
-                Ok(TargetValue::Value(IrValue::Callable(IrCallable {
-                    parameters: body.parameters.clone(),
-                    body: body.body.clone(),
-                    span: body.span,
-                    capture: None,
-                })))
-            }
+            RuntimeValueKind::InlineBody(body) => Ok(TargetValue::Value(IrValue::Callable(
+                body.clone().into_callable().into_ir(),
+            ))),
             _ => match argument.dynamic_text() {
                 Some(value) => Ok(TargetValue::RawMarkdown {
                     target: RawMarkdownTarget::Callable,
@@ -1284,7 +1521,7 @@ fn convert_content_target(
         RuntimeValueKind::Content(nodes) => Ok(TargetValue::Value(IrValue::Content(nodes.clone()))),
         // An inline contextual body is not a block body. It remains inline
         // content until the selected target asks for it.
-        RuntimeValueKind::SemanticLeaf(IrValue::InlineBody(body)) if !block_target => {
+        RuntimeValueKind::InlineBody(body) if !block_target => {
             Ok(TargetValue::Value(IrValue::Content(body.content.clone())))
         }
         RuntimeValueKind::String(value)
@@ -3332,7 +3569,8 @@ mod tests {
         ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
-        IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
+        IrBoxType, IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
+        IrCapturedFunction, IrCapturedVariable, IrColor, IrComponent, IrContainerAlignment,
         IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType, IrEnumValue,
         IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize,
         IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle, IrStackedComponent,
@@ -3483,6 +3721,187 @@ mod tests {
                 Err(ConversionError::UnsupportedValue { target })
             );
         }
+    }
+
+    #[test]
+    fn runtime_callable_inline_body_are_engine_owned_and_roundtrip_recursive_capture() {
+        let callable_span = SourceSpan::new(SourceId(7), 20, 80);
+        let nested_span = SourceSpan::new(SourceId(8), 2, 12);
+        let nested = IrCallable {
+            parameters: None,
+            body: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "nested".into(),
+                    span: nested_span,
+                }],
+                span: nested_span,
+            }],
+            span: nested_span,
+            capture: None,
+        };
+        let callable = IrCallable {
+            parameters: None,
+            body: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "body".into(),
+                    span: callable_span,
+                }],
+                span: callable_span,
+            }],
+            span: callable_span,
+            capture: Some(Box::new(IrCallableCapture {
+                variables: vec![IrCapturedVariable {
+                    name: "captured".into(),
+                    value: IrValue::Range(IrRange {
+                        start: Some(1),
+                        end: Some(4),
+                        span: nested_span,
+                    }),
+                }],
+                functions: vec![
+                    IrCapturedFunction {
+                        name: "zeta".into(),
+                        callable: nested.clone(),
+                    },
+                    IrCapturedFunction {
+                        name: "alpha".into(),
+                        callable: nested,
+                    },
+                ],
+                resource_context: Some(IrCallableResourceContext {
+                    current_source: SourceId(7),
+                    subdocument_root: Some(SourceId(8)),
+                    loadable_libraries: true,
+                }),
+            })),
+        };
+        let value = IrValue::Callable(callable.clone());
+        let runtime = RuntimeValue::dynamic_value(value.clone());
+
+        let RuntimeValueKind::Callable(runtime_callable) = &runtime.kind else {
+            panic!("callable must be engine-owned");
+        };
+        let capture = runtime_callable
+            .capture
+            .as_deref()
+            .expect("legacy callable capture must decompose recursively");
+        assert_eq!(capture.variables.len(), 1);
+        assert_eq!(capture.variables[0].name, "captured");
+        assert_eq!(capture.variables[0].value.origin, ValueOrigin::Static);
+        assert!(capture.variables[0].value.provenance().is_materialized());
+        assert!(matches!(
+            &capture.variables[0].value.kind,
+            RuntimeValueKind::Range(range) if range.span == nested_span
+        ));
+        assert_eq!(
+            capture
+                .functions
+                .iter()
+                .map(|function| function.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["zeta", "alpha"]
+        );
+        assert_eq!(
+            capture.resource_context,
+            Some(super::RuntimeCallableResourceContext {
+                current_source: SourceId(7),
+                subdocument_root: Some(SourceId(8)),
+                loadable_libraries: true,
+            })
+        );
+        assert_eq!(runtime.semantic_value().as_ref(), &value);
+        assert_eq!(runtime.to_ir_value(), value);
+        assert_eq!(runtime.into_ir_value(), IrValue::Callable(callable));
+
+        let content_span = SourceSpan::new(SourceId(9), 0, 9);
+        let body_span = SourceSpan::new(SourceId(9), 10, 19);
+        let inline = IrInlineBody {
+            content: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "content".into(),
+                    span: content_span,
+                }],
+                span: content_span,
+            }],
+            parameters: None,
+            body: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "callable".into(),
+                    span: body_span,
+                }],
+                span: body_span,
+            }],
+            span: SourceSpan::new(SourceId(9), 0, 19),
+        };
+        let runtime = RuntimeValue::static_value(IrValue::InlineBody(inline.clone()));
+        assert!(matches!(
+            &runtime.kind,
+            RuntimeValueKind::InlineBody(value) if value.to_ir() == inline
+        ));
+        assert_eq!(
+            convert_target_with_origin(&runtime, ConversionTarget::InlineContent, content_span),
+            Ok(TargetValue::Value(IrValue::Content(inline.content.clone())))
+        );
+        assert_eq!(
+            convert_target_with_origin(&runtime, ConversionTarget::Callable, body_span),
+            Ok(TargetValue::Value(IrValue::Callable(IrCallable {
+                parameters: inline.parameters.clone(),
+                body: inline.body.clone(),
+                span: inline.span,
+                capture: None,
+            })))
+        );
+        assert_eq!(runtime.into_ir_value(), IrValue::InlineBody(inline));
+    }
+
+    #[test]
+    fn runtime_callable_capture_retains_nested_runtime_provenance_until_ir_projection() {
+        let captured = RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "captured".into(),
+                span: span(),
+            }],
+            span: span(),
+        }]))
+        .with_provenance(ValueProvenance::source_backed_markdown_text(
+            "captured-source",
+        ));
+        let callable = super::RuntimeCallable {
+            parameters: None,
+            body: Vec::new(),
+            span: span(),
+            capture: Some(Box::new(super::RuntimeCallableCapture {
+                variables: vec![super::RuntimeCapturedVariable {
+                    name: "value".into(),
+                    value: captured,
+                }],
+                functions: Vec::new(),
+                resource_context: None,
+            })),
+        };
+        let runtime = RuntimeValue::callable(callable, ValueOrigin::Static);
+        let captured = &runtime
+            .as_callable()
+            .expect("runtime callable")
+            .capture
+            .as_deref()
+            .expect("runtime capture")
+            .variables[0]
+            .value;
+
+        assert_eq!(captured.origin, ValueOrigin::Dynamic);
+        assert_eq!(
+            captured.source_backed_markdown_text(),
+            Some("captured-source")
+        );
+        assert!(matches!(&captured.kind, RuntimeValueKind::Content(_)));
+
+        let IrValue::Callable(projected) = runtime.to_ir_value() else {
+            panic!("temporary projection must remain a callable");
+        };
+        let projected_capture = projected.capture.expect("projected capture");
+        let projected_value = &projected_capture.variables[0].value;
+        assert!(matches!(projected_value, IrValue::Content(_)));
     }
 
     #[test]

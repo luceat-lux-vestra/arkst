@@ -59,7 +59,9 @@ use crate::invocation_binder::{
     self, BindingPlan, BodyPolicy, BoundSlot, Candidate, ParameterMetadata,
 };
 use crate::value_conversion::{
-    self, RuntimeNamedArg, RuntimeValue, ScalarTarget, ScalarValue, ValueOrigin, ValueProvenance,
+    self, RuntimeCallable, RuntimeCallableCapture, RuntimeCallableResourceContext,
+    RuntimeCapturedFunction, RuntimeCapturedVariable, RuntimeNamedArg, RuntimeValue, ScalarTarget,
+    ScalarValue, ValueOrigin, ValueProvenance,
 };
 use crate::{ast_to_ir, builtins};
 use crate::{
@@ -68,14 +70,15 @@ use crate::{
     ResourceAccessError, ResourceEntryKind, ResourceProvider, ResourceRoot, ResourceText,
 };
 use arkst_diagnostics::{Diagnostic, Severity};
+#[cfg(test)]
+use arkst_ir::IrCallable;
 use arkst_ir::{
-    IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture,
-    IrCallableResourceContext, IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable,
+    IrBoxComponent, IrBoxType, IrCallArgument, IrCallSegment, IrCaptionPositionInfo,
     IrClipComponent, IrCodeCallout, IrCollapseComponent, IrColor, IrComponent,
     IrContainerAlignment, IrContainerBorderWidths, IrContainerComponent, IrContainerMargin,
     IrContainerPadding, IrContainerRadius, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
-    IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline, IrInlineBody,
+    IrFontLayer, IrFontState, IrFragmentBehavior, IrFragmentComponent, IrInline,
     IrInvocationFailureComponent, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
     IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState, IrPageBorderWidths,
     IrPageCounterTarget, IrPageFormatLayer, IrPageFormatSelector, IrPageFormatState,
@@ -120,6 +123,10 @@ impl VariableValue {
         }
     }
 
+    fn from_runtime_value(runtime: RuntimeValue) -> Self {
+        Self { runtime }
+    }
+
     /// Returns the backend-neutral value used by legacy evaluator paths.
     /// Runtime-only origin/provenance is intentionally stripped here.
     fn to_value(&self) -> IrValue {
@@ -146,13 +153,13 @@ struct FunctionBinding {
     parameters: LambdaParameters,
     body: Vec<IrNode>,
     declaration_span: SourceSpan,
-    capture: Option<Box<IrCallableCapture>>,
+    capture: Option<Box<RuntimeCallableCapture>>,
     extension: Option<Rc<FunctionExtension>>,
 }
 
 impl FunctionBinding {
-    fn as_callable(&self) -> IrCallable {
-        IrCallable {
+    fn as_callable(&self) -> RuntimeCallable {
+        RuntimeCallable {
             parameters: self.parameters.to_ir(),
             body: self.body.clone(),
             span: self.declaration_span,
@@ -172,7 +179,7 @@ struct ExtensionId(u64);
 #[derive(Debug, Clone, PartialEq)]
 struct FunctionExtension {
     id: ExtensionId,
-    condition: Option<IrCallable>,
+    condition: Option<RuntimeCallable>,
     super_target: FunctionTarget,
     body_policy: ExtensionBodyPolicy,
 }
@@ -573,7 +580,7 @@ struct ChainFinalCall<'a> {
 
 enum IterationBody<'a> {
     Block(&'a [IrNode]),
-    Inline(IrCallable),
+    Inline(RuntimeCallable),
 }
 
 #[derive(Clone)]
@@ -2868,7 +2875,7 @@ impl<'a> EvaluationContext<'a> {
         parameters: LambdaParameters,
         body: Vec<IrNode>,
         declaration_span: SourceSpan,
-        capture: Option<Box<IrCallableCapture>>,
+        capture: Option<Box<RuntimeCallableCapture>>,
     ) {
         let binding = Rc::new(FunctionBinding {
             parameters,
@@ -2890,7 +2897,7 @@ impl<'a> EvaluationContext<'a> {
         self.functions.insert(name, binding);
     }
 
-    fn capture_snapshot(&self) -> IrCallableCapture {
+    fn capture_snapshot(&self) -> RuntimeCallableCapture {
         let mut variables = BTreeMap::new();
         let mut functions = BTreeMap::new();
         self.collect_bindings(&mut variables, &mut functions);
@@ -2902,28 +2909,28 @@ impl<'a> EvaluationContext<'a> {
                 continue;
             };
             if let Some(binding) = functions.remove(name) {
-                captured_functions.push(IrCapturedFunction {
+                captured_functions.push(RuntimeCapturedFunction {
                     name: name.to_string(),
                     callable: binding.as_callable(),
                 });
             }
         }
         captured_functions.extend(functions.into_iter().map(|(name, binding)| {
-            IrCapturedFunction {
+            RuntimeCapturedFunction {
                 name,
                 callable: binding.as_callable(),
             }
         }));
-        IrCallableCapture {
+        RuntimeCallableCapture {
             variables: variables
                 .into_iter()
-                .map(|(name, value)| IrCapturedVariable { name, value })
+                .map(|(name, value)| RuntimeCapturedVariable { name, value })
                 .collect(),
             functions: captured_functions,
             resource_context: self.current_source.and_then(|current_source| {
                 self.resources
                     .is_some()
-                    .then_some(IrCallableResourceContext {
+                    .then_some(RuntimeCallableResourceContext {
                         current_source,
                         subdocument_root: self.subdocument_root,
                         loadable_libraries: self.loadable_libraries.is_some(),
@@ -2934,7 +2941,7 @@ impl<'a> EvaluationContext<'a> {
 
     fn collect_bindings(
         &self,
-        variables: &mut BTreeMap<String, IrValue>,
+        variables: &mut BTreeMap<String, RuntimeValue>,
         functions: &mut BTreeMap<String, Rc<FunctionBinding>>,
     ) {
         if let Some(parent) = self.parent.as_deref() {
@@ -2943,7 +2950,7 @@ impl<'a> EvaluationContext<'a> {
         variables.extend(
             self.variables
                 .iter()
-                .map(|(name, value)| (name.clone(), value.to_value())),
+                .map(|(name, value)| (name.clone(), value.runtime_value().clone())),
         );
         functions.extend(self.functions.clone());
     }
@@ -2955,10 +2962,13 @@ impl<'a> EvaluationContext<'a> {
         targets.extend(self.extension_targets.clone());
     }
 
-    fn from_capture(capture: &IrCallableCapture) -> Self {
+    fn from_capture(capture: &RuntimeCallableCapture) -> Self {
         let mut context = Self::new();
         for variable in &capture.variables {
-            context.set_value(variable.name.clone(), variable.value.clone());
+            context.variables.insert(
+                variable.name.clone(),
+                VariableValue::from_runtime_value(variable.value.clone()),
+            );
         }
         for function in &capture.functions {
             let name = function.name.clone();
@@ -2984,7 +2994,7 @@ impl<'a> EvaluationContext<'a> {
     fn with_caller_overlay(
         definition_context: Self,
         caller_context: &Self,
-        resource_context: Option<IrCallableResourceContext>,
+        resource_context: Option<RuntimeCallableResourceContext>,
     ) -> Self {
         let mut variables = BTreeMap::new();
         let mut functions = BTreeMap::new();
@@ -3005,7 +3015,7 @@ impl<'a> EvaluationContext<'a> {
             parent: Some(Box::new(definition_context)),
             variables: variables
                 .into_iter()
-                .map(|(name, value)| (name, VariableValue::from_evaluated_value(value)))
+                .map(|(name, value)| (name, VariableValue::from_runtime_value(value)))
                 .collect(),
             functions,
             extension_targets,
@@ -15736,26 +15746,14 @@ impl Evaluator {
                     ));
                     return CallOutcome::Failed;
                 };
-                let callable = match callback {
-                    IrValue::Callable(callable) => callable,
-                    IrValue::InlineBody(IrInlineBody {
-                        parameters,
-                        body,
-                        span,
-                        ..
-                    }) => IrCallable {
-                        parameters,
-                        body,
-                        span,
-                        capture: None,
-                    },
-                    value => {
-                        diagnostics.push(iteration_error(
-                            "`.foreach` inline body must be a callable".to_string(),
-                            value_source_span(&value, span),
-                        ));
-                        return CallOutcome::Failed;
-                    }
+                let callback_span = value_source_span(&callback, span);
+                let Some(callable) = RuntimeValue::static_value(callback).into_callable_target()
+                else {
+                    diagnostics.push(iteration_error(
+                        "`.foreach` inline body must be a callable".to_string(),
+                        callback_span,
+                    ));
+                    return CallOutcome::Failed;
                 };
                 IterationBody::Inline(callable)
             }
@@ -15879,7 +15877,7 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
-    ) -> Result<(Vec<IrValue>, IrCallable, IterationOptions), CallOutcome> {
+    ) -> Result<(Vec<IrValue>, RuntimeCallable, IterationOptions), CallOutcome> {
         let Some(binding_plan) = binding_plan else {
             return Err(CallOutcome::Failed);
         };
@@ -15920,26 +15918,14 @@ impl Evaluator {
                     ));
                     return Err(CallOutcome::Failed);
                 };
-                let callable = match callback {
-                    IrValue::Callable(callable) => callable,
-                    IrValue::InlineBody(IrInlineBody {
-                        parameters,
-                        body,
-                        span,
-                        ..
-                    }) => IrCallable {
-                        parameters,
-                        body,
-                        span,
-                        capture: None,
-                    },
-                    value => {
-                        diagnostics.push(iteration_error(
-                            "`.repeat` inline body must be a callable".to_string(),
-                            value_source_span(&value, span),
-                        ));
-                        return Err(CallOutcome::Failed);
-                    }
+                let callback_span = value_source_span(&callback, span);
+                let Some(callable) = RuntimeValue::static_value(callback).into_callable_target()
+                else {
+                    diagnostics.push(iteration_error(
+                        "`.repeat` inline body must be a callable".to_string(),
+                        callback_span,
+                    ));
+                    return Err(CallOutcome::Failed);
                 };
                 IterationBody::Inline(callable)
             }
@@ -16588,7 +16574,7 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let IrValue::Callable(predicate) = predicate_value.into_ir_value() else {
+        let Some(predicate) = predicate_value.into_callable() else {
             diagnostics.push(table_filter_error(
                 "E3001",
                 "`.tablefilter` filter must be a one-argument callable".to_string(),
@@ -16596,6 +16582,7 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         };
+        let predicate = self.materialize_runtime_callable(predicate, context);
         if !validate_iteration_lambda(
             predicate.parameters.as_deref(),
             "tablefilter",
@@ -16849,7 +16836,7 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let IrValue::Callable(compute) = compute_value.into_ir_value() else {
+        let Some(compute) = compute_value.into_callable() else {
             diagnostics.push(table_compute_error(
                 "E3001",
                 "`.tablecompute` compute must be a one-argument callable".to_string(),
@@ -16857,6 +16844,7 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         };
+        let compute = self.materialize_runtime_callable(compute, context);
         if !validate_iteration_lambda(
             compute.parameters.as_deref(),
             "tablecompute",
@@ -17334,12 +17322,15 @@ impl Evaluator {
                         }
                         CallOutcome::Failed => return CallOutcome::Failed,
                     };
-                    match value {
-                        IrValue::Callable(callable) => Some(callable),
-                        _ => {
+                    let callback_span = value_source_span(&value, span);
+                    match RuntimeValue::static_value(value).into_callable() {
+                        Some(callable) => {
+                            Some(self.materialize_runtime_callable(callable, context))
+                        }
+                        None => {
                             diagnostics.push(iteration_error(
                                 format!("`.{name}` callback must be a first-class callable"),
-                                value_source_span(&value, span),
+                                callback_span,
                             ));
                             return CallOutcome::Failed;
                         }
@@ -17494,12 +17485,12 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
             None => match callback_slot {
-                Some(BoundSlot::Explicit { value, span }) => match value.into_ir_value() {
-                    IrValue::Callable(callable) => Some(callable),
-                    value => {
+                Some(BoundSlot::Explicit { value, span }) => match value.into_callable() {
+                    Some(callable) => Some(self.materialize_runtime_callable(callable, context)),
+                    None => {
                         diagnostics.push(iteration_error(
                             "`.join` body must be a one-element callable".to_string(),
-                            value_source_span(&value, &span),
+                            span,
                         ));
                         return CallOutcome::Failed;
                     }
@@ -17621,13 +17612,17 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 };
                 let callback = match self.evaluate_value(&raw_callback, diagnostics, context) {
-                    CallOutcome::Value(IrValue::Callable(callable)) => callable,
                     CallOutcome::Value(value) => {
-                        diagnostics.push(iteration_error(
-                            format!("`.{name}` callback must be a first-class callable"),
-                            value_source_span(&value, span),
-                        ));
-                        return CallOutcome::Failed;
+                        let callback_span = value_source_span(&value, span);
+                        let Some(callable) = RuntimeValue::static_value(value).into_callable()
+                        else {
+                            diagnostics.push(iteration_error(
+                                format!("`.{name}` callback must be a first-class callable"),
+                                callback_span,
+                            ));
+                            return CallOutcome::Failed;
+                        };
+                        self.materialize_runtime_callable(callable, context)
                     }
                     CallOutcome::Unresolved => {
                         diagnostics.push(iteration_error(
@@ -17792,30 +17787,15 @@ impl Evaluator {
         body: IterationBody<'_>,
         lambda_parameters: Option<&[IrParameter]>,
         span: SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
+        _diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-    ) -> Result<IrCallable, CallOutcome> {
+    ) -> Result<RuntimeCallable, CallOutcome> {
         match body {
             IterationBody::Block(nodes) => {
                 Ok(self.make_callable(lambda_parameters, nodes, span, context))
             }
             IterationBody::Inline(callable) => {
-                let callable_span = callable.span;
-                match self.evaluate_value(&IrValue::Callable(callable), diagnostics, context) {
-                    CallOutcome::Value(IrValue::Callable(callable)) => Ok(callable),
-                    CallOutcome::Value(_) | CallOutcome::Unresolved => {
-                        diagnostics.push(iteration_error(
-                            "inline iteration body did not resolve to a callable".to_string(),
-                            callable_span,
-                        ));
-                        Err(CallOutcome::Failed)
-                    }
-                    CallOutcome::NoValue => {
-                        diagnostics.push(no_value_required(callable_span));
-                        Err(CallOutcome::Failed)
-                    }
-                    CallOutcome::Failed => Err(CallOutcome::Failed),
-                }
+                Ok(self.materialize_runtime_callable(callable, context))
             }
         }
     }
@@ -17826,13 +17806,24 @@ impl Evaluator {
         body: &[IrNode],
         span: SourceSpan,
         context: &EvaluationContext<'_>,
-    ) -> IrCallable {
-        IrCallable {
+    ) -> RuntimeCallable {
+        RuntimeCallable {
             parameters: parameters.map(ToOwned::to_owned),
             body: body.to_vec(),
             span,
             capture: Some(Box::new(context.capture_snapshot())),
         }
+    }
+
+    fn materialize_runtime_callable(
+        &self,
+        mut callable: RuntimeCallable,
+        context: &EvaluationContext<'_>,
+    ) -> RuntimeCallable {
+        if callable.capture.is_none() {
+            callable.capture = Some(Box::new(context.capture_snapshot()));
+        }
+        callable
     }
 
     /// Shared first-class callable invocation path for loops, transforms, and
@@ -17841,7 +17832,7 @@ impl Evaluator {
     /// remain invocation-local.
     fn invoke_callable(
         &self,
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         arguments: Vec<IrValue>,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
@@ -17859,7 +17850,7 @@ impl Evaluator {
 
     fn invoke_callable_without_extension_context(
         &self,
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         arguments: Vec<IrValue>,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
@@ -17877,7 +17868,7 @@ impl Evaluator {
 
     fn invoke_callable_with_extension_mode(
         &self,
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         arguments: Vec<IrValue>,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
@@ -17910,7 +17901,7 @@ impl Evaluator {
 
     fn invoke_bound_callable(
         &self,
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         bound: BoundLambdaArguments,
         _options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
@@ -17928,7 +17919,7 @@ impl Evaluator {
 
     fn invoke_bound_callable_with_extension(
         &self,
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         bound: BoundLambdaArguments,
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
@@ -17946,7 +17937,7 @@ impl Evaluator {
 
     fn invoke_bound_callable_with_extension_mode(
         &self,
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         bound: BoundLambdaArguments,
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
@@ -18018,7 +18009,7 @@ impl Evaluator {
     fn map_callable_values(
         &self,
         elements: &[IrValue],
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -18032,7 +18023,7 @@ impl Evaluator {
     fn map_callable_runtime_values(
         &self,
         elements: &[IrValue],
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -18076,7 +18067,7 @@ impl Evaluator {
     fn filter_callable_values(
         &self,
         elements: &[IrValue],
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -18131,7 +18122,7 @@ impl Evaluator {
         &self,
         name: &str,
         elements: &[IrValue],
-        callable: &IrCallable,
+        callable: &RuntimeCallable,
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -18197,7 +18188,7 @@ impl Evaluator {
     fn sort_iterable_values(
         &self,
         elements: Vec<IrValue>,
-        callable: Option<&IrCallable>,
+        callable: Option<&RuntimeCallable>,
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -18957,9 +18948,9 @@ impl Evaluator {
         }
 
         let condition = match bound.slots.get(1) {
-            Some(BoundSlot::Explicit { value, span }) => match value.semantic_value().as_ref() {
-                IrValue::Callable(callable) => {
-                    if let Some(parameters) = callable.parameters.as_deref() {
+            Some(BoundSlot::Explicit { value, span }) => match value.as_callable().cloned() {
+                Some(mut condition) => {
+                    if let Some(parameters) = condition.parameters.as_deref() {
                         if let Some(parameter) = parameters
                             .iter()
                             .find(|parameter| !target_names.contains(&parameter.name))
@@ -18975,11 +18966,10 @@ impl Evaluator {
                             return CallOutcome::Failed;
                         }
                     }
-                    let mut condition = callable.clone();
                     condition.parameters = wrapper_parameters.to_ir();
-                    Some(condition)
+                    Some(self.materialize_runtime_callable(condition, context))
                 }
-                _ => {
+                None => {
                     diagnostics.push(extension_error(
                         "`.extend` `where` must be a callable condition".to_string(),
                         *span,
@@ -21140,13 +21130,11 @@ impl Evaluator {
                 }
             }
             IrValue::Callable(callable) => {
-                if callable.capture.is_some() {
-                    CallOutcome::Value(value.clone())
-                } else {
-                    let mut callable = callable.clone();
-                    callable.capture = Some(Box::new(context.capture_snapshot()));
-                    CallOutcome::Value(IrValue::Callable(callable))
-                }
+                let callable = self.materialize_runtime_callable(
+                    RuntimeCallable::from_ir(callable.clone()),
+                    context,
+                );
+                CallOutcome::Value(IrValue::Callable(callable.into_ir()))
             }
             scalar => value_context_outcome(CallOutcome::Value(scalar.clone())),
         }
@@ -21194,6 +21182,11 @@ impl Evaluator {
     ) -> Result<RuntimeValue, CallOutcome> {
         if let Some(value) = direct_variable_runtime_value(value, context) {
             return Ok(value.with_origin(origin));
+        }
+        if let IrValue::Callable(callable) = value {
+            let callable = self
+                .materialize_runtime_callable(RuntimeCallable::from_ir(callable.clone()), context);
+            return Ok(RuntimeValue::callable(callable, origin));
         }
         #[cfg(test)]
         if let Some(result) = self.evaluate_direct_repeat_runtime_value(value, diagnostics, context)
@@ -28138,7 +28131,7 @@ fn direct_variable_runtime_value(
         .variables
         .get(name)
         .map(VariableValue::runtime_value)
-        .filter(|value| !value.provenance().is_materialized())
+        .filter(|value| value.is_callable() || !value.provenance().is_materialized())
         .cloned()
 }
 
@@ -36723,16 +36716,73 @@ mod tests {
     }
 
     #[test]
+    fn runtime_callable_capture_and_caller_overlay_preserve_nested_runtime_provenance() {
+        let mut definition = EvaluationContext::new();
+        definition.variables.insert(
+            "captured".to_string(),
+            VariableValue::from_runtime_value(
+                RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+                    content: vec![IrInline::Text {
+                        content: "captured".to_string(),
+                        span: span(0, 8),
+                    }],
+                    span: span(0, 8),
+                }]))
+                .with_provenance(ValueProvenance::source_backed_markdown_text(
+                    "captured-source",
+                )),
+            ),
+        );
+        let capture = definition.capture_snapshot();
+        let captured = &capture.variables[0].value;
+        assert_eq!(captured.origin, ValueOrigin::Dynamic);
+        assert_eq!(
+            captured.source_backed_markdown_text(),
+            Some("captured-source")
+        );
+
+        let restored = EvaluationContext::from_capture(&capture);
+        let caller = EvaluationContext::new();
+        let overlay =
+            EvaluationContext::with_caller_overlay(restored, &caller, capture.resource_context);
+        let restored = overlay
+            .get("captured")
+            .expect("captured runtime value survives overlay")
+            .runtime_value();
+        assert_eq!(restored.origin, ValueOrigin::Dynamic);
+        assert_eq!(
+            restored.source_backed_markdown_text(),
+            Some("captured-source")
+        );
+
+        let evaluator = Evaluator::new();
+        let materialized = evaluator.materialize_runtime_callable(
+            RuntimeCallable {
+                parameters: None,
+                body: Vec::new(),
+                span: span(0, 1),
+                capture: Some(Box::new(capture.clone())),
+            },
+            &caller,
+        );
+        assert_eq!(
+            materialized.capture.as_deref(),
+            Some(&capture),
+            "an existing definition capture must never be replaced at invocation time"
+        );
+    }
+
+    #[test]
     fn caller_overlay_failure_does_not_mutate_capture_or_caller_context() {
-        let capture = IrCallableCapture {
-            variables: vec![IrCapturedVariable {
+        let capture = RuntimeCallableCapture {
+            variables: vec![RuntimeCapturedVariable {
                 name: "value".to_string(),
-                value: IrValue::String("definition".to_string()),
+                value: RuntimeValue::static_value(IrValue::String("definition".to_string())),
             }],
             functions: Vec::new(),
             resource_context: None,
         };
-        let callable = IrCallable {
+        let callable = RuntimeCallable {
             parameters: None,
             body: vec![IrNode::FunctionCall {
                 name: "multiply".to_string(),
@@ -37192,7 +37242,7 @@ mod tests {
     fn issue_167_discarded_callable_locals_do_not_grow_transaction_metadata() {
         let evaluator = Evaluator::new();
         let span = span(0, 20);
-        let callable = IrCallable {
+        let callable = RuntimeCallable {
             parameters: Some(vec![lambda_parameter("value", 4)]),
             body: vec![var_ref("value")],
             span,
@@ -37337,7 +37387,7 @@ mod tests {
     fn issue_167_repeated_document_state_appends_use_bounded_undo_metadata() {
         let evaluator = Evaluator::new();
         let span = span(0, 20);
-        let callable = IrCallable {
+        let callable = RuntimeCallable {
             parameters: Some(vec![lambda_parameter("value", 4)]),
             body: vec![
                 IrNode::FunctionCall {
