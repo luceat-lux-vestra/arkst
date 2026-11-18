@@ -8,11 +8,11 @@
 
 use arkst_ir::{
     IrBoxType, IrCallable, IrCaptionPosition, IrClipShape, IrColor, IrComponent,
-    IrContainerAlignment, IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue,
-    IrFragmentBehavior, IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageMarginPosition,
-    IrPageOrientation, IrPageSide, IrPageSizeFormat, IrRange, IrRawBody, IrSize, IrSizeUnit,
-    IrSlideTransitionSpeed, IrSlideTransitionStyle, IrTextCase, IrTextDecoration, IrTextSize,
-    IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
+    IrContainerAlignment, IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType,
+    IrEnumValue, IrFragmentBehavior, IrInline, IrMainAxisAlignment, IrNamedArg, IrNode,
+    IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair, IrRange,
+    IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle, IrTextCase,
+    IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::borrow::Cow;
@@ -156,14 +156,28 @@ impl ValueProvenance {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct RuntimePair {
+    first: Box<RuntimeValue>,
+    second: Box<RuntimeValue>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RuntimeDictionary {
+    entries: Vec<RuntimeValue>,
+    span: SourceSpan,
+}
+
 /// First evaluator-owned runtime value carrier.
 ///
-/// Primitive values, textual leaves, Range, closed domain values, Components,
-/// and Collections are evaluator-owned; each nested element retains its own origin
-/// and provenance. Complex categories still use a temporary semantic leaf until
-/// their later G1 migration. A `SemanticLeaf` must never contain Unit, None,
-/// Boolean, Number, String, Identifier, Range, Size, Color, Enum, Component,
-/// or Collection.
+/// Primitive values, textual leaves, Range, closed domain values, recursive
+/// Pair/Dictionary aggregates, Components, and Collections are evaluator-owned;
+/// each nested value retains its own origin and provenance. Content and
+/// execution-stage carriers still use a temporary semantic leaf until their
+/// later G1 migration. A `SemanticLeaf` must never contain Unit, None,
+/// Boolean, Number, String, Identifier, Range, Size, Color, Enum, Pair,
+/// Dictionary, Component, or Collection.
 #[derive(Debug, Clone, PartialEq)]
 enum RuntimeValueKind {
     Unit,
@@ -176,6 +190,8 @@ enum RuntimeValueKind {
     Size(IrSize),
     Color(IrColor),
     Enum(IrEnumValue),
+    Pair(RuntimePair),
+    Dictionary(RuntimeDictionary),
     Component(IrComponent),
     SemanticLeaf(IrValue),
     Collection(Vec<RuntimeValue>),
@@ -201,6 +217,40 @@ impl RuntimeValue {
             IrValue::Size(value) => RuntimeValueKind::Size(value),
             IrValue::Color(value) => RuntimeValueKind::Color(value),
             IrValue::Enum(value) => RuntimeValueKind::Enum(value),
+            IrValue::Pair(value) => {
+                let IrPair {
+                    first,
+                    second,
+                    span,
+                } = value;
+                return Self::pair(
+                    Self::new(*first, origin),
+                    Self::new(*second, origin),
+                    span,
+                    origin,
+                );
+            }
+            IrValue::Dictionary(value) => {
+                let IrDictionary { entries, span } = value;
+                let entries = entries
+                    .into_iter()
+                    .map(|entry| {
+                        let IrPair {
+                            first,
+                            second,
+                            span,
+                        } = entry;
+                        Self::pair(
+                            Self::new(*first, origin),
+                            Self::new(*second, origin),
+                            span,
+                            origin,
+                        )
+                    })
+                    .collect();
+                return Self::dictionary(entries, span, origin)
+                    .expect("IR dictionary entries are always pairs");
+            }
             IrValue::Component(value) => RuntimeValueKind::Component(value),
             IrValue::Collection(values) => {
                 return Self::collection(
@@ -227,6 +277,32 @@ impl RuntimeValue {
     #[allow(dead_code)]
     pub(crate) fn dynamic_value(value: IrValue) -> Self {
         Self::new(value, ValueOrigin::Dynamic)
+    }
+
+    fn pair(first: Self, second: Self, span: SourceSpan, origin: ValueOrigin) -> Self {
+        Self {
+            kind: RuntimeValueKind::Pair(RuntimePair {
+                first: Box::new(first),
+                second: Box::new(second),
+                span,
+            }),
+            origin,
+            provenance: ValueProvenance::Materialized,
+        }
+    }
+
+    fn dictionary(entries: Vec<Self>, span: SourceSpan, origin: ValueOrigin) -> Option<Self> {
+        if entries
+            .iter()
+            .any(|entry| !matches!(&entry.kind, RuntimeValueKind::Pair(_)))
+        {
+            return None;
+        }
+        Some(Self {
+            kind: RuntimeValueKind::Dictionary(RuntimeDictionary { entries, span }),
+            origin,
+            provenance: ValueProvenance::Materialized,
+        })
     }
 
     pub(crate) fn collection(elements: Vec<Self>, origin: ValueOrigin) -> Self {
@@ -267,6 +343,28 @@ impl RuntimeValue {
         )
     }
 
+    fn to_ir_pair(&self) -> Option<IrPair> {
+        let RuntimeValueKind::Pair(pair) = &self.kind else {
+            return None;
+        };
+        Some(IrPair {
+            first: Box::new(pair.first.to_ir_value()),
+            second: Box::new(pair.second.to_ir_value()),
+            span: pair.span,
+        })
+    }
+
+    fn into_ir_pair(self) -> Option<IrPair> {
+        let RuntimeValueKind::Pair(pair) = self.kind else {
+            return None;
+        };
+        Some(IrPair {
+            first: Box::new(pair.first.into_ir_value()),
+            second: Box::new(pair.second.into_ir_value()),
+            span: pair.span,
+        })
+    }
+
     /// Project evaluator-owned runtime values back into the transitional
     /// `IrValue` model only when an existing semantic consumer explicitly
     /// requires that boundary during the G1 migration.
@@ -282,6 +380,19 @@ impl RuntimeValue {
             RuntimeValueKind::Size(value) => Cow::Owned(IrValue::Size(value.clone())),
             RuntimeValueKind::Color(value) => Cow::Owned(IrValue::Color(value.clone())),
             RuntimeValueKind::Enum(value) => Cow::Owned(IrValue::Enum(*value)),
+            RuntimeValueKind::Pair(_) => Cow::Owned(IrValue::Pair(
+                self.to_ir_pair().expect("runtime pair invariant"),
+            )),
+            RuntimeValueKind::Dictionary(value) => {
+                Cow::Owned(IrValue::Dictionary(IrDictionary {
+                    entries: value
+                        .entries
+                        .iter()
+                        .map(|entry| entry.to_ir_pair().expect("runtime dictionary entry invariant"))
+                        .collect(),
+                    span: value.span,
+                }))
+            }
             RuntimeValueKind::Component(value) => Cow::Owned(IrValue::Component(value.clone())),
             RuntimeValueKind::SemanticLeaf(value) => Cow::Borrowed(value),
             RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
@@ -325,6 +436,17 @@ impl RuntimeValue {
             RuntimeValueKind::Size(value) => IrValue::Size(value.clone()),
             RuntimeValueKind::Color(value) => IrValue::Color(value.clone()),
             RuntimeValueKind::Enum(value) => IrValue::Enum(*value),
+            RuntimeValueKind::Pair(_) => {
+                IrValue::Pair(self.to_ir_pair().expect("runtime pair invariant"))
+            }
+            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
+                entries: value
+                    .entries
+                    .iter()
+                    .map(|entry| entry.to_ir_pair().expect("runtime dictionary entry invariant"))
+                    .collect(),
+                span: value.span,
+            }),
             RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
             RuntimeValueKind::SemanticLeaf(value) => value.clone(),
             RuntimeValueKind::Collection(elements) => {
@@ -345,6 +467,23 @@ impl RuntimeValue {
             RuntimeValueKind::Size(value) => IrValue::Size(value),
             RuntimeValueKind::Color(value) => IrValue::Color(value),
             RuntimeValueKind::Enum(value) => IrValue::Enum(value),
+            RuntimeValueKind::Pair(pair) => IrValue::Pair(IrPair {
+                first: Box::new(pair.first.into_ir_value()),
+                second: Box::new(pair.second.into_ir_value()),
+                span: pair.span,
+            }),
+            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
+                entries: value
+                    .entries
+                    .into_iter()
+                    .map(|entry| {
+                        entry
+                            .into_ir_pair()
+                            .expect("runtime dictionary entry invariant")
+                    })
+                    .collect(),
+                span: value.span,
+            }),
             RuntimeValueKind::Component(value) => IrValue::Component(value),
             RuntimeValueKind::SemanticLeaf(value) => value,
             RuntimeValueKind::Collection(elements) => {
@@ -1210,8 +1349,8 @@ fn convert_structured_target(
 ) -> Result<TargetValue, ConversionError> {
     let kind = match &argument.kind {
         RuntimeValueKind::Collection(_) => IrValueKind::Collection,
-        RuntimeValueKind::SemanticLeaf(IrValue::Pair(_)) => IrValueKind::Pair,
-        RuntimeValueKind::SemanticLeaf(IrValue::Dictionary(_)) => IrValueKind::Dictionary,
+        RuntimeValueKind::Pair(_) => IrValueKind::Pair,
+        RuntimeValueKind::Dictionary(_) => IrValueKind::Dictionary,
         RuntimeValueKind::Range(_) => IrValueKind::Range,
         // A parsed Markdown list is the frontend representation of the
         // upstream dynamic iterable adapter. Keep it structured here so the
@@ -3191,8 +3330,9 @@ mod tests {
     };
     use arkst_ir::{
         IrBoxType, IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment,
-        IrCrossAxisAlignment, IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline,
-        IrInlineBody, IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
+        IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType, IrEnumValue,
+        IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPair, IrRange, IrRawBody, IrSize,
+        IrSizeUnit,
         IrSlideTransitionSpeed, IrSlideTransitionStyle, IrStackedComponent, IrStackedLayout,
         IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight,
         IrValue,
@@ -3341,6 +3481,197 @@ mod tests {
                 Err(ConversionError::UnsupportedValue { target })
             );
         }
+    }
+
+    #[test]
+    fn runtime_pair_dictionary_are_engine_owned_and_roundtrip_nested_semantics() {
+        let entry_span = SourceSpan::new(SourceId(7), 20, 30);
+        let nested_span = SourceSpan::new(SourceId(7), 31, 40);
+        let dictionary_span = SourceSpan::new(SourceId(7), 20, 60);
+        let dictionary = IrValue::Dictionary(IrDictionary {
+            entries: vec![
+                IrPair {
+                    first: Box::new(IrValue::String("dup".into())),
+                    second: Box::new(IrValue::Pair(IrPair {
+                        first: Box::new(IrValue::Number(1.0)),
+                        second: Box::new(IrValue::Range(IrRange {
+                            start: Some(-2),
+                            end: Some(4),
+                            span: nested_span,
+                        })),
+                        span: nested_span,
+                    })),
+                    span: entry_span,
+                },
+                IrPair {
+                    first: Box::new(IrValue::String("dup".into())),
+                    second: Box::new(IrValue::Number(2.0)),
+                    span: span(),
+                },
+            ],
+            span: dictionary_span,
+        });
+        let runtime = RuntimeValue::dynamic_value(dictionary.clone());
+
+        let RuntimeValueKind::Dictionary(runtime_dictionary) = &runtime.kind else {
+            panic!("dictionary must be engine-owned");
+        };
+        assert_eq!(runtime_dictionary.span, dictionary_span);
+        assert_eq!(runtime_dictionary.entries.len(), 2);
+        let RuntimeValueKind::Pair(first_entry) = &runtime_dictionary.entries[0].kind else {
+            panic!("dictionary entry must remain a runtime Pair");
+        };
+        assert_eq!(first_entry.span, entry_span);
+        assert!(matches!(
+            &first_entry.first.kind,
+            RuntimeValueKind::String(value) if value == "dup"
+        ));
+        let RuntimeValueKind::Pair(nested_pair) = &first_entry.second.kind else {
+            panic!("nested Pair must remain engine-owned");
+        };
+        assert_eq!(nested_pair.span, nested_span);
+        assert!(matches!(
+            &nested_pair.first.kind,
+            RuntimeValueKind::Number(value) if *value == 1.0
+        ));
+        assert!(matches!(
+            &nested_pair.second.kind,
+            RuntimeValueKind::Range(value)
+                if value.start == Some(-2)
+                    && value.end == Some(4)
+                    && value.span == nested_span
+        ));
+        assert!(matches!(
+            &runtime_dictionary.entries[1].kind,
+            RuntimeValueKind::Pair(_)
+        ));
+        assert_eq!(runtime.semantic_value().as_ref(), &dictionary);
+        assert_eq!(runtime.to_ir_value(), dictionary);
+        assert_eq!(runtime.clone().into_ir_value(), dictionary);
+    }
+
+    #[test]
+    fn runtime_pair_dictionary_constructors_preserve_nested_origin_and_provenance() {
+        let pair_span = SourceSpan::new(SourceId(7), 70, 80);
+        let dictionary_span = SourceSpan::new(SourceId(7), 70, 90);
+        let first = RuntimeValue::dynamic_value(IrValue::String("left".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("left-source"));
+        let second = RuntimeValue::static_value(IrValue::Range(IrRange {
+            start: Some(1),
+            end: Some(3),
+            span: pair_span,
+        }));
+        let pair = RuntimeValue::pair(first, second, pair_span, ValueOrigin::Dynamic)
+            .with_provenance(ValueProvenance::source_backed_markdown_text("pair-source"));
+        let dictionary =
+            RuntimeValue::dictionary(vec![pair], dictionary_span, ValueOrigin::Static)
+                .expect("runtime dictionary accepts Pair entries");
+
+        assert_eq!(dictionary.origin, ValueOrigin::Static);
+        assert!(dictionary.provenance().is_materialized());
+        let RuntimeValueKind::Dictionary(runtime_dictionary) = &dictionary.kind else {
+            panic!("dictionary must be engine-owned");
+        };
+        let entry = &runtime_dictionary.entries[0];
+        assert_eq!(entry.origin, ValueOrigin::Dynamic);
+        assert_eq!(entry.source_backed_markdown_text(), Some("pair-source"));
+        let RuntimeValueKind::Pair(pair) = &entry.kind else {
+            panic!("dictionary entry must remain a runtime Pair");
+        };
+        assert_eq!(pair.span, pair_span);
+        assert_eq!(pair.first.origin, ValueOrigin::Dynamic);
+        assert_eq!(
+            pair.first.source_backed_markdown_text(),
+            Some("left-source")
+        );
+        assert!(matches!(
+            &pair.first.kind,
+            RuntimeValueKind::String(value) if value == "left"
+        ));
+        assert_eq!(pair.second.origin, ValueOrigin::Static);
+        assert!(pair.second.provenance().is_materialized());
+        assert!(matches!(
+            &pair.second.kind,
+            RuntimeValueKind::Range(value) if value.span == pair_span
+        ));
+
+        assert!(RuntimeValue::dictionary(
+            vec![RuntimeValue::static_value(IrValue::String("not-pair".into()))],
+            dictionary_span,
+            ValueOrigin::Static,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn runtime_pair_dictionary_replacement_and_targets_preserve_existing_contracts() {
+        let dictionary = IrValue::Dictionary(IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::String("key".into())),
+                second: Box::new(IrValue::Number(1.0)),
+                span: span(),
+            }],
+            span: span(),
+        });
+        let mut replaced = RuntimeValue::dynamic_value(IrValue::Identifier("discarded".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("discarded"));
+        replaced.replace_semantic_value(dictionary.clone());
+
+        assert_eq!(replaced.origin, ValueOrigin::Dynamic);
+        assert!(replaced.provenance().is_materialized());
+        let RuntimeValueKind::Dictionary(runtime_dictionary) = &replaced.kind else {
+            panic!("replacement must reclassify Dictionary");
+        };
+        assert_eq!(runtime_dictionary.entries.len(), 1);
+        let entry = &runtime_dictionary.entries[0];
+        assert_eq!(entry.origin, ValueOrigin::Dynamic);
+        assert!(entry.provenance().is_materialized());
+        let RuntimeValueKind::Pair(pair) = &entry.kind else {
+            panic!("replacement dictionary entry must be runtime Pair");
+        };
+        assert_eq!(pair.first.origin, ValueOrigin::Dynamic);
+        assert!(pair.first.provenance().is_materialized());
+        assert_eq!(pair.second.origin, ValueOrigin::Dynamic);
+        assert!(pair.second.provenance().is_materialized());
+
+        for target in [ConversionTarget::Iterable, ConversionTarget::Dictionary] {
+            assert_eq!(
+                convert_target_with_origin(&replaced, target, span()),
+                Ok(TargetValue::Value(dictionary.clone()))
+            );
+        }
+        for target in [
+            ConversionTarget::Number,
+            ConversionTarget::String,
+            ConversionTarget::InlineContent,
+            ConversionTarget::BlockContent,
+            ConversionTarget::Node,
+            ConversionTarget::Callable,
+        ] {
+            assert!(
+                convert_target_with_origin(&replaced, target, span()).is_err(),
+                "Dictionary unexpectedly converted to {target:?}"
+            );
+        }
+
+        let pair_value = IrValue::Pair(IrPair {
+            first: Box::new(IrValue::String("left".into())),
+            second: Box::new(IrValue::Number(2.0)),
+            span: span(),
+        });
+        let pair = RuntimeValue::static_value(pair_value.clone());
+        assert!(matches!(&pair.kind, RuntimeValueKind::Pair(_)));
+        assert_eq!(
+            convert_target_with_origin(&pair, ConversionTarget::Iterable, span()),
+            Ok(TargetValue::Value(pair_value))
+        );
+        assert_eq!(
+            convert_target_with_origin(&pair, ConversionTarget::Dictionary, span()),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Dictionary,
+            })
+        );
+        assert!(convert_target_with_origin(&pair, ConversionTarget::String, span()).is_err());
     }
 
     #[test]
