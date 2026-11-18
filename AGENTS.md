@@ -245,11 +245,14 @@ validation. Shared scope failure must materialize required jobs through the
 verifier-approved exact `${{ always() }}` guard, never by accepting skipped
 required jobs. Do not broaden the allowlist merely to reduce CI cost.
 
-The workspace MSRV is Rust 1.92.0. Repository development and CI use the
-pinned Rust 1.98.0 toolchain from `rust-toolchain.toml`; do not conflate the
-minimum supported compiler with the toolchain used for authoritative current
-validation. Dependency-resolving Cargo validation uses the checked-in
-`Cargo.lock` and must run with `--locked`.
+Repository development, CI, and release checks use the floating Rust `stable`
+channel from `rust-toolchain.toml`. Update local rustup with
+`rustup update stable`; CI installs current stable at execution time.
+No numeric MSRV is claimed for this unpublished workspace: Cargo's
+`rust-version` does not accept the `stable` channel name. The required CI job
+`msrv` retains its existing identity but validates current stable compilation,
+not compatibility with a historical compiler. Dependency-resolving Cargo
+validation uses the checked-in `Cargo.lock` and must run with `--locked`.
 
 The following commands are repository-wide validation examples. Run them when
 the change risk requires them or when reproducing the authoritative CI gate;
