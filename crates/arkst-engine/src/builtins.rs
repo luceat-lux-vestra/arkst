@@ -654,6 +654,17 @@ pub(crate) fn evaluate_with_origins(
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
+    evaluate_runtime_with_origins(builtin, positional_args, named_args, has_body)
+        .map(RuntimeValue::into_ir_value)
+}
+
+#[cfg(test)]
+fn evaluate_runtime_with_origins(
+    builtin: &BuiltinSpec,
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
+    has_body: bool,
+) -> Result<RuntimeValue, BuiltinError> {
     let parameters = binding_parameters(builtin);
     let fallback_span = SourceSpan::new(SourceId(0), 0, 0);
     let mut candidates = Vec::with_capacity(positional_args.len() + named_args.len());
@@ -687,7 +698,7 @@ pub(crate) fn evaluate_with_origins(
     let bound = plan
         .bind(&candidates, body.as_ref(), fallback_span)
         .map_err(|failure| error(format!("`.{}` {}", builtin.name, failure.message)))?;
-    evaluate_bound(builtin, bound, fallback_span, has_body).map(RuntimeValue::into_ir_value)
+    evaluate_bound(builtin, bound, fallback_span, has_body)
 }
 
 /// Evaluates a builtin after the engine-owned binder has selected every slot.
@@ -752,9 +763,7 @@ pub(crate) fn evaluate_bound(
             LOREM_IPSUM_TEXT.to_string(),
         ))),
         BuiltinKind::None => evaluate_none(builtin, arguments),
-        BuiltinKind::Otherwise => {
-            evaluate_otherwise(builtin, arguments).map(RuntimeValue::static_value)
-        }
+        BuiltinKind::Otherwise => evaluate_otherwise(builtin, arguments),
         BuiltinKind::IsNone => evaluate_isnone(builtin, arguments),
         BuiltinKind::IsLower | BuiltinKind::IsGreater => evaluate_ordering(builtin, arguments),
         BuiltinKind::Equals => evaluate_equals(builtin, arguments),
@@ -1891,7 +1900,7 @@ pub(crate) fn table_cell_plain_text(inlines: &[IrInline]) -> Option<String> {
 fn evaluate_otherwise(
     _builtin: &BuiltinSpec,
     mut arguments: BoundArguments,
-) -> Result<IrValue, BuiltinError> {
+) -> Result<RuntimeValue, BuiltinError> {
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.otherwise` requires a value argument".to_string()))?;
@@ -1899,9 +1908,9 @@ fn evaluate_otherwise(
         .remove(0)
         .ok_or_else(|| error("`.otherwise` requires a fallback argument".to_string()))?;
     if value.is_none() {
-        Ok(fallback.into_ir_value())
+        Ok(fallback)
     } else {
-        Ok(value.into_ir_value())
+        Ok(value)
     }
 }
 
@@ -2436,7 +2445,8 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_lowercase, deterministic_transcendental, evaluate, evaluate_with_origins, lookup,
+        canonical_lowercase, deterministic_transcendental, evaluate, evaluate_runtime_with_origins,
+        evaluate_with_origins, lookup,
         regular_builtins, simple_lowercase as unicode_simple_lowercase,
         simple_uppercase as unicode_simple_uppercase, unicode_titlecase, BuiltinBodyPolicy,
         PINNED_JVM_ARCHIVE_SHA256, PINNED_JVM_RUNTIME_VERSION, PINNED_JVM_UNICODE_VERSION,
@@ -2449,7 +2459,7 @@ mod tests {
         REFERENCE_JVM_VENDOR_VERSION, REFERENCE_JVM_VERSION, SCALAR_MAPPING_RECORD_COUNT,
         UNICODE_VERSION, UTF16_CHAR_RECORD_COUNT,
     };
-    use crate::value_conversion::RuntimeValue;
+    use crate::value_conversion::{RuntimeValue, ValueOrigin, ValueProvenance};
     use arkst_ir::{
         IrCallable, IrColor, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrSize, IrSizeUnit,
         IrValue,
@@ -2467,6 +2477,63 @@ mod tests {
             value,
             span: arkst_source::SourceSpan::new(arkst_source::SourceId(0), 0, 0),
         }
+    }
+
+    #[test]
+    fn otherwise_preserves_present_source_backed_runtime_value() {
+        let span = SourceSpan::new(SourceId(7), 3, 11);
+        let selected = RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "selected".into(),
+                span,
+            }],
+            span,
+        }]))
+        .with_provenance(ValueProvenance::source_backed_markdown_text("selected"));
+        let fallback = RuntimeValue::static_value(IrValue::String("unused".into()));
+
+        let actual = evaluate_runtime_with_origins(
+            lookup("otherwise").expect("otherwise builtin"),
+            &[selected.clone(), fallback],
+            &[],
+            false,
+        )
+        .expect("present value should be selected");
+
+        assert_eq!(actual, selected);
+        assert_eq!(actual.origin, ValueOrigin::Dynamic);
+        assert_eq!(actual.source_backed_markdown_text(), Some("selected"));
+    }
+
+    #[test]
+    fn otherwise_preserves_fallback_collection_nested_runtime_evidence() {
+        let span = SourceSpan::new(SourceId(9), 5, 10);
+        let source_backed_child =
+            RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "child".into(),
+                    span,
+                }],
+                span,
+            }]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("child"));
+        let materialized_child = RuntimeValue::static_value(IrValue::Number(7.0));
+        let fallback = RuntimeValue::collection(
+            vec![source_backed_child.clone(), materialized_child.clone()],
+            ValueOrigin::Dynamic,
+        );
+
+        let actual = evaluate_runtime_with_origins(
+            lookup("otherwise").expect("otherwise builtin"),
+            &[RuntimeValue::static_value(IrValue::None), fallback.clone()],
+            &[],
+            false,
+        )
+        .expect("None should select the supplied fallback");
+
+        assert_eq!(actual, fallback);
+        let children = actual.into_collection().expect("fallback must remain a collection");
+        assert_eq!(children, vec![source_backed_child, materialized_child]);
     }
 
     #[test]
