@@ -687,8 +687,7 @@ pub(crate) fn evaluate_with_origins(
     let bound = plan
         .bind(&candidates, body.as_ref(), fallback_span)
         .map_err(|failure| error(format!("`.{}` {}", builtin.name, failure.message)))?;
-    evaluate_bound(builtin, bound, fallback_span, has_body)
-        .map(RuntimeValue::into_ir_value)
+    evaluate_bound(builtin, bound, fallback_span, has_body).map(RuntimeValue::into_ir_value)
 }
 
 /// Evaluates a builtin after the engine-owned binder has selected every slot.
