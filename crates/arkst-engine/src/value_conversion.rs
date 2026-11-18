@@ -798,17 +798,6 @@ pub(crate) struct RuntimeNamedArg {
     pub span: SourceSpan,
 }
 
-impl RuntimeNamedArg {
-    pub(crate) fn new(arg: IrNamedArg, origin: ValueOrigin) -> Self {
-        Self {
-            name: arg.name,
-            name_span: arg.name_span,
-            value: RuntimeValue::new(arg.value, origin),
-            span: arg.span,
-        }
-    }
-}
-
 /// The scalar targets supported by this bounded conversion policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScalarTarget {
