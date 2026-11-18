@@ -55,7 +55,7 @@ fast path because both classifier code and allowlist are loaded from the base
 revision and `.github/**` is outside the allowlist.
 
 Authoritative component jobs remain always present, and the sole required
-`Merge Gate` remains materialized above them. The Rust-heavy components, MSRV,
+`Merge Gate` remains materialized above them. The Rust-heavy components, floating Stable compiler validation (`msrv` job),
 and Dependency Review emit explicit successful fast-path steps instead of
 running product/toolchain work when the trusted-base result is true.
 `compatibility` keeps its existing independent fail-closed scope decision, so

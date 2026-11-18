@@ -198,7 +198,7 @@ internal components of that aggregate.
 | docs | `cargo doc --locked --workspace --all-features --no-deps` | Merge Gate component |
 | license | `cargo deny check --all-features` through the repository's cargo-deny action | Merge Gate component |
 | compatibility | Markdown/Quarkdown differential campaign for relevant changes, explicit successful no-op otherwise | Merge Gate component |
-| msrv | `cargo +1.92.0 check --workspace --all-targets --all-features --locked` | Merge Gate component |
+| msrv | `cargo +stable check --workspace --all-targets --all-features --locked` (floating Stable contract; no numeric MSRV) | Merge Gate component |
 | wasm | `cargo check --locked -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features` | Merge Gate component |
 | dependency-review | Diff-scoped GitHub dependency admission for newly introduced vulnerable dependencies and Actions references | Merge Gate component |
 | Merge Gate | Fail-closed `needs` aggregation; every component result must be exactly `success` | Sole live required context |

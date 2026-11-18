@@ -126,7 +126,7 @@ job = "msrv"
 classification = "merge_component"
 contexts = ["msrv"]
 always_present = true
-rationale = "Required minimum-supported-Rust-version contract for substantive changes; trusted docs-only changes retain the required context without compiling on MSRV."
+rationale = "Required current-Stable compiler contract for substantive changes; trusted docs-only changes retain the required context without compiling on MSRV."
 
 [[producer]]
 workflow = ".github/workflows/ci.yml"

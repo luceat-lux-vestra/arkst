@@ -94,7 +94,10 @@ def validate(producer: str, consumer: str) -> None:
 
     require(seed, "save-if: " + "$" + "{{ github.ref == 'refs/heads/main' }}", "main-only cache writer")
     require(seed, "CARGO_PROFILE_TEST_DEBUG=1", "Windows debug parity")
-    require(seed, "toolchain: 1.98.0", "toolchain parity")
+    require(seed, "toolchain: stable", "toolchain parity")
+    require(consumer, "toolchain: stable", "PR toolchain parity")
+    require(producer, "  RUSTUP_TOOLCHAIN: stable", "producer stable environment")
+    require(consumer, "  RUSTUP_TOOLCHAIN: stable", "PR stable environment")
     require(seed, "typst-version: 0.15.1", "Typst parity")
     for command in (
         "cargo test --locked -p arkst-cli --no-default-features",
