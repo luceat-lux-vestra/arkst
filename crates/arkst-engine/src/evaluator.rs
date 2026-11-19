@@ -6935,7 +6935,7 @@ impl Evaluator {
                     Ok(values) => values,
                     Err(outcome) => return outcome,
                 };
-            return (self.evaluate_collection_access(
+            return self.evaluate_collection_access(
                 name,
                 &evaluated_positional,
                 &evaluated_named,
@@ -6945,8 +6945,7 @@ impl Evaluator {
                 diagnostics,
                 context,
                 binding_plan,
-            ))
-            .into();
+            );
         }
 
         if let Some(builtin) = builtins::lookup(name) {
@@ -15152,7 +15151,7 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
         binding_plan: &BindingPlan,
-    ) -> LegacyCallOutcome {
+    ) -> CallOutcome {
         match name {
             "size" | "first" | "second" | "third" | "last" | "sumall" | "average" | "distinct"
             | "reversed" | "groupvalues" | "withindices" => {
@@ -15165,7 +15164,7 @@ impl Evaluator {
                         diagnostics,
                     ) {
                         Ok(candidate) => candidate,
-                        Err(outcome) => return outcome.into(),
+                        Err(outcome) => return outcome,
                     }
                 } else {
                     None
@@ -15180,78 +15179,67 @@ impl Evaluator {
                     diagnostics,
                 ) {
                     Ok(value) => value,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 let elements = match self.coerce_iterable(value, span, diagnostics, context) {
                     Ok(elements) => elements,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 match name {
                     "size" => match exact_collection_length(elements.len(), span, diagnostics) {
-                        Ok(length) => LegacyCallOutcome::Value(IrValue::Number(length)),
-                        Err(outcome) => outcome.into(),
+                        Ok(length) => CallOutcome::Value(RuntimeValue::static_value(
+                            IrValue::Number(length),
+                        )),
+                        Err(outcome) => outcome,
                     },
-                    "first" => LegacyCallOutcome::Value(
+                    "first" => CallOutcome::Value(
                         elements
                             .first()
                             .cloned()
-                            .map(RuntimeValue::into_ir_value)
-                            .unwrap_or(IrValue::None),
+                            .unwrap_or_else(|| RuntimeValue::static_value(IrValue::None)),
                     ),
-                    "second" => LegacyCallOutcome::Value(
+                    "second" => CallOutcome::Value(
                         elements
                             .get(1)
                             .cloned()
-                            .map(RuntimeValue::into_ir_value)
-                            .unwrap_or(IrValue::None),
+                            .unwrap_or_else(|| RuntimeValue::static_value(IrValue::None)),
                     ),
-                    "third" => LegacyCallOutcome::Value(
+                    "third" => CallOutcome::Value(
                         elements
                             .get(2)
                             .cloned()
-                            .map(RuntimeValue::into_ir_value)
-                            .unwrap_or(IrValue::None),
+                            .unwrap_or_else(|| RuntimeValue::static_value(IrValue::None)),
                     ),
-                    "last" => LegacyCallOutcome::Value(
+                    "last" => CallOutcome::Value(
                         elements
                             .last()
                             .cloned()
-                            .map(RuntimeValue::into_ir_value)
-                            .unwrap_or(IrValue::None),
+                            .unwrap_or_else(|| RuntimeValue::static_value(IrValue::None)),
                     ),
-                    "sumall" => LegacyCallOutcome::Value(IrValue::Number(collection_sum_all(
-                        &project_runtime_values(&elements),
+                    "sumall" => CallOutcome::Value(RuntimeValue::static_value(IrValue::Number(
+                        collection_sum_all(&elements),
                     ))),
-                    "average" => match collection_average(
-                        &project_runtime_values(&elements),
-                        span,
-                        diagnostics,
-                    ) {
-                        Ok(average) => LegacyCallOutcome::Value(IrValue::Number(average)),
-                        Err(outcome) => outcome.into(),
+                    "average" => match collection_average(&elements, span, diagnostics) {
+                        Ok(average) => CallOutcome::Value(RuntimeValue::static_value(
+                            IrValue::Number(average),
+                        )),
+                        Err(outcome) => outcome,
                     },
-                    "distinct" => distinct_collection_values(
-                        project_owned_runtime_values(elements),
-                        *span,
-                        diagnostics,
-                    ),
+                    "distinct" => distinct_collection_values(elements, *span, diagnostics),
                     "reversed" => {
                         let mut reversed = elements;
                         reversed.reverse();
-                        LegacyCallOutcome::Value(IrValue::Collection(project_owned_runtime_values(
+                        CallOutcome::Value(RuntimeValue::collection(
                             reversed,
-                        )))
+                            ValueOrigin::Static,
+                        ))
                     }
-                    "groupvalues" => group_collection_values(
-                        project_owned_runtime_values(elements),
-                        *span,
-                        diagnostics,
-                    ),
+                    "groupvalues" => group_collection_values(elements, *span, diagnostics),
                     "withindices" => {
                         if let Err(outcome) =
                             exact_collection_length(elements.len(), span, diagnostics)
                         {
-                            return outcome.into();
+                            return outcome;
                         }
                         let mut entries = Vec::new();
                         if let Err(error) = entries.try_reserve_exact(elements.len()) {
@@ -15259,19 +15247,20 @@ impl Evaluator {
                                 format!("`.withindices` dictionary cannot be allocated: {error}"),
                                 *span,
                             ));
-                            return LegacyCallOutcome::Failed;
+                            return CallOutcome::Failed;
                         }
                         entries.extend(elements.into_iter().enumerate().map(|(index, value)| {
-                            IrPair {
-                                first: Box::new(IrValue::Number((index + 1) as f64)),
-                                second: Box::new(value.into_ir_value()),
-                                span: *span,
-                            }
+                            RuntimeValue::pair(
+                                RuntimeValue::static_value(IrValue::Number((index + 1) as f64)),
+                                value,
+                                *span,
+                                ValueOrigin::Static,
+                            )
                         }));
-                        LegacyCallOutcome::Value(IrValue::Dictionary(IrDictionary {
-                            entries,
-                            span: *span,
-                        }))
+                        CallOutcome::Value(
+                            RuntimeValue::dictionary(entries, *span, ValueOrigin::Static)
+                                .expect("withindices entries are runtime pairs"),
+                        )
                     }
                     _ => unreachable!("collection access operation was prevalidated"),
                 }
@@ -15286,28 +15275,26 @@ impl Evaluator {
                     diagnostics,
                 ) {
                     Ok(operands) => operands,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 let mut elements =
                     match self.coerce_iterable(collection, span, diagnostics, context) {
                         Ok(elements) => elements,
-                        Err(outcome) => return outcome.into(),
+                        Err(outcome) => return outcome,
                     };
                 if let Err(error) = elements.try_reserve(1) {
                     diagnostics.push(iteration_error(
                         format!("`.{name}` collection cannot be allocated: {error}"),
                         *span,
                     ));
-                    return LegacyCallOutcome::Failed;
+                    return CallOutcome::Failed;
                 }
                 if name == "prepended" {
                     elements.insert(0, value);
                 } else {
                     elements.push(value);
                 }
-                LegacyCallOutcome::Value(IrValue::Collection(project_owned_runtime_values(
-                    elements,
-                )))
+                CallOutcome::Value(RuntimeValue::collection(elements, ValueOrigin::Static))
             }
             "getat" => {
                 let (value, index, fallback) = match getat_operands(
@@ -15318,26 +15305,25 @@ impl Evaluator {
                     diagnostics,
                 ) {
                     Ok(operands) => operands,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 let elements = match self.coerce_iterable(value, span, diagnostics, context) {
                     Ok(elements) => elements,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 let length = match exact_collection_length(elements.len(), span, diagnostics) {
                     Ok(length) => length,
-                    Err(outcome) => return outcome.into(),
+                    Err(outcome) => return outcome,
                 };
                 let index_semantic = index.semantic_value();
                 let index =
                     match collection_index(index_semantic.as_ref(), length, span, diagnostics) {
                         Ok(index) => index,
-                        Err(outcome) => return outcome.into(),
+                        Err(outcome) => return outcome,
                     };
-                LegacyCallOutcome::Value(
+                CallOutcome::Value(
                     index
                         .and_then(|index| elements.get(index).cloned())
-                        .map(RuntimeValue::into_ir_value)
                         .unwrap_or(fallback),
                 )
             }
@@ -24705,7 +24691,7 @@ fn getat_operands(
     binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(RuntimeValue, RuntimeValue, IrValue), CallOutcome> {
+) -> Result<(RuntimeValue, RuntimeValue, RuntimeValue), CallOutcome> {
     let candidates = invocation_candidates(
         positional_args
             .iter()
@@ -24768,8 +24754,10 @@ fn getat_operands(
         return Err(CallOutcome::Failed);
     };
     let fallback = match slots.next() {
-        Some(BoundSlot::Explicit { value, .. }) => value.into_ir_value(),
-        Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => IrValue::None,
+        Some(BoundSlot::Explicit { value, .. }) => value,
+        Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => {
+            RuntimeValue::static_value(IrValue::None)
+        }
     };
     Ok((collection, index, fallback))
 }
@@ -24842,10 +24830,6 @@ fn collection_index(
 /// possible, while Boolean, None, structured values, and callables stringify
 /// to non-numeric values in the upstream implementation and therefore also
 /// become zero.
-fn project_runtime_values(values: &[RuntimeValue]) -> Vec<IrValue> {
-    values.iter().map(RuntimeValue::to_ir_value).collect()
-}
-
 fn project_owned_runtime_values(values: Vec<RuntimeValue>) -> Vec<IrValue> {
     values
         .into_iter()
@@ -24853,8 +24837,9 @@ fn project_owned_runtime_values(values: Vec<RuntimeValue>) -> Vec<IrValue> {
         .collect()
 }
 
-fn collection_value_as_double(value: &IrValue) -> f64 {
-    match value {
+fn collection_value_as_double(value: &RuntimeValue) -> f64 {
+    let semantic = value.semantic_value();
+    match semantic.as_ref() {
         IrValue::Number(value) => *value,
         IrValue::String(value) | IrValue::Identifier(value) => {
             value.trim().parse::<f64>().ok().unwrap_or(0.0)
@@ -24863,14 +24848,14 @@ fn collection_value_as_double(value: &IrValue) -> f64 {
     }
 }
 
-fn collection_sum_all(elements: &[IrValue]) -> f64 {
+fn collection_sum_all(elements: &[RuntimeValue]) -> f64 {
     elements
         .iter()
         .fold(0.0, |sum, value| sum + collection_value_as_double(value))
 }
 
 fn collection_average(
-    elements: &[IrValue],
+    elements: &[RuntimeValue],
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<f64, CallOutcome> {
@@ -24928,49 +24913,55 @@ fn collection_values_equal(left: &IrValue, right: &IrValue) -> bool {
     }
 }
 
+fn runtime_collection_values_equal(left: &RuntimeValue, right: &RuntimeValue) -> bool {
+    let left = left.semantic_value();
+    let right = right.semantic_value();
+    collection_values_equal(left.as_ref(), right.as_ref())
+}
+
 fn distinct_collection_values(
-    elements: Vec<IrValue>,
+    elements: Vec<RuntimeValue>,
     span: SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> LegacyCallOutcome {
+) -> CallOutcome {
     let mut distinct = Vec::new();
     if let Err(error) = distinct.try_reserve_exact(elements.len()) {
         diagnostics.push(iteration_error(
             format!("distinct collection cannot be allocated: {error}"),
             span,
         ));
-        return LegacyCallOutcome::Failed;
+        return CallOutcome::Failed;
     }
     for element in elements {
         if !distinct
             .iter()
-            .any(|existing| collection_values_equal(existing, &element))
+            .any(|existing| runtime_collection_values_equal(existing, &element))
         {
             distinct.push(element);
         }
     }
-    LegacyCallOutcome::Value(IrValue::Collection(distinct))
+    CallOutcome::Value(RuntimeValue::collection(distinct, ValueOrigin::Static))
 }
 
 fn group_collection_values(
-    elements: Vec<IrValue>,
+    elements: Vec<RuntimeValue>,
     span: SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> LegacyCallOutcome {
-    let mut groups: Vec<Vec<IrValue>> = Vec::new();
+) -> CallOutcome {
+    let mut groups: Vec<Vec<RuntimeValue>> = Vec::new();
     if let Err(error) = groups.try_reserve_exact(elements.len()) {
         diagnostics.push(iteration_error(
             format!("grouped collection cannot be allocated: {error}"),
             span,
         ));
-        return LegacyCallOutcome::Failed;
+        return CallOutcome::Failed;
     }
 
     for element in elements {
         let group_index = groups.iter().position(|group| {
             group
                 .first()
-                .is_some_and(|first| collection_values_equal(first, &element))
+                .is_some_and(|first| runtime_collection_values_equal(first, &element))
         });
         match group_index {
             Some(index) => {
@@ -24979,7 +24970,7 @@ fn group_collection_values(
                         format!("grouped collection cannot be allocated: {error}"),
                         span,
                     ));
-                    return LegacyCallOutcome::Failed;
+                    return CallOutcome::Failed;
                 }
                 groups[index].push(element);
             }
@@ -24990,7 +24981,7 @@ fn group_collection_values(
                         format!("grouped collection cannot be allocated: {error}"),
                         span,
                     ));
-                    return LegacyCallOutcome::Failed;
+                    return CallOutcome::Failed;
                 }
                 group.push(element);
                 groups.push(group);
@@ -25004,10 +24995,14 @@ fn group_collection_values(
             format!("grouped collection result cannot be allocated: {error}"),
             span,
         ));
-        return LegacyCallOutcome::Failed;
+        return CallOutcome::Failed;
     }
-    grouped.extend(groups.into_iter().map(IrValue::Collection));
-    LegacyCallOutcome::Value(IrValue::Collection(grouped))
+    grouped.extend(
+        groups
+            .into_iter()
+            .map(|group| RuntimeValue::collection(group, ValueOrigin::Static)),
+    );
+    CallOutcome::Value(RuntimeValue::collection(grouped, ValueOrigin::Static))
 }
 
 fn validate_iteration_lambda(
@@ -31502,6 +31497,45 @@ mod tests {
         )
     }
 
+    fn runtime_collection_call(
+        evaluator: &Evaluator,
+        name: &str,
+        positional_args: &[RuntimeValue],
+        operation_span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let projected = positional_args
+            .iter()
+            .map(RuntimeValue::to_ir_value)
+            .collect::<Vec<_>>();
+        let binding_plan = evaluator
+            .preflight_native_binding(
+                name,
+                None,
+                &projected,
+                &[],
+                None,
+                None,
+                *operation_span,
+                context,
+                diagnostics,
+            )
+            .expect("collection runtime preflight must succeed")
+            .expect("collection access has native binding metadata");
+        evaluator.evaluate_collection_access(
+            name,
+            positional_args,
+            &[],
+            None,
+            None,
+            operation_span,
+            diagnostics,
+            context,
+            &binding_plan,
+        )
+    }
+
     fn text_paragraph(content: &str) -> IrNode {
         IrNode::Paragraph {
             content: vec![IrInline::Text {
@@ -33313,6 +33347,153 @@ mod tests {
         assert!(matches!(project_legacy_outcome(&(outcome)),
             LegacyCallOutcome::Value(IrValue::String(value)) if value == "a"
         ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1b_collection_access_preserves_runtime_children_and_fallback_provenance() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 80);
+        let source = RuntimeValue::dynamic_value(IrValue::String("same".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("**same**"));
+        let duplicate = RuntimeValue::static_value(IrValue::String("same".into()));
+        let generated = RuntimeValue::static_value(IrValue::Number(7.0));
+        let collection = RuntimeValue::collection(
+            vec![source.clone(), duplicate.clone(), generated.clone()],
+            ValueOrigin::Static,
+        );
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let CallOutcome::Value(first) = runtime_collection_call(
+            &evaluator,
+            "first",
+            std::slice::from_ref(&collection),
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        ) else {
+            panic!("first must return a runtime child");
+        };
+        assert_eq!(first, source);
+        assert_eq!(first.origin, ValueOrigin::Dynamic);
+        assert_eq!(first.source_backed_markdown_text(), Some("**same**"));
+
+        let CallOutcome::Value(reversed) = runtime_collection_call(
+            &evaluator,
+            "reversed",
+            std::slice::from_ref(&collection),
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        ) else {
+            panic!("reversed must return a runtime collection");
+        };
+        assert_eq!(
+            reversed.into_collection(),
+            Some(vec![generated.clone(), duplicate.clone(), source.clone()])
+        );
+
+        let CallOutcome::Value(distinct) = runtime_collection_call(
+            &evaluator,
+            "distinct",
+            std::slice::from_ref(&collection),
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        ) else {
+            panic!("distinct must return a runtime collection");
+        };
+        assert_eq!(
+            distinct.into_collection(),
+            Some(vec![source.clone(), generated.clone()]),
+            "semantic de-duplication must retain the first runtime carrier"
+        );
+
+        let CallOutcome::Value(grouped) = runtime_collection_call(
+            &evaluator,
+            "groupvalues",
+            std::slice::from_ref(&collection),
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        ) else {
+            panic!("groupvalues must return runtime groups");
+        };
+        let mut groups = grouped.into_collection().expect("outer runtime collection");
+        assert_eq!(groups.len(), 2);
+        assert_eq!(
+            groups.remove(0).into_collection(),
+            Some(vec![source.clone(), duplicate])
+        );
+        assert_eq!(groups.remove(0).into_collection(), Some(vec![generated.clone()]));
+
+        let CallOutcome::Value(indexed) = runtime_collection_call(
+            &evaluator,
+            "withindices",
+            std::slice::from_ref(&collection),
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        ) else {
+            panic!("withindices must return a runtime dictionary");
+        };
+        let (entries, _) = indexed
+            .into_dictionary_entries()
+            .expect("withindices result must remain a runtime dictionary");
+        let (_, indexed_source, _) = entries
+            .into_iter()
+            .next()
+            .expect("indexed dictionary entry")
+            .into_pair_parts()
+            .expect("indexed entry remains a runtime pair");
+        assert_eq!(indexed_source, source);
+
+        let fallback = RuntimeValue::collection(
+            vec![source.clone(), RuntimeValue::static_value(IrValue::None)],
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("- fallback"));
+        let CallOutcome::Value(actual_fallback) = runtime_collection_call(
+            &evaluator,
+            "getat",
+            &[
+                collection.clone(),
+                RuntimeValue::static_value(IrValue::Number(99.0)),
+                fallback.clone(),
+            ],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        ) else {
+            panic!("getat miss must return the runtime fallback");
+        };
+        assert_eq!(actual_fallback, fallback);
+        assert_eq!(
+            actual_fallback.source_backed_markdown_text(),
+            Some("- fallback")
+        );
+
+        let appended = RuntimeValue::dynamic_value(IrValue::String("tail".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("*tail*"));
+        let CallOutcome::Value(appended_collection) = runtime_collection_call(
+            &evaluator,
+            "appended",
+            &[collection, appended.clone()],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        ) else {
+            panic!("appended must return a runtime collection");
+        };
+        assert_eq!(
+            appended_collection
+                .into_collection()
+                .expect("appended collection")
+                .last(),
+            Some(&appended)
+        );
+
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
