@@ -1,5 +1,6 @@
 # Arkst
 
+[![GitHub Stars](https://img.shields.io/github/stars/luceat-lux-vestra/arkst?style=flat&label=Stars)](https://www.star-history.com/?repos=luceat-lux-vestra%2Farkst&type=date)
 [![Experimental](https://img.shields.io/badge/status-experimental-orange)](https://github.com/luceat-lux-vestra/arkst)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![CI](https://github.com/luceat-lux-vestra/arkst/actions/workflows/ci.yml/badge.svg)](https://github.com/luceat-lux-vestra/arkst/actions/workflows/ci.yml)
