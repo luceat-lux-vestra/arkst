@@ -15187,9 +15187,9 @@ impl Evaluator {
                 };
                 match name {
                     "size" => match exact_collection_length(elements.len(), span, diagnostics) {
-                        Ok(length) => CallOutcome::Value(RuntimeValue::static_value(
-                            IrValue::Number(length),
-                        )),
+                        Ok(length) => {
+                            CallOutcome::Value(RuntimeValue::static_value(IrValue::Number(length)))
+                        }
                         Err(outcome) => outcome,
                     },
                     "first" => CallOutcome::Value(
@@ -15220,19 +15220,16 @@ impl Evaluator {
                         collection_sum_all(&elements),
                     ))),
                     "average" => match collection_average(&elements, span, diagnostics) {
-                        Ok(average) => CallOutcome::Value(RuntimeValue::static_value(
-                            IrValue::Number(average),
-                        )),
+                        Ok(average) => {
+                            CallOutcome::Value(RuntimeValue::static_value(IrValue::Number(average)))
+                        }
                         Err(outcome) => outcome,
                     },
                     "distinct" => distinct_collection_values(elements, *span, diagnostics),
                     "reversed" => {
                         let mut reversed = elements;
                         reversed.reverse();
-                        CallOutcome::Value(RuntimeValue::collection(
-                            reversed,
-                            ValueOrigin::Static,
-                        ))
+                        CallOutcome::Value(RuntimeValue::collection(reversed, ValueOrigin::Static))
                     }
                     "groupvalues" => group_collection_values(elements, *span, diagnostics),
                     "withindices" => {
@@ -33426,7 +33423,10 @@ mod tests {
             groups.remove(0).into_collection(),
             Some(vec![source.clone(), duplicate])
         );
-        assert_eq!(groups.remove(0).into_collection(), Some(vec![generated.clone()]));
+        assert_eq!(
+            groups.remove(0).into_collection(),
+            Some(vec![generated.clone()])
+        );
 
         let CallOutcome::Value(indexed) = runtime_collection_call(
             &evaluator,
