@@ -18563,31 +18563,27 @@ impl Evaluator {
                         .collect()
                 });
         }
-        if let Some(nodes) = value.as_content_nodes() {
-            match nodes {
-                [IrNode::UnorderedList { items, .. }]
-                | [IrNode::OrderedList { items, .. }] => {
-                    self.check_materialized_elements_len(items.len(), *span, diagnostics)?;
-                    let mut values = Vec::new();
-                    if let Err(error) = values.try_reserve_exact(items.len()) {
-                        diagnostics.push(iteration_error(
-                            format!("list collection cannot be allocated: {error}"),
-                            *span,
-                        ));
-                        return Err(CallOutcome::Failed);
-                    }
-                    for item in items {
-                        values.push(RuntimeValue::static_value(self.list_item_value(
-                            item,
-                            span,
-                            diagnostics,
-                            context,
-                        )?));
-                    }
-                    return Ok(values);
-                }
-                _ => {}
+        if let Some([IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }]) =
+            value.as_content_nodes()
+        {
+            self.check_materialized_elements_len(items.len(), *span, diagnostics)?;
+            let mut values = Vec::new();
+            if let Err(error) = values.try_reserve_exact(items.len()) {
+                diagnostics.push(iteration_error(
+                    format!("list collection cannot be allocated: {error}"),
+                    *span,
+                ));
+                return Err(CallOutcome::Failed);
             }
+            for item in items {
+                values.push(RuntimeValue::static_value(self.list_item_value(
+                    item,
+                    span,
+                    diagnostics,
+                    context,
+                )?));
+            }
+            return Ok(values);
         }
         diagnostics.push(iteration_error(
             "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
@@ -38895,16 +38891,14 @@ mod tests {
             ]
         );
 
-        let list = RuntimeValue::dynamic_value(IrValue::Content(vec![
-            IrNode::UnorderedList {
-                items: vec![IrListItem {
-                    nodes: vec![text_paragraph("alpha")],
-                    task: None,
-                    span: span(10, 20),
-                }],
-                span: operation_span,
-            },
-        ]))
+        let list = RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::UnorderedList {
+            items: vec![IrListItem {
+                nodes: vec![text_paragraph("alpha")],
+                task: None,
+                span: span(10, 20),
+            }],
+            span: operation_span,
+        }]))
         .with_provenance(ValueProvenance::source_backed_markdown_text("- alpha"));
         let values = evaluator
             .coerce_iterable(list, &operation_span, &mut diagnostics, &mut context)
