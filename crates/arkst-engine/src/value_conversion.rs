@@ -561,6 +561,13 @@ impl RuntimeValue {
         }
     }
 
+    pub(crate) fn as_content_nodes_mut(&mut self) -> Option<&mut Vec<IrNode>> {
+        match &mut self.kind {
+            RuntimeValueKind::Content(nodes) => Some(nodes),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_iterable_aggregate(&self) -> bool {
         matches!(
             &self.kind,

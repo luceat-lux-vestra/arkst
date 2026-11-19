@@ -1728,13 +1728,11 @@ fn table_row_from_elements(
 /// wrapper after the outer rows iterable has been materialized. Remove only
 /// that parser-evidenced wrapper; arbitrary singleton Collections remain
 /// ordinary one-cell rows and are not flattened.
-fn unwrap_source_backed_table_row(value: RuntimeValue) -> RuntimeValue {
+fn unwrap_source_backed_table_row(mut value: RuntimeValue) -> RuntimeValue {
     // Only the parser-evidenced Content wrapper needs semantic reshaping.
-    // Typed rows must retain their independently-owned runtime children.
-    if !value.is_content() {
-        return value;
-    }
-    let IrValue::Content(nodes) = value.to_ir_value() else {
+    // Mutate its existing runtime payload without resetting origin/provenance.
+    // Typed rows retain independently-owned runtime children.
+    let Some(nodes) = value.as_content_nodes_mut() else {
         return value;
     };
     let items = match nodes.as_slice() {
@@ -1750,8 +1748,9 @@ fn unwrap_source_backed_table_row(value: RuntimeValue) -> RuntimeValue {
     ) {
         return value;
     }
-    RuntimeValue::new(IrValue::Content(item.nodes.clone()), value.origin)
-        .with_provenance(value.provenance().clone())
+    let inner_nodes = item.nodes.clone();
+    *nodes = inner_nodes;
+    value
 }
 
 fn value_into_table_cell(
@@ -38738,6 +38737,123 @@ mod tests {
             .provenance()
             .is_materialized());
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1d_table_row_content_unwrap_keeps_origin_provenance_and_list_spans() {
+        let evaluator = Evaluator::new();
+        let row_span = span(10, 90);
+        let list_span = span(20, 70);
+        let cell_span = span(30, 40);
+        for outer_ordered in [false, true] {
+            for inner_ordered in [false, true] {
+                let inner_items = vec![IrListItem {
+                    nodes: vec![text_paragraph("alpha")],
+                    task: None,
+                    span: cell_span,
+                }];
+                let inner = if inner_ordered {
+                    IrNode::OrderedList {
+                        items: inner_items,
+                        start: 1,
+                        span: list_span,
+                    }
+                } else {
+                    IrNode::UnorderedList {
+                        items: inner_items,
+                        span: list_span,
+                    }
+                };
+                let outer_items = vec![IrListItem {
+                    nodes: vec![inner.clone()],
+                    task: None,
+                    span: row_span,
+                }];
+                let outer = if outer_ordered {
+                    IrNode::OrderedList {
+                        items: outer_items,
+                        start: 1,
+                        span: row_span,
+                    }
+                } else {
+                    IrNode::UnorderedList {
+                        items: outer_items,
+                        span: row_span,
+                    }
+                };
+                for source_backed in [false, true] {
+                    let origin = if source_backed {
+                        ValueOrigin::Dynamic
+                    } else {
+                        ValueOrigin::Static
+                    };
+                    let mut input =
+                        RuntimeValue::new(IrValue::Content(vec![outer.clone()]), origin);
+                    if source_backed {
+                        let provenance = ValueProvenance::source_backed_markdown_text("- alpha");
+                        input = input.with_provenance(provenance);
+                    }
+                    let actual = unwrap_source_backed_table_row(input.clone());
+                    assert_eq!(actual.origin, input.origin);
+                    assert_eq!(actual.provenance(), input.provenance());
+                    assert_eq!(
+                        actual.source_backed_markdown_text(),
+                        input.source_backed_markdown_text()
+                    );
+                    let expected = [inner.clone()];
+                    assert_eq!(actual.as_content_nodes(), Some(expected.as_slice()));
+
+                    let mut diagnostics = Vec::new();
+                    let mut context = EvaluationContext::new();
+                    let cells = evaluator
+                        .coerce_evidenced_iterable(
+                            actual,
+                            &row_span,
+                            &mut diagnostics,
+                            &mut context,
+                        )
+                        .expect("an unwrapped ordered or unordered list remains iterable");
+                    assert_eq!(cells.len(), 1);
+                    assert_eq!(cells[0].span, cell_span);
+                    assert_eq!(
+                        cells[0].value.to_ir_value(),
+                        IrValue::String("alpha".into())
+                    );
+                    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+                }
+
+                let extra = IrListItem {
+                    nodes: vec![inner.clone()],
+                    task: None,
+                    span: cell_span,
+                };
+                let multiple =
+                    RuntimeValue::static_value(IrValue::Content(vec![IrNode::UnorderedList {
+                        items: vec![extra.clone(), extra],
+                        span: row_span,
+                    }]));
+                assert_eq!(
+                    unwrap_source_backed_table_row(multiple.clone()),
+                    multiple,
+                    "two outer items are not a single nested wrapper"
+                );
+                let mixed =
+                    RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::OrderedList {
+                        items: vec![IrListItem {
+                            nodes: vec![inner, text_paragraph("trailing")],
+                            task: None,
+                            span: row_span,
+                        }],
+                        start: 1,
+                        span: row_span,
+                    }]));
+                assert_eq!(
+                    unwrap_source_backed_table_row(mixed.clone()),
+                    mixed,
+                    "one outer item with multiple nested nodes is not unwrapped"
+                );
+            }
+        }
     }
 
     #[test]
