@@ -18526,32 +18526,31 @@ impl Evaluator {
                     nodes.as_slice(),
                     [IrNode::FunctionCall { .. } | IrNode::ChainedFunctionCall { .. }]
                 );
-                if is_expression {
-                    match self.evaluate_value(&fallback, diagnostics, context) {
-                        CallOutcome::Value(value) => match value.into_ir_value() {
-                            value @ (IrValue::Collection(_)
-                            | IrValue::Pair(_)
-                            | IrValue::Dictionary(_)
-                            | IrValue::Range(_)) => value,
+                let evaluated = match self.evaluate_value(&fallback, diagnostics, context) {
+                    CallOutcome::Value(value) => Some(value),
+                    CallOutcome::Unresolved => None,
+                    CallOutcome::NoValue => {
+                        diagnostics.push(no_value_required(*span));
+                        return Err(CallOutcome::Failed);
+                    }
+                    CallOutcome::Failed => return Err(CallOutcome::Failed),
+                };
+                if let Some(value) = evaluated {
+                    // Typed runtime aggregates carry independently-owned child evidence.
+                    // Reusing the typed iterable path avoids a lossy IR roundtrip.
+                    if value.is_iterable_aggregate() {
+                        return self.coerce_iterable(value, span, diagnostics, context);
+                    }
+                    if is_expression {
+                        match value.into_ir_value() {
+                            value @ IrValue::Range(_) => value,
                             _ => fallback,
-                        },
-                        CallOutcome::Unresolved => fallback,
-                        CallOutcome::NoValue => {
-                            diagnostics.push(no_value_required(*span));
-                            return Err(CallOutcome::Failed);
                         }
-                        CallOutcome::Failed => return Err(CallOutcome::Failed),
+                    } else {
+                        value.into_ir_value()
                     }
                 } else {
-                    match self.evaluate_value(&fallback, diagnostics, context) {
-                        CallOutcome::Value(value) => value.into_ir_value(),
-                        CallOutcome::Unresolved => fallback,
-                        CallOutcome::NoValue => {
-                            diagnostics.push(no_value_required(*span));
-                            return Err(CallOutcome::Failed);
-                        }
-                        CallOutcome::Failed => return Err(CallOutcome::Failed),
-                    }
+                    fallback
                 }
             }
             Err(error) => {
@@ -38525,5 +38524,103 @@ mod tests {
         assert_eq!(values[1].provenance(), &ValueProvenance::Materialized);
         assert_eq!(values[0], dynamic);
         assert_eq!(values[1], materialized);
+    }
+    #[test]
+    fn g1k3b_raw_expression_preserves_nested_runtime_evidence() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let source_child = RuntimeValue::dynamic_value(IrValue::String("source".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("**source**"));
+        let materialized_child = RuntimeValue::static_value(IrValue::Number(7.0));
+
+        let aggregate_cases = [
+            (
+                "collection",
+                RuntimeValue::collection(
+                    vec![source_child.clone(), materialized_child.clone()],
+                    ValueOrigin::Static,
+                ),
+                vec![source_child.clone(), materialized_child.clone()],
+            ),
+            (
+                "pair",
+                RuntimeValue::pair(
+                    source_child.clone(),
+                    materialized_child.clone(),
+                    span(10, 20),
+                    ValueOrigin::Static,
+                ),
+                vec![source_child.clone(), materialized_child.clone()],
+            ),
+            (
+                "dictionary",
+                RuntimeValue::dictionary(
+                    vec![RuntimeValue::pair(
+                        materialized_child.clone(),
+                        source_child.clone(),
+                        span(20, 30),
+                        ValueOrigin::Static,
+                    )],
+                    span(10, 35),
+                    ValueOrigin::Static,
+                )
+                .expect("typed dictionary"),
+                vec![RuntimeValue::pair(
+                    materialized_child.clone(),
+                    source_child.clone(),
+                    span(20, 30),
+                    ValueOrigin::Static,
+                )],
+            ),
+        ];
+
+        for (name, aggregate, expected) in aggregate_cases {
+            let mut context = EvaluationContext::new();
+            context.set_value(name.to_string(), aggregate);
+            let mut diagnostics = Vec::new();
+            let actual = evaluator
+                .coerce_iterable(
+                    RuntimeValue::dynamic_value(IrValue::String(format!(".{name}"))),
+                    &operation_span,
+                    &mut diagnostics,
+                    &mut context,
+                )
+                .expect("raw expression must keep typed runtime children");
+            assert!(diagnostics.is_empty(), "{name}: {diagnostics:?}");
+            assert_eq!(actual, expected, "{name} must preserve per-child metadata");
+        }
+    }
+
+    #[test]
+    fn g1k3b_raw_iterable_fallback_and_range_limit_remain_bounded() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let mut context = EvaluationContext::new();
+        let mut diagnostics = Vec::new();
+        let items = evaluator
+            .coerce_iterable(
+                RuntimeValue::dynamic_value(IrValue::String("- first\n- second".into())),
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            )
+            .expect("non-expression Markdown list remains iterable");
+        assert_eq!(items.len(), 2);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let evaluator = Evaluator::with_limits(EvaluationLimits {
+            max_materialized_elements: 2,
+            max_evaluation_depth: 256,
+        });
+        let mut diagnostics = Vec::new();
+        let result = evaluator.coerce_iterable(
+            RuntimeValue::dynamic_value(IrValue::String(".range {1} {3}".into())),
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E3005");
     }
 }

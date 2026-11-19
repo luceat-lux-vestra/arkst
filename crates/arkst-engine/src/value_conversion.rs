@@ -550,6 +550,15 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::Content(_))
     }
 
+    pub(crate) fn is_iterable_aggregate(&self) -> bool {
+        matches!(
+            &self.kind,
+            RuntimeValueKind::Collection(_)
+                | RuntimeValueKind::Pair(_)
+                | RuntimeValueKind::Dictionary(_)
+        )
+    }
+
     pub(crate) fn is_unit(&self) -> bool {
         matches!(&self.kind, RuntimeValueKind::Unit)
     }
