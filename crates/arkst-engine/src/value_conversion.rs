@@ -1440,10 +1440,7 @@ impl TargetValue {
     /// a conversion-only reason at this boundary.
     pub(crate) fn resolve_with<E>(
         self,
-        resolve_raw_markdown: impl FnOnce(
-            RawMarkdownTarget,
-            String,
-        ) -> Result<RuntimeValue, E>,
+        resolve_raw_markdown: impl FnOnce(RawMarkdownTarget, String) -> Result<RuntimeValue, E>,
     ) -> Result<RuntimeValue, E> {
         match self {
             Self::Value(value) => Ok(value),
@@ -1536,9 +1533,9 @@ pub(crate) fn convert_target_with_origin(
         ),
         ConversionTarget::Callable => match &argument.kind {
             RuntimeValueKind::Callable(_) => Ok(TargetValue::Value(argument.clone())),
-            RuntimeValueKind::InlineBody(body) => Ok(materialized_target_value(
-                IrValue::Callable(body.clone().into_callable().into_ir()),
-            )),
+            RuntimeValueKind::InlineBody(body) => Ok(materialized_target_value(IrValue::Callable(
+                body.clone().into_callable().into_ir(),
+            ))),
             _ => match argument.dynamic_text() {
                 Some(value) => Ok(TargetValue::RawMarkdown {
                     target: RawMarkdownTarget::Callable,
@@ -1624,15 +1621,17 @@ fn convert_content_target(
         RuntimeValueKind::None if block_target => {
             Ok(literal_content_value("None".to_string(), span))
         }
-        RuntimeValueKind::String(value) if !block_target => Ok(materialized_target_value(
-            IrValue::Content(vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: value.clone(),
+        RuntimeValueKind::String(value) if !block_target => {
+            Ok(materialized_target_value(IrValue::Content(vec![
+                IrNode::Paragraph {
+                    content: vec![IrInline::Text {
+                        content: value.clone(),
+                        span,
+                    }],
                     span,
-                }],
-                span,
-            }]),
-        )),
+                },
+            ])))
+        }
         _ => Err(ConversionError::UnsupportedValue {
             target: if block_target {
                 ConversionTarget::BlockContent
@@ -3633,8 +3632,7 @@ mod tests {
         convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
         ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionFailure,
         ConversionTarget, DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue,
-        RuntimeValueKind, ScalarTarget,
-        ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
+        RuntimeValueKind, ScalarTarget, ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
         IrBoxType, IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
@@ -3908,9 +3906,9 @@ mod tests {
         ));
         assert_eq!(
             convert_target_with_origin(&runtime, ConversionTarget::InlineContent, content_span),
-            Ok(TargetValue::Value(RuntimeValue::static_value(IrValue::Content(
-                inline.content.clone(),
-            ))))
+            Ok(TargetValue::Value(RuntimeValue::static_value(
+                IrValue::Content(inline.content.clone(),)
+            )))
         );
         assert_eq!(
             convert_target_with_origin(&runtime, ConversionTarget::Callable, body_span),
@@ -4844,14 +4842,15 @@ mod tests {
 
     #[test]
     fn target_value_runtime_carrier_and_resolver_preserve_provenance_and_diagnostics() {
-        let source_backed = RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
-            content: vec![IrInline::Text {
-                content: "source".into(),
+        let source_backed =
+            RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "source".into(),
+                    span: span(),
+                }],
                 span: span(),
-            }],
-            span: span(),
-        }]))
-        .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
+            }]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
 
         let resolved = TargetValue::Value(source_backed.clone())
             .resolve_with(|_, _| -> Result<RuntimeValue, ConversionFailure> {
@@ -5035,7 +5034,10 @@ mod tests {
                 ConversionTarget::Callable,
                 span(),
             ),
-            Ok(TargetValue::Value(RuntimeValue { kind: RuntimeValueKind::Callable(_), .. }))
+            Ok(TargetValue::Value(RuntimeValue {
+                kind: RuntimeValueKind::Callable(_),
+                ..
+            }))
         ));
 
         let pair = IrValue::Pair(IrPair {
@@ -5049,7 +5051,10 @@ mod tests {
                 ConversionTarget::Iterable,
                 span(),
             ),
-            Ok(TargetValue::Value(RuntimeValue { kind: RuntimeValueKind::Pair(_), .. }))
+            Ok(TargetValue::Value(RuntimeValue {
+                kind: RuntimeValueKind::Pair(_),
+                ..
+            }))
         ));
 
         let dictionary = IrValue::Dictionary(arkst_ir::IrDictionary {
@@ -5062,7 +5067,10 @@ mod tests {
                 ConversionTarget::Dictionary,
                 span(),
             ),
-            Ok(TargetValue::Value(RuntimeValue { kind: RuntimeValueKind::Dictionary(_), .. }))
+            Ok(TargetValue::Value(RuntimeValue {
+                kind: RuntimeValueKind::Dictionary(_),
+                ..
+            }))
         ));
         assert!(matches!(
             convert_target_with_origin(
