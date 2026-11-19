@@ -15532,7 +15532,7 @@ impl Evaluator {
                     .into_dictionary_entries()
                     .expect("validated dictionary target has runtime entries")
                     .0
-            },
+            }
             Ok(value_conversion::TargetValue::Value(_)) => {
                 diagnostics.push(conversion_failure_diagnostic(
                     value_conversion::ConversionFailure::new(
@@ -33488,7 +33488,10 @@ mod tests {
         let source_child = RuntimeValue::dynamic_value(IrValue::String("fallback".into()))
             .with_provenance(ValueProvenance::source_backed_markdown_text("*fallback*"));
         let fallback = RuntimeValue::collection(
-            vec![source_child.clone(), RuntimeValue::static_value(IrValue::None)],
+            vec![
+                source_child.clone(),
+                RuntimeValue::static_value(IrValue::None),
+            ],
             ValueOrigin::Dynamic,
         )
         .with_provenance(ValueProvenance::source_backed_markdown_text("- fallback"));
