@@ -6901,14 +6901,13 @@ impl Evaluator {
                     Ok(values) => values,
                     Err(outcome) => return outcome,
                 };
-            return (self.evaluate_dictionary_lookup(
+            return self.evaluate_dictionary_lookup(
                 &evaluated_positional,
                 &evaluated_named,
                 span,
                 diagnostics,
                 binding_plan,
-            ))
-            .into();
+            );
         }
 
         if is_collection_access(name) {
@@ -15444,7 +15443,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         binding_plan: &BindingPlan,
-    ) -> LegacyCallOutcome {
+    ) -> CallOutcome {
         let candidates = invocation_candidates(
             positional_args
                 .iter()
@@ -15494,7 +15493,7 @@ impl Evaluator {
                 let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
                 diagnostic.message = message;
                 diagnostics.push(diagnostic);
-                return LegacyCallOutcome::Failed;
+                return CallOutcome::Failed;
             }
         };
         let parameters = bound.parameters;
@@ -15504,18 +15503,20 @@ impl Evaluator {
             span: dictionary_span,
         }) = slots.next()
         else {
-            return LegacyCallOutcome::Failed;
+            return CallOutcome::Failed;
         };
         let Some(BoundSlot::Explicit {
             value: key_argument,
             span: key_span,
         }) = slots.next()
         else {
-            return LegacyCallOutcome::Failed;
+            return CallOutcome::Failed;
         };
         let fallback = match slots.next() {
-            Some(BoundSlot::Explicit { value, .. }) => value.into_ir_value(),
-            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => IrValue::None,
+            Some(BoundSlot::Explicit { value, .. }) => value,
+            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => {
+                RuntimeValue::static_value(IrValue::None)
+            }
         };
         let dictionary_parameter_span =
             parameters.first().and_then(|parameter| parameter.name_span);
@@ -15526,7 +15527,12 @@ impl Evaluator {
             value_conversion::ConversionTarget::Dictionary,
             dictionary_span,
         ) {
-            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(dictionary))) => dictionary,
+            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(_))) => {
+                dictionary_argument
+                    .into_dictionary_entries()
+                    .expect("validated dictionary target has runtime entries")
+                    .0
+            }
             Ok(value_conversion::TargetValue::Value(_)) => {
                 diagnostics.push(conversion_failure_diagnostic(
                     value_conversion::ConversionFailure::new(
@@ -15540,7 +15546,7 @@ impl Evaluator {
                     ),
                     Some("`.get` dictionary"),
                 ));
-                return LegacyCallOutcome::Failed;
+                return CallOutcome::Failed;
             }
             Ok(value_conversion::TargetValue::RawMarkdown { .. }) => {
                 diagnostics.push(conversion_failure_diagnostic(
@@ -15555,7 +15561,7 @@ impl Evaluator {
                     ),
                     Some("`.get` dictionary"),
                 ));
-                return LegacyCallOutcome::Failed;
+                return CallOutcome::Failed;
             }
             Err(error) => {
                 diagnostics.push(conversion_failure_diagnostic(
@@ -15568,7 +15574,7 @@ impl Evaluator {
                     ),
                     Some("`.get` dictionary"),
                 ));
-                return LegacyCallOutcome::Failed;
+                return CallOutcome::Failed;
             }
         };
 
@@ -15591,7 +15597,7 @@ impl Evaluator {
                     ),
                     Some("`.get` key"),
                 ));
-                return LegacyCallOutcome::Failed;
+                return CallOutcome::Failed;
             }
             Ok(value_conversion::TargetValue::RawMarkdown { .. }) => {
                 diagnostics.push(conversion_failure_diagnostic(
@@ -15606,7 +15612,7 @@ impl Evaluator {
                     ),
                     Some("`.get` key"),
                 ));
-                return LegacyCallOutcome::Failed;
+                return CallOutcome::Failed;
             }
             Err(error) => {
                 diagnostics.push(conversion_failure_diagnostic(
@@ -15619,28 +15625,31 @@ impl Evaluator {
                     ),
                     Some("`.get` key"),
                 ));
-                return LegacyCallOutcome::Failed;
+                return CallOutcome::Failed;
             }
         };
 
         let mut found = None;
-        for pair in &dictionary.entries {
-            match pair.first.as_ref() {
+        for pair in dictionary {
+            let (entry_key, entry_value, pair_span) = pair
+                .into_pair_parts()
+                .expect("runtime dictionary entries are always pairs");
+            match entry_key.semantic_value().as_ref() {
                 IrValue::String(entry_key) => {
                     if found.is_none() && entry_key == &key {
-                        found = Some(pair.second.as_ref().clone());
+                        found = Some(entry_value);
                     }
                 }
                 _ => {
                     diagnostics.push(iteration_error(
                         "Dictionary keys must remain typed strings".to_string(),
-                        pair.span,
+                        pair_span,
                     ));
-                    return LegacyCallOutcome::Failed;
+                    return CallOutcome::Failed;
                 }
             }
         }
-        LegacyCallOutcome::Value(found.unwrap_or(fallback))
+        CallOutcome::Value(found.unwrap_or(fallback))
     }
 
     fn evaluate_dictionary_entries(
@@ -33399,6 +33408,125 @@ mod tests {
         assert_eq!(limited_diagnostics.len(), 1);
         assert_eq!(limited_diagnostics[0].code, "E3005");
         assert_eq!(limited_diagnostics[0].primary, Some(operation_span));
+    }
+
+    fn evaluate_get_with_runtime_values(
+        values: &[RuntimeValue],
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> CallOutcome {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 40);
+        let positional = values
+            .iter()
+            .map(RuntimeValue::to_ir_value)
+            .collect::<Vec<_>>();
+        let context = EvaluationContext::new();
+        let plan = evaluator
+            .preflight_native_binding(
+                "get",
+                None,
+                &positional,
+                &[],
+                None,
+                None,
+                call_span,
+                &context,
+                diagnostics,
+            )
+            .expect("get preflight should succeed")
+            .expect("get has native binding metadata");
+        evaluator.evaluate_dictionary_lookup(values, &[], &call_span, diagnostics, &plan)
+    }
+
+    #[test]
+    fn dictionary_lookup_preserves_source_backed_nested_runtime_value() {
+        let source_child = RuntimeValue::dynamic_value(IrValue::String("source".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("**source**"));
+        let generated_child = RuntimeValue::static_value(IrValue::Number(7.0));
+        let selected = RuntimeValue::collection(
+            vec![source_child.clone(), generated_child.clone()],
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("- source"));
+        let dictionary = RuntimeValue::dictionary(
+            vec![RuntimeValue::pair(
+                RuntimeValue::static_value(IrValue::String("present".into())),
+                selected.clone(),
+                span(10, 20),
+                ValueOrigin::Dynamic,
+            )],
+            span(0, 30),
+            ValueOrigin::Dynamic,
+        )
+        .expect("typed dictionary entries");
+
+        let mut diagnostics = Vec::new();
+        let outcome = evaluate_get_with_runtime_values(
+            &[
+                dictionary,
+                RuntimeValue::static_value(IrValue::String("present".into())),
+            ],
+            &mut diagnostics,
+        );
+        let CallOutcome::Value(actual) = outcome else {
+            panic!("get must return the selected runtime value");
+        };
+        assert_eq!(actual, selected);
+        assert_eq!(actual.origin, ValueOrigin::Dynamic);
+        assert_eq!(actual.source_backed_markdown_text(), Some("- source"));
+        assert_eq!(
+            actual
+                .into_collection()
+                .expect("collection must remain runtime-owned"),
+            vec![source_child, generated_child]
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn dictionary_lookup_preserves_missing_key_runtime_fallback() {
+        let source_child = RuntimeValue::dynamic_value(IrValue::String("fallback".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("*fallback*"));
+        let fallback = RuntimeValue::collection(
+            vec![
+                source_child.clone(),
+                RuntimeValue::static_value(IrValue::None),
+            ],
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("- fallback"));
+        let dictionary = RuntimeValue::dictionary(
+            vec![RuntimeValue::pair(
+                RuntimeValue::static_value(IrValue::String("present".into())),
+                RuntimeValue::static_value(IrValue::Boolean(true)),
+                span(10, 20),
+                ValueOrigin::Static,
+            )],
+            span(0, 30),
+            ValueOrigin::Static,
+        )
+        .expect("typed dictionary entries");
+
+        let mut diagnostics = Vec::new();
+        let outcome = evaluate_get_with_runtime_values(
+            &[
+                dictionary,
+                RuntimeValue::static_value(IrValue::String("missing".into())),
+                fallback.clone(),
+            ],
+            &mut diagnostics,
+        );
+        let CallOutcome::Value(actual) = outcome else {
+            panic!("missing key must select the fallback runtime value");
+        };
+        assert_eq!(actual, fallback);
+        assert_eq!(actual.origin, ValueOrigin::Dynamic);
+        assert_eq!(actual.source_backed_markdown_text(), Some("- fallback"));
+        let children = actual
+            .into_collection()
+            .expect("fallback collection must remain runtime-owned");
+        assert_eq!(children[0], source_child);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
