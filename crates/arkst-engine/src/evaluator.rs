@@ -38493,12 +38493,9 @@ mod tests {
             entry_span,
             ValueOrigin::Dynamic,
         );
-        let dictionary = RuntimeValue::dictionary(
-            vec![entry.clone()],
-            span(28, 60),
-            ValueOrigin::Static,
-        )
-        .expect("dictionary entry must be a Pair");
+        let dictionary =
+            RuntimeValue::dictionary(vec![entry.clone()], span(28, 60), ValueOrigin::Static)
+                .expect("dictionary entry must be a Pair");
         let dictionary_elements = evaluator
             .coerce_evidenced_iterable(dictionary, &operation_span, &mut diagnostics, &mut context)
             .expect("Dictionary must retain its runtime Pair entry");
@@ -38560,10 +38557,7 @@ mod tests {
             vec![source.clone(), generated.clone()],
             ValueOrigin::Dynamic,
         );
-        assert_eq!(
-            unwrap_source_backed_table_row(typed_row.clone()),
-            typed_row
-        );
+        assert_eq!(unwrap_source_backed_table_row(typed_row.clone()), typed_row);
         let cells = evaluator
             .coerce_evidenced_iterable(
                 unwrap_source_backed_table_row(typed_row),
@@ -38621,25 +38615,24 @@ mod tests {
         assert_eq!(normalized.to_ir_value(), IrValue::Content(vec![inner]));
 
         let nested_cells = evaluator
-            .coerce_evidenced_iterable(
-                normalized,
-                &row_span,
-                &mut diagnostics,
-                &mut context,
-            )
+            .coerce_evidenced_iterable(normalized, &row_span, &mut diagnostics, &mut context)
             .expect("only the exact nested Markdown list wrapper is removed");
         assert_eq!(nested_cells.len(), 2);
         assert_eq!(nested_cells[0].span, first_span);
         assert_eq!(nested_cells[1].span, second_span);
-        assert_eq!(nested_cells[0].value.to_ir_value(), IrValue::String("alpha".into()));
-        assert_eq!(nested_cells[1].value.to_ir_value(), IrValue::String("beta".into()));
+        assert_eq!(
+            nested_cells[0].value.to_ir_value(),
+            IrValue::String("alpha".into())
+        );
+        assert_eq!(
+            nested_cells[1].value.to_ir_value(),
+            IrValue::String("beta".into())
+        );
 
         let generated_wrapper = RuntimeValue::static_value(IrValue::Content(vec![wrapper]));
-        assert!(
-            unwrap_source_backed_table_row(generated_wrapper)
-                .provenance()
-                .is_materialized()
-        );
+        assert!(unwrap_source_backed_table_row(generated_wrapper)
+            .provenance()
+            .is_materialized());
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
