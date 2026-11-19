@@ -38755,6 +38755,7 @@ mod tests {
                 let inner = if inner_ordered {
                     IrNode::OrderedList {
                         items: inner_items,
+                        start: 1,
                         span: list_span,
                     }
                 } else {
@@ -38771,6 +38772,7 @@ mod tests {
                 let outer = if outer_ordered {
                     IrNode::OrderedList {
                         items: outer_items,
+                        start: 1,
                         span: row_span,
                     }
                 } else {
@@ -38785,14 +38787,11 @@ mod tests {
                     } else {
                         ValueOrigin::Static
                     };
-                    let mut input = RuntimeValue::new(
-                        IrValue::Content(vec![outer.clone()]),
-                        origin,
-                    );
+                    let mut input =
+                        RuntimeValue::new(IrValue::Content(vec![outer.clone()]), origin);
                     if source_backed {
-                        input = input.with_provenance(
-                            ValueProvenance::source_backed_markdown_text("- alpha"),
-                        );
+                        let provenance = ValueProvenance::source_backed_markdown_text("- alpha");
+                        input = input.with_provenance(provenance);
                     }
                     let actual = unwrap_source_backed_table_row(input.clone());
                     assert_eq!(actual.origin, input.origin);
@@ -38828,27 +38827,26 @@ mod tests {
                     task: None,
                     span: cell_span,
                 };
-                let multiple = RuntimeValue::static_value(IrValue::Content(vec![
-                    IrNode::UnorderedList {
+                let multiple =
+                    RuntimeValue::static_value(IrValue::Content(vec![IrNode::UnorderedList {
                         items: vec![extra.clone(), extra],
                         span: row_span,
-                    },
-                ]));
+                    }]));
                 assert_eq!(
                     unwrap_source_backed_table_row(multiple.clone()),
                     multiple,
                     "two outer items are not a single nested wrapper"
                 );
-                let mixed = RuntimeValue::dynamic_value(IrValue::Content(vec![
-                    IrNode::OrderedList {
+                let mixed =
+                    RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::OrderedList {
                         items: vec![IrListItem {
                             nodes: vec![inner, text_paragraph("trailing")],
                             task: None,
                             span: row_span,
                         }],
+                        start: 1,
                         span: row_span,
-                    },
-                ]));
+                    }]));
                 assert_eq!(
                     unwrap_source_backed_table_row(mixed.clone()),
                     mixed,
