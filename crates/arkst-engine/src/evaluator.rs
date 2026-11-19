@@ -1728,8 +1728,13 @@ fn table_row_from_elements(
 /// wrapper after the outer rows iterable has been materialized. Remove only
 /// that parser-evidenced wrapper; arbitrary singleton Collections remain
 /// ordinary one-cell rows and are not flattened.
-fn unwrap_source_backed_table_row(value: IrValue) -> IrValue {
-    let IrValue::Content(nodes) = &value else {
+fn unwrap_source_backed_table_row(value: RuntimeValue) -> RuntimeValue {
+    // Only the parser-evidenced Content wrapper needs semantic reshaping.
+    // Typed rows must retain their independently-owned runtime children.
+    if !value.is_content() {
+        return value;
+    }
+    let IrValue::Content(nodes) = value.to_ir_value() else {
         return value;
     };
     let items = match nodes.as_slice() {
@@ -1745,7 +1750,8 @@ fn unwrap_source_backed_table_row(value: IrValue) -> IrValue {
     ) {
         return value;
     }
-    IrValue::Content(item.nodes.clone())
+    RuntimeValue::new(IrValue::Content(item.nodes.clone()), value.origin)
+        .with_provenance(value.provenance().clone())
 }
 
 fn value_into_table_cell(
@@ -17409,9 +17415,7 @@ impl Evaluator {
         for row in row_elements {
             let row_span = row.span;
             let cells = match self.coerce_evidenced_iterable(
-                RuntimeValue::static_value(unwrap_source_backed_table_row(
-                    row.value.into_ir_value(),
-                )),
+                unwrap_source_backed_table_row(row.value),
                 &row_span,
                 diagnostics,
                 context,
@@ -18691,20 +18695,11 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<EvidencedIterableElement>, CallOutcome> {
         let value = value.into();
-        let origin = value.origin;
+        // Keep the semantic projection for span evidence only. Converting it
+        // back to RuntimeValue would erase Pair/Dictionary child provenance.
         let semantic_value = value.to_ir_value();
         let element_spans = iterable_element_spans(&semantic_value, *span);
-        let values = if let Some(values) = value.into_collection() {
-            self.check_materialized_elements_len(values.len(), *span, diagnostics)?;
-            values
-        } else {
-            self.coerce_iterable(
-                RuntimeValue::new(semantic_value, origin),
-                span,
-                diagnostics,
-                context,
-            )?
-        };
+        let values = self.coerce_iterable(value, span, diagnostics, context)?;
         let use_captured_spans = element_spans.len() == values.len();
         let mut elements = Vec::new();
         if let Err(error) = elements.try_reserve_exact(values.len()) {
@@ -38463,6 +38458,184 @@ mod tests {
         ));
         assert!(elements[1].value.provenance().is_materialized());
     }
+    #[test]
+    fn g1k3c_evidenced_pair_dictionary_keep_nested_runtime_origin_and_provenance() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let operation_span = span(0, 100);
+        let pair_span = span(10, 25);
+        let source = RuntimeValue::dynamic_value(IrValue::String("source".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("- source"));
+        let generated = RuntimeValue::static_value(IrValue::Number(7.0));
+        let pair = RuntimeValue::pair(
+            source.clone(),
+            generated.clone(),
+            pair_span,
+            ValueOrigin::Static,
+        );
+        let pair_elements = evaluator
+            .coerce_evidenced_iterable(pair, &operation_span, &mut diagnostics, &mut context)
+            .expect("Pair must retain distinct runtime children");
+        assert_eq!(pair_elements.len(), 2);
+        assert_eq!(pair_elements[0].value, source);
+        assert_eq!(pair_elements[1].value, generated);
+        assert_eq!(pair_elements[0].span, pair_span);
+        assert_eq!(pair_elements[1].span, pair_span);
+
+        let entry_span = span(30, 55);
+        let entry = RuntimeValue::pair(
+            RuntimeValue::static_value(IrValue::String("key".into())),
+            RuntimeValue::collection(
+                vec![source.clone(), generated.clone()],
+                ValueOrigin::Dynamic,
+            ),
+            entry_span,
+            ValueOrigin::Dynamic,
+        );
+        let dictionary =
+            RuntimeValue::dictionary(vec![entry.clone()], span(28, 60), ValueOrigin::Static)
+                .expect("dictionary entry must be a Pair");
+        let dictionary_elements = evaluator
+            .coerce_evidenced_iterable(dictionary, &operation_span, &mut diagnostics, &mut context)
+            .expect("Dictionary must retain its runtime Pair entry");
+        assert_eq!(dictionary_elements.len(), 1);
+        assert_eq!(dictionary_elements[0].span, entry_span);
+        assert_eq!(dictionary_elements[0].value, entry);
+        let (_, nested, _) = dictionary_elements
+            .into_iter()
+            .next()
+            .expect("one dictionary entry")
+            .value
+            .into_pair_parts()
+            .expect("dictionary entry remains a runtime Pair");
+        assert_eq!(
+            nested.into_collection(),
+            Some(vec![source.clone(), generated.clone()])
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let invalid = evaluator.coerce_evidenced_iterable(
+            RuntimeValue::static_value(IrValue::Boolean(true)),
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(invalid, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E3001");
+        assert_eq!(diagnostics[0].primary, Some(operation_span));
+
+        let limited = Evaluator::with_limits(EvaluationLimits {
+            max_materialized_elements: 1,
+            max_evaluation_depth: 256,
+        });
+        let mut limited_diagnostics = Vec::new();
+        let limited_span = span(70, 90);
+        let over_limit = limited.coerce_evidenced_iterable(
+            RuntimeValue::pair(source, generated, limited_span, ValueOrigin::Static),
+            &operation_span,
+            &mut limited_diagnostics,
+            &mut context,
+        );
+        assert!(matches!(over_limit, Err(CallOutcome::Failed)));
+        assert_eq!(limited_diagnostics.len(), 1);
+        assert_eq!(limited_diagnostics[0].code, "E3005");
+        assert_eq!(limited_diagnostics[0].primary, Some(limited_span));
+    }
+
+    #[test]
+    fn g1k3c_table_row_adapter_preserves_typed_and_source_wrapped_rows() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let row_span = span(10, 80);
+        let source = RuntimeValue::dynamic_value(IrValue::String("source".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown());
+        let generated = RuntimeValue::static_value(IrValue::String("generated".into()));
+        let typed_row = RuntimeValue::collection(
+            vec![source.clone(), generated.clone()],
+            ValueOrigin::Dynamic,
+        );
+        assert_eq!(unwrap_source_backed_table_row(typed_row.clone()), typed_row);
+        let cells = evaluator
+            .coerce_evidenced_iterable(
+                unwrap_source_backed_table_row(typed_row),
+                &row_span,
+                &mut diagnostics,
+                &mut context,
+            )
+            .expect("typed table row must retain independently sourced cells");
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[0].value, source);
+        assert_eq!(cells[1].value, generated);
+        assert_eq!(cells[0].span, row_span);
+        assert_eq!(cells[1].span, row_span);
+
+        let singleton = RuntimeValue::collection(vec![source], ValueOrigin::Static);
+        assert_eq!(
+            unwrap_source_backed_table_row(singleton.clone()),
+            singleton,
+            "a one-cell Collection is not a parser list wrapper"
+        );
+        let plain = RuntimeValue::dynamic_value(IrValue::Content(vec![text_paragraph("one")]))
+            .with_provenance(ValueProvenance::source_backed_markdown());
+        assert_eq!(unwrap_source_backed_table_row(plain.clone()), plain);
+
+        let first_span = span(21, 27);
+        let second_span = span(30, 37);
+        let inner = IrNode::UnorderedList {
+            items: vec![
+                IrListItem {
+                    nodes: vec![text_paragraph("alpha")],
+                    task: None,
+                    span: first_span,
+                },
+                IrListItem {
+                    nodes: vec![text_paragraph("beta")],
+                    task: None,
+                    span: second_span,
+                },
+            ],
+            span: span(20, 40),
+        };
+        let wrapper = IrNode::UnorderedList {
+            items: vec![IrListItem {
+                nodes: vec![inner.clone()],
+                task: None,
+                span: row_span,
+            }],
+            span: row_span,
+        };
+        let source_wrapper = RuntimeValue::dynamic_value(IrValue::Content(vec![wrapper.clone()]))
+            .with_provenance(ValueProvenance::source_backed_markdown());
+        let normalized = unwrap_source_backed_table_row(source_wrapper.clone());
+        assert_eq!(normalized.origin, source_wrapper.origin);
+        assert_eq!(normalized.provenance(), source_wrapper.provenance());
+        assert_eq!(normalized.to_ir_value(), IrValue::Content(vec![inner]));
+
+        let nested_cells = evaluator
+            .coerce_evidenced_iterable(normalized, &row_span, &mut diagnostics, &mut context)
+            .expect("only the exact nested Markdown list wrapper is removed");
+        assert_eq!(nested_cells.len(), 2);
+        assert_eq!(nested_cells[0].span, first_span);
+        assert_eq!(nested_cells[1].span, second_span);
+        assert_eq!(
+            nested_cells[0].value.to_ir_value(),
+            IrValue::String("alpha".into())
+        );
+        assert_eq!(
+            nested_cells[1].value.to_ir_value(),
+            IrValue::String("beta".into())
+        );
+
+        let generated_wrapper = RuntimeValue::static_value(IrValue::Content(vec![wrapper]));
+        assert!(unwrap_source_backed_table_row(generated_wrapper)
+            .provenance()
+            .is_materialized());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
     #[test]
     fn g1j_scope_storage_keeps_runtime_origin_and_provenance() {
         let mut context = EvaluationContext::new();
