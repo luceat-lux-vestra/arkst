@@ -497,7 +497,11 @@ impl RuntimeValue {
         }
     }
 
-    pub(crate) fn dictionary(entries: Vec<Self>, span: SourceSpan, origin: ValueOrigin) -> Option<Self> {
+    pub(crate) fn dictionary(
+        entries: Vec<Self>,
+        span: SourceSpan,
+        origin: ValueOrigin,
+    ) -> Option<Self> {
         if entries
             .iter()
             .any(|entry| !matches!(&entry.kind, RuntimeValueKind::Pair(_)))
