@@ -550,6 +550,17 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::Content(_))
     }
 
+    pub(crate) fn is_range(&self) -> bool {
+        matches!(&self.kind, RuntimeValueKind::Range(_))
+    }
+
+    pub(crate) fn as_content_nodes(&self) -> Option<&[IrNode]> {
+        match &self.kind {
+            RuntimeValueKind::Content(nodes) => Some(nodes.as_slice()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_iterable_aggregate(&self) -> bool {
         matches!(
             &self.kind,

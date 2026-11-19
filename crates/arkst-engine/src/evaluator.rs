@@ -18467,6 +18467,8 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<RuntimeValue>, CallOutcome> {
         let origin = value.origin;
+        // Already-typed aggregates own their children. Never flatten them
+        // through IrValue just to make an iterable.
         if let Some(values) = value.clone().into_collection() {
             self.check_materialized_elements_len(values.len(), *span, diagnostics)?;
             return Ok(values);
@@ -18485,7 +18487,7 @@ impl Evaluator {
             value_conversion::ConversionTarget::Iterable,
             *span,
         ) {
-            Ok(value_conversion::TargetValue::Value(value)) => value.into_ir_value(),
+            Ok(value_conversion::TargetValue::Value(value)) => value,
             Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                 if let Ok(range) = value_conversion::convert_range_with_origin(&value, *span) {
                     return self
@@ -18504,13 +18506,9 @@ impl Evaluator {
                     diagnostics,
                 )?;
                 let fallback = IrValue::Content(nodes.clone());
-                // `ValueFactory.iterable` first evaluates one raw expression
-                // in the current context. A typed iterable result wins. If
-                // the expression is not iterable, fall back to the parsed
-                // Markdown list without evaluating that same expression a
-                // second time. A non-expression Markdown body is evaluated
-                // once as the list fallback so nested calls retain their
-                // normal value-context semantics.
+                // Evaluate a raw expression at most once. An evaluated typed
+                // iterable wins; a non-iterable expression falls back to the
+                // parsed Markdown list, not a second evaluation of that call.
                 let is_expression = matches!(
                     nodes.as_slice(),
                     [IrNode::FunctionCall { .. } | IrNode::ChainedFunctionCall { .. }]
@@ -18525,21 +18523,16 @@ impl Evaluator {
                     CallOutcome::Failed => return Err(CallOutcome::Failed),
                 };
                 if let Some(value) = evaluated {
-                    // Typed runtime aggregates carry independently-owned child evidence.
-                    // Reusing the typed iterable path avoids a lossy IR roundtrip.
                     if value.is_iterable_aggregate() {
                         return self.coerce_iterable(value, span, diagnostics, context);
                     }
-                    if is_expression {
-                        match value.into_ir_value() {
-                            value @ IrValue::Range(_) => value,
-                            _ => fallback,
-                        }
+                    if is_expression && !value.is_range() {
+                        RuntimeValue::new(fallback, origin)
                     } else {
-                        value.into_ir_value()
+                        value
                     }
                 } else {
-                    fallback
+                    RuntimeValue::new(fallback, origin)
                 }
             }
             Err(error) => {
@@ -18556,120 +18549,48 @@ impl Evaluator {
                 return Err(CallOutcome::Failed);
             }
         };
-        match value {
-            IrValue::Collection(values) => {
-                self.check_materialized_elements_len(values.len(), *span, diagnostics)?;
-                Ok(values
-                    .into_iter()
-                    .map(|value| RuntimeValue::new(value, origin))
-                    .collect())
-            }
-            IrValue::Pair(pair) => {
-                self.check_materialized_elements_len(2, pair.span, diagnostics)?;
-                let mut values = Vec::new();
-                if let Err(error) = values.try_reserve_exact(2) {
-                    diagnostics.push(iteration_error(
-                        format!("Pair iterable cannot be allocated: {error}"),
-                        pair.span,
-                    ));
-                    return Err(CallOutcome::Failed);
-                }
-                values.push(RuntimeValue::new(*pair.first, origin));
-                values.push(RuntimeValue::new(*pair.second, origin));
-                Ok(values)
-            }
-            IrValue::Dictionary(dictionary) => {
-                self.check_materialized_elements_len(
-                    dictionary.entries.len(),
-                    dictionary.span,
-                    diagnostics,
-                )?;
-                let mut values = Vec::new();
-                if let Err(error) = values.try_reserve_exact(dictionary.entries.len()) {
-                    diagnostics.push(iteration_error(
-                        format!("Dictionary iterable cannot be allocated: {error}"),
-                        dictionary.span,
-                    ));
-                    return Err(CallOutcome::Failed);
-                }
-                values.extend(
-                    dictionary
-                        .entries
+
+        // Only genuinely new range elements are materialized. A supported
+        // Markdown list is interpreted as content, without rebuilding a
+        // RuntimeValue from a projected IrValue.
+        if let Ok(range) = value_conversion::convert_range_with_origin(&value, *span) {
+            return self
+                .materialize_range(range, span, diagnostics)
+                .map(|values| {
+                    values
                         .into_iter()
-                        .map(IrValue::Pair)
-                        .map(|value| RuntimeValue::new(value, origin)),
-                );
-                Ok(values)
-            }
-            IrValue::Range(range) => {
-                self.materialize_range(range, span, diagnostics)
-                    .map(|values| {
-                        values
-                            .into_iter()
-                            .map(|value| RuntimeValue::new(value, origin))
-                            .collect()
-                    })
-            }
-            value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
-                let argument = RuntimeValue::new(value, origin);
-                match value_conversion::convert_range_with_origin(&argument, *span) {
-                    Ok(range) => self
-                        .materialize_range(range, span, diagnostics)
-                        .map(|values| {
-                            values
-                                .into_iter()
-                                .map(|value| RuntimeValue::new(value, origin))
-                                .collect()
-                        }),
-                    Err(_) => {
-                        diagnostics.push(iteration_error(
-                            "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
-                                .to_string(),
-                            *span,
-                        ));
-                        Err(CallOutcome::Failed)
-                    }
-                }
-            }
-            IrValue::Content(nodes) => match nodes.as_slice() {
-                [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => {
-                    self.check_materialized_elements_len(items.len(), *span, diagnostics)?;
-                    let mut values = Vec::new();
-                    if let Err(error) = values.try_reserve_exact(items.len()) {
-                        diagnostics.push(iteration_error(
-                            format!("list collection cannot be allocated: {error}"),
-                            *span,
-                        ));
-                        return Err(CallOutcome::Failed);
-                    }
-                    for item in items {
-                        values.push(RuntimeValue::static_value(self.list_item_value(
-                            item,
-                            span,
-                            diagnostics,
-                            context,
-                        )?));
-                    }
-                    Ok(values)
-                }
-                _ => {
-                    diagnostics.push(iteration_error(
-                        "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
-                            .to_string(),
-                        *span,
-                    ));
-                    Err(CallOutcome::Failed)
-                }
-            },
-            _ => {
+                        .map(|value| RuntimeValue::new(value, origin))
+                        .collect()
+                });
+        }
+        if let Some([IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }]) =
+            value.as_content_nodes()
+        {
+            self.check_materialized_elements_len(items.len(), *span, diagnostics)?;
+            let mut values = Vec::new();
+            if let Err(error) = values.try_reserve_exact(items.len()) {
                 diagnostics.push(iteration_error(
-                    "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
-                        .to_string(),
+                    format!("list collection cannot be allocated: {error}"),
                     *span,
                 ));
-                Err(CallOutcome::Failed)
+                return Err(CallOutcome::Failed);
             }
+            for item in items {
+                values.push(RuntimeValue::static_value(self.list_item_value(
+                    item,
+                    span,
+                    diagnostics,
+                    context,
+                )?));
+            }
+            return Ok(values);
         }
+        diagnostics.push(iteration_error(
+            "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
+                .to_string(),
+            *span,
+        ));
+        Err(CallOutcome::Failed)
     }
 
     fn coerce_evidenced_iterable(
@@ -38945,6 +38866,48 @@ mod tests {
             assert!(diagnostics.is_empty(), "{name}: {diagnostics:?}");
             assert_eq!(actual, expected, "{name} must preserve per-child metadata");
         }
+    }
+
+    #[test]
+    fn g1l1c_iterable_target_uses_runtime_range_and_content_without_ir_roundtrip() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 80);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let range = RuntimeValue::dynamic_value(IrValue::Range(IrRange {
+            start: Some(2),
+            end: Some(3),
+            span: operation_span,
+        }))
+        .with_provenance(ValueProvenance::source_backed_markdown_text("2..3"));
+        let numbers = evaluator
+            .coerce_iterable(range, &operation_span, &mut diagnostics, &mut context)
+            .expect("typed Range remains iterable without rematerializing the carrier");
+        assert_eq!(
+            numbers,
+            vec![
+                RuntimeValue::dynamic_value(IrValue::Number(2.0)),
+                RuntimeValue::dynamic_value(IrValue::Number(3.0)),
+            ]
+        );
+
+        let list = RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::UnorderedList {
+            items: vec![IrListItem {
+                nodes: vec![text_paragraph("alpha")],
+                task: None,
+                span: span(10, 20),
+            }],
+            span: operation_span,
+        }]))
+        .with_provenance(ValueProvenance::source_backed_markdown_text("- alpha"));
+        let values = evaluator
+            .coerce_iterable(list, &operation_span, &mut diagnostics, &mut context)
+            .expect("typed Markdown list remains iterable");
+        assert_eq!(
+            values,
+            vec![RuntimeValue::static_value(IrValue::String("alpha".into()))]
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
