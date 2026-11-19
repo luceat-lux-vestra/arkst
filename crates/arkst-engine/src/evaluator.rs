@@ -7160,9 +7160,8 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<IrValue, LegacyCallOutcome> {
-        match converted {
-            value_conversion::TargetValue::Value(value) => Ok(value),
-            value_conversion::TargetValue::RawMarkdown { target, text } => {
+        converted
+            .resolve_with(|target, text| {
                 if !matches!(
                     target,
                     value_conversion::RawMarkdownTarget::Inline
@@ -7184,7 +7183,7 @@ impl Evaluator {
                         let before = diagnostics.len();
                         let nodes = self.evaluate_nodes(&nodes, diagnostics, context);
                         if diagnostics.len() == before {
-                            Ok(IrValue::Content(nodes))
+                            Ok(RuntimeValue::static_value(IrValue::Content(nodes)))
                         } else {
                             Err(LegacyCallOutcome::Failed)
                         }
@@ -7195,8 +7194,8 @@ impl Evaluator {
                         "unsupported raw target was rejected before dynamic Markdown parsing"
                     ),
                 }
-            }
-        }
+            })
+            .map(RuntimeValue::into_ir_value)
     }
 
     fn parse_dynamic_markdown_content(
@@ -10854,7 +10853,16 @@ impl Evaluator {
             value_conversion::ConversionTarget::Dictionary,
             formats_span,
         ) {
-            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(dictionary))) => dictionary,
+            Ok(value_conversion::TargetValue::Value(value)) => {
+                let IrValue::Dictionary(dictionary) = value.into_ir_value() else {
+                    diagnostics.push(document_state_conversion_error(
+                        ".numbering formats must be a typed Dictionary".to_string(),
+                        formats_span,
+                    ));
+                    return LegacyCallOutcome::Failed;
+                };
+                dictionary
+            }
             Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                 let nodes = match self.parse_dynamic_markdown_content(
                     &text,
@@ -10879,13 +10887,6 @@ impl Evaluator {
                     entries,
                     span: formats_span,
                 }
-            }
-            Ok(value_conversion::TargetValue::Value(_)) => {
-                diagnostics.push(document_state_conversion_error(
-                    ".numbering formats must be a typed Dictionary".to_string(),
-                    formats_span,
-                ));
-                return LegacyCallOutcome::Failed;
             }
             Err(error) => {
                 diagnostics.push(conversion_failure_diagnostic(
@@ -11162,7 +11163,16 @@ impl Evaluator {
             value_conversion::ConversionTarget::Dictionary,
             contents_span,
         ) {
-            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(dictionary))) => dictionary,
+            Ok(value_conversion::TargetValue::Value(value)) => {
+                let IrValue::Dictionary(dictionary) = value.into_ir_value() else {
+                    diagnostics.push(localization_error(
+                        "`.localization` contents must be a typed Dictionary",
+                        contents_span,
+                    ));
+                    return LegacyCallOutcome::Failed;
+                };
+                dictionary
+            }
             Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                 let nodes = match self.parse_dynamic_markdown_content(
                     &text,
@@ -11187,13 +11197,6 @@ impl Evaluator {
                     entries,
                     span: contents_span,
                 }
-            }
-            Ok(value_conversion::TargetValue::Value(_)) => {
-                diagnostics.push(localization_error(
-                    "`.localization` contents must be a typed Dictionary",
-                    contents_span,
-                ));
-                return LegacyCallOutcome::Failed;
             }
             Err(error) => {
                 diagnostics.push(localization_conversion_diagnostic(
@@ -12836,7 +12839,7 @@ impl Evaluator {
                 value_conversion::ConversionTarget::Dictionary,
                 candidate_span,
             ) {
-                Ok(value_conversion::TargetValue::Value(value)) => value,
+                Ok(value_conversion::TargetValue::Value(value)) => value.into_ir_value(),
                 Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                     let nodes = match self.parse_dynamic_markdown_content(
                         &text,
@@ -15533,26 +15536,23 @@ impl Evaluator {
             value_conversion::ConversionTarget::Dictionary,
             dictionary_span,
         ) {
-            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(_))) => {
-                dictionary_argument
-                    .into_dictionary_entries()
-                    .expect("validated dictionary target has runtime entries")
-                    .0
-            }
-            Ok(value_conversion::TargetValue::Value(_)) => {
-                diagnostics.push(conversion_failure_diagnostic(
-                    value_conversion::ConversionFailure::new(
-                        value_conversion::ConversionError::UnsupportedValue {
-                            target: value_conversion::ConversionTarget::Dictionary,
-                        },
-                        Some(dictionary_span),
-                        Some("dictionary"),
-                        dictionary_parameter_span,
-                        *span,
-                    ),
-                    Some("`.get` dictionary"),
-                ));
-                return CallOutcome::Failed;
+            Ok(value_conversion::TargetValue::Value(value)) => {
+                let Some((entries, _)) = value.into_dictionary_entries() else {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            value_conversion::ConversionError::UnsupportedValue {
+                                target: value_conversion::ConversionTarget::Dictionary,
+                            },
+                            Some(dictionary_span),
+                            Some("dictionary"),
+                            dictionary_parameter_span,
+                            *span,
+                        ),
+                        Some("`.get` dictionary"),
+                    ));
+                    return CallOutcome::Failed;
+                };
+                entries
             }
             Ok(value_conversion::TargetValue::RawMarkdown { .. }) => {
                 diagnostics.push(conversion_failure_diagnostic(
@@ -15589,21 +15589,23 @@ impl Evaluator {
             value_conversion::ConversionTarget::String,
             key_span,
         ) {
-            Ok(value_conversion::TargetValue::Value(IrValue::String(key))) => key,
-            Ok(value_conversion::TargetValue::Value(_)) => {
-                diagnostics.push(conversion_failure_diagnostic(
-                    value_conversion::ConversionFailure::new(
-                        value_conversion::ConversionError::UnsupportedValue {
-                            target: value_conversion::ConversionTarget::String,
-                        },
-                        Some(key_span),
-                        Some("key"),
-                        key_parameter_span,
-                        *span,
-                    ),
-                    Some("`.get` key"),
-                ));
-                return CallOutcome::Failed;
+            Ok(value_conversion::TargetValue::Value(value)) => {
+                let IrValue::String(key) = value.into_ir_value() else {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            value_conversion::ConversionError::UnsupportedValue {
+                                target: value_conversion::ConversionTarget::String,
+                            },
+                            Some(key_span),
+                            Some("key"),
+                            key_parameter_span,
+                            *span,
+                        ),
+                        Some("`.get` key"),
+                    ));
+                    return CallOutcome::Failed;
+                };
+                key
             }
             Ok(value_conversion::TargetValue::RawMarkdown { .. }) => {
                 diagnostics.push(conversion_failure_diagnostic(
@@ -18500,7 +18502,7 @@ impl Evaluator {
             value_conversion::ConversionTarget::Iterable,
             *span,
         ) {
-            Ok(value_conversion::TargetValue::Value(value)) => value,
+            Ok(value_conversion::TargetValue::Value(value)) => value.into_ir_value(),
             Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                 if let Ok(range) = value_conversion::convert_range_with_origin(&value, *span) {
                     return self
