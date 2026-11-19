@@ -35152,36 +35152,59 @@ mod tests {
         };
         assert_eq!(value.origin, ValueOrigin::Static);
         assert!(value.provenance().is_materialized());
-        assert_eq!(value.as_content_nodes(), Some([first.clone(), second.clone()].as_slice()));
+        assert_eq!(
+            value.as_content_nodes(),
+            Some([first.clone(), second.clone()].as_slice())
+        );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
         // Non-Content still follows the existing scalar conversion policy.
         let mut mixed = CallableBodyValueAccumulator::Empty;
         mixed
-            .append_value(RuntimeValue::static_value(IrValue::Number(7.0)), first_span, &mut diagnostics)
+            .append_value(
+                RuntimeValue::static_value(IrValue::Number(7.0)),
+                first_span,
+                &mut diagnostics,
+            )
             .expect("scalar must be observable");
         mixed
-            .append_value(RuntimeValue::static_value(IrValue::Content(vec![second])), second_span, &mut diagnostics)
+            .append_value(
+                RuntimeValue::static_value(IrValue::Content(vec![second])),
+                second_span,
+                &mut diagnostics,
+            )
             .expect("content must be observable");
         let CallOutcome::Value(value) = mixed.finish() else {
             panic!("expected mixed content");
         };
-        let nodes = value.as_content_nodes().expect("mixed value must be content");
+        let nodes = value
+            .as_content_nodes()
+            .expect("mixed value must be content");
         assert_eq!(nodes.len(), 2);
         assert!(matches!(
             &nodes[0],
             IrNode::Paragraph { content, span }
                 if *span == first_span
-                    && matches!(content.as_slice(), [IrInline::Text { content, .. }] if content == "7")
+                    && matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, .. }] if content == "7"
+                    )
         ));
-        assert!(matches!(&nodes[1], IrNode::Paragraph { span, .. } if *span == second_span));
+        assert!(matches!(
+            &nodes[1],
+            IrNode::Paragraph { span, .. } if *span == second_span
+        ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
         // Range materialization must still fail on its original source span.
         let range_span = span(60, 70);
         let mut invalid = CallableBodyValueAccumulator::Empty;
         invalid
-            .append_value(RuntimeValue::static_value(IrValue::Content(vec![first])), first_span, &mut diagnostics)
+            .append_value(
+                RuntimeValue::static_value(IrValue::Content(vec![first])),
+                first_span,
+                &mut diagnostics,
+            )
             .expect("first content must be observable");
         let error = invalid.append_value(
             RuntimeValue::static_value(IrValue::Range(IrRange {
