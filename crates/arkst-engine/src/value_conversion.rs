@@ -1418,17 +1418,38 @@ impl ConversionFailure {
     }
 }
 
-/// A context-sensitive conversion result. `Value` is already typed or
-/// structurally preserved. `RawMarkdown` is an explicit request for the
-/// evaluator to parse the original dynamic text in the selected target
+/// A context-sensitive conversion result. `Value` is already an
+/// evaluator-owned runtime value. `RawMarkdown` is an explicit request for
+/// the evaluator to parse the original dynamic text in the selected target
 /// context; the conversion module does not perform that evaluation itself.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum TargetValue {
-    Value(IrValue),
+    Value(RuntimeValue),
     RawMarkdown {
         target: RawMarkdownTarget,
         text: String,
     },
+}
+
+impl TargetValue {
+    /// Resolves the already-typed carrier directly and delegates only raw
+    /// Markdown materialization to the evaluator-owned contextual resolver.
+    ///
+    /// The error type is deliberately generic so the evaluator can retain its
+    /// complete source-backed diagnostic payload instead of collapsing it to
+    /// a conversion-only reason at this boundary.
+    pub(crate) fn resolve_with<E>(
+        self,
+        resolve_raw_markdown: impl FnOnce(
+            RawMarkdownTarget,
+            String,
+        ) -> Result<RuntimeValue, E>,
+    ) -> Result<RuntimeValue, E> {
+        match self {
+            Self::Value(value) => Ok(value),
+            Self::RawMarkdown { target, text } => resolve_raw_markdown(target, text),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1441,34 +1462,48 @@ pub(crate) enum RawMarkdownTarget {
 }
 
 /// Applies the one engine-owned target conversion policy used by value
-/// consumers. The returned raw requests correspond to the pinned
-/// `DynamicValueConverter` branches and preserve the value's dynamic origin.
+/// consumers. Identity conversions retain the existing runtime value,
+/// including origin/provenance; conversions that materialize a different
+/// semantic value publish a fresh materialized runtime value.
 pub(crate) fn convert_target_with_origin(
     argument: &RuntimeValue,
     target: ConversionTarget,
     span: SourceSpan,
 ) -> Result<TargetValue, ConversionError> {
     match target {
-        ConversionTarget::Dynamic => Ok(TargetValue::Value(argument.to_ir_value())),
-        ConversionTarget::Number => {
-            convert_scalar_with_origin(argument, ScalarTarget::Number).map(scalar_value_to_ir)
-        }
+        ConversionTarget::Dynamic => Ok(TargetValue::Value(argument.clone())),
+        ConversionTarget::Number => match &argument.kind {
+            RuntimeValueKind::Number(_) => Ok(TargetValue::Value(argument.clone())),
+            _ => convert_scalar_with_origin(argument, ScalarTarget::Number)
+                .map(scalar_value_to_runtime),
+        },
         ConversionTarget::Integer => convert_integer_with_origin(argument)
-            .map(|value| TargetValue::Value(IrValue::Number(f64::from(value)))),
-        ConversionTarget::Boolean => {
-            convert_scalar_with_origin(argument, ScalarTarget::Boolean).map(scalar_value_to_ir)
-        }
-        ConversionTarget::String => {
-            convert_scalar_with_origin(argument, ScalarTarget::String).map(scalar_value_to_ir)
-        }
-        ConversionTarget::Range => convert_range_with_origin(argument, span)
-            .map(|value| TargetValue::Value(IrValue::Range(value))),
-        ConversionTarget::Size => {
-            convert_domain_with_origin(argument, DomainTarget::Size).map(domain_value_to_ir)
-        }
-        ConversionTarget::Color => {
-            convert_domain_with_origin(argument, DomainTarget::Color).map(domain_value_to_ir)
-        }
+            .map(|value| materialized_target_value(IrValue::Number(f64::from(value)))),
+        ConversionTarget::Boolean => match &argument.kind {
+            RuntimeValueKind::Boolean(_) => Ok(TargetValue::Value(argument.clone())),
+            _ => convert_scalar_with_origin(argument, ScalarTarget::Boolean)
+                .map(scalar_value_to_runtime),
+        },
+        ConversionTarget::String => match &argument.kind {
+            RuntimeValueKind::String(_) => Ok(TargetValue::Value(argument.clone())),
+            _ => convert_scalar_with_origin(argument, ScalarTarget::String)
+                .map(scalar_value_to_runtime),
+        },
+        ConversionTarget::Range => match &argument.kind {
+            RuntimeValueKind::Range(_) => Ok(TargetValue::Value(argument.clone())),
+            _ => convert_range_with_origin(argument, span)
+                .map(|value| materialized_target_value(IrValue::Range(value))),
+        },
+        ConversionTarget::Size => match &argument.kind {
+            RuntimeValueKind::Size(_) => Ok(TargetValue::Value(argument.clone())),
+            _ => convert_domain_with_origin(argument, DomainTarget::Size)
+                .map(domain_value_to_runtime),
+        },
+        ConversionTarget::Color => match &argument.kind {
+            RuntimeValueKind::Color(_) => Ok(TargetValue::Value(argument.clone())),
+            _ => convert_domain_with_origin(argument, DomainTarget::Color)
+                .map(domain_value_to_runtime),
+        },
         ConversionTarget::Enum => Err(ConversionError::UnsupportedValue {
             target: ConversionTarget::Enum,
         }),
@@ -1479,9 +1514,7 @@ pub(crate) fn convert_target_with_origin(
             convert_content_target(argument, RawMarkdownTarget::Block, span, true)
         }
         ConversionTarget::Node => match &argument.kind {
-            RuntimeValueKind::Component(component) => {
-                Ok(TargetValue::Value(IrValue::Component(component.clone())))
-            }
+            RuntimeValueKind::Component(_) => Ok(TargetValue::Value(argument.clone())),
             _ => Err(ConversionError::UnsupportedValue {
                 target: ConversionTarget::Node,
             }),
@@ -1502,12 +1535,10 @@ pub(crate) fn convert_target_with_origin(
             &[IrValueKind::Dictionary],
         ),
         ConversionTarget::Callable => match &argument.kind {
-            RuntimeValueKind::Callable(value) => {
-                Ok(TargetValue::Value(IrValue::Callable(value.to_ir())))
-            }
-            RuntimeValueKind::InlineBody(body) => Ok(TargetValue::Value(IrValue::Callable(
-                body.clone().into_callable().into_ir(),
-            ))),
+            RuntimeValueKind::Callable(_) => Ok(TargetValue::Value(argument.clone())),
+            RuntimeValueKind::InlineBody(body) => Ok(materialized_target_value(
+                IrValue::Callable(body.clone().into_callable().into_ir()),
+            )),
             _ => match argument.dynamic_text() {
                 Some(value) => Ok(TargetValue::RawMarkdown {
                     target: RawMarkdownTarget::Callable,
@@ -1521,20 +1552,24 @@ pub(crate) fn convert_target_with_origin(
     }
 }
 
-fn scalar_value_to_ir(value: ScalarValue) -> TargetValue {
-    match value {
-        ScalarValue::Number(value) => TargetValue::Value(IrValue::Number(value)),
-        ScalarValue::Boolean(value) => TargetValue::Value(IrValue::Boolean(value)),
-        ScalarValue::String(value) => TargetValue::Value(IrValue::String(value)),
-    }
+fn materialized_target_value(value: IrValue) -> TargetValue {
+    TargetValue::Value(RuntimeValue::static_value(value))
 }
 
-fn domain_value_to_ir(value: DomainValue) -> TargetValue {
-    match value {
-        DomainValue::Size(value) => TargetValue::Value(IrValue::Size(value)),
-        DomainValue::Color(value) => TargetValue::Value(IrValue::Color(value)),
-        DomainValue::Enum(value) => TargetValue::Value(IrValue::Enum(value)),
-    }
+fn scalar_value_to_runtime(value: ScalarValue) -> TargetValue {
+    materialized_target_value(match value {
+        ScalarValue::Number(value) => IrValue::Number(value),
+        ScalarValue::Boolean(value) => IrValue::Boolean(value),
+        ScalarValue::String(value) => IrValue::String(value),
+    })
+}
+
+fn domain_value_to_runtime(value: DomainValue) -> TargetValue {
+    materialized_target_value(match value {
+        DomainValue::Size(value) => IrValue::Size(value),
+        DomainValue::Color(value) => IrValue::Color(value),
+        DomainValue::Enum(value) => IrValue::Enum(value),
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1552,15 +1587,14 @@ fn convert_content_target(
     block_target: bool,
 ) -> Result<TargetValue, ConversionError> {
     match &argument.kind {
-        // MarkdownContentValue adapts to InlineMarkdownContentValue in the
-        // pinned value model. The IR keeps one structured content carrier, so
-        // both content targets preserve that carrier without flattening it.
-        RuntimeValueKind::Content(nodes) => Ok(TargetValue::Value(IrValue::Content(nodes.clone()))),
-        // An inline contextual body is not a block body. It remains inline
-        // content until the selected target asks for it.
-        RuntimeValueKind::InlineBody(body) if !block_target => {
-            Ok(TargetValue::Value(IrValue::Content(body.content.clone())))
-        }
+        // Already-evaluated content is a semantic identity conversion. Keep
+        // the evaluator-owned carrier so source provenance is not discarded.
+        RuntimeValueKind::Content(_) => Ok(TargetValue::Value(argument.clone())),
+        // An inline contextual body is not a block body. It becomes fresh
+        // materialized inline content only when this target requests it.
+        RuntimeValueKind::InlineBody(body) if !block_target => Ok(materialized_target_value(
+            IrValue::Content(body.content.clone()),
+        )),
         RuntimeValueKind::String(value)
             if block_target || argument.origin == ValueOrigin::Dynamic =>
         {
@@ -1577,8 +1611,7 @@ fn convert_content_target(
         }
         // The block Markdown target renders scalar results as literal text;
         // it does not feed their textual representation back through the
-        // Markdown parser. This keeps already-evaluated values typed while
-        // matching the target's observable paragraph materialization.
+        // Markdown parser.
         RuntimeValueKind::Number(value) if block_target => {
             Ok(literal_content_value(number_to_text(*value), span))
         }
@@ -1587,21 +1620,19 @@ fn convert_content_target(
         }
         // A non-null MarkdownContent target observes None as the literal
         // value name. Nullable consumers must intercept None before selecting
-        // this target; `.container body:{.none}` is one such boundary.
+        // this target.
         RuntimeValueKind::None if block_target => {
             Ok(literal_content_value("None".to_string(), span))
         }
-        RuntimeValueKind::String(value) if !block_target => {
-            Ok(TargetValue::Value(IrValue::Content(vec![
-                IrNode::Paragraph {
-                    content: vec![IrInline::Text {
-                        content: value.clone(),
-                        span,
-                    }],
+        RuntimeValueKind::String(value) if !block_target => Ok(materialized_target_value(
+            IrValue::Content(vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: value.clone(),
                     span,
-                },
-            ])))
-        }
+                }],
+                span,
+            }]),
+        )),
         _ => Err(ConversionError::UnsupportedValue {
             target: if block_target {
                 ConversionTarget::BlockContent
@@ -1613,7 +1644,7 @@ fn convert_content_target(
 }
 
 fn literal_content_value(text: String, span: SourceSpan) -> TargetValue {
-    TargetValue::Value(IrValue::Content(vec![IrNode::Paragraph {
+    materialized_target_value(IrValue::Content(vec![IrNode::Paragraph {
         content: vec![IrInline::Text {
             content: text,
             span,
@@ -1633,11 +1664,10 @@ fn convert_structured_target(
         RuntimeValueKind::Dictionary(_) => IrValueKind::Dictionary,
         RuntimeValueKind::Range(_) => IrValueKind::Range,
         // A parsed Markdown list is the frontend representation of the
-        // upstream dynamic iterable adapter. Keep it structured here so the
-        // evaluator can materialize its elements without reparsing or
-        // stringifying the already parsed list.
-        RuntimeValueKind::Content(nodes) if raw_target == RawMarkdownTarget::Iterable => {
-            return Ok(TargetValue::Value(IrValue::Content(nodes.clone())));
+        // upstream dynamic iterable adapter. Keep the exact runtime carrier
+        // so source-backed provenance survives the identity conversion.
+        RuntimeValueKind::Content(_) if raw_target == RawMarkdownTarget::Iterable => {
+            return Ok(TargetValue::Value(argument.clone()));
         }
         _ => {
             if let Some(value) = argument.dynamic_text() {
@@ -1662,7 +1692,7 @@ fn convert_structured_target(
             },
         });
     }
-    Ok(TargetValue::Value(argument.to_ir_value()))
+    Ok(TargetValue::Value(argument.clone()))
 }
 
 /// Converts a typed evaluator value to one of the supported scalar targets.
@@ -3601,8 +3631,9 @@ mod tests {
         convert_text_case_with_origin, convert_text_decoration_with_origin,
         convert_text_size_with_origin, convert_text_style_with_origin,
         convert_text_variant_with_origin, convert_text_weight_with_origin, raw_body_dynamic_text,
-        ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget,
-        DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue, RuntimeValueKind, ScalarTarget,
+        ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionFailure,
+        ConversionTarget, DomainTarget, DomainValue, RawMarkdownTarget, RuntimeValue,
+        RuntimeValueKind, ScalarTarget,
         ScalarValue, TargetValue, ValueOrigin, ValueProvenance,
     };
     use arkst_ir::{
@@ -3743,7 +3774,7 @@ mod tests {
         ));
         assert_eq!(
             convert_target_with_origin(&replaced, ConversionTarget::Node, span()),
-            Ok(TargetValue::Value(IrValue::Component(component)))
+            Ok(TargetValue::Value(replaced.clone()))
         );
 
         for target in [
@@ -3877,16 +3908,20 @@ mod tests {
         ));
         assert_eq!(
             convert_target_with_origin(&runtime, ConversionTarget::InlineContent, content_span),
-            Ok(TargetValue::Value(IrValue::Content(inline.content.clone())))
+            Ok(TargetValue::Value(RuntimeValue::static_value(IrValue::Content(
+                inline.content.clone(),
+            ))))
         );
         assert_eq!(
             convert_target_with_origin(&runtime, ConversionTarget::Callable, body_span),
-            Ok(TargetValue::Value(IrValue::Callable(IrCallable {
-                parameters: inline.parameters.clone(),
-                body: inline.body.clone(),
-                span: inline.span,
-                capture: None,
-            })))
+            Ok(TargetValue::Value(RuntimeValue::static_value(
+                IrValue::Callable(IrCallable {
+                    parameters: inline.parameters.clone(),
+                    body: inline.body.clone(),
+                    span: inline.span,
+                    capture: None,
+                }),
+            )))
         );
         assert_eq!(runtime.into_ir_value(), IrValue::InlineBody(inline));
     }
@@ -4054,7 +4089,7 @@ mod tests {
         ] {
             assert_eq!(
                 convert_target_with_origin(&source_backed, target, span()),
-                Ok(TargetValue::Value(plain.clone()))
+                Ok(TargetValue::Value(source_backed.clone()))
             );
         }
         assert_eq!(
@@ -4254,7 +4289,7 @@ mod tests {
         for target in [ConversionTarget::Iterable, ConversionTarget::Dictionary] {
             assert_eq!(
                 convert_target_with_origin(&replaced, target, span()),
-                Ok(TargetValue::Value(dictionary.clone()))
+                Ok(TargetValue::Value(replaced.clone()))
             );
         }
         for target in [
@@ -4280,7 +4315,7 @@ mod tests {
         assert!(matches!(&pair.kind, RuntimeValueKind::Pair(_)));
         assert_eq!(
             convert_target_with_origin(&pair, ConversionTarget::Iterable, span()),
-            Ok(TargetValue::Value(pair_value))
+            Ok(TargetValue::Value(pair.clone()))
         );
         assert_eq!(
             convert_target_with_origin(&pair, ConversionTarget::Dictionary, span()),
@@ -4361,15 +4396,15 @@ mod tests {
 
         assert_eq!(
             convert_target_with_origin(&static_string, ConversionTarget::InlineContent, span()),
-            Ok(TargetValue::Value(IrValue::Content(vec![
-                IrNode::Paragraph {
+            Ok(TargetValue::Value(RuntimeValue::static_value(
+                IrValue::Content(vec![IrNode::Paragraph {
                     content: vec![IrInline::Text {
                         content: "*literal*".into(),
                         span: span(),
                     }],
                     span: span(),
-                }
-            ])))
+                }]),
+            )))
         );
         assert_eq!(
             convert_target_with_origin(&static_string, ConversionTarget::BlockContent, span()),
@@ -4808,15 +4843,79 @@ mod tests {
     }
 
     #[test]
-    fn target_conversion_keeps_scalar_content_and_origin_ordering_explicit() {
-        assert_eq!(
-            convert_target_with_origin(
-                &RuntimeValue::dynamic_value(IrValue::String("2".into())),
-                ConversionTarget::Number,
-                span(),
-            ),
-            Ok(TargetValue::Value(IrValue::Number(2.0)))
+    fn target_value_runtime_carrier_and_resolver_preserve_provenance_and_diagnostics() {
+        let source_backed = RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "source".into(),
+                span: span(),
+            }],
+            span: span(),
+        }]))
+        .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
+
+        let resolved = TargetValue::Value(source_backed.clone())
+            .resolve_with(|_, _| -> Result<RuntimeValue, ConversionFailure> {
+                panic!("typed runtime targets must not invoke raw Markdown resolution")
+            })
+            .expect("typed runtime target");
+        assert_eq!(resolved, source_backed);
+        assert_eq!(resolved.origin, ValueOrigin::Dynamic);
+        assert_eq!(resolved.source_backed_markdown_text(), Some("source"));
+
+        let parsed = RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "parsed".into(),
+                span: span(),
+            }],
+            span: span(),
+        }]))
+        .with_provenance(ValueProvenance::source_backed_markdown_text("parsed"));
+        let resolved = TargetValue::RawMarkdown {
+            target: RawMarkdownTarget::Inline,
+            text: "*parsed*".into(),
+        }
+        .resolve_with(|target, text| {
+            assert_eq!(target, RawMarkdownTarget::Inline);
+            assert_eq!(text, "*parsed*");
+            Ok::<RuntimeValue, ConversionFailure>(parsed.clone())
+        })
+        .expect("contextual raw Markdown target");
+        assert_eq!(resolved, parsed);
+        assert_eq!(resolved.source_backed_markdown_text(), Some("parsed"));
+
+        let candidate_span = SourceSpan::new(SourceId(11), 1, 4);
+        let parameter_span = SourceSpan::new(SourceId(11), 6, 10);
+        let call_span = SourceSpan::new(SourceId(11), 0, 12);
+        let failure = ConversionFailure::new(
+            ConversionError::InvalidText {
+                target: ConversionTarget::Number,
+            },
+            Some(candidate_span),
+            Some("value"),
+            Some(parameter_span),
+            call_span,
         );
+        let actual = TargetValue::RawMarkdown {
+            target: RawMarkdownTarget::Block,
+            text: "bad".into(),
+        }
+        .resolve_with(|_, _| Err::<RuntimeValue, ConversionFailure>(failure.clone()));
+        assert_eq!(actual, Err(failure));
+    }
+
+    #[test]
+    fn target_conversion_keeps_scalar_content_and_origin_ordering_explicit() {
+        let source_number = RuntimeValue::dynamic_value(IrValue::String("2".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("2"));
+        let converted =
+            convert_target_with_origin(&source_number, ConversionTarget::Number, span())
+                .expect("dynamic textual number");
+        let TargetValue::Value(converted) = converted else {
+            panic!("number target must resolve to a typed runtime value");
+        };
+        assert_eq!(converted, IrValue::Number(2.0));
+        assert_eq!(converted.origin, ValueOrigin::Static);
+        assert!(converted.provenance().is_materialized());
         assert!(matches!(
             convert_target_with_origin(
                 &RuntimeValue::static_value(IrValue::String("2".into())),
@@ -4836,8 +4935,10 @@ mod tests {
         .expect("static String adapts to plain inline content");
         assert!(matches!(
             static_string,
-            TargetValue::Value(IrValue::Content(nodes))
-                if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }] if matches!(content.as_slice(), [IrInline::Text { content, .. }] if content == "*text*"))
+            TargetValue::Value(RuntimeValue {
+                kind: RuntimeValueKind::Content(nodes),
+                ..
+            }) if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }] if matches!(content.as_slice(), [IrInline::Text { content, .. }] if content == "*text*"))
         ));
 
         assert_eq!(
@@ -4874,10 +4975,12 @@ mod tests {
             .expect("scalar result adapts to literal block content");
             assert!(matches!(
                 converted,
-                TargetValue::Value(IrValue::Content(nodes))
-                    if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }]
-                        if matches!(content.as_slice(), [IrInline::Text { content, .. }]
-                            if content == expected))
+                TargetValue::Value(RuntimeValue {
+                    kind: RuntimeValueKind::Content(nodes),
+                    ..
+                }) if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }]
+                    if matches!(content.as_slice(), [IrInline::Text { content, .. }]
+                        if content == expected))
             ));
         }
         for value in [IrValue::Number(2.0), IrValue::Boolean(true)] {
@@ -4911,7 +5014,7 @@ mod tests {
                 ConversionTarget::Node,
                 span(),
             ),
-            Ok(TargetValue::Value(component))
+            Ok(TargetValue::Value(RuntimeValue::static_value(component)))
         );
 
         let inline_body = IrValue::InlineBody(IrInlineBody {
@@ -4932,7 +5035,7 @@ mod tests {
                 ConversionTarget::Callable,
                 span(),
             ),
-            Ok(TargetValue::Value(IrValue::Callable(_)))
+            Ok(TargetValue::Value(RuntimeValue { kind: RuntimeValueKind::Callable(_), .. }))
         ));
 
         let pair = IrValue::Pair(IrPair {
@@ -4946,7 +5049,7 @@ mod tests {
                 ConversionTarget::Iterable,
                 span(),
             ),
-            Ok(TargetValue::Value(IrValue::Pair(_)))
+            Ok(TargetValue::Value(RuntimeValue { kind: RuntimeValueKind::Pair(_), .. }))
         ));
 
         let dictionary = IrValue::Dictionary(arkst_ir::IrDictionary {
@@ -4959,7 +5062,7 @@ mod tests {
                 ConversionTarget::Dictionary,
                 span(),
             ),
-            Ok(TargetValue::Value(IrValue::Dictionary(_)))
+            Ok(TargetValue::Value(RuntimeValue { kind: RuntimeValueKind::Dictionary(_), .. }))
         ));
         assert!(matches!(
             convert_target_with_origin(
@@ -4981,10 +5084,12 @@ mod tests {
         .expect("None adapts to literal non-null block content");
         assert!(matches!(
             none,
-            TargetValue::Value(IrValue::Content(nodes))
-                if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }]
-                    if matches!(content.as_slice(), [IrInline::Text { content, .. }]
-                        if content == "None"))
+            TargetValue::Value(RuntimeValue {
+                kind: RuntimeValueKind::Content(nodes),
+                ..
+            }) if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }]
+                if matches!(content.as_slice(), [IrInline::Text { content, .. }]
+                    if content == "None"))
         ));
 
         for target in [
