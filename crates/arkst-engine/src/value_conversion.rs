@@ -626,6 +626,25 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::Unit)
     }
 
+    /// Consume a runtime Pair without projecting its children through
+    /// transitional IrValue. Return other runtime kinds intact for the legacy
+    /// content-materialization fallback.
+    pub(crate) fn try_into_pair_parts(self) -> Result<(Self, Self, SourceSpan), Box<Self>> {
+        let Self {
+            kind,
+            origin,
+            provenance,
+        } = self;
+        match kind {
+            RuntimeValueKind::Pair(pair) => Ok((*pair.first, *pair.second, pair.span)),
+            kind => Err(Box::new(Self {
+                kind,
+                origin,
+                provenance,
+            })),
+        }
+    }
+
     pub(crate) fn into_pair_parts(self) -> Option<(Self, Self, SourceSpan)> {
         let RuntimeValueKind::Pair(pair) = self.kind else {
             return None;
@@ -4153,6 +4172,32 @@ mod tests {
             .try_into_collection()
             .expect_err("non-Collection must remain available to the fallback");
         assert_eq!(restored, non_collection);
+    }
+
+    #[test]
+    fn g1l1h_try_into_pair_parts_preserves_children_span_and_nonpair_metadata() {
+        let pair_span = SourceSpan::new(SourceId(17), 20, 40);
+        let first = RuntimeValue::dynamic_value(IrValue::String("left".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("left-source"));
+        let second = RuntimeValue::static_value(IrValue::Number(7.0));
+        let pair =
+            RuntimeValue::pair(first.clone(), second.clone(), pair_span, ValueOrigin::Dynamic)
+                .with_provenance(ValueProvenance::source_backed_markdown_text("pair-source"));
+
+        let (actual_first, actual_second, actual_span) = pair
+            .try_into_pair_parts()
+            .expect("runtime Pair must be consumed without IR projection");
+        assert_eq!(actual_first, first);
+        assert_eq!(actual_second, second);
+        assert_eq!(actual_span, pair_span);
+
+        let non_pair = RuntimeValue::dynamic_value(IrValue::Identifier("kept".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("kept"));
+        let restored = *non_pair
+            .clone()
+            .try_into_pair_parts()
+            .expect_err("non-Pair must remain available to the fallback");
+        assert_eq!(restored, non_pair);
     }
 
     #[test]
