@@ -594,6 +594,25 @@ impl RuntimeValue {
         }
     }
 
+    /// Consume a runtime Collection without projecting its children through
+    /// transitional IrValue. Return other runtime kinds intact for the legacy
+    /// content-materialization fallback.
+    pub(crate) fn try_into_collection(self) -> Result<Vec<Self>, Box<Self>> {
+        let Self {
+            kind,
+            origin,
+            provenance,
+        } = self;
+        match kind {
+            RuntimeValueKind::Collection(elements) => Ok(elements),
+            kind => Err(Box::new(Self {
+                kind,
+                origin,
+                provenance,
+            })),
+        }
+    }
+
     pub(crate) fn is_iterable_aggregate(&self) -> bool {
         matches!(
             &self.kind,
@@ -4109,6 +4128,31 @@ mod tests {
         assert!(replaced.provenance().is_materialized());
         assert!(matches!(&replaced.kind, RuntimeValueKind::Content(_)));
         assert_eq!(replaced.to_ir_value(), replacement);
+    }
+
+    #[test]
+    fn g1l1g_try_into_collection_preserves_children_and_noncollection_metadata() {
+        let source_child = RuntimeValue::dynamic_value(IrValue::String("source".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
+        let materialized_child = RuntimeValue::static_value(IrValue::Number(7.0));
+        let collection = RuntimeValue::collection(
+            vec![source_child.clone(), materialized_child.clone()],
+            ValueOrigin::Static,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("outer"));
+
+        let elements = collection
+            .try_into_collection()
+            .expect("runtime collection must be consumed without IR projection");
+        assert_eq!(elements, vec![source_child, materialized_child]);
+
+        let non_collection = RuntimeValue::dynamic_value(IrValue::Identifier("kept".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("kept"));
+        let restored = *non_collection
+            .clone()
+            .try_into_collection()
+            .expect_err("non-Collection must remain available to the fallback");
+        assert_eq!(restored, non_collection);
     }
 
     #[test]
