@@ -1328,11 +1328,7 @@ impl CallableBodyValueAccumulator {
 
         let current = std::mem::replace(self, Self::Empty);
         let mut nodes = current.into_content_nodes(diagnostics)?;
-        nodes.extend(value_into_content_nodes(
-            value.into_ir_value(),
-            span,
-            diagnostics,
-        )?);
+        nodes.extend(runtime_value_into_content_nodes(value, span, diagnostics)?);
         *self = Self::Content(nodes);
         Ok(())
     }
@@ -1349,9 +1345,13 @@ impl CallableBodyValueAccumulator {
         match self {
             Self::Empty => CallOutcome::NoValue,
             Self::SuppressedUnit => CallOutcome::Value(IrValue::Unit.into()),
-            Self::SuppressedUnits => CallOutcome::Value(IrValue::Content(Vec::new()).into()),
+            Self::SuppressedUnits => {
+                CallOutcome::Value(RuntimeValue::content(Vec::new(), ValueOrigin::Static))
+            }
             Self::Semantic { value, .. } => CallOutcome::Value(value),
-            Self::Content(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
+            Self::Content(nodes) => {
+                CallOutcome::Value(RuntimeValue::content(nodes, ValueOrigin::Static))
+            }
         }
     }
 
@@ -1362,10 +1362,23 @@ impl CallableBodyValueAccumulator {
         match self {
             Self::Empty | Self::SuppressedUnit | Self::SuppressedUnits => Ok(Vec::new()),
             Self::Semantic { value, span } => {
-                value_into_content_nodes(value.into_ir_value(), span, diagnostics)
+                runtime_value_into_content_nodes(value, span, diagnostics)
             }
             Self::Content(nodes) => Ok(nodes),
         }
+    }
+}
+
+/// Preserve evaluator-owned Content nodes directly. Other value kinds retain
+/// the prior legacy materialization semantics until their G1 owners migrate.
+fn runtime_value_into_content_nodes(
+    value: RuntimeValue,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Vec<IrNode>, CallOutcome> {
+    match value.try_into_content_nodes() {
+        Ok(nodes) => Ok(nodes),
+        Err(value) => value_into_content_nodes((*value).into_ir_value(), span, diagnostics),
     }
 }
 
@@ -35090,6 +35103,121 @@ mod tests {
 
         assert_eq!(outcome, LegacyCallOutcome::Value(component));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1e_callable_content_aggregation_preserves_spans_and_noncontent_policy() {
+        let first_span = span(20, 30);
+        let second_span = span(40, 55);
+        let first = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "first".to_string(),
+                span: first_span,
+            }],
+            span: first_span,
+        };
+        let second = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "second".to_string(),
+                span: second_span,
+            }],
+            span: second_span,
+        };
+        let source = RuntimeValue::dynamic_value(IrValue::Content(vec![first.clone()]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
+        let generated = RuntimeValue::static_value(IrValue::Content(vec![second.clone()]));
+        let mut diagnostics = Vec::new();
+
+        // One observable remains exactly the original runtime value.
+        let mut single = CallableBodyValueAccumulator::Empty;
+        single
+            .append_value(source.clone(), first_span, &mut diagnostics)
+            .expect("source-backed content must be observable");
+        let CallOutcome::Value(single_value) = single.finish() else {
+            panic!("expected one runtime content value");
+        };
+        assert_eq!(single_value, source);
+
+        // Composing two observable Content values preserves their nested spans
+        // while intentionally producing static, materialized content.
+        let mut combined = CallableBodyValueAccumulator::Empty;
+        combined
+            .append_value(source, first_span, &mut diagnostics)
+            .expect("first content must be observable");
+        combined
+            .append_value(generated, second_span, &mut diagnostics)
+            .expect("second content must be observable");
+        let CallOutcome::Value(value) = combined.finish() else {
+            panic!("expected combined runtime content");
+        };
+        assert_eq!(value.origin, ValueOrigin::Static);
+        assert!(value.provenance().is_materialized());
+        assert_eq!(
+            value.as_content_nodes(),
+            Some([first.clone(), second.clone()].as_slice())
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        // Non-Content still follows the existing scalar conversion policy.
+        let mut mixed = CallableBodyValueAccumulator::Empty;
+        mixed
+            .append_value(
+                RuntimeValue::static_value(IrValue::Number(7.0)),
+                first_span,
+                &mut diagnostics,
+            )
+            .expect("scalar must be observable");
+        mixed
+            .append_value(
+                RuntimeValue::static_value(IrValue::Content(vec![second])),
+                second_span,
+                &mut diagnostics,
+            )
+            .expect("content must be observable");
+        let CallOutcome::Value(value) = mixed.finish() else {
+            panic!("expected mixed content");
+        };
+        let nodes = value
+            .as_content_nodes()
+            .expect("mixed value must be content");
+        assert_eq!(nodes.len(), 2);
+        assert!(matches!(
+            &nodes[0],
+            IrNode::Paragraph { content, span }
+                if *span == first_span
+                    && matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, .. }] if content == "7"
+                    )
+        ));
+        assert!(matches!(
+            &nodes[1],
+            IrNode::Paragraph { span, .. } if *span == second_span
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        // Range materialization must still fail on its original source span.
+        let range_span = span(60, 70);
+        let mut invalid = CallableBodyValueAccumulator::Empty;
+        invalid
+            .append_value(
+                RuntimeValue::static_value(IrValue::Content(vec![first])),
+                first_span,
+                &mut diagnostics,
+            )
+            .expect("first content must be observable");
+        let error = invalid.append_value(
+            RuntimeValue::static_value(IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(2),
+                span: range_span,
+            })),
+            range_span,
+            &mut diagnostics,
+        );
+        assert!(matches!(error, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].primary, Some(range_span));
     }
 
     #[test]

@@ -523,6 +523,14 @@ impl RuntimeValue {
         }
     }
 
+    pub(crate) fn content(nodes: Vec<IrNode>, origin: ValueOrigin) -> Self {
+        Self {
+            kind: RuntimeValueKind::Content(nodes),
+            origin,
+            provenance: ValueProvenance::Materialized,
+        }
+    }
+
     pub(crate) fn with_origin(mut self, origin: ValueOrigin) -> Self {
         self.origin = origin;
         self
@@ -565,6 +573,24 @@ impl RuntimeValue {
         match &mut self.kind {
             RuntimeValueKind::Content(nodes) => Some(nodes),
             _ => None,
+        }
+    }
+
+    /// Consume typed Content without crossing the transitional IrValue boundary.
+    /// Return other runtime kinds intact for existing target conversion policy.
+    pub(crate) fn try_into_content_nodes(self) -> Result<Vec<IrNode>, Box<Self>> {
+        let Self {
+            kind,
+            origin,
+            provenance,
+        } = self;
+        match kind {
+            RuntimeValueKind::Content(nodes) => Ok(nodes),
+            kind => Err(Box::new(Self {
+                kind,
+                origin,
+                provenance,
+            })),
         }
     }
 
