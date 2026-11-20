@@ -4180,9 +4180,13 @@ mod tests {
         let first = RuntimeValue::dynamic_value(IrValue::String("left".into()))
             .with_provenance(ValueProvenance::source_backed_markdown_text("left-source"));
         let second = RuntimeValue::static_value(IrValue::Number(7.0));
-        let pair =
-            RuntimeValue::pair(first.clone(), second.clone(), pair_span, ValueOrigin::Dynamic)
-                .with_provenance(ValueProvenance::source_backed_markdown_text("pair-source"));
+        let pair = RuntimeValue::pair(
+            first.clone(),
+            second.clone(),
+            pair_span,
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("pair-source"));
 
         let (actual_first, actual_second, actual_span) = pair
             .try_into_pair_parts()
