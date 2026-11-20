@@ -35763,12 +35763,9 @@ mod tests {
             entry_span,
             ValueOrigin::Static,
         );
-        let dictionary = RuntimeValue::dictionary(
-            vec![entry],
-            dictionary_span,
-            ValueOrigin::Static,
-        )
-        .expect("typed runtime dictionary");
+        let dictionary =
+            RuntimeValue::dictionary(vec![entry], dictionary_span, ValueOrigin::Static)
+                .expect("typed runtime dictionary");
         let successful = RuntimeValue::pair(
             RuntimeValue::static_value(component_value(component_span)),
             dictionary,
@@ -35777,13 +35774,17 @@ mod tests {
         );
         let mut diagnostics = Vec::new();
 
-        let nodes =
-            runtime_value_into_content_nodes(successful, span(0, 1), &mut diagnostics)
-                .expect("Component and Dictionary children must retain their fallback policy");
-        let [IrNode::OrderedList { items, span, .. }] = nodes.as_slice() else {
+        let nodes = runtime_value_into_content_nodes(successful, span(0, 1), &mut diagnostics)
+            .expect("Component and Dictionary children must retain their fallback policy");
+        let [IrNode::OrderedList {
+            items,
+            span: actual_pair_span,
+            ..
+        }] = nodes.as_slice()
+        else {
             panic!("expected Pair ordered list");
         };
-        assert_eq!(*span, pair_span);
+        assert_eq!(*actual_pair_span, pair_span);
         assert_eq!(items.len(), 2);
         assert!(matches!(
             items[0].nodes.as_slice(),
