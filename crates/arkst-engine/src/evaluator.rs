@@ -1376,10 +1376,28 @@ fn runtime_value_into_content_nodes(
     span: SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Vec<IrNode>, CallOutcome> {
-    match value.try_into_content_nodes() {
-        Ok(nodes) => Ok(nodes),
-        Err(value) => value_into_content_nodes((*value).into_ir_value(), span, diagnostics),
-    }
+    let value = match value.try_into_content_nodes() {
+        Ok(nodes) => return Ok(nodes),
+        Err(value) => *value,
+    };
+    let value = match value.try_into_collection() {
+        Ok(values) => {
+            let mut nodes = Vec::new();
+            if let Err(error) = nodes.try_reserve(values.len()) {
+                diagnostics.push(iteration_error(
+                    format!("collection content cannot be allocated: {error}"),
+                    span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            for value in values {
+                nodes.extend(runtime_value_into_content_nodes(value, span, diagnostics)?);
+            }
+            return Ok(nodes);
+        }
+        Err(value) => *value,
+    };
+    value_into_content_nodes(value.into_ir_value(), span, diagnostics)
 }
 
 fn value_into_content_nodes(
@@ -35346,6 +35364,267 @@ mod tests {
         assert_eq!(name, "g1l1f_unknown");
         assert_eq!(unresolved.origin, ValueOrigin::Static);
         assert!(unresolved.provenance().is_materialized());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1g_runtime_collection_content_normalization_preserves_order_spans_and_fallbacks() {
+        let caller_span = span(5, 15);
+        let first_span = span(100, 110);
+        let second_span = span(120, 135);
+        let component_span = span(150, 175);
+        let first = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "first".to_string(),
+                span: first_span,
+            }],
+            span: first_span,
+        };
+        let second = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "second".to_string(),
+                span: second_span,
+            }],
+            span: second_span,
+        };
+        let source = RuntimeValue::dynamic_value(IrValue::Content(vec![first.clone()]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
+        let nested = RuntimeValue::collection(
+            vec![
+                RuntimeValue::static_value(IrValue::Number(7.0)),
+                RuntimeValue::static_value(IrValue::Content(vec![second.clone()])),
+            ],
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("nested"));
+        let component = RuntimeValue::static_value(component_value(component_span));
+        let collection =
+            RuntimeValue::collection(vec![source, nested, component], ValueOrigin::Dynamic)
+                .with_provenance(ValueProvenance::source_backed_markdown_text("outer"));
+        let mut diagnostics = Vec::new();
+
+        let nodes = runtime_value_into_content_nodes(collection, caller_span, &mut diagnostics)
+            .expect("runtime Collection must materialize in child order");
+
+        assert_eq!(nodes.len(), 4);
+        assert_eq!(nodes[0], first);
+        assert!(matches!(
+            &nodes[1],
+            IrNode::Paragraph { content, span }
+                if *span == caller_span
+                    && matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, span }]
+                            if content == "7" && *span == caller_span
+                    )
+        ));
+        assert_eq!(nodes[2], second);
+        assert!(matches!(
+            &nodes[3],
+            IrNode::Component { component } if component.span() == component_span
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1g_runtime_collection_failure_and_legacy_pair_dictionary_fallback_remain_stable() {
+        let caller_span = span(0, 20);
+        let first_span = span(30, 40);
+        let range_span = span(50, 60);
+        let first = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "before".to_string(),
+                span: first_span,
+            }],
+            span: first_span,
+        };
+        let invalid = RuntimeValue::collection(
+            vec![
+                RuntimeValue::static_value(IrValue::Content(vec![first])),
+                RuntimeValue::dynamic_value(IrValue::Range(IrRange {
+                    start: Some(1),
+                    end: Some(3),
+                    span: range_span,
+                }))
+                .with_provenance(ValueProvenance::source_backed_markdown_text("1..3")),
+                RuntimeValue::static_value(IrValue::Content(vec![text_paragraph("after")])),
+            ],
+            ValueOrigin::Static,
+        );
+        let mut diagnostics = Vec::new();
+
+        let failure = runtime_value_into_content_nodes(invalid, caller_span, &mut diagnostics);
+        assert!(matches!(failure, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(range_span));
+
+        diagnostics.clear();
+        let pair_span = span(70, 80);
+        let pair = RuntimeValue::pair(
+            RuntimeValue::static_value(IrValue::String("left".to_string())),
+            RuntimeValue::static_value(IrValue::Number(2.0)),
+            pair_span,
+            ValueOrigin::Static,
+        );
+        let pair_nodes = runtime_value_into_content_nodes(pair, caller_span, &mut diagnostics)
+            .expect("Pair must remain on the legacy content fallback");
+        assert!(matches!(
+            pair_nodes.as_slice(),
+            [IrNode::OrderedList { items, span, .. }]
+                if *span == pair_span && items.len() == 2
+        ));
+
+        let entry_span = span(90, 100);
+        let dictionary_span = span(85, 110);
+        let entry = RuntimeValue::pair(
+            RuntimeValue::static_value(IrValue::String("key".to_string())),
+            RuntimeValue::static_value(IrValue::Number(3.0)),
+            entry_span,
+            ValueOrigin::Static,
+        );
+        let dictionary =
+            RuntimeValue::dictionary(vec![entry], dictionary_span, ValueOrigin::Static)
+                .expect("typed runtime dictionary");
+        let dictionary_nodes =
+            runtime_value_into_content_nodes(dictionary, caller_span, &mut diagnostics)
+                .expect("Dictionary must remain on the legacy table fallback");
+        assert!(matches!(
+            dictionary_nodes.as_slice(),
+            [IrNode::Table { rows, span, .. }]
+                if *span == dictionary_span
+                    && rows.len() == 1
+                    && rows[0].span == entry_span
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1g_single_callable_collection_remains_semantic_until_composition() {
+        let collection_span = span(200, 210);
+        let second_span = span(220, 230);
+        let collection = RuntimeValue::collection(
+            vec![
+                RuntimeValue::dynamic_value(IrValue::String("source".to_string()))
+                    .with_provenance(ValueProvenance::source_backed_markdown_text("source")),
+                RuntimeValue::static_value(IrValue::Number(8.0)),
+            ],
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("collection"));
+        let second = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "tail".to_string(),
+                span: second_span,
+            }],
+            span: second_span,
+        };
+        let mut diagnostics = Vec::new();
+
+        let mut single = CallableBodyValueAccumulator::Empty;
+        single
+            .append_value(collection.clone(), collection_span, &mut diagnostics)
+            .expect("single Collection is an observable semantic value");
+        let CallOutcome::Value(single_value) = single.finish() else {
+            panic!("single Collection must remain a semantic return value");
+        };
+        assert_eq!(single_value, collection);
+
+        let mut composed = CallableBodyValueAccumulator::Empty;
+        composed
+            .append_value(collection, collection_span, &mut diagnostics)
+            .expect("Collection must remain semantic until composition");
+        composed
+            .append_value(
+                RuntimeValue::static_value(IrValue::Content(vec![second.clone()])),
+                second_span,
+                &mut diagnostics,
+            )
+            .expect("second observable triggers content composition");
+        let CallOutcome::Value(composed) = composed.finish() else {
+            panic!("composed callable result must be content");
+        };
+        assert_eq!(composed.origin, ValueOrigin::Static);
+        assert!(composed.provenance().is_materialized());
+        let nodes = composed
+            .as_content_nodes()
+            .expect("composed Collection must normalize to content");
+        assert_eq!(nodes.len(), 3);
+        assert!(matches!(
+            &nodes[0],
+            IrNode::Paragraph { content, span }
+                if *span == collection_span
+                    && matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, .. }] if content == "source"
+                    )
+        ));
+        assert!(matches!(
+            &nodes[1],
+            IrNode::Paragraph { content, span }
+                if *span == collection_span
+                    && matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, .. }] if content == "8"
+                    )
+        ));
+        assert_eq!(nodes[2], second);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1g_taken_conditional_collection_normalizes_static_materialized_content() {
+        let caller_span = span(0, 20);
+        let nested_span = span(240, 250);
+        let nested = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "nested".to_string(),
+                span: nested_span,
+            }],
+            span: nested_span,
+        };
+        let collection = RuntimeValue::collection(
+            vec![
+                RuntimeValue::dynamic_value(IrValue::Content(vec![nested.clone()]))
+                    .with_provenance(ValueProvenance::source_backed_markdown_text("nested")),
+                RuntimeValue::static_value(IrValue::Number(9.0)),
+            ],
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("collection"));
+        let mut context = EvaluationContext::new();
+        context.set_value("payload".to_string(), collection);
+        let mut diagnostics = Vec::new();
+
+        let outcome = Evaluator::new().evaluate_call_value(
+            "if",
+            &[IrValue::Boolean(true), call_value("payload", Vec::new())],
+            &[],
+            None,
+            None,
+            &caller_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        let CallOutcome::Value(value) = outcome else {
+            panic!("taken conditional Collection must produce content");
+        };
+
+        assert_eq!(value.origin, ValueOrigin::Static);
+        assert!(value.provenance().is_materialized());
+        let nodes = value
+            .as_content_nodes()
+            .expect("taken conditional Collection must normalize to content");
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0], nested);
+        assert!(matches!(
+            &nodes[1],
+            IrNode::Paragraph { content, span }
+                if *span == caller_span
+                    && matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, .. }] if content == "9"
+                    )
+        ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
