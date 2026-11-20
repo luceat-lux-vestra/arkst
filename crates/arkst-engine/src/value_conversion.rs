@@ -578,7 +578,7 @@ impl RuntimeValue {
 
     /// Consume typed Content without crossing the transitional IrValue boundary.
     /// Return other runtime kinds intact for existing target conversion policy.
-    pub(crate) fn try_into_content_nodes(self) -> Result<Vec<IrNode>, Self> {
+    pub(crate) fn try_into_content_nodes(self) -> Result<Vec<IrNode>, Box<Self>> {
         let Self {
             kind,
             origin,
@@ -586,11 +586,11 @@ impl RuntimeValue {
         } = self;
         match kind {
             RuntimeValueKind::Content(nodes) => Ok(nodes),
-            kind => Err(Self {
+            kind => Err(Box::new(Self {
                 kind,
                 origin,
                 provenance,
-            }),
+            })),
         }
     }
 

@@ -1347,11 +1347,11 @@ impl CallableBodyValueAccumulator {
             Self::SuppressedUnit => CallOutcome::Value(IrValue::Unit.into()),
             Self::SuppressedUnits => {
                 CallOutcome::Value(RuntimeValue::content(Vec::new(), ValueOrigin::Static))
-            },
+            }
             Self::Semantic { value, .. } => CallOutcome::Value(value),
             Self::Content(nodes) => {
                 CallOutcome::Value(RuntimeValue::content(nodes, ValueOrigin::Static))
-            },
+            }
         }
     }
 
@@ -1378,7 +1378,7 @@ fn runtime_value_into_content_nodes(
 ) -> Result<Vec<IrNode>, CallOutcome> {
     match value.try_into_content_nodes() {
         Ok(nodes) => Ok(nodes),
-        Err(value) => value_into_content_nodes(value.into_ir_value(), span, diagnostics),
+        Err(value) => value_into_content_nodes((*value).into_ir_value(), span, diagnostics),
     }
 }
 
