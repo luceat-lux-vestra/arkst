@@ -20803,10 +20803,9 @@ impl Evaluator {
         match self.evaluate_value(value, diagnostics, context) {
             CallOutcome::Value(value) => {
                 match runtime_value_into_content_nodes(value, *span, diagnostics) {
-                    Ok(nodes) => CallOutcome::Value(RuntimeValue::content(
-                        nodes,
-                        ValueOrigin::Static,
-                    )),
+                    Ok(nodes) => {
+                        CallOutcome::Value(RuntimeValue::content(nodes, ValueOrigin::Static))
+                    }
                     Err(outcome) => outcome,
                 }
             }
@@ -35320,7 +35319,9 @@ mod tests {
         let CallOutcome::Value(skipped) = skipped else {
             panic!("false conditional must return empty content");
         };
-        assert!(skipped.as_content_nodes().is_some_and(|nodes| nodes.is_empty()));
+        assert!(skipped
+            .as_content_nodes()
+            .is_some_and(|nodes| nodes.is_empty()));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
         let unresolved = evaluator.evaluate_call_value(
