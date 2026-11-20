@@ -20802,8 +20802,10 @@ impl Evaluator {
     ) -> CallOutcome {
         match self.evaluate_value(value, diagnostics, context) {
             CallOutcome::Value(value) => {
-                match self.scalar_or_content(value.into_ir_value(), span, diagnostics) {
-                    Ok(value) => CallOutcome::Value(value.into()),
+                match runtime_value_into_content_nodes(value, *span, diagnostics) {
+                    Ok(nodes) => {
+                        CallOutcome::Value(RuntimeValue::content(nodes, ValueOrigin::Static))
+                    }
                     Err(outcome) => outcome,
                 }
             }
@@ -35218,6 +35220,133 @@ mod tests {
         assert!(matches!(error, Err(CallOutcome::Failed)));
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].primary, Some(range_span));
+    }
+
+    #[test]
+    fn g1l1f_conditional_content_argument_normalizes_runtime_content_without_ir_roundtrip() {
+        let first_span = span(100, 110);
+        let second_span = span(120, 135);
+        let nodes = vec![
+            IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "first".to_string(),
+                    span: first_span,
+                }],
+                span: first_span,
+            },
+            IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "second".to_string(),
+                    span: second_span,
+                }],
+                span: second_span,
+            },
+        ];
+        let source = RuntimeValue::dynamic_value(IrValue::Content(nodes.clone()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("source"));
+        let evaluator = Evaluator::new();
+
+        for (name, condition) in [("if", true), ("ifnot", false)] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            context.set_value("payload".to_string(), source.clone());
+
+            let outcome = evaluator.evaluate_call_value(
+                name,
+                &[
+                    IrValue::Boolean(condition),
+                    call_value("payload", Vec::new()),
+                ],
+                &[],
+                None,
+                None,
+                &span(0, 20),
+                &mut diagnostics,
+                &mut context,
+            );
+            let CallOutcome::Value(value) = outcome else {
+                panic!("expected taken conditional content");
+            };
+
+            assert_eq!(value.origin, ValueOrigin::Static);
+            assert!(value.provenance().is_materialized());
+            assert_eq!(value.as_content_nodes(), Some(nodes.as_slice()));
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+    }
+
+    #[test]
+    fn g1l1f_conditional_content_argument_keeps_fallback_failure_and_lazy_unresolved_policy() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 20);
+        let range_span = span(60, 70);
+        let range = RuntimeValue::dynamic_value(IrValue::Range(IrRange {
+            start: Some(1),
+            end: Some(3),
+            span: range_span,
+        }))
+        .with_provenance(ValueProvenance::source_backed_markdown_text("1..3"));
+        let mut context = EvaluationContext::new();
+        context.set_value("range".to_string(), range);
+        let range_ref = call_value("range", Vec::new());
+
+        let mut diagnostics = Vec::new();
+        let failed = evaluator.evaluate_call_value(
+            "if",
+            &[IrValue::Boolean(true), range_ref.clone()],
+            &[],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(failed, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(range_span));
+
+        diagnostics.clear();
+        let skipped = evaluator.evaluate_call_value(
+            "if",
+            &[IrValue::Boolean(false), range_ref],
+            &[],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        let CallOutcome::Value(skipped) = skipped else {
+            panic!("false conditional must return empty content");
+        };
+        assert!(skipped
+            .as_content_nodes()
+            .is_some_and(|nodes| nodes.is_empty()));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let unresolved = evaluator.evaluate_call_value(
+            "if",
+            &[
+                IrValue::Boolean(true),
+                call_value("g1l1f_unknown", Vec::new()),
+            ],
+            &[],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        let CallOutcome::Value(unresolved) = unresolved else {
+            panic!("unresolved content argument must remain preservable content");
+        };
+        let Some([IrNode::FunctionCall { name, .. }]) = unresolved.as_content_nodes() else {
+            panic!("expected one preserved unresolved function call");
+        };
+        assert_eq!(name, "g1l1f_unknown");
+        assert_eq!(unresolved.origin, ValueOrigin::Static);
+        assert!(unresolved.provenance().is_materialized());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
