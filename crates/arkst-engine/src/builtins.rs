@@ -1307,11 +1307,10 @@ fn text_url_string_conversion(
     value: &RuntimeValue,
 ) -> Result<String, value_conversion::ConversionError> {
     scalar_string_conversion(value).or_else(|error| {
-        let semantic_value = value.semantic_value();
-        let IrValue::Content(nodes) = semantic_value.as_ref() else {
+        let Some(nodes) = value.as_content_nodes() else {
             return Err(error);
         };
-        let [IrNode::Paragraph { content, .. }] = nodes.as_slice() else {
+        let [IrNode::Paragraph { content, .. }] = nodes else {
             return Err(error);
         };
         let [IrInline::Link {
