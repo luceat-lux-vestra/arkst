@@ -1638,8 +1638,11 @@ fn evaluate_plaintext(
     let content = arguments
         .remove(0)
         .ok_or_else(|| error("`.plaintext` requires one content argument".to_string()))?;
-    let content_semantic = content.semantic_value();
-    let text = plain_text_argument(content_semantic.as_ref()).ok_or_else(|| {
+    let text = match content.as_content_nodes() {
+        Some(nodes) => plain_text_from_content(nodes),
+        None => content.plain_text_scalar(),
+    }
+    .ok_or_else(|| {
         error(
             "`.plaintext` requires already-parsed inline content or a supported scalar value"
                 .to_string(),
@@ -1814,8 +1817,9 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
     Some(())
 }
 
-/// Projects the bounded `.plaintext` input contract without converting a
-/// value back into source text or invoking a Markdown parser.
+/// Transitional IR-only plain-text projection retained for evaluator document
+/// metadata paths. Public `.plaintext` evaluation must stay runtime-owned and
+/// must not route through this helper.
 pub(crate) fn plain_text_argument(value: &IrValue) -> Option<String> {
     match value {
         IrValue::Identifier(value) => Some(value.clone()),
