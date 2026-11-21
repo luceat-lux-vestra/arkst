@@ -1,45 +1,107 @@
 # #719 G1 — residual runtime / IR bridge inventory
 
-- **Status:** scoped, read-only source audit at protected `main@68afd804ef0aa5376575f905fe7aa53f7ad0435b`; documentation candidate, **not G1 exit proof**
+- **Status:** refreshed for the G1-exit cleanup candidate; **not yet G1 exit proof**
+- **Protected baseline:** `main@76a475d9676bf7133a003be2283e33a20adb48c0` (#818 / G1-L1t reconciled)
 - **Authority:** [issue #719](https://github.com/luceat-lux-vestra/arkst/issues/719), [ADR-0022](../adr/0022-runtime-final-document-ir.md), [G0 surface ledger](719-g0-audit.md)
-- **Reason:** #800 finished G1-L1c iterable conversion. Inventory the remaining evaluator-owned-runtime / legacy-IR transitions before selecting the next bounded change.
-- **Scope inspected:** `arkst-engine/src/{evaluator,value_conversion,builtins,invocation_binder,ast_to_ir,lib}.rs`, `arkst-core/src/lib.rs`, G0 ledger, ADR-0022. Source line anchors below refer to **this frozen main SHA**, not future moving lines. This is a **scoped G1 inventory**, not an exhaustive all-crate/G8 negative proof.
+- **Purpose:** classify remaining runtime/IR boundaries by lifecycle. Raw token counts are evidence aids, not completion percentages.
 
-## Confirmed landed state
+The previous version of this file was a frozen snapshot from `main@68afd804ef0aa5376575f905fe7aa53f7ad0435b`. Its R01–R12 queue is historical: later G1-L1d through G1-L1t removed the live evaluator/builtin projection consumers it described. Historical checkpoint evidence remains preserved in [719-checkpoint-archive-2026-11-20.md](719-checkpoint-archive-2026-11-20.md).
 
-1. `value_conversion.rs:382-406`: `RuntimeValueKind` now has runtime-owned scalar/domain, Range, Collection, Pair, Dictionary, Content, Component and Callable/InlineBody variants, with origin and provenance held per runtime child. The old `SemanticLeaf(IrValue)` and `InvocationValue` identifiers are absent from the audited live engine files. Historical references in G0 documentation remain historical, **not current production evidence**.
-2. `value_conversion.rs:553-571` and `evaluator.rs:18462-18599`: G1-L1c/#800 keeps `TargetValue::Value(RuntimeValue)` and iterable aggregate children runtime-owned; typed Range and parsed Markdown Content no longer go through `RuntimeValue -> IrValue -> RuntimeValue` for type dispatch. Verified exact-head [CI #44599285764](https://github.com/luceat-lux-vestra/arkst/actions/runs/44599285764), then source/squash tree equivalence at main `68afd804ef0aa5376575f905fe7aa53f7ad0435b`.
-3. The prior scoped regression families include `g1l1c_iterable_target_uses_runtime_range_and_content_without_ir_roundtrip`, `g1k3b_raw_iterable_fallback_and_range_limit_remain_bounded`, `g1k3c_table_row_adapter_preserves_typed_and_source_wrapped_rows`, and `g1l1b_collection_access_preserves_runtime_children_and_fallback_provenance`. These do **not** prove universal G1 closure.
+## Current landed baseline before this candidate
 
-## Residual route ledger — current code, not completed work
+At protected `main@76a475d9676bf7133a003be2283e33a20adb48c0`:
 
-| ID | Current producer -> consumer / source anchor | Classification and risk | Assigned owner |
-| --- | --- | --- | --- |
-| **R01** | `evaluator.rs:1731-1755` `unwrap_source_backed_table_row`: `RuntimeValue -> to_ir_value() -> IrValue::Content -> RuntimeValue::new` | **Direct roundtrip still present** for parser-evidenced nested list wrapper; outer provenance is manually restored, but the complete intermediate semantic projection is unnecessary. Narrow, independently testable. | **G1-L1d — next bounded implementation candidate** |
-| R02 | `evaluator.rs:715-751`: `CallOutcome = CallResult<RuntimeValue>` alongside `LegacyCallOutcome = CallResult<IrValue>`; bidirectional `From` adapters | **Production dual value carrier**, not a mere final-output formatter; refactor only with owner-by-owner native/extension dispatch and return coverage. | G1 dispatch/builtin migration; later G3/G4 cleanup |
-| R03 | `evaluator.rs:20298-20377`: `continue_chain_from_value` projects predecessor through `value.to_ir_value()` into legacy positional array while separately retaining `implicit_argument: RuntimeValue` | Transitional **dual predecessor** could diverge in nested provenance, ordering, shadowing; do not drop the implicit runtime predecessor until all selected owners consume it. | G1/G3 chain owner |
-| R04 | `evaluator.rs:21325-21353,21714-21810`: `evaluate_values`, `evaluate_named`, preservation helpers emit `IrValue` / `IrNamedArg` after runtime evaluation | **Evaluated argument re-projection** for selected and preserved legacy invocation shapes; preserve unresolved-policy, eager/lazy ordering and fail-first behavior. | G1/G3; G4 for nested/callable retention |
-| R05 | `evaluator.rs:1294-1410,20784-20825`: callable-body accumulator and content argument paths consume runtime values into `IrValue`; `scalar_or_content` then produces a runtime `CallOutcome` | **Semantic value -> content -> runtime** conversions remain while body execution uses IR. Preserve multi-statement Unit/empty, failure, explicit error and source spans. | G1 with G4 callable-body migration |
-| R06 | `evaluator.rs:10850-10865,11160-11175,12833-12850,12930-13074`: typed dictionary/metadata paths use `into_ir_value` and legacy structural consumers | Typed runtime children may be projected before further evaluation/state application; scope before rewriting each. Document-state publication is separate. | G1 conversion; G5 mutable document state |
-| R07 | `evaluator.rs:15517-15538,15570-15592`: `.get` dictionary operand already runtime-owned; `key` String target still projects to `IrValue::String` to extract text | **Low-risk scalar projection**; do not widen static-string/dynamic-text conversion. Future typed accessor can remove unnecessary IR intermediate. | G1 later narrow slice |
-| R08 | `evaluator.rs:1711-1723,18600-18630,16285,16540,16799,17064`: table cell normalization and table transforms use IR projection for semantic table inspection | Differentiate **runtime-carried table values** from **final table-cell emission**; only runtime reuse is a provenance hazard. Do not promote independent Quarkdown v2.7 `.table subTables` feature. | G1/G4; independent feature #718 |
-| R09 | `builtins.rs:1514`: `.text` accepts `RuntimeValue`, projects `IrValue` for component/text production | Output-adjacent projection. Confirm whether return is final semantic content or re-enters runtime before treating it as loss; retain empty-body and URL diagnostics. | G1 producer audit, G6 final-output boundary |
-| R10 | `evaluator.rs:4584,4600,4811,4819,4971,4995,5326,5379,5474,5705,5739`: legacy inline/block/node output materialization | **Expected final-emission projection** where outputs genuinely terminate, **transitional bridge** if wrapped again as runtime and consumed by chain/body. Categorize each call path rather than banning all IR output. | G1 selectively; G3/G4/G6 removal gates |
-| R11 | `evaluator.rs:18606-18629,24758-24770` and scalar consumers: `semantic_value()` projection for spans, comparison, numeric interpretation | **Read-only semantic inspection** may allocate and deserves cleanup, but does not by itself discard live runtime children. Lower priority than roundtrip paths. | G1 optimization or G8 cleanup |
-| R12 | `arkst-core/src/lib.rs` legacy evaluator facade and `arkst-engine/src/ast_to_ir.rs` executable AST->IR route | Outside standalone G1 conversion refactor. Do not claim public API or final document IR corrected early. | G3/G4 and G6/G7 |
+- `evaluator.rs` retains the reconciled zero-direct-projection baseline.
+- production `builtins.rs` has zero direct `.semantic_value()`, `.to_ir_value()`, and `.into_ir_value()` consumers.
+- `RuntimeValueKind` owns Unit/None/scalars, Range/Size/Color/Enum, Pair/Dictionary/Collection, Content/Component, Callable and InlineBody.
+- `InvocationValue` and `SemanticLeaf(IrValue)` are absent from the active runtime carrier.
+- the remaining generic reverse projection implementation is concentrated in `value_conversion.rs`.
+- executable/mixed IR remains intentionally present for later G3/G4/G6/G7 migration.
 
-**Counts are lexical signals, not acceptance metrics.** The frozen `evaluator.rs` source contains 30 occurrences of `.into_ir_value(`, 18 of `.to_ir_value(` and 27 of `.semantic_value(` (tests and final materialization included); `builtins.rs` contains one `.into_ir_value(`. These counts do not equal the number of distinct bugs, and should not be used as G1 completion percentages. Earlier G0 ledger path/line snapshots precede #800 and require reconciliation.
+## Lifecycle classification
 
-## Next atomic work unit: G1-L1d (proposed)
+### A — G1 blockers
 
-**Only** replace the table-row wrapper's `RuntimeValue -> IrValue::Content -> RuntimeValue` reshaping at `unwrap_source_backed_table_row`. Borrow/mutate the existing `RuntimeValueKind::Content` carrier through a narrowly scoped runtime Content operation; carry forward **exact** origin and source-backed/materialized provenance. Do **not** widen table semantics, flatten runtime Collection/Pair/Dictionary, or modify normal generated table rows.
+These are evaluator-runtime values that are projected through `IrValue` and immediately consumed again as runtime state, or generic production escape hatches that allow that pattern to return.
 
-**Regression matrix:** nested ordered and unordered list wrapper; single-item exact wrapper versus arbitrary one-cell typed Collection; source-backed text and metadata preserved; generated materialized wrapper remains materialized; nested cell spans; malformed/non-list passthrough; no unexpected diagnostics; existing `g1k3c_table_row_adapter_preserves_typed_and_source_wrapped_rows`, G1-L1b/L1c tests and table-by-rows fixtures unchanged. No source-offset heuristic; no conversion of source-backed Markdown to generated Table.
+The G1-exit cleanup candidate owns all of them together:
 
-**STOP/gate:** one production candidate PR only after this documentation checkpoint is separately reviewed/qualified. Test it on the exact candidate HEAD across all required CI, compare semantic result/diagnostics and source tree, guarded squash merge, reconcile #719. R02–R12 remain open after R01; **G1 exit must not be declared**.
+1. **Contextual InlineBody → Callable target roundtrip**
+   - previous route: `RuntimeInlineBody -> RuntimeCallable -> IrCallable -> IrValue::Callable -> RuntimeValue`;
+   - target route: build evaluator-owned `RuntimeCallable` directly and materialize `RuntimeValueKind::Callable` without crossing `IrValue`.
 
-## Documentation custody and acceptance boundaries
+2. **Conversion-generated scalar/domain/content values**
+   - previous route: construct a fresh `IrValue`, call `RuntimeValue::static_value`, then immediately decompose it;
+   - target route: runtime-native constructors for Number/Boolean/String, Range/Size/Color/Enum, Content and Callable.
 
-The rolling block formerly carried inside #719 is approximately 225k characters and has accumulated historical CI/semantic evidence. Its **verbatim dated snapshot** is stored in [the checkpoint archive](719-checkpoint-archive-2026-11-20.md) in the **same documentation candidate**. The archive does not supersede the issue's G0–G8 contract, the G0 evidence files or ADR-0022. **Only after the archive commit is merged and verified on protected main** may the rolling issue block be replaced with a concise current checkpoint linking to the archive; do not delete its normative non-rolling suffix or rewrite the original issue until preservation is durable. Later cleanups may require a separate reviewed semantic archive/update; no silent history deletion.
+3. **Builtin generated-result factories**
+   - previous route: `static_result(IrValue)` or `RuntimeValue::static_value(IrValue::...)`;
+   - target route: generated builtin results are constructed directly as runtime values. Test compatibility wrappers may still project to IR under `#[cfg(test)]`.
 
-The unresolved structured String policy (#682) and v2.7 table feature (#718) remain with their respective owners but supply mandatory G1 provenance/conversion integration evidence. G1 is in progress; this inventory is not a claim that the audited code, output, upstream language, or security properties have been independently revalidated.
+4. **Generic reverse projection API**
+   - `semantic_value`, `to_ir_value`, `into_ir_value`, Pair reverse projection, callable/capture reverse projection, `replace_semantic_value`, and `PartialEq<IrValue>` no longer have a production consumer after L1d–L1t;
+   - retain them only under `#[cfg(test)]` while the existing roundtrip/regression tests still exercise exact legacy semantic parity.
+
+**G1 exit condition for category A:** no production runtime→IR→runtime roundtrip and no production generic RuntimeValue→IrValue projection escape hatch.
+
+## B — allowed at G1 exit
+
+The crate boundary does not itself define runtime ownership. Immutable backend-neutral semantic leaf structures can remain shared where they carry no evaluator execution state.
+
+Allowed examples:
+
+- `IrRange`
+- `IrSize`
+- `IrColor`
+- `IrEnumValue`
+- `IrComponent`
+- semantic `IrNode` content that is already evaluated and carried as runtime Content during this migration stage
+
+G1 does **not** require inventing duplicate RuntimeRange/RuntimeSize/etc. types merely to remove the `arkst-ir` name from these leaf payloads.
+
+## C — later-gate migration debt
+
+These boundaries are intentionally not promoted into G1 blockers:
+
+| Boundary | Current purpose | Required owner |
+| --- | --- | --- |
+| `RuntimeValue::new(IrValue, origin)` / `static_value(IrValue)` | one-way legacy IR ingress while old execution/facade paths still exist | G3/G4/G7 retirement with legacy routes |
+| callable captured values reconstructed from `IrCallableCapture` | one-way legacy callable ingress | G4 |
+| `RuntimeCallable.body: Vec<IrNode>` | callable bodies still execute through transitional mixed IR | G4 |
+| `RuntimeInlineBody::{content,body}: Vec<IrNode>` | contextual body carrier until direct nested AST execution | G4 |
+| `numbering::format_from_value(&IrValue)` | document metadata is still stored in legacy IR-shaped state; conversion uses the one-way runtime ingress only | G5/G6 |
+| `ast_to_ir` and the core compatibility facade | pre-evaluation/executable IR route | G3/G4/G7 |
+| executable `IrNode::{FunctionCall,ChainedFunctionCall,FunctionDeclaration}` | transitional execution model | G3/G4/G6 |
+| `IrInline::{DirectiveCall,ChainedDirectiveCall}` | transitional nested executable model | G4/G6 |
+| durable `IrValue::{Callable,InlineBody}` and executable wire variants | mixed final/runtime schema | G6/G7 |
+| Typst handling of executable/mixed IR | negative baseline until final-only IR | G6 |
+
+The G1 candidate must not remove these prematurely or introduce a parallel ad-hoc body/bytecode model.
+
+## G1-exit cleanup candidate acceptance
+
+The candidate is acceptable for PR creation only if authoritative source read-back proves:
+
+- production `builtins.rs` has no generated `IrValue -> RuntimeValue` immediate wrapper;
+- `materialized_target_value(IrValue)` is absent;
+- the InlineBody→Callable target does not call `into_ir()` or construct `IrValue::Callable`;
+- generic reverse-projection helpers are `#[cfg(test)]`-confined;
+- one-way legacy ingress remains explicit and documented instead of being disguised as a generated-value factory;
+- origin remains `Static` and provenance remains `Materialized` for newly materialized target values, matching the previous observable contract;
+- existing source-backed identity conversions continue to preserve the original runtime carrier and provenance;
+- no #682 structured-String widening, #718 table feature implementation, final-IR schema change, wire change, backend change, or G2+ implementation is introduced.
+
+Focused regression ownership includes runtime-native Integer/Color conversion, InlineBody→Callable conversion, InlineBody→Content conversion, origin/provenance preservation, plus the existing scalar/domain/content/callable roundtrip and fail-closed suites.
+
+## Exit sequencing
+
+This candidate is an implementation candidate only. Do not declare G1 complete from source shape alone.
+
+1. authoritative candidate read-back;
+2. PR creation;
+3. exact-HEAD required CI qualification;
+4. guarded squash merge;
+5. post-merge reconciliation;
+6. **fresh G1 exit proof** against protected main.
+
+If the fresh proof finds category A empty and the G1 integration evidence remains green, G1 may then be accepted and the next architectural gate becomes G2. Category C remains tracked by its later mandatory gate instead of being silently reclassified as completed work.
