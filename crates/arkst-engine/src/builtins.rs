@@ -1965,7 +1965,9 @@ fn evaluate_unary_numeric(
         BuiltinKind::Abs => Ok(numeric_result(value.abs())),
         BuiltinKind::Negate => Ok(numeric_result(-value)),
         BuiltinKind::Sqrt => Ok(numeric_result(value.sqrt())),
-        BuiltinKind::IsEven => static_result(RuntimeValue::static_boolean(kotlin_float_to_int(value) % 2 == 0)),
+        BuiltinKind::IsEven => {
+            static_result(RuntimeValue::static_boolean(kotlin_float_to_int(value) % 2 == 0))
+        }
         _ => Err(error(format!(
             "`.{name}` has no unary numeric implementation"
         ))),
@@ -2042,7 +2044,9 @@ fn evaluate_truncate(
     // Kotlin's clamped toInt conversion) into an Int before truncate sees it.
     // Keep that branch separate from the floating post-processing formula.
     if decimals == 0 || number_value_is_integral(value) {
-        return static_result(RuntimeValue::static_number(f64::from(kotlin_float_to_int(value))));
+        return static_result(RuntimeValue::static_number(f64::from(
+            kotlin_float_to_int(value),
+        )));
     }
 
     // This deliberately follows Math.kt's observable boundaries:
@@ -2064,7 +2068,9 @@ fn evaluate_round(
         .ok_or_else(|| error("`.round` requires one numeric argument".to_string()))?;
     let value = numeric_argument(&value, "x")
         .map_err(|error| error.with_message("`.round` requires a numeric argument".to_string()))?;
-    static_result(RuntimeValue::static_number(f64::from(kotlin_round_to_int(value))))
+    static_result(RuntimeValue::static_number(f64::from(
+        kotlin_round_to_int(value),
+    )))
 }
 
 /// Applies the `NumberValue` normalization visible at the upstream output
@@ -2072,12 +2078,12 @@ fn evaluate_round(
 /// clamped conversions for infinities and out-of-range finite values.
 fn numeric_result(value: f32) -> RuntimeValue {
     if value.is_nan() {
-        return RuntimeValue::static_number(f64::NAN));
+        return RuntimeValue::static_number(f64::NAN);
     }
     if value.ceil() == value.floor() {
-        return RuntimeValue::static_number(f64::from(kotlin_float_to_int(value))));
+        return RuntimeValue::static_number(f64::from(kotlin_float_to_int(value)));
     }
-    RuntimeValue::static_number(f64::from(value)))
+    RuntimeValue::static_number(f64::from(value))
 }
 
 /// Mirrors Kotlin `Float.toInt()`: truncate toward zero, map NaN to zero,
