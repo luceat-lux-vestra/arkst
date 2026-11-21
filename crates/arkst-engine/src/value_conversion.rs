@@ -15,9 +15,8 @@ use arkst_ir::{
     IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle,
     IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
-use arkst_source::{SourceId, SourceSpan};
-#[cfg(test)]
 use arkst_ir::{IrCapturedFunction, IrCapturedVariable};
+use arkst_source::{SourceId, SourceSpan};
 #[cfg(test)]
 use std::borrow::Cow;
 
@@ -243,7 +242,6 @@ impl RuntimeCallableCapture {
         }
     }
 
-    #[cfg(test)]
     fn to_ir(&self) -> IrCallableCapture {
         IrCallableCapture {
             variables: self
@@ -266,7 +264,6 @@ impl RuntimeCallableCapture {
         }
     }
 
-    #[cfg(test)]
     fn into_ir(self) -> IrCallableCapture {
         IrCallableCapture {
             variables: self
@@ -310,8 +307,7 @@ impl RuntimeCallable {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn to_ir(&self) -> IrCallable {
+    fn to_ir(&self) -> IrCallable {
         IrCallable {
             parameters: self.parameters.clone(),
             body: self.body.clone(),
@@ -323,8 +319,7 @@ impl RuntimeCallable {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn into_ir(self) -> IrCallable {
+    fn into_ir(self) -> IrCallable {
         IrCallable {
             parameters: self.parameters,
             body: self.body,
@@ -352,7 +347,6 @@ impl RuntimeInlineBody {
         }
     }
 
-    #[cfg(test)]
     fn to_ir(&self) -> IrInlineBody {
         IrInlineBody {
             content: self.content.clone(),
@@ -362,7 +356,6 @@ impl RuntimeInlineBody {
         }
     }
 
-    #[cfg(test)]
     fn into_ir(self) -> IrInlineBody {
         IrInlineBody {
             content: self.content,
@@ -641,6 +634,59 @@ impl RuntimeValue {
         }
     }
 
+    pub(crate) fn as_number(&self) -> Option<f64> {
+        match &self.kind {
+            RuntimeValueKind::Number(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_boolean(&self) -> Option<bool> {
+        match &self.kind {
+            RuntimeValueKind::Boolean(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_component(&self) -> Option<&IrComponent> {
+        match &self.kind {
+            RuntimeValueKind::Component(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn into_component(self) -> Option<IrComponent> {
+        let RuntimeValueKind::Component(value) = self.kind else {
+            return None;
+        };
+        Some(value)
+    }
+
+    pub(crate) fn as_collection_elements(&self) -> Option<&[Self]> {
+        match &self.kind {
+            RuntimeValueKind::Collection(elements) => Some(elements.as_slice()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn source_span_or(&self, fallback: SourceSpan) -> SourceSpan {
+        match &self.kind {
+            RuntimeValueKind::Pair(pair) => pair.span,
+            RuntimeValueKind::Dictionary(dictionary) => dictionary.span,
+            RuntimeValueKind::Range(range) => range.span,
+            RuntimeValueKind::Callable(callable) => callable.span,
+            RuntimeValueKind::InlineBody(body) => body.span,
+            RuntimeValueKind::Component(component) => component.span(),
+            RuntimeValueKind::Content(nodes) => match nodes.as_slice() {
+                [IrNode::FunctionCall { span, .. }]
+                | [IrNode::ChainedFunctionCall { span, .. }]
+                | [IrNode::FunctionDeclaration { span, .. }] => *span,
+                _ => fallback,
+            },
+            _ => fallback,
+        }
+    }
+
     pub(crate) fn into_string(self) -> Option<String> {
         let RuntimeValueKind::String(value) = self.kind else {
             return None;
@@ -905,8 +951,7 @@ impl RuntimeValue {
         }
     }
 
-    #[cfg(test)]
-    fn to_ir_pair(&self) -> Option<IrPair> {
+    fn to_legacy_ir_pair(&self) -> Option<IrPair> {
         let RuntimeValueKind::Pair(pair) = &self.kind else {
             return None;
         };
@@ -917,8 +962,7 @@ impl RuntimeValue {
         })
     }
 
-    #[cfg(test)]
-    fn into_ir_pair(self) -> Option<IrPair> {
+    fn into_legacy_ir_pair(self) -> Option<IrPair> {
         let RuntimeValueKind::Pair(pair) = self.kind else {
             return None;
         };
@@ -929,45 +973,93 @@ impl RuntimeValue {
         })
     }
 
-    /// Project evaluator-owned runtime values back into the transitional
-    /// `IrValue` model only when an existing semantic consumer explicitly
-    /// requires that boundary during the G1 migration.
-    #[cfg(test)]
-    pub(crate) fn semantic_value(&self) -> Cow<'_, IrValue> {
+    /// Explicit transitional projection used only at named legacy evaluator
+    /// emission/preservation boundaries that still require `IrValue`.
+    ///
+    /// Runtime inspection must use typed accessors instead. G3/G4/G6/G7 own
+    /// retirement of the remaining legacy emission boundaries.
+    pub(crate) fn to_legacy_ir_value(&self) -> IrValue {
         match &self.kind {
-            RuntimeValueKind::Unit => Cow::Owned(IrValue::Unit),
-            RuntimeValueKind::None => Cow::Owned(IrValue::None),
-            RuntimeValueKind::Boolean(value) => Cow::Owned(IrValue::Boolean(*value)),
-            RuntimeValueKind::Number(value) => Cow::Owned(IrValue::Number(*value)),
-            RuntimeValueKind::String(value) => Cow::Owned(IrValue::String(value.clone())),
-            RuntimeValueKind::Identifier(value) => Cow::Owned(IrValue::Identifier(value.clone())),
-            RuntimeValueKind::Range(value) => Cow::Owned(IrValue::Range(value.clone())),
-            RuntimeValueKind::Size(value) => Cow::Owned(IrValue::Size(value.clone())),
-            RuntimeValueKind::Color(value) => Cow::Owned(IrValue::Color(value.clone())),
-            RuntimeValueKind::Enum(value) => Cow::Owned(IrValue::Enum(*value)),
-            RuntimeValueKind::Pair(_) => Cow::Owned(IrValue::Pair(
-                self.to_ir_pair().expect("runtime pair invariant"),
-            )),
-            RuntimeValueKind::Dictionary(value) => Cow::Owned(IrValue::Dictionary(IrDictionary {
+            RuntimeValueKind::Unit => IrValue::Unit,
+            RuntimeValueKind::None => IrValue::None,
+            RuntimeValueKind::Boolean(value) => IrValue::Boolean(*value),
+            RuntimeValueKind::Number(value) => IrValue::Number(*value),
+            RuntimeValueKind::String(value) => IrValue::String(value.clone()),
+            RuntimeValueKind::Identifier(value) => IrValue::Identifier(value.clone()),
+            RuntimeValueKind::Range(value) => IrValue::Range(value.clone()),
+            RuntimeValueKind::Size(value) => IrValue::Size(value.clone()),
+            RuntimeValueKind::Color(value) => IrValue::Color(value.clone()),
+            RuntimeValueKind::Enum(value) => IrValue::Enum(*value),
+            RuntimeValueKind::Pair(_) => IrValue::Pair(
+                self.to_legacy_ir_pair().expect("runtime pair invariant"),
+            ),
+            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
                 entries: value
                     .entries
                     .iter()
                     .map(|entry| {
                         entry
-                            .to_ir_pair()
+                            .to_legacy_ir_pair()
                             .expect("runtime dictionary entry invariant")
                     })
                     .collect(),
                 span: value.span,
-            })),
-            RuntimeValueKind::Content(value) => Cow::Owned(IrValue::Content(value.clone())),
-            RuntimeValueKind::Component(value) => Cow::Owned(IrValue::Component(value.clone())),
-            RuntimeValueKind::Callable(value) => Cow::Owned(IrValue::Callable(value.to_ir())),
-            RuntimeValueKind::InlineBody(value) => Cow::Owned(IrValue::InlineBody(value.to_ir())),
-            RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
-                elements.iter().map(Self::to_ir_value).collect(),
-            )),
+            }),
+            RuntimeValueKind::Content(value) => IrValue::Content(value.clone()),
+            RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
+            RuntimeValueKind::Callable(value) => IrValue::Callable(value.to_ir()),
+            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.to_ir()),
+            RuntimeValueKind::Collection(elements) => IrValue::Collection(
+                elements.iter().map(Self::to_legacy_ir_value).collect(),
+            ),
         }
+    }
+
+    pub(crate) fn into_legacy_ir_value(self) -> IrValue {
+        match self.kind {
+            RuntimeValueKind::Unit => IrValue::Unit,
+            RuntimeValueKind::None => IrValue::None,
+            RuntimeValueKind::Boolean(value) => IrValue::Boolean(value),
+            RuntimeValueKind::Number(value) => IrValue::Number(value),
+            RuntimeValueKind::String(value) => IrValue::String(value),
+            RuntimeValueKind::Identifier(value) => IrValue::Identifier(value),
+            RuntimeValueKind::Range(value) => IrValue::Range(value),
+            RuntimeValueKind::Size(value) => IrValue::Size(value),
+            RuntimeValueKind::Color(value) => IrValue::Color(value),
+            RuntimeValueKind::Enum(value) => IrValue::Enum(value),
+            RuntimeValueKind::Pair(pair) => IrValue::Pair(IrPair {
+                first: Box::new(pair.first.into_legacy_ir_value()),
+                second: Box::new(pair.second.into_legacy_ir_value()),
+                span: pair.span,
+            }),
+            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
+                entries: value
+                    .entries
+                    .into_iter()
+                    .map(|entry| {
+                        entry
+                            .into_legacy_ir_pair()
+                            .expect("runtime dictionary entry invariant")
+                    })
+                    .collect(),
+                span: value.span,
+            }),
+            RuntimeValueKind::Content(value) => IrValue::Content(value),
+            RuntimeValueKind::Component(value) => IrValue::Component(value),
+            RuntimeValueKind::Callable(value) => IrValue::Callable(value.into_ir()),
+            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.into_ir()),
+            RuntimeValueKind::Collection(elements) => IrValue::Collection(
+                elements
+                    .into_iter()
+                    .map(Self::into_legacy_ir_value)
+                    .collect(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn semantic_value(&self) -> Cow<'_, IrValue> {
+        Cow::Owned(self.to_legacy_ir_value())
     }
 
     pub(crate) fn is_none(&self) -> bool {
@@ -996,80 +1088,12 @@ impl RuntimeValue {
 
     #[cfg(test)]
     pub(crate) fn to_ir_value(&self) -> IrValue {
-        match &self.kind {
-            RuntimeValueKind::Unit => IrValue::Unit,
-            RuntimeValueKind::None => IrValue::None,
-            RuntimeValueKind::Boolean(value) => IrValue::Boolean(*value),
-            RuntimeValueKind::Number(value) => IrValue::Number(*value),
-            RuntimeValueKind::String(value) => IrValue::String(value.clone()),
-            RuntimeValueKind::Identifier(value) => IrValue::Identifier(value.clone()),
-            RuntimeValueKind::Range(value) => IrValue::Range(value.clone()),
-            RuntimeValueKind::Size(value) => IrValue::Size(value.clone()),
-            RuntimeValueKind::Color(value) => IrValue::Color(value.clone()),
-            RuntimeValueKind::Enum(value) => IrValue::Enum(*value),
-            RuntimeValueKind::Pair(_) => {
-                IrValue::Pair(self.to_ir_pair().expect("runtime pair invariant"))
-            }
-            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
-                entries: value
-                    .entries
-                    .iter()
-                    .map(|entry| {
-                        entry
-                            .to_ir_pair()
-                            .expect("runtime dictionary entry invariant")
-                    })
-                    .collect(),
-                span: value.span,
-            }),
-            RuntimeValueKind::Content(value) => IrValue::Content(value.clone()),
-            RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
-            RuntimeValueKind::Callable(value) => IrValue::Callable(value.to_ir()),
-            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.to_ir()),
-            RuntimeValueKind::Collection(elements) => {
-                IrValue::Collection(elements.iter().map(Self::to_ir_value).collect())
-            }
-        }
+        self.to_legacy_ir_value()
     }
 
     #[cfg(test)]
     pub(crate) fn into_ir_value(self) -> IrValue {
-        match self.kind {
-            RuntimeValueKind::Unit => IrValue::Unit,
-            RuntimeValueKind::None => IrValue::None,
-            RuntimeValueKind::Boolean(value) => IrValue::Boolean(value),
-            RuntimeValueKind::Number(value) => IrValue::Number(value),
-            RuntimeValueKind::String(value) => IrValue::String(value),
-            RuntimeValueKind::Identifier(value) => IrValue::Identifier(value),
-            RuntimeValueKind::Range(value) => IrValue::Range(value),
-            RuntimeValueKind::Size(value) => IrValue::Size(value),
-            RuntimeValueKind::Color(value) => IrValue::Color(value),
-            RuntimeValueKind::Enum(value) => IrValue::Enum(value),
-            RuntimeValueKind::Pair(pair) => IrValue::Pair(IrPair {
-                first: Box::new(pair.first.into_ir_value()),
-                second: Box::new(pair.second.into_ir_value()),
-                span: pair.span,
-            }),
-            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
-                entries: value
-                    .entries
-                    .into_iter()
-                    .map(|entry| {
-                        entry
-                            .into_ir_pair()
-                            .expect("runtime dictionary entry invariant")
-                    })
-                    .collect(),
-                span: value.span,
-            }),
-            RuntimeValueKind::Content(value) => IrValue::Content(value),
-            RuntimeValueKind::Component(value) => IrValue::Component(value),
-            RuntimeValueKind::Callable(value) => IrValue::Callable(value.into_ir()),
-            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.into_ir()),
-            RuntimeValueKind::Collection(elements) => {
-                IrValue::Collection(elements.into_iter().map(Self::into_ir_value).collect())
-            }
-        }
+        self.into_legacy_ir_value()
     }
 
     pub(crate) fn into_collection(self) -> Option<Vec<Self>> {
