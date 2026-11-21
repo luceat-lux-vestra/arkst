@@ -15640,7 +15640,7 @@ impl Evaluator {
             key_span,
         ) {
             Ok(value_conversion::TargetValue::Value(value)) => {
-                let IrValue::String(key) = value.into_ir_value() else {
+                let Some(key) = value.into_string() else {
                     diagnostics.push(conversion_failure_diagnostic(
                         value_conversion::ConversionFailure::new(
                             value_conversion::ConversionError::UnsupportedValue {
@@ -15692,19 +15692,15 @@ impl Evaluator {
             let (entry_key, entry_value, pair_span) = pair
                 .into_pair_parts()
                 .expect("runtime dictionary entries are always pairs");
-            match entry_key.semantic_value().as_ref() {
-                IrValue::String(entry_key) => {
-                    if found.is_none() && entry_key == &key {
-                        found = Some(entry_value);
-                    }
-                }
-                _ => {
-                    diagnostics.push(iteration_error(
-                        "Dictionary keys must remain typed strings".to_string(),
-                        pair_span,
-                    ));
-                    return CallOutcome::Failed;
-                }
+            let Some(entry_key) = entry_key.as_string() else {
+                diagnostics.push(iteration_error(
+                    "Dictionary keys must remain typed strings".to_string(),
+                    pair_span,
+                ));
+                return CallOutcome::Failed;
+            };
+            if found.is_none() && entry_key == key.as_str() {
+                found = Some(entry_value);
             }
         }
         CallOutcome::Value(found.unwrap_or(fallback))
@@ -33603,6 +33599,103 @@ mod tests {
             .expect("get preflight should succeed")
             .expect("get has native binding metadata");
         evaluator.evaluate_dictionary_lookup(values, &[], &call_span, diagnostics, &plan)
+    }
+
+    #[test]
+    fn g1l1j_dictionary_lookup_keeps_string_keys_runtime_owned() {
+        let stored = RuntimeValue::collection(
+            vec![
+                RuntimeValue::dynamic_value(IrValue::String("stored".into()))
+                    .with_provenance(ValueProvenance::source_backed_markdown_text("**stored**")),
+            ],
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("- stored"));
+        let fallback = RuntimeValue::dynamic_value(IrValue::String("fallback".into()))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("*fallback*"));
+        let dictionary = RuntimeValue::dictionary(
+            vec![RuntimeValue::pair(
+                RuntimeValue::static_value(IrValue::String("1".into())),
+                stored.clone(),
+                span(10, 20),
+                ValueOrigin::Dynamic,
+            )],
+            span(0, 30),
+            ValueOrigin::Dynamic,
+        )
+        .expect("typed dictionary entries");
+
+        for key in [
+            RuntimeValue::static_value(IrValue::String("1".into())),
+            RuntimeValue::static_value(IrValue::Number(1.0)),
+        ] {
+            let mut diagnostics = Vec::new();
+            let outcome = evaluate_get_with_runtime_values(
+                &[dictionary.clone(), key, fallback.clone()],
+                &mut diagnostics,
+            );
+            let CallOutcome::Value(actual) = outcome else {
+                panic!("direct and converted String keys must select the stored runtime value");
+            };
+            assert_eq!(actual, stored);
+            assert_eq!(actual.origin, ValueOrigin::Dynamic);
+            assert_eq!(actual.source_backed_markdown_text(), Some("- stored"));
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+
+        let mut diagnostics = Vec::new();
+        let outcome = evaluate_get_with_runtime_values(
+            &[
+                dictionary,
+                RuntimeValue::static_value(IrValue::String("missing".into())),
+                fallback.clone(),
+            ],
+            &mut diagnostics,
+        );
+        let CallOutcome::Value(actual) = outcome else {
+            panic!("missing key must preserve the runtime fallback");
+        };
+        assert_eq!(actual, fallback);
+        assert_eq!(actual.origin, ValueOrigin::Dynamic);
+        assert_eq!(actual.source_backed_markdown_text(), Some("*fallback*"));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let malformed_span = span(41, 50);
+        let malformed = RuntimeValue::dictionary(
+            vec![
+                RuntimeValue::pair(
+                    RuntimeValue::static_value(IrValue::String("present".into())),
+                    RuntimeValue::static_value(IrValue::String("stored".into())),
+                    span(31, 40),
+                    ValueOrigin::Static,
+                ),
+                RuntimeValue::pair(
+                    RuntimeValue::static_value(IrValue::Number(2.0)),
+                    RuntimeValue::static_value(IrValue::String("malformed".into())),
+                    malformed_span,
+                    ValueOrigin::Static,
+                ),
+            ],
+            span(31, 50),
+            ValueOrigin::Static,
+        )
+        .expect("runtime dictionary accepts typed Pair entries");
+
+        diagnostics.clear();
+        let outcome = evaluate_get_with_runtime_values(
+            &[
+                malformed,
+                RuntimeValue::static_value(IrValue::String("present".into())),
+            ],
+            &mut diagnostics,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(
+            diagnostics[0].message,
+            "Dictionary keys must remain typed strings"
+        );
+        assert_eq!(diagnostics[0].primary, Some(malformed_span));
     }
 
     #[test]

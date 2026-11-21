@@ -562,6 +562,20 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::Range(_))
     }
 
+    pub(crate) fn as_string(&self) -> Option<&str> {
+        match &self.kind {
+            RuntimeValueKind::String(value) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn into_string(self) -> Option<String> {
+        let RuntimeValueKind::String(value) = self.kind else {
+            return None;
+        };
+        Some(value)
+    }
+
     pub(crate) fn as_content_nodes(&self) -> Option<&[IrNode]> {
         match &self.kind {
             RuntimeValueKind::Content(nodes) => Some(nodes.as_slice()),
