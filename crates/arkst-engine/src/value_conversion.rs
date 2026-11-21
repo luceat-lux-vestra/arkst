@@ -569,6 +569,13 @@ impl RuntimeValue {
         }
     }
 
+    pub(crate) fn as_identifier(&self) -> Option<&str> {
+        match &self.kind {
+            RuntimeValueKind::Identifier(value) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn into_string(self) -> Option<String> {
         let RuntimeValueKind::String(value) = self.kind else {
             return None;
@@ -682,15 +689,6 @@ impl RuntimeValue {
     pub(crate) fn as_dictionary_entries(&self) -> Option<&[Self]> {
         match &self.kind {
             RuntimeValueKind::Dictionary(dictionary) => Some(dictionary.entries.as_slice()),
-            _ => None,
-        }
-    }
-
-    /// Narrow text identity used only by the independently evidenced logger
-    /// Pair projection. Other scalar categories must stay fail-closed here.
-    pub(crate) fn logger_pair_text_identity(&self) -> Option<&str> {
-        match &self.kind {
-            RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value) => Some(value),
             _ => None,
         }
     }
