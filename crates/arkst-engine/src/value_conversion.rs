@@ -569,6 +569,13 @@ impl RuntimeValue {
         }
     }
 
+    pub(crate) fn as_identifier(&self) -> Option<&str> {
+        match &self.kind {
+            RuntimeValueKind::Identifier(value) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn into_string(self) -> Option<String> {
         let RuntimeValueKind::String(value) = self.kind else {
             return None;
@@ -654,6 +661,34 @@ impl RuntimeValue {
     pub(crate) fn as_content_nodes(&self) -> Option<&[IrNode]> {
         match &self.kind {
             RuntimeValueKind::Content(nodes) => Some(nodes.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// Borrow the typed Range payload for runtime-owned consumers without
+    /// projecting through transitional `IrValue`.
+    pub(crate) fn as_range_value(&self) -> Option<&IrRange> {
+        match &self.kind {
+            RuntimeValueKind::Range(range) => Some(range),
+            _ => None,
+        }
+    }
+
+    /// Borrow Pair children without crossing the transitional `IrValue`
+    /// boundary. Pair span is intentionally not exposed because logger
+    /// rendering depends only on the recursively evidenced member values.
+    pub(crate) fn as_pair_values(&self) -> Option<(&Self, &Self)> {
+        match &self.kind {
+            RuntimeValueKind::Pair(pair) => Some((&pair.first, &pair.second)),
+            _ => None,
+        }
+    }
+
+    /// Borrow ordered Dictionary entries as runtime Pair values without
+    /// crossing the transitional `IrValue` boundary.
+    pub(crate) fn as_dictionary_entries(&self) -> Option<&[Self]> {
+        match &self.kind {
+            RuntimeValueKind::Dictionary(dictionary) => Some(dictionary.entries.as_slice()),
             _ => None,
         }
     }
