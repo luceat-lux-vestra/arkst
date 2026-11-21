@@ -955,7 +955,7 @@ fn evaluate_string(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
-    if matches!(value.semantic_value().as_ref(), IrValue::Unit) {
+    if value.is_unit() {
         return static_result(IrValue::String("kotlin.Unit".to_string()));
     }
     let text = scalar_string_argument_result(&value, "value").map_err(|error| {
