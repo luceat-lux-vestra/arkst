@@ -576,6 +576,17 @@ impl RuntimeValue {
         Some(value)
     }
 
+    /// Project only the scalar kinds accepted by `.plaintext` without
+    /// crossing the transitional `IrValue` boundary.
+    pub(crate) fn plain_text_scalar(&self) -> Option<String> {
+        match &self.kind {
+            RuntimeValueKind::Identifier(value) => Some(value.clone()),
+            RuntimeValueKind::Boolean(value) => Some(value.to_string()),
+            RuntimeValueKind::Number(value) => Some(value.to_string()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn as_content_nodes(&self) -> Option<&[IrNode]> {
         match &self.kind {
             RuntimeValueKind::Content(nodes) => Some(nodes.as_slice()),
