@@ -640,6 +640,10 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::Unit)
     }
 
+    pub(crate) fn is_true_boolean(&self) -> bool {
+        matches!(&self.kind, RuntimeValueKind::Boolean(true))
+    }
+
     /// Consume a runtime Pair without projecting its children through
     /// transitional IrValue. Return other runtime kinds intact for the legacy
     /// content-materialization fallback.
