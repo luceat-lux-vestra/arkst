@@ -2131,17 +2131,9 @@ fn number_value_is_integral(value: f32) -> bool {
 /// Static StringValue text and fractional NumberValue results are not silently
 /// converted to an Int.
 fn integer_argument(value: &RuntimeValue, parameter: &str) -> Result<i32, BuiltinError> {
-    let number = match value.semantic_value().as_ref() {
-        IrValue::Number(value) => Some(*value as f32),
-        IrValue::String(text) | IrValue::Identifier(text)
-            if value.origin == crate::value_conversion::ValueOrigin::Dynamic =>
-        {
-            text.parse::<i32>()
-                .map(|value| value as f32)
-                .ok()
-                .or_else(|| text.parse::<f32>().ok())
-        }
-        _ => None,
+    let number = match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Number) {
+        Ok(ScalarValue::Number(number)) => Some(number as f32),
+        Ok(_) | Err(_) => None,
     };
     let Some(number) = number else {
         return Err(conversion_error(
