@@ -1510,8 +1510,11 @@ fn evaluate_text(
         })
         .transpose()?
         .flatten();
-    match value.into_ir_value() {
-        IrValue::Content(nodes)
+    let nodes = value.try_into_content_nodes().map_err(|_| {
+        error("`.text` requires a single inline paragraph, not block content".to_string())
+    })?;
+    match nodes {
+        nodes
             if url.is_none()
                 && !bold
                 && !italic
@@ -1525,14 +1528,14 @@ fn evaluate_text(
         {
             Ok(IrValue::Content(nodes))
         }
-        IrValue::Content(nodes) if nodes.is_empty() => {
+        nodes if nodes.is_empty() => {
             // Upstream accepts an empty inline body, but the Typst/Link
             // projection of an empty display label is not proven here.
             Err(error(
                 "`.text` URL requires nonempty inline content".to_string(),
             ))
         }
-        IrValue::Content(mut nodes) if matches!(nodes.as_slice(), [IrNode::Paragraph { .. }]) => {
+        mut nodes if matches!(nodes.as_slice(), [IrNode::Paragraph { .. }]) => {
             if let IrNode::Paragraph { content, .. } = &mut nodes[0] {
                 if bold {
                     let original = std::mem::take(content);
