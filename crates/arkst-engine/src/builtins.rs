@@ -1817,6 +1817,31 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
     Some(())
 }
 
+/// Transitional IR-only plain-text projection retained for evaluator document
+/// metadata paths. Public `.plaintext` evaluation must stay runtime-owned and
+/// must not route through this helper.
+pub(crate) fn plain_text_argument(value: &IrValue) -> Option<String> {
+    match value {
+        IrValue::Identifier(value) => Some(value.clone()),
+        IrValue::Boolean(value) => Some(value.to_string()),
+        IrValue::Number(value) => Some(value.to_string()),
+        IrValue::Content(nodes) => plain_text_from_content(nodes),
+        IrValue::String(_)
+        | IrValue::Range(_)
+        | IrValue::Collection(_)
+        | IrValue::Pair(_)
+        | IrValue::Dictionary(_)
+        | IrValue::Callable(_)
+        | IrValue::InlineBody(_)
+        | IrValue::Size(_)
+        | IrValue::Color(_)
+        | IrValue::Enum(_)
+        | IrValue::Component(_)
+        | IrValue::Unit
+        | IrValue::None => None,
+    }
+}
+
 fn plain_text_from_content(nodes: &[IrNode]) -> Option<String> {
     let mut output = String::new();
     for node in nodes {
