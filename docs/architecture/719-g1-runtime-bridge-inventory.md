@@ -1,107 +1,120 @@
 # #719 G1 — residual runtime / IR bridge inventory
 
-- **Status:** refreshed for the G1-exit cleanup candidate; **not yet G1 exit proof**
-- **Protected baseline:** `main@76a475d9676bf7133a003be2283e33a20adb48c0` (#818 / G1-L1t reconciled)
+- **Status:** refreshed after PR #819 exact-head compiler evidence; **G1 exit proof remains pending**
+- **Protected baseline:** `main@76a475d9676bf7133a003be2283e33a20adb48c0`
 - **Authority:** [issue #719](https://github.com/luceat-lux-vestra/arkst/issues/719), [ADR-0022](../adr/0022-runtime-final-document-ir.md), [G0 surface ledger](719-g0-audit.md)
-- **Purpose:** classify remaining runtime/IR boundaries by lifecycle. Raw token counts are evidence aids, not completion percentages.
+- **Purpose:** distinguish evaluator-owned runtime inspection from explicit legacy/final IR emission boundaries. Absence of search results is not accepted as proof for large source files.
 
-The previous version of this file was a frozen snapshot from `main@68afd804ef0aa5376575f905fe7aa53f7ad0435b`. Its R01–R12 queue is historical: later G1-L1d through G1-L1t removed the live evaluator/builtin projection consumers it described. Historical checkpoint evidence remains preserved in [719-checkpoint-archive-2026-11-20.md](719-checkpoint-archive-2026-11-20.md).
+## Evidence correction
 
-## Current landed baseline before this candidate
+The earlier G1-exit audit incorrectly treated `evaluator.rs` as a zero-projection production baseline. The connector's ordinary file/search path returned incomplete data for the large evaluator source, and that absence was mistakenly interpreted as evidence.
 
-At protected `main@76a475d9676bf7133a003be2283e33a20adb48c0`:
+PR #819 CI #2416 / run #44931779968 invalidated that conclusion with compiler diagnostics after the generic projection helpers were test-confined. The exact evaluator blob was then read through the Git blob API and showed 61 production references to `semantic_value`, `to_ir_value`, or `into_ir_value`.
 
-- `evaluator.rs` retains the reconciled zero-direct-projection baseline.
-- production `builtins.rs` has zero direct `.semantic_value()`, `.to_ir_value()`, and `.into_ir_value()` consumers.
-- `RuntimeValueKind` owns Unit/None/scalars, Range/Size/Color/Enum, Pair/Dictionary/Collection, Content/Component, Callable and InlineBody.
-- `InvocationValue` and `SemanticLeaf(IrValue)` are absent from the active runtime carrier.
-- the remaining generic reverse projection implementation is concentrated in `value_conversion.rs`.
-- executable/mixed IR remains intentionally present for later G3/G4/G6/G7 migration.
+That historical audit result is superseded. CI #2416 is retained as immutable evidence of the inventory defect.
 
-## Lifecycle classification
+## Current G1 ownership model
 
-### A — G1 blockers
+### A1 — runtime inspection: must remain RuntimeValue-native
 
-These are evaluator-runtime values that are projected through `IrValue` and immediately consumed again as runtime state, or generic production escape hatches that allow that pattern to return.
+Runtime semantics must not project through `IrValue` merely to inspect a value. PR #819 now migrates these evaluator consumers to typed RuntimeValue operations:
 
-The G1-exit cleanup candidate owns all of them together:
+- sort-key Number/String/Boolean classification;
+- explicit-error rollback/owner detection;
+- runtime source-span recovery;
+- dynamic table sort-order classification;
+- table Content inspection;
+- code callout/text evaluation;
+- document-theme scalar validation;
+- `.includeall` String adaptation;
+- collection index and repeat-count Number inspection;
+- table-compute deterministic text projection;
+- iterable child-span evidence;
+- `.extend` target-name classification;
+- page-format multi-size text inspection;
+- collection `asDouble` and collection equality semantics;
+- scalar Boolean inspection;
+- evaluated Markdown-list detection for variable assignment.
 
-1. **Contextual InlineBody → Callable target roundtrip**
-   - previous route: `RuntimeInlineBody -> RuntimeCallable -> IrCallable -> IrValue::Callable -> RuntimeValue`;
-   - target route: build evaluator-owned `RuntimeCallable` directly and materialize `RuntimeValueKind::Callable` without crossing `IrValue`.
+RuntimeValue now exposes only the typed access required by those consumers, including Number/Boolean/Component/Collection access, text identity, source-span recovery, and collection-specific equality semantics.
 
-2. **Conversion-generated scalar/domain/content values**
-   - previous route: construct a fresh `IrValue`, call `RuntimeValue::static_value`, then immediately decompose it;
-   - target route: runtime-native constructors for Number/Boolean/String, Range/Size/Color/Enum, Content and Callable.
+**Candidate source invariant:** production `evaluator.rs` contains zero calls to `.semantic_value()`, `.to_ir_value()`, `.into_ir_value()`, or `RuntimeValue::into_ir_value`.
 
-3. **Builtin generated-result factories**
-   - previous route: `static_result(IrValue)` or `RuntimeValue::static_value(IrValue::...)`;
-   - target route: generated builtin results are constructed directly as runtime values. Test compatibility wrappers may still project to IR under `#[cfg(test)]`.
+### A2/C — explicit transitional IR emission boundaries
 
-4. **Generic reverse projection API**
-   - `semantic_value`, `to_ir_value`, `into_ir_value`, Pair reverse projection, callable/capture reverse projection, `replace_semantic_value`, and `PartialEq<IrValue>` no longer have a production consumer after L1d–L1t;
-   - retain them only under `#[cfg(test)]` while the existing roundtrip/regression tests still exercise exact legacy semantic parity.
+Some paths still have an `IrValue` contract because later mandatory gates have not yet replaced the mixed/executable IR model. These are not runtime-inspection consumers.
 
-**G1 exit condition for category A:** no production runtime→IR→runtime roundtrip and no production generic RuntimeValue→IrValue projection escape hatch.
+They use the deliberately explicit names `to_legacy_ir_value` / `into_legacy_ir_value` and are grouped as follows:
 
-## B — allowed at G1 exit
+| Boundary family | Why IR still exists | Required owner |
+| --- | --- | --- |
+| legacy scope/outcome adapters | compatibility evaluator surfaces still return `IrValue` | G3/G4/G7 |
+| block/inline/content materialization fallback | final document materializers still consume mixed `IrValue` | G4/G6 |
+| table-cell / flow-join materialization | current document-node materializers accept legacy semantic values | G4/G6 |
+| numbering/localization/authors/keywords state | DocumentState remains IR-shaped | G5 |
+| target resolution / chain native argument array | legacy executable invocation pipeline remains IR-shaped | G3/G4 |
+| evaluate/preserve positional and named values | unresolved/executable preservation still serializes mixed IR | G3/G4/G7 |
+| owned collection projection helper | legacy collection-output callers still require `Vec<IrValue>` | G3/G4/G6 |
 
-The crate boundary does not itself define runtime ownership. Immutable backend-neutral semantic leaf structures can remain shared where they carry no evaluator execution state.
+At the current PR #819 candidate there are 26 explicit legacy projection call sites in production evaluator code: 2 borrowed projections, 22 consuming projections, and 2 consuming function references.
 
-Allowed examples:
+These boundaries must not be reused for ordinary runtime inspection. Their retirement belongs to the later gate listed above.
+
+## B — allowed semantic leaf sharing at G1 exit
+
+The crate that defines a data type does not alone determine evaluator ownership. Immutable backend-neutral leaf payloads may remain shared where they carry no execution state:
 
 - `IrRange`
 - `IrSize`
 - `IrColor`
 - `IrEnumValue`
 - `IrComponent`
-- semantic `IrNode` content that is already evaluated and carried as runtime Content during this migration stage
+- already-evaluated semantic `IrNode` content carried by RuntimeValue during this migration stage
 
-G1 does **not** require inventing duplicate RuntimeRange/RuntimeSize/etc. types merely to remove the `arkst-ir` name from these leaf payloads.
+G1 does not introduce duplicate RuntimeRange/RuntimeSize/etc. wrappers merely to remove an `arkst-ir` type name.
 
 ## C — later-gate migration debt
 
-These boundaries are intentionally not promoted into G1 blockers:
+The following remain intentionally outside G1 completion:
 
 | Boundary | Current purpose | Required owner |
 | --- | --- | --- |
-| `RuntimeValue::new(IrValue, origin)` / `static_value(IrValue)` | one-way legacy IR ingress while old execution/facade paths still exist | G3/G4/G7 retirement with legacy routes |
-| callable captured values reconstructed from `IrCallableCapture` | one-way legacy callable ingress | G4 |
-| `RuntimeCallable.body: Vec<IrNode>` | callable bodies still execute through transitional mixed IR | G4 |
-| `RuntimeInlineBody::{content,body}: Vec<IrNode>` | contextual body carrier until direct nested AST execution | G4 |
-| `numbering::format_from_value(&IrValue)` | document metadata is still stored in legacy IR-shaped state; conversion uses the one-way runtime ingress only | G5/G6 |
+| `RuntimeValue::new(IrValue, origin)` / `static_value(IrValue)` | one-way ingress from legacy IR execution/facade paths | G3/G4/G7 |
+| callable capture reconstruction from `IrCallableCapture` | one-way legacy callable ingress | G4 |
+| `RuntimeCallable.body: Vec<IrNode>` | callable bodies still execute through mixed IR | G4 |
+| `RuntimeInlineBody::{content, body}: Vec<IrNode>` | contextual body carrier before direct nested AST execution | G4 |
+| `numbering::format_from_value(&IrValue)` | document metadata still uses legacy IR-shaped state | G5/G6 |
 | `ast_to_ir` and the core compatibility facade | pre-evaluation/executable IR route | G3/G4/G7 |
-| executable `IrNode::{FunctionCall,ChainedFunctionCall,FunctionDeclaration}` | transitional execution model | G3/G4/G6 |
-| `IrInline::{DirectiveCall,ChainedDirectiveCall}` | transitional nested executable model | G4/G6 |
-| durable `IrValue::{Callable,InlineBody}` and executable wire variants | mixed final/runtime schema | G6/G7 |
+| executable `IrNode::{FunctionCall, ChainedFunctionCall, FunctionDeclaration}` | transitional execution model | G3/G4/G6 |
+| `IrInline::{DirectiveCall, ChainedDirectiveCall}` | transitional nested executable model | G4/G6 |
+| durable `IrValue::{Callable, InlineBody}` and executable wire variants | mixed final/runtime schema | G6/G7 |
 | Typst handling of executable/mixed IR | negative baseline until final-only IR | G6 |
 
-The G1 candidate must not remove these prematurely or introduce a parallel ad-hoc body/bytecode model.
+## PR #819 candidate acceptance
 
-## G1-exit cleanup candidate acceptance
+Before the PR can be qualified, authoritative read-back and CI must establish all of the following:
 
-The candidate is acceptable for PR creation only if authoritative source read-back proves:
+- no production evaluator use of the old generic projection names;
+- A1 runtime inspection is implemented through RuntimeValue-native accessors/helpers;
+- every remaining production RuntimeValue→IrValue projection is explicitly named as a legacy boundary and belongs to an A2/C family above;
+- production builtins still have no generated `IrValue -> RuntimeValue` immediate wrapper;
+- conversion-generated scalar/domain/content/callable values remain runtime-native;
+- InlineBody→Callable target conversion does not round-trip through `IrCallable`/`IrValue`;
+- origin/provenance behavior remains unchanged at fresh materialization boundaries;
+- formatting, stable/MSRV build, clippy, platform tests, WASM, compatibility/oracle checks and required Merge Gate pass on one exact candidate HEAD.
 
-- production `builtins.rs` has no generated `IrValue -> RuntimeValue` immediate wrapper;
-- `materialized_target_value(IrValue)` is absent;
-- the InlineBody→Callable target does not call `into_ir()` or construct `IrValue::Callable`;
-- generic reverse-projection helpers are `#[cfg(test)]`-confined;
-- one-way legacy ingress remains explicit and documented instead of being disguised as a generated-value factory;
-- origin remains `Static` and provenance remains `Materialized` for newly materialized target values, matching the previous observable contract;
-- existing source-backed identity conversions continue to preserve the original runtime carrier and provenance;
-- no #682 structured-String widening, #718 table feature implementation, final-IR schema change, wire change, backend change, or G2+ implementation is introduced.
+Historical failures remain evidence:
 
-Focused regression ownership includes runtime-native Integer/Color conversion, InlineBody→Callable conversion, InlineBody→Content conversion, origin/provenance preservation, plus the existing scalar/domain/content/callable roundtrip and fail-closed suites.
+- `f8ed58bb40db6c52c869e85e2f4b5a5c1eb63503` / CI #2415 / run #44929119886 — malformed `LoremIpsum` delimiter;
+- `de521ce90d3c02c6f0f824786721fb6ce2c87411` / CI #2416 / run #44931779968 — evaluator projection inventory defect exposed by compilation.
 
 ## Exit sequencing
 
-This candidate is an implementation candidate only. Do not declare G1 complete from source shape alone.
-
 1. authoritative candidate read-back;
-2. PR creation;
-3. exact-HEAD required CI qualification;
-4. guarded squash merge;
+2. exact-head CI qualification once;
+3. deterministic remediation only if that exact run fails;
+4. guarded squash merge only after qualification;
 5. post-merge reconciliation;
-6. **fresh G1 exit proof** against protected main.
+6. fresh G1 exit proof against protected main.
 
-If the fresh proof finds category A empty and the G1 integration evidence remains green, G1 may then be accepted and the next architectural gate becomes G2. Category C remains tracked by its later mandatory gate instead of being silently reclassified as completed work.
+Only the final proof may mark G1 complete. Later-gate C debt remains open by design.
