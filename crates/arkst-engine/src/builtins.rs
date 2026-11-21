@@ -1638,8 +1638,11 @@ fn evaluate_plaintext(
     let content = arguments
         .remove(0)
         .ok_or_else(|| error("`.plaintext` requires one content argument".to_string()))?;
-    let content_semantic = content.semantic_value();
-    let text = plain_text_argument(content_semantic.as_ref()).ok_or_else(|| {
+    let text = match content.as_content_nodes() {
+        Some(nodes) => plain_text_from_content(nodes),
+        None => content.plain_text_scalar(),
+    }
+    .ok_or_else(|| {
         error(
             "`.plaintext` requires already-parsed inline content or a supported scalar value"
                 .to_string(),
@@ -1812,30 +1815,6 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         IrInline::Image { .. } => return None,
     }
     Some(())
-}
-
-/// Projects the bounded `.plaintext` input contract without converting a
-/// value back into source text or invoking a Markdown parser.
-pub(crate) fn plain_text_argument(value: &IrValue) -> Option<String> {
-    match value {
-        IrValue::Identifier(value) => Some(value.clone()),
-        IrValue::Boolean(value) => Some(value.to_string()),
-        IrValue::Number(value) => Some(value.to_string()),
-        IrValue::Content(nodes) => plain_text_from_content(nodes),
-        IrValue::String(_)
-        | IrValue::Range(_)
-        | IrValue::Collection(_)
-        | IrValue::Pair(_)
-        | IrValue::Dictionary(_)
-        | IrValue::Callable(_)
-        | IrValue::InlineBody(_)
-        | IrValue::Size(_)
-        | IrValue::Color(_)
-        | IrValue::Enum(_)
-        | IrValue::Component(_)
-        | IrValue::Unit
-        | IrValue::None => None,
-    }
 }
 
 fn plain_text_from_content(nodes: &[IrNode]) -> Option<String> {
