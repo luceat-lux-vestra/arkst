@@ -760,7 +760,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
         BuiltinKind::LoremIpsum => Ok(RuntimeValue::static_string(
             LOREM_IPSUM_TEXT.to_string(),
-        ))),
+        )),
         BuiltinKind::None => evaluate_none(builtin, arguments),
         BuiltinKind::Otherwise => evaluate_otherwise(builtin, arguments),
         BuiltinKind::IsNone => evaluate_isnone(builtin, arguments),
