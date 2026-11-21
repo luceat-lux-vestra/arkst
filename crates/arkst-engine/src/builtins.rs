@@ -1219,7 +1219,7 @@ fn evaluate_math(
     let source = scalar_string_argument_result(&content, "content")?;
     let block = arguments.remove(0);
     match block.as_ref() {
-        Some(value) if matches!(value.semantic_value().as_ref(), IrValue::Boolean(true)) => {}
+        Some(value) if value.is_true_boolean() => {}
         None if is_block_call => {}
         Some(value) if is_block_call && value.is_none() => {}
         _ => {
