@@ -1374,9 +1374,9 @@ fn evaluate_text(
         .ok_or_else(|| error("`.text` requires inline content".to_string()))?;
     let url = arguments
         .remove(0)
-        .map(|value| match value.semantic_value().as_ref() {
-            IrValue::None => Ok(None),
-            _ => {
+        .map(|value| match value.is_none() {
+            true => Ok(None),
+            false => {
                 let url = text_url_string_conversion(&value).map_err(|cause| {
                     conversion_error(
                         "`.text` `url` must be a String or None".to_string(),
@@ -1392,7 +1392,7 @@ fn evaluate_text(
     let bold = arguments
         .remove(0)
         .map(|value| {
-            if matches!(value.semantic_value().as_ref(), IrValue::None) {
+            if value.is_none() {
                 return Ok(false);
             }
             let weight = scalar_string_argument_result(&value, "weight")?;
@@ -1405,7 +1405,7 @@ fn evaluate_text(
     let italic = arguments
         .remove(0)
         .map(|value| {
-            if matches!(value.semantic_value().as_ref(), IrValue::None) {
+            if value.is_none() {
                 return Ok(false);
             }
             let style = scalar_string_argument_result(&value, "style")?;
@@ -1418,7 +1418,7 @@ fn evaluate_text(
     let decoration = arguments
         .remove(0)
         .map(|value| {
-            if matches!(value.semantic_value().as_ref(), IrValue::None) {
+            if value.is_none() {
                 return Ok(None);
             }
             let decoration = scalar_string_argument_result(&value, "decoration")?;
@@ -1434,7 +1434,7 @@ fn evaluate_text(
     let size = arguments
         .remove(0)
         .map(|value| {
-            if matches!(value.semantic_value().as_ref(), IrValue::None) {
+            if value.is_none() {
                 return Ok(None);
             }
             let size = scalar_string_argument_result(&value, "size")?;
@@ -1450,7 +1450,7 @@ fn evaluate_text(
     let text_case = arguments
         .remove(0)
         .map(|value| {
-            if matches!(value.semantic_value().as_ref(), IrValue::None) {
+            if value.is_none() {
                 return Ok(None);
             }
             let text_case = scalar_string_argument_result(&value, "case")?;
@@ -1466,7 +1466,7 @@ fn evaluate_text(
     let variant = arguments
         .remove(0)
         .map(|value| {
-            if matches!(value.semantic_value().as_ref(), IrValue::None) {
+            if value.is_none() {
                 return Ok(None);
             }
             let variant = scalar_string_argument_result(&value, "variant")?;
@@ -1479,7 +1479,7 @@ fn evaluate_text(
     let script = arguments
         .remove(0)
         .map(|value| {
-            if matches!(value.semantic_value().as_ref(), IrValue::None) {
+            if value.is_none() {
                 return Ok(None);
             }
             let script = scalar_string_argument_result(&value, "script")?;
@@ -1496,7 +1496,7 @@ fn evaluate_text(
     let color = arguments
         .remove(0)
         .map(|value| {
-            if matches!(value.semantic_value().as_ref(), IrValue::None) {
+            if value.is_none() {
                 return Ok(None);
             }
             value_conversion::convert_color_with_origin(&value)
