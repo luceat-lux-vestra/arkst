@@ -1397,6 +1397,32 @@ fn runtime_value_into_content_nodes(
         }
         Err(value) => *value,
     };
+    let value = match value.try_into_pair_parts() {
+        Ok((first, second, pair_span)) => {
+            let mut items = Vec::new();
+            if let Err(error) = items.try_reserve_exact(2) {
+                diagnostics.push(iteration_error(
+                    format!("pair output collection cannot be allocated: {error}"),
+                    pair_span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            for value in [first, second] {
+                let nodes = runtime_value_into_content_nodes(value, pair_span, diagnostics)?;
+                items.push(IrListItem {
+                    nodes,
+                    task: None,
+                    span: pair_span,
+                });
+            }
+            return Ok(vec![IrNode::OrderedList {
+                items,
+                start: 1,
+                span: pair_span,
+            }]);
+        }
+        Err(value) => *value,
+    };
     value_into_content_nodes(value.into_ir_value(), span, diagnostics)
 }
 
@@ -35427,7 +35453,7 @@ mod tests {
     }
 
     #[test]
-    fn g1l1g_runtime_collection_failure_and_legacy_pair_dictionary_fallback_remain_stable() {
+    fn g1l1g_runtime_collection_failure_and_pair_dictionary_output_remain_stable() {
         let caller_span = span(0, 20);
         let first_span = span(30, 40);
         let range_span = span(50, 60);
@@ -35467,7 +35493,7 @@ mod tests {
             ValueOrigin::Static,
         );
         let pair_nodes = runtime_value_into_content_nodes(pair, caller_span, &mut diagnostics)
-            .expect("Pair must remain on the legacy content fallback");
+            .expect("Pair output must remain stable across the runtime-owned migration");
         assert!(matches!(
             pair_nodes.as_slice(),
             [IrNode::OrderedList { items, span, .. }]
@@ -35624,6 +35650,254 @@ mod tests {
                         content.as_slice(),
                         [IrInline::Text { content, .. }] if content == "9"
                     )
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1h_runtime_pair_normalization_preserves_nested_pair_collection_order_and_spans() {
+        let outer_span = span(300, 360);
+        let first_span = span(305, 315);
+        let inner_span = span(320, 345);
+        let second_span = span(330, 340);
+        let first = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "first".to_string(),
+                span: first_span,
+            }],
+            span: first_span,
+        };
+        let second = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "second".to_string(),
+                span: second_span,
+            }],
+            span: second_span,
+        };
+        let inner = RuntimeValue::pair(
+            RuntimeValue::collection(
+                vec![
+                    RuntimeValue::dynamic_value(IrValue::Number(7.0))
+                        .with_provenance(ValueProvenance::source_backed_markdown_text("7")),
+                    RuntimeValue::static_value(IrValue::Content(vec![second.clone()])),
+                ],
+                ValueOrigin::Dynamic,
+            ),
+            RuntimeValue::static_value(IrValue::Boolean(true)),
+            inner_span,
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("inner-pair"));
+        let outer = RuntimeValue::pair(
+            RuntimeValue::dynamic_value(IrValue::Content(vec![first.clone()]))
+                .with_provenance(ValueProvenance::source_backed_markdown_text("first")),
+            inner,
+            outer_span,
+            ValueOrigin::Dynamic,
+        )
+        .with_provenance(ValueProvenance::source_backed_markdown_text("outer-pair"));
+        let mut diagnostics = Vec::new();
+
+        let nodes = runtime_value_into_content_nodes(outer, span(0, 1), &mut diagnostics)
+            .expect("runtime Pair must normalize without transitional IR");
+
+        let [IrNode::OrderedList {
+            items: outer_items,
+            span: actual_outer_span,
+            ..
+        }] = nodes.as_slice()
+        else {
+            panic!("expected one outer ordered list, got {nodes:?}");
+        };
+        assert_eq!(*actual_outer_span, outer_span);
+        assert_eq!(outer_items.len(), 2);
+        assert_eq!(outer_items[0].span, outer_span);
+        assert_eq!(outer_items[0].nodes.as_slice(), [first].as_slice());
+
+        let [IrNode::OrderedList {
+            items: inner_items,
+            span: actual_inner_span,
+            ..
+        }] = outer_items[1].nodes.as_slice()
+        else {
+            panic!("expected nested Pair ordered list");
+        };
+        assert_eq!(*actual_inner_span, inner_span);
+        assert_eq!(inner_items.len(), 2);
+        assert_eq!(inner_items[0].span, inner_span);
+        assert_eq!(inner_items[1].span, inner_span);
+        assert_eq!(inner_items[0].nodes.len(), 2);
+        assert!(matches!(
+            &inner_items[0].nodes[0],
+            IrNode::Paragraph { content, span }
+                if *span == inner_span
+                    && matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, span }]
+                            if content == "7" && *span == inner_span
+                    )
+        ));
+        assert_eq!(inner_items[0].nodes[1], second);
+        assert!(matches!(
+            &inner_items[1].nodes[0],
+            IrNode::Paragraph { content, span }
+                if *span == inner_span
+                    && matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, span }]
+                            if content == "true" && *span == inner_span
+                    )
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn g1l1h_runtime_pair_keeps_component_dictionary_and_range_policies() {
+        let pair_span = span(400, 460);
+        let component_span = span(405, 420);
+        let dictionary_span = span(425, 450);
+        let entry_span = span(430, 440);
+        let entry = RuntimeValue::pair(
+            RuntimeValue::static_value(IrValue::String("key".to_string())),
+            RuntimeValue::static_value(IrValue::Number(3.0)),
+            entry_span,
+            ValueOrigin::Static,
+        );
+        let dictionary =
+            RuntimeValue::dictionary(vec![entry], dictionary_span, ValueOrigin::Static)
+                .expect("typed runtime dictionary");
+        let successful = RuntimeValue::pair(
+            RuntimeValue::static_value(component_value(component_span)),
+            dictionary,
+            pair_span,
+            ValueOrigin::Static,
+        );
+        let mut diagnostics = Vec::new();
+
+        let nodes = runtime_value_into_content_nodes(successful, span(0, 1), &mut diagnostics)
+            .expect("Component and Dictionary children must retain their fallback policy");
+        let [IrNode::OrderedList {
+            items,
+            span: actual_pair_span,
+            ..
+        }] = nodes.as_slice()
+        else {
+            panic!("expected Pair ordered list");
+        };
+        assert_eq!(*actual_pair_span, pair_span);
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            items[0].nodes.as_slice(),
+            [IrNode::Component { component }] if component.span() == component_span
+        ));
+        assert!(matches!(
+            items[1].nodes.as_slice(),
+            [IrNode::Table { rows, span, .. }]
+                if *span == dictionary_span
+                    && rows.len() == 1
+                    && rows[0].span == entry_span
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let range_span = span(470, 480);
+        let failing = RuntimeValue::pair(
+            RuntimeValue::static_value(IrValue::Content(vec![text_paragraph("before")])),
+            RuntimeValue::dynamic_value(IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(3),
+                span: range_span,
+            }))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("1..3")),
+            pair_span,
+            ValueOrigin::Dynamic,
+        );
+        let failure = runtime_value_into_content_nodes(failing, span(0, 1), &mut diagnostics);
+        assert!(matches!(failure, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(range_span));
+    }
+
+    #[test]
+    fn g1l1h_callable_and_conditional_pair_normalization_preserve_outer_contracts() {
+        let pair_span = span(500, 520);
+        let tail_span = span(530, 540);
+        let make_pair = || {
+            RuntimeValue::pair(
+                RuntimeValue::dynamic_value(IrValue::String("left".to_string()))
+                    .with_provenance(ValueProvenance::source_backed_markdown_text("left")),
+                RuntimeValue::static_value(IrValue::Number(8.0)),
+                pair_span,
+                ValueOrigin::Dynamic,
+            )
+            .with_provenance(ValueProvenance::source_backed_markdown_text("pair"))
+        };
+        let pair = make_pair();
+        let tail = IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: "tail".to_string(),
+                span: tail_span,
+            }],
+            span: tail_span,
+        };
+        let mut diagnostics = Vec::new();
+
+        let mut single = CallableBodyValueAccumulator::Empty;
+        single
+            .append_value(pair.clone(), pair_span, &mut diagnostics)
+            .expect("single Pair is an observable semantic value");
+        let CallOutcome::Value(single_value) = single.finish() else {
+            panic!("single Pair must remain a semantic return value");
+        };
+        assert_eq!(single_value, pair);
+
+        let mut composed = CallableBodyValueAccumulator::Empty;
+        composed
+            .append_value(pair, pair_span, &mut diagnostics)
+            .expect("Pair remains semantic until composition");
+        composed
+            .append_value(
+                RuntimeValue::static_value(IrValue::Content(vec![tail.clone()])),
+                tail_span,
+                &mut diagnostics,
+            )
+            .expect("second observable triggers Pair content normalization");
+        let CallOutcome::Value(composed) = composed.finish() else {
+            panic!("composed Pair result must be content");
+        };
+        assert_eq!(composed.origin, ValueOrigin::Static);
+        assert!(composed.provenance().is_materialized());
+        let composed_nodes = composed
+            .as_content_nodes()
+            .expect("composed Pair must normalize to content");
+        assert_eq!(composed_nodes.len(), 2);
+        assert!(matches!(
+            &composed_nodes[0],
+            IrNode::OrderedList { items, span, .. }
+                if *span == pair_span && items.len() == 2
+        ));
+        assert_eq!(composed_nodes[1], tail);
+
+        let mut context = EvaluationContext::new();
+        context.set_value("payload".to_string(), make_pair());
+        let conditional = Evaluator::new().evaluate_call_value(
+            "if",
+            &[IrValue::Boolean(true), call_value("payload", Vec::new())],
+            &[],
+            None,
+            None,
+            &span(490, 550),
+            &mut diagnostics,
+            &mut context,
+        );
+        let CallOutcome::Value(conditional) = conditional else {
+            panic!("taken conditional Pair must produce content");
+        };
+        assert_eq!(conditional.origin, ValueOrigin::Static);
+        assert!(conditional.provenance().is_materialized());
+        assert!(matches!(
+            conditional.as_content_nodes(),
+            Some([IrNode::OrderedList { items, span, .. }])
+                if *span == pair_span && items.len() == 2
         ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
