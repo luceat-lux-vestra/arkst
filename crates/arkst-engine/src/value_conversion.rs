@@ -645,6 +645,25 @@ impl RuntimeValue {
         }
     }
 
+    /// Consume a typed Range without projecting it through transitional
+    /// IrValue. Return other runtime kinds intact for the legacy
+    /// content-materialization fallback.
+    pub(crate) fn try_into_range(self) -> Result<IrRange, Box<Self>> {
+        let Self {
+            kind,
+            origin,
+            provenance,
+        } = self;
+        match kind {
+            RuntimeValueKind::Range(range) => Ok(range),
+            kind => Err(Box::new(Self {
+                kind,
+                origin,
+                provenance,
+            })),
+        }
+    }
+
     pub(crate) fn into_pair_parts(self) -> Option<(Self, Self, SourceSpan)> {
         let RuntimeValueKind::Pair(pair) = self.kind else {
             return None;
