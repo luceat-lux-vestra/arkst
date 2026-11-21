@@ -2332,7 +2332,7 @@ fn logger_pair_member_string(value: &RuntimeValue) -> Option<String> {
     // across left/right/balanced shapes through depth 4. Source-authored
     // recursion remains bounded by the evaluator's existing depth budget;
     // unrelated structured categories remain fail-closed.
-    if let Some(value) = value.logger_pair_text_identity() {
+    if let Some(value) = value.as_string().or_else(|| value.as_identifier()) {
         return Some(value.to_owned());
     }
     if value.is_none() {
@@ -2468,7 +2468,7 @@ mod tests {
             RuntimeValue::pair(
                 RuntimeValue::static_value(IrValue::None),
                 RuntimeValue::static_value(IrValue::Range(IrRange {
-                    start: Some(2.0),
+                    start: Some(2),
                     end: None,
                     span,
                 })),
@@ -2501,8 +2501,7 @@ mod tests {
             span,
         }));
         assert_eq!(
-            logger_string_conversion(&dictionary)
-                .expect("flat evidenced Dictionary should render"),
+            logger_string_conversion(&dictionary).expect("flat evidenced Dictionary should render"),
             "{amount=DynamicValue(unwrappedValue=42, evaluationContext=null)}"
         );
 
