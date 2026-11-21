@@ -769,6 +769,62 @@ impl RuntimeValue {
         }
     }
 
+    /// Equality semantics used by collection operations such as `.distinct`
+    /// and `.groupvalues`. Source spans on Range/Pair/Dictionary wrappers
+    /// are intentionally ignored, and String/Identifier remain distinct kinds,
+    /// matching the legacy collection comparator without IR projection.
+    pub(crate) fn collection_semantic_eq(&self, other: &Self) -> bool {
+        match (&self.kind, &other.kind) {
+            (RuntimeValueKind::String(left), RuntimeValueKind::String(right))
+            | (RuntimeValueKind::Identifier(left), RuntimeValueKind::Identifier(right)) => {
+                left == right
+            }
+            (RuntimeValueKind::Number(left), RuntimeValueKind::Number(right)) => {
+                (left.is_nan() && right.is_nan()) || left.total_cmp(right).is_eq()
+            }
+            (RuntimeValueKind::Boolean(left), RuntimeValueKind::Boolean(right)) => left == right,
+            (RuntimeValueKind::Unit, RuntimeValueKind::Unit)
+            | (RuntimeValueKind::None, RuntimeValueKind::None) => true,
+            (RuntimeValueKind::Range(left), RuntimeValueKind::Range(right)) => {
+                left.start == right.start && left.end == right.end
+            }
+            (RuntimeValueKind::Collection(left), RuntimeValueKind::Collection(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| left.collection_semantic_eq(right))
+            }
+            (RuntimeValueKind::Pair(left), RuntimeValueKind::Pair(right)) => {
+                left.first.collection_semantic_eq(&right.first)
+                    && left.second.collection_semantic_eq(&right.second)
+            }
+            (RuntimeValueKind::Dictionary(left), RuntimeValueKind::Dictionary(right)) => {
+                left.entries.len() == right.entries.len()
+                    && left.entries.iter().all(|left_entry| {
+                        right.entries.iter().any(|right_entry| {
+                            let (Some((left_key, left_value)), Some((right_key, right_value))) = (
+                                left_entry.as_pair_values(),
+                                right_entry.as_pair_values(),
+                            ) else {
+                                return false;
+                            };
+                            left_key.collection_semantic_eq(right_key)
+                                && left_value.collection_semantic_eq(right_value)
+                        })
+                    })
+            }
+            (RuntimeValueKind::Content(left), RuntimeValueKind::Content(right)) => left == right,
+            (RuntimeValueKind::Callable(left), RuntimeValueKind::Callable(right)) => {
+                runtime_callable_semantic_eq(left, right)
+            }
+            (RuntimeValueKind::InlineBody(left), RuntimeValueKind::InlineBody(right)) => {
+                left == right
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn as_content_nodes(&self) -> Option<&[IrNode]> {
         match &self.kind {
             RuntimeValueKind::Content(nodes) => Some(nodes.as_slice()),
@@ -1066,7 +1122,7 @@ impl RuntimeValue {
         matches!(&self.kind, RuntimeValueKind::None)
     }
 
-    fn text_identity(&self) -> Option<&str> {
+    pub(crate) fn text_identity(&self) -> Option<&str> {
         match &self.kind {
             RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value) => Some(value),
             _ => None,
