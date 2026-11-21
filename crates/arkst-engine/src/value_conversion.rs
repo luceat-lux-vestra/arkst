@@ -631,7 +631,9 @@ impl RuntimeValue {
                         .all(|(left, right)| left.semantic_eq(right))
             }
             (RuntimeValueKind::Content(left), RuntimeValueKind::Content(right)) => left == right,
-            (RuntimeValueKind::Component(left), RuntimeValueKind::Component(right)) => left == right,
+            (RuntimeValueKind::Component(left), RuntimeValueKind::Component(right)) => {
+                left == right
+            }
             (RuntimeValueKind::Callable(left), RuntimeValueKind::Callable(right)) => {
                 runtime_callable_semantic_eq(left, right)
             }
@@ -996,9 +998,7 @@ fn runtime_callable_capture_semantic_eq(
             .variables
             .iter()
             .zip(&right.variables)
-            .all(|(left, right)| {
-                left.name == right.name && left.value.semantic_eq(&right.value)
-            })
+            .all(|(left, right)| left.name == right.name && left.value.semantic_eq(&right.value))
         && left.functions.len() == right.functions.len()
         && left
             .functions
