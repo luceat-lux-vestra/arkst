@@ -758,9 +758,7 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::Codespan => evaluate_codespan(arguments, call_span),
         BuiltinKind::Math => evaluate_math(arguments, call_span, is_block_call),
         BuiltinKind::Keybinding => evaluate_keybinding(arguments, call_span),
-        BuiltinKind::LoremIpsum => Ok(RuntimeValue::static_string(
-            LOREM_IPSUM_TEXT.to_string(),
-        )),
+        BuiltinKind::LoremIpsum => Ok(RuntimeValue::static_string(LOREM_IPSUM_TEXT.to_string())),
         BuiltinKind::None => evaluate_none(builtin, arguments),
         BuiltinKind::Otherwise => evaluate_otherwise(builtin, arguments),
         BuiltinKind::IsNone => evaluate_isnone(builtin, arguments),
@@ -769,13 +767,9 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::Not => evaluate_not(builtin, arguments),
         BuiltinKind::And | BuiltinKind::Or => evaluate_boolean_binary(builtin, arguments),
         BuiltinKind::Color => evaluate_color(arguments),
-        BuiltinKind::EmptyCollection => {
-            Ok(RuntimeValue::static_collection(Vec::new()))
-        }
-        BuiltinKind::EmptyDictionary => Ok(
-            RuntimeValue::static_dictionary(Vec::new(), call_span)
-                .expect("empty runtime dictionary invariant"),
-        ),
+        BuiltinKind::EmptyCollection => Ok(RuntimeValue::static_collection(Vec::new())),
+        BuiltinKind::EmptyDictionary => Ok(RuntimeValue::static_dictionary(Vec::new(), call_span)
+            .expect("empty runtime dictionary invariant")),
     };
     result.map_err(|mut error| {
         if let Some(conversion) = error.conversion.as_mut() {
@@ -912,7 +906,9 @@ fn evaluate_not(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.not` requires exactly one boolean argument".to_string()))?;
-    static_result(RuntimeValue::static_boolean(!boolean_argument(&value, "value")?))
+    static_result(RuntimeValue::static_boolean(!boolean_argument(
+        &value, "value",
+    )?))
 }
 
 fn evaluate_boolean_binary(
@@ -933,11 +929,13 @@ fn evaluate_boolean_binary(
     })?;
     let left = boolean_argument(&left, "a")?;
     let right = boolean_argument(&right, "b")?;
-    static_result(RuntimeValue::static_boolean(if builtin.kind == BuiltinKind::And {
-        left && right
-    } else {
-        left || right
-    }))
+    static_result(RuntimeValue::static_boolean(
+        if builtin.kind == BuiltinKind::And {
+            left && right
+        } else {
+            left || right
+        },
+    ))
 }
 
 fn evaluate_string(
@@ -998,11 +996,13 @@ fn evaluate_empty_check(
         ))
     })?;
     let is_empty = text.is_empty();
-    static_result(RuntimeValue::static_boolean(if builtin.kind == BuiltinKind::IsEmpty {
-        is_empty
-    } else {
-        !is_empty
-    }))
+    static_result(RuntimeValue::static_boolean(
+        if builtin.kind == BuiltinKind::IsEmpty {
+            is_empty
+        } else {
+            !is_empty
+        },
+    ))
 }
 
 fn evaluate_startswith(
@@ -1965,9 +1965,9 @@ fn evaluate_unary_numeric(
         BuiltinKind::Abs => Ok(numeric_result(value.abs())),
         BuiltinKind::Negate => Ok(numeric_result(-value)),
         BuiltinKind::Sqrt => Ok(numeric_result(value.sqrt())),
-        BuiltinKind::IsEven => {
-            static_result(RuntimeValue::static_boolean(kotlin_float_to_int(value) % 2 == 0))
-        }
+        BuiltinKind::IsEven => static_result(RuntimeValue::static_boolean(
+            kotlin_float_to_int(value) % 2 == 0,
+        )),
         _ => Err(error(format!(
             "`.{name}` has no unary numeric implementation"
         ))),
@@ -2044,9 +2044,9 @@ fn evaluate_truncate(
     // Kotlin's clamped toInt conversion) into an Int before truncate sees it.
     // Keep that branch separate from the floating post-processing formula.
     if decimals == 0 || number_value_is_integral(value) {
-        return static_result(RuntimeValue::static_number(f64::from(
-            kotlin_float_to_int(value),
-        )));
+        return static_result(RuntimeValue::static_number(f64::from(kotlin_float_to_int(
+            value,
+        ))));
     }
 
     // This deliberately follows Math.kt's observable boundaries:
@@ -2068,9 +2068,9 @@ fn evaluate_round(
         .ok_or_else(|| error("`.round` requires one numeric argument".to_string()))?;
     let value = numeric_argument(&value, "x")
         .map_err(|error| error.with_message("`.round` requires a numeric argument".to_string()))?;
-    static_result(RuntimeValue::static_number(f64::from(
-        kotlin_round_to_int(value),
-    )))
+    static_result(RuntimeValue::static_number(f64::from(kotlin_round_to_int(
+        value,
+    ))))
 }
 
 /// Applies the `NumberValue` normalization visible at the upstream output
