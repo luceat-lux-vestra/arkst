@@ -35845,8 +35845,11 @@ mod tests {
         };
         let mut diagnostics = Vec::new();
 
-        let direct =
-            runtime_value_into_content_nodes(make_range(direct_span), caller_span, &mut diagnostics);
+        let direct = runtime_value_into_content_nodes(
+            make_range(direct_span),
+            caller_span,
+            &mut diagnostics,
+        );
         assert!(matches!(direct, Err(CallOutcome::Failed)));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].primary, Some(direct_span));
