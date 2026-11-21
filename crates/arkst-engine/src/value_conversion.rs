@@ -8,14 +8,13 @@
 
 use arkst_ir::{
     IrBoxType, IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
-    IrClipShape, IrColor, IrComponent,
-    IrContainerAlignment, IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType,
-    IrEnumValue, IrFragmentBehavior, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode,
-    IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair, IrParameter,
-    IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle,
-    IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
+    IrCapturedFunction, IrCapturedVariable, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
+    IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType, IrEnumValue,
+    IrFragmentBehavior, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPageMarginPosition,
+    IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair, IrParameter, IrRange, IrRawBody, IrSize,
+    IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle, IrTextCase, IrTextDecoration,
+    IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
-use arkst_ir::{IrCapturedFunction, IrCapturedVariable};
 use arkst_source::{SourceId, SourceSpan};
 #[cfg(test)]
 use std::borrow::Cow;
@@ -6664,12 +6663,9 @@ mod tests {
         let runtime_inline =
             RuntimeValue::new(IrValue::InlineBody(inline.clone()), ValueOrigin::Dynamic)
                 .with_provenance(ValueProvenance::source_backed_markdown_text("body"));
-        let callable = convert_target_with_origin(
-            &runtime_inline,
-            ConversionTarget::Callable,
-            span,
-        )
-        .expect("inline body callable conversion");
+        let callable =
+            convert_target_with_origin(&runtime_inline, ConversionTarget::Callable, span)
+                .expect("inline body callable conversion");
         let TargetValue::Value(callable) = callable else {
             panic!("callable target must materialize a runtime value");
         };
@@ -6683,18 +6679,51 @@ mod tests {
         assert_eq!(callable.origin, ValueOrigin::Static);
         assert_eq!(callable.provenance(), &ValueProvenance::Materialized);
 
-        let content = convert_target_with_origin(
-            &runtime_inline,
-            ConversionTarget::InlineContent,
-            span,
-        )
-        .expect("inline body content conversion");
+        let content =
+            convert_target_with_origin(&runtime_inline, ConversionTarget::InlineContent, span)
+                .expect("inline body content conversion");
         let TargetValue::Value(content) = content else {
             panic!("inline content target must materialize a runtime value");
         };
-        assert!(matches!(&content.kind, RuntimeValueKind::Content(nodes) if nodes == &inline.content));
+        assert!(
+            matches!(&content.kind, RuntimeValueKind::Content(nodes) if nodes == &inline.content)
+        );
         assert_eq!(content.origin, ValueOrigin::Static);
         assert_eq!(content.provenance(), &ValueProvenance::Materialized);
+    }
+
+    #[test]
+    fn g1_exit_runtime_inspection_keeps_collection_semantics_without_ir_projection() {
+        let first_span = SourceSpan::new(SourceId(71), 3, 8);
+        let second_span = SourceSpan::new(SourceId(72), 11, 16);
+
+        let first = RuntimeValue::new(
+            IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(3),
+                span: first_span,
+            }),
+            ValueOrigin::Dynamic,
+        );
+        let second = RuntimeValue::new(
+            IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(3),
+                span: second_span,
+            }),
+            ValueOrigin::Static,
+        );
+
+        assert!(first.collection_semantic_eq(&second));
+        assert_eq!(first.source_span_or(second_span), first_span);
+        assert!(!RuntimeValue::new(
+            IrValue::String("same".into()),
+            ValueOrigin::Dynamic,
+        )
+        .collection_semantic_eq(&RuntimeValue::new(
+            IrValue::Identifier("same".into()),
+            ValueOrigin::Dynamic,
+        )));
     }
 
     #[test]
