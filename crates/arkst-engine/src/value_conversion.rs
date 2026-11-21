@@ -8,7 +8,7 @@
 
 use arkst_ir::{
     IrBoxType, IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
-    IrCapturedFunction, IrCapturedVariable, IrClipShape, IrColor, IrComponent,
+    IrClipShape, IrColor, IrComponent,
     IrContainerAlignment, IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType,
     IrEnumValue, IrFragmentBehavior, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode,
     IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair, IrParameter,
@@ -16,6 +16,9 @@ use arkst_ir::{
     IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
 use arkst_source::{SourceId, SourceSpan};
+#[cfg(test)]
+use arkst_ir::{IrCapturedFunction, IrCapturedVariable};
+#[cfg(test)]
 use std::borrow::Cow;
 
 /// Materialize the Quarkdown body `DynamicValue` only at a conversion target
@@ -187,6 +190,7 @@ impl From<IrCallableResourceContext> for RuntimeCallableResourceContext {
     }
 }
 
+#[cfg(test)]
 impl From<RuntimeCallableResourceContext> for IrCallableResourceContext {
     fn from(value: RuntimeCallableResourceContext) -> Self {
         Self {
@@ -239,6 +243,7 @@ impl RuntimeCallableCapture {
         }
     }
 
+    #[cfg(test)]
     fn to_ir(&self) -> IrCallableCapture {
         IrCallableCapture {
             variables: self
@@ -261,6 +266,7 @@ impl RuntimeCallableCapture {
         }
     }
 
+    #[cfg(test)]
     fn into_ir(self) -> IrCallableCapture {
         IrCallableCapture {
             variables: self
@@ -304,6 +310,7 @@ impl RuntimeCallable {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn to_ir(&self) -> IrCallable {
         IrCallable {
             parameters: self.parameters.clone(),
@@ -316,6 +323,7 @@ impl RuntimeCallable {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn into_ir(self) -> IrCallable {
         IrCallable {
             parameters: self.parameters,
@@ -344,6 +352,7 @@ impl RuntimeInlineBody {
         }
     }
 
+    #[cfg(test)]
     fn to_ir(&self) -> IrInlineBody {
         IrInlineBody {
             content: self.content.clone(),
@@ -353,6 +362,7 @@ impl RuntimeInlineBody {
         }
     }
 
+    #[cfg(test)]
     fn into_ir(self) -> IrInlineBody {
         IrInlineBody {
             content: self.content,
@@ -469,6 +479,10 @@ impl RuntimeValue {
                 );
             }
         };
+        Self::materialized(kind, origin)
+    }
+
+    fn materialized(kind: RuntimeValueKind, origin: ValueOrigin) -> Self {
         Self {
             kind,
             origin,
@@ -476,6 +490,9 @@ impl RuntimeValue {
         }
     }
 
+    /// Transitional one-way ingress for legacy IR-backed callers that have not
+    /// yet moved to direct AST/runtime construction. G1 production code must
+    /// not use this as a generated-value factory.
     pub(crate) fn static_value(value: IrValue) -> Self {
         Self::new(value, ValueOrigin::Static)
     }
@@ -483,6 +500,54 @@ impl RuntimeValue {
     #[allow(dead_code)]
     pub(crate) fn dynamic_value(value: IrValue) -> Self {
         Self::new(value, ValueOrigin::Dynamic)
+    }
+
+    pub(crate) fn static_none() -> Self {
+        Self::materialized(RuntimeValueKind::None, ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_boolean(value: bool) -> Self {
+        Self::materialized(RuntimeValueKind::Boolean(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_number(value: f64) -> Self {
+        Self::materialized(RuntimeValueKind::Number(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_string(value: impl Into<String>) -> Self {
+        Self::materialized(RuntimeValueKind::String(value.into()), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_range(value: IrRange) -> Self {
+        Self::materialized(RuntimeValueKind::Range(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_size(value: IrSize) -> Self {
+        Self::materialized(RuntimeValueKind::Size(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_color(value: IrColor) -> Self {
+        Self::materialized(RuntimeValueKind::Color(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_enum(value: IrEnumValue) -> Self {
+        Self::materialized(RuntimeValueKind::Enum(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_content(nodes: Vec<IrNode>) -> Self {
+        Self::materialized(RuntimeValueKind::Content(nodes), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_callable(value: RuntimeCallable) -> Self {
+        Self::materialized(RuntimeValueKind::Callable(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_collection(elements: Vec<Self>) -> Self {
+        Self::collection(elements, ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_dictionary(entries: Vec<Self>, span: SourceSpan) -> Option<Self> {
+        Self::dictionary(entries, span, ValueOrigin::Static)
     }
 
     pub(crate) fn pair(first: Self, second: Self, span: SourceSpan, origin: ValueOrigin) -> Self {
@@ -840,6 +905,7 @@ impl RuntimeValue {
         }
     }
 
+    #[cfg(test)]
     fn to_ir_pair(&self) -> Option<IrPair> {
         let RuntimeValueKind::Pair(pair) = &self.kind else {
             return None;
@@ -851,6 +917,7 @@ impl RuntimeValue {
         })
     }
 
+    #[cfg(test)]
     fn into_ir_pair(self) -> Option<IrPair> {
         let RuntimeValueKind::Pair(pair) = self.kind else {
             return None;
@@ -865,6 +932,7 @@ impl RuntimeValue {
     /// Project evaluator-owned runtime values back into the transitional
     /// `IrValue` model only when an existing semantic consumer explicitly
     /// requires that boundary during the G1 migration.
+    #[cfg(test)]
     pub(crate) fn semantic_value(&self) -> Cow<'_, IrValue> {
         match &self.kind {
             RuntimeValueKind::Unit => Cow::Owned(IrValue::Unit),
@@ -920,11 +988,13 @@ impl RuntimeValue {
         self.text_identity()
     }
 
+    #[cfg(test)]
     pub(crate) fn replace_semantic_value(&mut self, value: IrValue) {
         let origin = self.origin;
         *self = Self::new(value, origin);
     }
 
+    #[cfg(test)]
     pub(crate) fn to_ir_value(&self) -> IrValue {
         match &self.kind {
             RuntimeValueKind::Unit => IrValue::Unit,
@@ -962,6 +1032,7 @@ impl RuntimeValue {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn into_ir_value(self) -> IrValue {
         match self.kind {
             RuntimeValueKind::Unit => IrValue::Unit,
@@ -1051,12 +1122,14 @@ impl From<IrValue> for RuntimeValue {
     }
 }
 
+#[cfg(test)]
 impl PartialEq<IrValue> for RuntimeValue {
     fn eq(&self, other: &IrValue) -> bool {
         self.semantic_value().as_ref() == other
     }
 }
 
+#[cfg(test)]
 impl PartialEq<RuntimeValue> for IrValue {
     fn eq(&self, other: &RuntimeValue) -> bool {
         self == other.semantic_value().as_ref()
@@ -1737,7 +1810,7 @@ pub(crate) fn convert_target_with_origin(
                 .map(scalar_value_to_runtime),
         },
         ConversionTarget::Integer => convert_integer_with_origin(argument)
-            .map(|value| materialized_target_value(IrValue::Number(f64::from(value)))),
+            .map(|value| TargetValue::Value(RuntimeValue::static_number(f64::from(value)))),
         ConversionTarget::Boolean => match &argument.kind {
             RuntimeValueKind::Boolean(_) => Ok(TargetValue::Value(argument.clone())),
             _ => convert_scalar_with_origin(argument, ScalarTarget::Boolean)
@@ -1751,7 +1824,7 @@ pub(crate) fn convert_target_with_origin(
         ConversionTarget::Range => match &argument.kind {
             RuntimeValueKind::Range(_) => Ok(TargetValue::Value(argument.clone())),
             _ => convert_range_with_origin(argument, span)
-                .map(|value| materialized_target_value(IrValue::Range(value))),
+                .map(|value| TargetValue::Value(RuntimeValue::static_range(value))),
         },
         ConversionTarget::Size => match &argument.kind {
             RuntimeValueKind::Size(_) => Ok(TargetValue::Value(argument.clone())),
@@ -1795,9 +1868,9 @@ pub(crate) fn convert_target_with_origin(
         ),
         ConversionTarget::Callable => match &argument.kind {
             RuntimeValueKind::Callable(_) => Ok(TargetValue::Value(argument.clone())),
-            RuntimeValueKind::InlineBody(body) => Ok(materialized_target_value(IrValue::Callable(
-                body.clone().into_callable().into_ir(),
-            ))),
+            RuntimeValueKind::InlineBody(body) => Ok(TargetValue::Value(
+                RuntimeValue::static_callable(body.clone().into_callable()),
+            )),
             _ => match argument.dynamic_text() {
                 Some(value) => Ok(TargetValue::RawMarkdown {
                     target: RawMarkdownTarget::Callable,
@@ -1811,23 +1884,19 @@ pub(crate) fn convert_target_with_origin(
     }
 }
 
-fn materialized_target_value(value: IrValue) -> TargetValue {
-    TargetValue::Value(RuntimeValue::static_value(value))
-}
-
 fn scalar_value_to_runtime(value: ScalarValue) -> TargetValue {
-    materialized_target_value(match value {
-        ScalarValue::Number(value) => IrValue::Number(value),
-        ScalarValue::Boolean(value) => IrValue::Boolean(value),
-        ScalarValue::String(value) => IrValue::String(value),
+    TargetValue::Value(match value {
+        ScalarValue::Number(value) => RuntimeValue::static_number(value),
+        ScalarValue::Boolean(value) => RuntimeValue::static_boolean(value),
+        ScalarValue::String(value) => RuntimeValue::static_string(value),
     })
 }
 
 fn domain_value_to_runtime(value: DomainValue) -> TargetValue {
-    materialized_target_value(match value {
-        DomainValue::Size(value) => IrValue::Size(value),
-        DomainValue::Color(value) => IrValue::Color(value),
-        DomainValue::Enum(value) => IrValue::Enum(value),
+    TargetValue::Value(match value {
+        DomainValue::Size(value) => RuntimeValue::static_size(value),
+        DomainValue::Color(value) => RuntimeValue::static_color(value),
+        DomainValue::Enum(value) => RuntimeValue::static_enum(value),
     })
 }
 
@@ -1851,8 +1920,8 @@ fn convert_content_target(
         RuntimeValueKind::Content(_) => Ok(TargetValue::Value(argument.clone())),
         // An inline contextual body is not a block body. It becomes fresh
         // materialized inline content only when this target requests it.
-        RuntimeValueKind::InlineBody(body) if !block_target => Ok(materialized_target_value(
-            IrValue::Content(body.content.clone()),
+        RuntimeValueKind::InlineBody(body) if !block_target => Ok(TargetValue::Value(
+            RuntimeValue::static_content(body.content.clone()),
         )),
         RuntimeValueKind::String(value)
             if block_target || argument.origin == ValueOrigin::Dynamic =>
@@ -1884,7 +1953,7 @@ fn convert_content_target(
             Ok(literal_content_value("None".to_string(), span))
         }
         RuntimeValueKind::String(value) if !block_target => {
-            Ok(materialized_target_value(IrValue::Content(vec![
+            Ok(TargetValue::Value(RuntimeValue::static_content(vec![
                 IrNode::Paragraph {
                     content: vec![IrInline::Text {
                         content: value.clone(),
@@ -1905,7 +1974,7 @@ fn convert_content_target(
 }
 
 fn literal_content_value(text: String, span: SourceSpan) -> TargetValue {
-    materialized_target_value(IrValue::Content(vec![IrNode::Paragraph {
+    TargetValue::Value(RuntimeValue::static_content(vec![IrNode::Paragraph {
         content: vec![IrInline::Text {
             content: text,
             span,
@@ -6463,6 +6532,90 @@ mod tests {
                 target: ConversionTarget::Integer
             })
         ));
+    }
+
+    #[test]
+    fn g1_exit_conversion_materializes_runtime_native_values() {
+        let span = span();
+
+        let number = convert_target_with_origin(
+            &RuntimeValue::dynamic_value(IrValue::String("2".into())),
+            ConversionTarget::Integer,
+            span,
+        )
+        .expect("dynamic integer conversion");
+        let TargetValue::Value(number) = number else {
+            panic!("integer target must materialize a runtime value");
+        };
+        assert!(matches!(number.kind, RuntimeValueKind::Number(value) if value == 2.0));
+        assert_eq!(number.origin, ValueOrigin::Static);
+        assert_eq!(number.provenance(), &ValueProvenance::Materialized);
+
+        let color = convert_target_with_origin(
+            &RuntimeValue::dynamic_value(IrValue::String("#112233".into())),
+            ConversionTarget::Color,
+            span,
+        )
+        .expect("dynamic color conversion");
+        let TargetValue::Value(color) = color else {
+            panic!("color target must materialize a runtime value");
+        };
+        assert!(matches!(color.kind, RuntimeValueKind::Color(_)));
+        assert_eq!(color.origin, ValueOrigin::Static);
+        assert_eq!(color.provenance(), &ValueProvenance::Materialized);
+
+        let inline = IrInlineBody {
+            content: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "body".into(),
+                    span,
+                }],
+                span,
+            }],
+            parameters: None,
+            body: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "callable".into(),
+                    span,
+                }],
+                span,
+            }],
+            span,
+        };
+        let runtime_inline =
+            RuntimeValue::new(IrValue::InlineBody(inline.clone()), ValueOrigin::Dynamic)
+                .with_provenance(ValueProvenance::source_backed_markdown_text("body"));
+        let callable = convert_target_with_origin(
+            &runtime_inline,
+            ConversionTarget::Callable,
+            span,
+        )
+        .expect("inline body callable conversion");
+        let TargetValue::Value(callable) = callable else {
+            panic!("callable target must materialize a runtime value");
+        };
+        let RuntimeValueKind::Callable(callable_value) = &callable.kind else {
+            panic!("expected runtime callable");
+        };
+        assert_eq!(callable_value.parameters, inline.parameters);
+        assert_eq!(callable_value.body, inline.body);
+        assert_eq!(callable_value.span, inline.span);
+        assert!(callable_value.capture.is_none());
+        assert_eq!(callable.origin, ValueOrigin::Static);
+        assert_eq!(callable.provenance(), &ValueProvenance::Materialized);
+
+        let content = convert_target_with_origin(
+            &runtime_inline,
+            ConversionTarget::InlineContent,
+            span,
+        )
+        .expect("inline body content conversion");
+        let TargetValue::Value(content) = content else {
+            panic!("inline content target must materialize a runtime value");
+        };
+        assert!(matches!(&content.kind, RuntimeValueKind::Content(nodes) if nodes == &inline.content));
+        assert_eq!(content.origin, ValueOrigin::Static);
+        assert_eq!(content.provenance(), &ValueProvenance::Materialized);
     }
 
     #[test]
