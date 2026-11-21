@@ -1423,6 +1423,17 @@ fn runtime_value_into_content_nodes(
         }
         Err(value) => *value,
     };
+    let value = match value.try_into_range() {
+        Ok(range) => {
+            diagnostics.push(iteration_error(
+                "Direct Range materialization is deferred; consume the typed Range through iteration first"
+                    .to_string(),
+                range.span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        Err(value) => *value,
+    };
     value_into_content_nodes(value.into_ir_value(), span, diagnostics)
 }
 
@@ -35815,6 +35826,64 @@ mod tests {
         assert!(matches!(failure, Err(CallOutcome::Failed)));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].primary, Some(range_span));
+    }
+
+    #[test]
+    fn g1l1i_runtime_range_rejection_uses_typed_span_directly_and_when_nested() {
+        let caller_span = span(600, 610);
+        let direct_span = span(620, 630);
+        let collection_span = span(640, 650);
+        let pair_span = span(660, 690);
+        let nested_pair_range_span = span(670, 680);
+        let make_range = |range_span| {
+            RuntimeValue::dynamic_value(IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(3),
+                span: range_span,
+            }))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("1..3"))
+        };
+        let mut diagnostics = Vec::new();
+
+        let direct = runtime_value_into_content_nodes(
+            make_range(direct_span),
+            caller_span,
+            &mut diagnostics,
+        );
+        assert!(matches!(direct, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(direct_span));
+        assert_eq!(
+            diagnostics[0].message,
+            "Direct Range materialization is deferred; consume the typed Range through iteration first"
+        );
+
+        diagnostics.clear();
+        let collection = RuntimeValue::collection(
+            vec![
+                RuntimeValue::static_value(IrValue::Content(vec![text_paragraph("before")])),
+                make_range(collection_span),
+                RuntimeValue::static_value(IrValue::Content(vec![text_paragraph("after")])),
+            ],
+            ValueOrigin::Dynamic,
+        );
+        let nested_collection =
+            runtime_value_into_content_nodes(collection, caller_span, &mut diagnostics);
+        assert!(matches!(nested_collection, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(collection_span));
+
+        diagnostics.clear();
+        let pair = RuntimeValue::pair(
+            RuntimeValue::static_value(IrValue::Content(vec![text_paragraph("left")])),
+            make_range(nested_pair_range_span),
+            pair_span,
+            ValueOrigin::Dynamic,
+        );
+        let nested_pair = runtime_value_into_content_nodes(pair, caller_span, &mut diagnostics);
+        assert!(matches!(nested_pair, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(nested_pair_range_span));
     }
 
     #[test]
