@@ -189,7 +189,6 @@ impl From<IrCallableResourceContext> for RuntimeCallableResourceContext {
     }
 }
 
-#[cfg(test)]
 impl From<RuntimeCallableResourceContext> for IrCallableResourceContext {
     fn from(value: RuntimeCallableResourceContext) -> Self {
         Self {
@@ -249,7 +248,7 @@ impl RuntimeCallableCapture {
                 .iter()
                 .map(|variable| IrCapturedVariable {
                     name: variable.name.clone(),
-                    value: variable.value.to_ir_value(),
+                    value: variable.value.to_legacy_ir_value(),
                 })
                 .collect(),
             functions: self
@@ -271,7 +270,7 @@ impl RuntimeCallableCapture {
                 .into_iter()
                 .map(|variable| IrCapturedVariable {
                     name: variable.name,
-                    value: variable.value.into_ir_value(),
+                    value: variable.value.into_legacy_ir_value(),
                 })
                 .collect(),
             functions: self
@@ -1012,8 +1011,8 @@ impl RuntimeValue {
             return None;
         };
         Some(IrPair {
-            first: Box::new(pair.first.to_ir_value()),
-            second: Box::new(pair.second.to_ir_value()),
+            first: Box::new(pair.first.to_legacy_ir_value()),
+            second: Box::new(pair.second.to_legacy_ir_value()),
             span: pair.span,
         })
     }
@@ -1023,8 +1022,8 @@ impl RuntimeValue {
             return None;
         };
         Some(IrPair {
-            first: Box::new(pair.first.into_ir_value()),
-            second: Box::new(pair.second.into_ir_value()),
+            first: Box::new(pair.first.into_legacy_ir_value()),
+            second: Box::new(pair.second.into_legacy_ir_value()),
             span: pair.span,
         })
     }
