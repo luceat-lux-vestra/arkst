@@ -1801,7 +1801,8 @@ fn table_row_from_elements(
             value,
             span: element_span,
         } = element;
-        let content = value_into_table_cell(value.into_legacy_ir_value(), element_span, diagnostics)?;
+        let content =
+            value_into_table_cell(value.into_legacy_ir_value(), element_span, diagnostics)?;
         cells.push(IrTableCell {
             content,
             alignment: IrTableAlignment::None,
@@ -5400,7 +5401,11 @@ impl Evaluator {
                 CallOutcome::NoValue
             }
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics) {
+                match self.materialize_block_value(
+                    value.into_legacy_ir_value(),
+                    span,
+                    diagnostics,
+                ) {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5453,7 +5458,11 @@ impl Evaluator {
         match outcome {
             CallOutcome::Value(value) if value.is_unit() => CallOutcome::NoValue,
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics) {
+                match self.materialize_block_value(
+                    value.into_legacy_ir_value(),
+                    span,
+                    diagnostics,
+                ) {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5548,7 +5557,11 @@ impl Evaluator {
                 Vec::new()
             }
             CallOutcome::Value(value) => {
-                self.materialize_inline_value(Some(value.into_legacy_ir_value()), span, diagnostics)
+                self.materialize_inline_value(
+                    Some(value.into_legacy_ir_value()),
+                    span,
+                    diagnostics,
+                )
             }
             CallOutcome::NoValue => Vec::new(),
             CallOutcome::Failed => Vec::new(),
@@ -5779,7 +5792,11 @@ impl Evaluator {
         match outcome {
             CallOutcome::Value(value) if value.is_unit() => CallOutcome::NoValue,
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics) {
+                match self.materialize_block_value(
+                    value.into_legacy_ir_value(),
+                    span,
+                    diagnostics,
+                ) {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5813,7 +5830,11 @@ impl Evaluator {
         ) {
             CallOutcome::Value(value) if value.is_unit() => Vec::new(),
             CallOutcome::Value(value) => {
-                self.materialize_inline_value(Some(value.into_legacy_ir_value()), span, diagnostics)
+                self.materialize_inline_value(
+                    Some(value.into_legacy_ir_value()),
+                    span,
+                    diagnostics,
+                )
             }
             CallOutcome::NoValue | CallOutcome::Failed | CallOutcome::Unresolved => Vec::new(),
         }
@@ -17789,8 +17810,11 @@ impl Evaluator {
                 },
                 None => element,
             };
-            let content = match value_into_content_nodes(value.into_legacy_ir_value(), *span, diagnostics)
-            {
+            let content = match value_into_content_nodes(
+                value.into_legacy_ir_value(),
+                *span,
+                diagnostics,
+            ) {
                 Ok(content) => content,
                 Err(outcome) => return outcome,
             };
