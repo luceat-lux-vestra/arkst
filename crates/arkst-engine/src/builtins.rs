@@ -905,12 +905,7 @@ fn evaluate_equals(
     let right = arguments
         .remove(0)
         .ok_or_else(|| error("`.equals` requires a `to` value argument".to_string()))?;
-    let left_semantic = left.semantic_value();
-    let right_semantic = right.semantic_value();
-    static_result(IrValue::Boolean(values_equal(
-        left_semantic.as_ref(),
-        right_semantic.as_ref(),
-    )))
+    static_result(IrValue::Boolean(values_equal(&left, &right)))
 }
 
 fn evaluate_not(
@@ -1691,8 +1686,8 @@ fn boolean_argument(value: &RuntimeValue, parameter: &str) -> Result<bool, Built
     }
 }
 
-fn values_equal(left: &IrValue, right: &IrValue) -> bool {
-    if left == right {
+fn values_equal(left: &RuntimeValue, right: &RuntimeValue) -> bool {
+    if left.semantic_eq(right) {
         return true;
     }
     // Clean-room v2.5.1/v2.6 evidence shows Unit and None compare equal in
@@ -1700,10 +1695,7 @@ fn values_equal(left: &IrValue, right: &IrValue) -> bool {
     // false) and Unit does not compare equal to its "kotlin.Unit" String
     // projection. Keep this semantic equivalence separate from plain-text
     // fallback so conversion does not become value identity.
-    if matches!(
-        (left, right),
-        (IrValue::Unit, IrValue::None) | (IrValue::None, IrValue::Unit)
-    ) {
+    if (left.is_unit() && right.is_none()) || (left.is_none() && right.is_unit()) {
         return true;
     }
     match (comparable_plain_text(left), comparable_plain_text(right)) {
@@ -1716,19 +1708,16 @@ fn values_equal(left: &IrValue, right: &IrValue) -> bool {
 /// structured values into text for unrelated operations. Rich content is
 /// projected only because upstream `.equals` explicitly compares its plain
 /// text representation as a final equality branch.
-fn comparable_plain_text(value: &IrValue) -> Option<String> {
-    match value {
-        IrValue::String(value) | IrValue::Identifier(value) => Some(value.clone()),
-        IrValue::Number(value) => Some(value.to_string()),
-        IrValue::Content(nodes) => {
-            let mut text = String::new();
-            for node in nodes {
-                append_node_plain_text(node, &mut text)?;
-            }
-            Some(text)
-        }
-        _ => None,
+fn comparable_plain_text(value: &RuntimeValue) -> Option<String> {
+    if let Some(value) = value.equality_plain_text_scalar() {
+        return Some(value);
     }
+    let nodes = value.as_content_nodes()?;
+    let mut text = String::new();
+    for node in nodes {
+        append_node_plain_text(node, &mut text)?;
+    }
+    Some(text)
 }
 
 fn append_node_plain_text(node: &IrNode, output: &mut String) -> Option<()> {
@@ -4185,6 +4174,44 @@ mod tests {
             )
             .expect("typed equality should evaluate"),
             IrValue::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn equality_ignores_runtime_metadata_and_preserves_unit_none_exception() {
+        let span = SourceSpan::new(SourceId(19), 2, 8);
+        let left = RuntimeValue::pair(
+            RuntimeValue::dynamic_value(number(7.0))
+                .with_provenance(ValueProvenance::source_backed_markdown_text("7")),
+            RuntimeValue::static_value(IrValue::String("same".into())),
+            span,
+            ValueOrigin::Dynamic,
+        );
+        let right = RuntimeValue::pair(
+            RuntimeValue::static_value(number(7.0)),
+            RuntimeValue::dynamic_value(IrValue::String("same".into()))
+                .with_provenance(ValueProvenance::source_backed_markdown_text("same")),
+            span,
+            ValueOrigin::Static,
+        );
+        let actual = evaluate_runtime_with_origins(
+            lookup("equals").expect("equals builtin"),
+            &[left, right],
+            &[],
+            false,
+        )
+        .expect("runtime metadata-neutral equality should evaluate");
+        assert_eq!(actual, IrValue::Boolean(true));
+
+        assert_eq!(
+            evaluate("equals", &[IrValue::Unit, IrValue::None], &[], false)
+                .expect("Unit/None equality should evaluate"),
+            IrValue::Boolean(true)
+        );
+        assert_eq!(
+            evaluate("equals", &[IrValue::None, IrValue::Unit], &[], false)
+                .expect("None/Unit equality should evaluate"),
+            IrValue::Boolean(true)
         );
     }
 
