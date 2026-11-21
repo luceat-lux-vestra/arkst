@@ -8,12 +8,12 @@
 
 use arkst_ir::{
     IrBoxType, IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
-    IrCapturedFunction, IrCapturedVariable, IrClipShape, IrColor, IrComponent, IrContainerAlignment,
-    IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType, IrEnumValue,
-    IrFragmentBehavior, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPageMarginPosition,
-    IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair, IrParameter, IrRange, IrRawBody, IrSize,
-    IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle, IrTextCase, IrTextDecoration,
-    IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
+    IrCapturedFunction, IrCapturedVariable, IrClipShape, IrColor, IrComponent,
+    IrContainerAlignment, IrCrossAxisAlignment, IrDictionary, IrDocumentAlignment, IrDocumentType,
+    IrEnumValue, IrFragmentBehavior, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode,
+    IrPageMarginPosition, IrPageOrientation, IrPageSide, IrPageSizeFormat, IrPair, IrParameter,
+    IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlideTransitionSpeed, IrSlideTransitionStyle,
+    IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
 use arkst_source::{SourceId, SourceSpan};
 #[cfg(test)]
