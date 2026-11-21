@@ -2251,10 +2251,10 @@ pub(crate) fn scalar_string_conversion(
         Ok(_) => Err(value_conversion::ConversionError::UnsupportedValue {
             target: value_conversion::ConversionTarget::String,
         }),
-        Err(error) => match value.semantic_value().as_ref() {
-            IrValue::Content(nodes) => plain_scalar_content_argument(nodes).ok_or(error),
-            _ => Err(error),
-        },
+        Err(error) => value
+            .as_content_nodes()
+            .and_then(plain_scalar_content_argument)
+            .ok_or(error),
     }
 }
 
