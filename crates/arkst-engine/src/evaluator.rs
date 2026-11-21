@@ -33604,8 +33604,10 @@ mod tests {
     #[test]
     fn g1l1j_dictionary_lookup_keeps_string_keys_runtime_owned() {
         let stored = RuntimeValue::collection(
-            vec![RuntimeValue::dynamic_value(IrValue::String("stored".into()))
-                .with_provenance(ValueProvenance::source_backed_markdown_text("**stored**"))],
+            vec![
+                RuntimeValue::dynamic_value(IrValue::String("stored".into()))
+                    .with_provenance(ValueProvenance::source_backed_markdown_text("**stored**")),
+            ],
             ValueOrigin::Dynamic,
         )
         .with_provenance(ValueProvenance::source_backed_markdown_text("- stored"));
