@@ -587,6 +587,70 @@ impl RuntimeValue {
         }
     }
 
+    /// Project only the scalar kinds that participate in `.equals` plain-text
+    /// fallback. Boolean is deliberately excluded to preserve typed equality.
+    pub(crate) fn equality_plain_text_scalar(&self) -> Option<String> {
+        match &self.kind {
+            RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value) => {
+                Some(value.clone())
+            }
+            RuntimeValueKind::Number(value) => Some(value.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Compare evaluator-owned values using the durable semantic payload only.
+    /// Runtime origin/provenance are execution metadata and are intentionally
+    /// excluded, including recursively nested values and callable captures.
+    pub(crate) fn semantic_eq(&self, other: &Self) -> bool {
+        match (&self.kind, &other.kind) {
+            (RuntimeValueKind::Unit, RuntimeValueKind::Unit)
+            | (RuntimeValueKind::None, RuntimeValueKind::None) => true,
+            (RuntimeValueKind::Boolean(left), RuntimeValueKind::Boolean(right)) => left == right,
+            (RuntimeValueKind::Number(left), RuntimeValueKind::Number(right)) => left == right,
+            (RuntimeValueKind::String(left), RuntimeValueKind::String(right))
+            | (RuntimeValueKind::Identifier(left), RuntimeValueKind::Identifier(right)) => {
+                left == right
+            }
+            (RuntimeValueKind::Range(left), RuntimeValueKind::Range(right)) => left == right,
+            (RuntimeValueKind::Size(left), RuntimeValueKind::Size(right)) => left == right,
+            (RuntimeValueKind::Color(left), RuntimeValueKind::Color(right)) => left == right,
+            (RuntimeValueKind::Enum(left), RuntimeValueKind::Enum(right)) => left == right,
+            (RuntimeValueKind::Pair(left), RuntimeValueKind::Pair(right)) => {
+                left.span == right.span
+                    && left.first.semantic_eq(&right.first)
+                    && left.second.semantic_eq(&right.second)
+            }
+            (RuntimeValueKind::Dictionary(left), RuntimeValueKind::Dictionary(right)) => {
+                left.span == right.span
+                    && left.entries.len() == right.entries.len()
+                    && left
+                        .entries
+                        .iter()
+                        .zip(&right.entries)
+                        .all(|(left, right)| left.semantic_eq(right))
+            }
+            (RuntimeValueKind::Content(left), RuntimeValueKind::Content(right)) => left == right,
+            (RuntimeValueKind::Component(left), RuntimeValueKind::Component(right)) => {
+                left == right
+            }
+            (RuntimeValueKind::Callable(left), RuntimeValueKind::Callable(right)) => {
+                runtime_callable_semantic_eq(left, right)
+            }
+            (RuntimeValueKind::InlineBody(left), RuntimeValueKind::InlineBody(right)) => {
+                left == right
+            }
+            (RuntimeValueKind::Collection(left), RuntimeValueKind::Collection(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| left.semantic_eq(right))
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn as_content_nodes(&self) -> Option<&[IrNode]> {
         match &self.kind {
             RuntimeValueKind::Content(nodes) => Some(nodes.as_slice()),
@@ -911,6 +975,39 @@ impl RuntimeValue {
             _ => None,
         }
     }
+}
+
+fn runtime_callable_semantic_eq(left: &RuntimeCallable, right: &RuntimeCallable) -> bool {
+    left.parameters == right.parameters
+        && left.body == right.body
+        && left.span == right.span
+        && match (&left.capture, &right.capture) {
+            (None, None) => true,
+            (Some(left), Some(right)) => runtime_callable_capture_semantic_eq(left, right),
+            _ => false,
+        }
+}
+
+fn runtime_callable_capture_semantic_eq(
+    left: &RuntimeCallableCapture,
+    right: &RuntimeCallableCapture,
+) -> bool {
+    left.resource_context == right.resource_context
+        && left.variables.len() == right.variables.len()
+        && left
+            .variables
+            .iter()
+            .zip(&right.variables)
+            .all(|(left, right)| left.name == right.name && left.value.semantic_eq(&right.value))
+        && left.functions.len() == right.functions.len()
+        && left
+            .functions
+            .iter()
+            .zip(&right.functions)
+            .all(|(left, right)| {
+                left.name == right.name
+                    && runtime_callable_semantic_eq(&left.callable, &right.callable)
+            })
 }
 
 impl From<IrValue> for RuntimeValue {
