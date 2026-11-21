@@ -124,7 +124,7 @@ impl VariableValue {
     /// Returns the backend-neutral value used by legacy evaluator paths.
     /// Runtime-only origin/provenance is intentionally stripped here.
     fn to_value(&self) -> IrValue {
-        self.runtime.to_ir_value()
+        self.runtime.to_legacy_ir_value()
     }
 
     fn runtime_value(&self) -> &RuntimeValue {
@@ -656,13 +656,19 @@ enum SortKey {
 
 impl SortKey {
     fn try_from_value(value: &RuntimeValue) -> Result<Self, String> {
-        match value.semantic_value().as_ref() {
-            IrValue::Number(value) => Ok(Self::Number(*value)),
-            IrValue::String(value) => Ok(Self::String(value.clone())),
-            IrValue::Boolean(value) => Ok(Self::Boolean(*value)),
-            IrValue::None => Err("`.sorted` cannot compare a None value".to_string()),
-            _ => Err("`.sorted` key has no supported natural ordering".to_string()),
+        if let Some(number) = value.as_number() {
+            return Ok(Self::Number(number));
         }
+        if let Some(text) = value.as_string() {
+            return Ok(Self::String(text.to_string()));
+        }
+        if let Some(boolean) = value.as_boolean() {
+            return Ok(Self::Boolean(boolean));
+        }
+        if value.is_none() {
+            return Err("`.sorted` cannot compare a None value".to_string());
+        }
+        Err("`.sorted` key has no supported natural ordering".to_string())
     }
 
     fn same_kind(&self, other: &Self) -> bool {
@@ -744,7 +750,7 @@ impl From<LegacyCallOutcome> for CallOutcome {
 impl From<CallOutcome> for LegacyCallOutcome {
     fn from(outcome: CallOutcome) -> Self {
         match outcome {
-            CallOutcome::Value(value) => Self::Value(value.into_ir_value()),
+            CallOutcome::Value(value) => Self::Value(value.into_legacy_ir_value()),
             CallOutcome::NoValue => Self::NoValue,
             CallOutcome::Failed => Self::Failed,
             CallOutcome::Unresolved => Self::Unresolved,
@@ -878,10 +884,7 @@ fn materialize_document_invocation_outcome(
     context: &EvaluationContext<'_>,
 ) -> Vec<IrNode> {
     match outcome {
-        CallOutcome::Value(value) => match value.into_ir_value() {
-            IrValue::Content(nodes) => nodes,
-            _ => Vec::new(),
-        },
+        CallOutcome::Value(value) => value.try_into_content_nodes().unwrap_or_default(),
         CallOutcome::Failed => recovery_span
             .and_then(|span| {
                 recoverable_invocation_failure_node(
@@ -963,11 +966,27 @@ fn value_contains_explicit_error(value: &IrValue) -> bool {
 }
 
 fn runtime_value_contains_explicit_error(value: &RuntimeValue) -> bool {
-    value_contains_explicit_error(value.semantic_value().as_ref())
+    if let Some(component) = value.as_component() {
+        return component_contains_explicit_error(component);
+    }
+    if let Some(nodes) = value.as_content_nodes() {
+        return nodes.iter().any(node_contains_explicit_error);
+    }
+    if let Some(elements) = value.as_collection_elements() {
+        return elements.iter().any(runtime_value_contains_explicit_error);
+    }
+    if let Some((first, second)) = value.as_pair_values() {
+        return runtime_value_contains_explicit_error(first)
+            || runtime_value_contains_explicit_error(second);
+    }
+    if let Some(entries) = value.as_dictionary_entries() {
+        return entries.iter().any(runtime_value_contains_explicit_error);
+    }
+    false
 }
 
 fn runtime_value_source_span(value: &RuntimeValue, fallback: &SourceSpan) -> SourceSpan {
-    value_source_span(value.semantic_value().as_ref(), fallback)
+    value.source_span_or(*fallback)
 }
 
 fn outcome_requires_rollback(outcome: &CallOutcome) -> bool {
@@ -1434,7 +1453,7 @@ fn runtime_value_into_content_nodes(
         }
         Err(value) => *value,
     };
-    value_into_content_nodes(value.into_ir_value(), span, diagnostics)
+    value_into_content_nodes(value.into_legacy_ir_value(), span, diagnostics)
 }
 
 fn value_into_content_nodes(
@@ -1700,31 +1719,37 @@ fn table_cell_value(cell: &IrTableCell) -> Result<IrValue, String> {
 /// Projects only callback result categories with stable, independently
 /// observed v2.7.0 table-computation text. Content-backed JVM object identity
 /// strings and other unproven dynamic values deliberately fail closed.
-fn table_compute_result_text(value: &IrValue) -> Option<String> {
-    match value {
-        IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
-        IrValue::Number(number) => Some(scalar_number_to_text(*number)),
-        IrValue::Boolean(boolean) => Some(boolean.to_string()),
-        IrValue::Unit => Some("kotlin.Unit".to_string()),
-        IrValue::None => Some("None".to_string()),
-        IrValue::Range(IrRange {
-            start: Some(start),
-            end: Some(end),
-            ..
-        }) => Some(format!("{start}..{end}")),
-        IrValue::Collection(values) if values.is_empty() => Some("[]".to_string()),
-        IrValue::Size(_)
-        | IrValue::Color(_)
-        | IrValue::Enum(_)
-        | IrValue::Range(_)
-        | IrValue::Collection(_)
-        | IrValue::Pair(_)
-        | IrValue::Dictionary(_)
-        | IrValue::Content(_)
-        | IrValue::Component(_)
-        | IrValue::Callable(_)
-        | IrValue::InlineBody(_) => None,
+fn table_compute_result_text(value: &RuntimeValue) -> Option<String> {
+    if let Some(text) = value.text_identity() {
+        return Some(text.to_string());
     }
+    if let Some(number) = value.as_number() {
+        return Some(scalar_number_to_text(number));
+    }
+    if let Some(boolean) = value.as_boolean() {
+        return Some(boolean.to_string());
+    }
+    if value.is_unit() {
+        return Some("kotlin.Unit".to_string());
+    }
+    if value.is_none() {
+        return Some("None".to_string());
+    }
+    if let Some(IrRange {
+        start: Some(start),
+        end: Some(end),
+        ..
+    }) = value.as_range_value()
+    {
+        return Some(format!("{start}..{end}"));
+    }
+    if value
+        .as_collection_elements()
+        .is_some_and(|elements| elements.is_empty())
+    {
+        return Some("[]".to_string());
+    }
+    None
 }
 
 /// Classifies the callable's authored body at the source/evaluation boundary,
@@ -1751,12 +1776,7 @@ fn table_sort_order(value: &RuntimeValue) -> Option<TableSortOrder> {
     if value.origin != ValueOrigin::Dynamic {
         return None;
     }
-    let semantic_value = value.semantic_value();
-    let name = match semantic_value.as_ref() {
-        IrValue::String(name) | IrValue::Identifier(name) => name,
-        _ => return None,
-    };
-    match name.as_str() {
+    match value.text_identity()? {
         name if name.eq_ignore_ascii_case("ascending") => Some(TableSortOrder::Ascending),
         name if name.eq_ignore_ascii_case("descending") => Some(TableSortOrder::Descending),
         _ => None,
@@ -1781,7 +1801,7 @@ fn table_row_from_elements(
             value,
             span: element_span,
         } = element;
-        let content = value_into_table_cell(value.into_ir_value(), element_span, diagnostics)?;
+        let content = value_into_table_cell(value.into_legacy_ir_value(), element_span, diagnostics)?;
         cells.push(IrTableCell {
             content,
             alignment: IrTableAlignment::None,
@@ -4640,16 +4660,14 @@ impl Evaluator {
             match outcome {
                 CallOutcome::Value(value)
                     if matches!(
-                        value.semantic_value().as_ref(),
-                        IrValue::Component(IrComponent::ExplicitError(_))
+                        value.as_component(),
+                        Some(IrComponent::ExplicitError(_))
                     ) && diagnostics.len() > before
                         && diagnostics[before..]
                             .iter()
                             .all(is_explicit_error_diagnostic) =>
                 {
-                    let IrValue::Component(IrComponent::ExplicitError(error)) =
-                        value.into_ir_value()
-                    else {
+                    let Some(IrComponent::ExplicitError(error)) = value.into_component() else {
                         unreachable!("explicit-error guard")
                     };
                     if !pending.is_empty() {
@@ -4664,7 +4682,7 @@ impl Evaluator {
                 }
                 CallOutcome::Value(value) => {
                     pending.extend(self.materialize_inline_value(
-                        Some(value.into_ir_value()),
+                        Some(value.into_legacy_ir_value()),
                         span,
                         diagnostics,
                     ));
@@ -4867,23 +4885,21 @@ impl Evaluator {
             match outcome {
                 CallOutcome::Value(value)
                     if matches!(
-                        value.semantic_value().as_ref(),
-                        IrValue::Component(IrComponent::ExplicitError(_))
+                        value.as_component(),
+                        Some(IrComponent::ExplicitError(_))
                     ) && diagnostics.len() > before
                         && diagnostics[before..]
                             .iter()
                             .all(is_explicit_error_diagnostic) =>
                 {
-                    let IrValue::Component(IrComponent::ExplicitError(component)) =
-                        value.into_ir_value()
-                    else {
+                    let Some(IrComponent::ExplicitError(component)) = value.into_component() else {
                         unreachable!("explicit-error guard")
                     };
                     out.push(IrInline::ExplicitError { component });
                 }
                 CallOutcome::Value(value) => {
                     out.extend(self.materialize_inline_value(
-                        Some(value.into_ir_value()),
+                        Some(value.into_legacy_ir_value()),
                         span,
                         diagnostics,
                     ));
@@ -5035,10 +5051,7 @@ impl Evaluator {
                 diagnostics,
                 context,
             ) {
-                CallOutcome::Value(value) => match value.into_ir_value() {
-                    IrValue::Content(nodes) => nodes,
-                    _ => Vec::new(),
-                },
+                CallOutcome::Value(value) => value.try_into_content_nodes().unwrap_or_default(),
                 CallOutcome::NoValue | CallOutcome::Failed => Vec::new(),
                 CallOutcome::Unresolved => Vec::new(),
             },
@@ -5059,10 +5072,7 @@ impl Evaluator {
                 diagnostics,
                 context,
             ) {
-                CallOutcome::Value(value) => match value.into_ir_value() {
-                    IrValue::Content(nodes) => nodes,
-                    _ => Vec::new(),
-                },
+                CallOutcome::Value(value) => value.try_into_content_nodes().unwrap_or_default(),
                 CallOutcome::NoValue | CallOutcome::Failed => Vec::new(),
                 CallOutcome::Unresolved => Vec::new(),
             },
@@ -5390,7 +5400,7 @@ impl Evaluator {
                 CallOutcome::NoValue
             }
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(value.into_ir_value(), span, diagnostics) {
+                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics) {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5443,7 +5453,7 @@ impl Evaluator {
         match outcome {
             CallOutcome::Value(value) if value.is_unit() => CallOutcome::NoValue,
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(value.into_ir_value(), span, diagnostics) {
+                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics) {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5538,7 +5548,7 @@ impl Evaluator {
                 Vec::new()
             }
             CallOutcome::Value(value) => {
-                self.materialize_inline_value(Some(value.into_ir_value()), span, diagnostics)
+                self.materialize_inline_value(Some(value.into_legacy_ir_value()), span, diagnostics)
             }
             CallOutcome::NoValue => Vec::new(),
             CallOutcome::Failed => Vec::new(),
@@ -5769,7 +5779,7 @@ impl Evaluator {
         match outcome {
             CallOutcome::Value(value) if value.is_unit() => CallOutcome::NoValue,
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(value.into_ir_value(), span, diagnostics) {
+                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics) {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5803,7 +5813,7 @@ impl Evaluator {
         ) {
             CallOutcome::Value(value) if value.is_unit() => Vec::new(),
             CallOutcome::Value(value) => {
-                self.materialize_inline_value(Some(value.into_ir_value()), span, diagnostics)
+                self.materialize_inline_value(Some(value.into_legacy_ir_value()), span, diagnostics)
             }
             CallOutcome::NoValue | CallOutcome::Failed | CallOutcome::Unresolved => Vec::new(),
         }
@@ -7261,7 +7271,7 @@ impl Evaluator {
                     ),
                 }
             })
-            .map(RuntimeValue::into_ir_value)
+            .map(RuntimeValue::into_legacy_ir_value)
     }
 
     fn parse_dynamic_markdown_content(
@@ -7524,7 +7534,7 @@ impl Evaluator {
                 } else {
                     evaluate_location!(*location)
                 };
-                match parse_code_callouts(value.semantic_value().as_ref(), *argument_span) {
+                match parse_runtime_code_callouts(&value, *argument_span) {
                     Ok(callouts) => callouts,
                     Err(message) => {
                         diagnostics.push(chain_evaluation_error(message, *argument_span));
@@ -7541,7 +7551,7 @@ impl Evaluator {
                 span: argument_span,
             }) => {
                 let value = evaluate_location!(*location);
-                let Some(text) = code_value_text(value.semantic_value().as_ref()) else {
+                let Some(text) = runtime_code_value_text(&value) else {
                     diagnostics.push(chain_evaluation_error(
                         "`.code` `code` must resolve to evaluable text".to_string(),
                         *argument_span,
@@ -10920,7 +10930,7 @@ impl Evaluator {
             formats_span,
         ) {
             Ok(value_conversion::TargetValue::Value(value)) => {
-                let IrValue::Dictionary(dictionary) = value.into_ir_value() else {
+                let IrValue::Dictionary(dictionary) = value.into_legacy_ir_value() else {
                     diagnostics.push(document_state_conversion_error(
                         ".numbering formats must be a typed Dictionary".to_string(),
                         formats_span,
@@ -11230,7 +11240,7 @@ impl Evaluator {
             contents_span,
         ) {
             Ok(value_conversion::TargetValue::Value(value)) => {
-                let IrValue::Dictionary(dictionary) = value.into_ir_value() else {
+                let IrValue::Dictionary(dictionary) = value.into_legacy_ir_value() else {
                     diagnostics.push(localization_error(
                         "`.localization` contents must be a typed Dictionary",
                         contents_span,
@@ -12905,7 +12915,7 @@ impl Evaluator {
                 value_conversion::ConversionTarget::Dictionary,
                 candidate_span,
             ) {
-                Ok(value_conversion::TargetValue::Value(value)) => value.into_ir_value(),
+                Ok(value_conversion::TargetValue::Value(value)) => value.into_legacy_ir_value(),
                 Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                     let nodes = match self.parse_dynamic_markdown_content(
                         &text,
@@ -12994,7 +13004,7 @@ impl Evaluator {
             let Some(BoundSlot::Explicit { value, span }) = bound.slots.into_iter().next() else {
                 return LegacyCallOutcome::Failed;
             };
-            (value.into_ir_value(), span, parameter_span)
+            (value.into_legacy_ir_value(), span, parameter_span)
         };
 
         let authors = match self.validate_document_authors(
@@ -13071,7 +13081,7 @@ impl Evaluator {
             let values = match self.coerce_iterable(value, &span, diagnostics, context) {
                 Ok(values) => values
                     .into_iter()
-                    .map(|value| (value.into_ir_value(), span))
+                    .map(|value| (value.into_legacy_ir_value(), span))
                     .collect(),
                 Err(outcome) => {
                     return outcome.into();
@@ -13138,7 +13148,7 @@ impl Evaluator {
                     .into_iter()
                     .map(|value| {
                         let value_span = runtime_value_source_span(&value, &argument_span);
-                        (value.into_ir_value(), value_span)
+                        (value.into_legacy_ir_value(), value_span)
                     })
                     .collect(),
                 argument_span,
@@ -13462,13 +13472,10 @@ impl Evaluator {
             if argument.is_none() {
                 return Ok(None);
             }
-            if !matches!(
-                argument.semantic_value().as_ref(),
-                IrValue::String(_)
-                    | IrValue::Identifier(_)
-                    | IrValue::Number(_)
-                    | IrValue::Boolean(_)
-            ) {
+            if argument.text_identity().is_none()
+                && argument.as_number().is_none()
+                && argument.as_boolean().is_none()
+            {
                 return Err(value_conversion::ConversionError::UnsupportedValue {
                     target: value_conversion::ConversionTarget::String,
                 });
@@ -14934,8 +14941,7 @@ impl Evaluator {
             return LegacyCallOutcome::Failed;
         }
         for (index, element) in elements.into_iter().enumerate() {
-            let element_semantic = element.to_ir_value();
-            let Some(reference) = builtins::adapt_string_argument(&element_semantic) else {
+            let Some(reference) = runtime_adapt_string_argument(&element) else {
                 diagnostics.push(resource_diagnostic(
                     "E3003",
                     format!("`.includeall` path at index {index} must adapt to String"),
@@ -15379,9 +15385,7 @@ impl Evaluator {
                     Ok(length) => length,
                     Err(outcome) => return outcome,
                 };
-                let index_semantic = index.semantic_value();
-                let index =
-                    match collection_index(index_semantic.as_ref(), length, span, diagnostics) {
+                let index = match collection_index(&index, length, span, diagnostics) {
                         Ok(index) => index,
                         Err(outcome) => return outcome,
                     };
@@ -15509,7 +15513,7 @@ impl Evaluator {
                 .map(|argument| {
                     (
                         argument.clone(),
-                        value_source_span(argument.semantic_value().as_ref(), span),
+                        runtime_value_source_span(argument, span),
                     )
                 })
                 .collect(),
@@ -16192,8 +16196,7 @@ impl Evaluator {
             }
             CallOutcome::Failed => return Err(CallOutcome::Failed),
         };
-        let count_value_ir = count_value.to_ir_value();
-        let count = match repeat_count(&count_value_ir) {
+        let count = match repeat_count(&count_value) {
             Ok(count) => count,
             Err(message) => {
                 diagnostics.push(iteration_error(
@@ -16345,8 +16348,7 @@ impl Evaluator {
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
             None => bound_table_value,
         };
-        let table_semantic = table_value.semantic_value();
-        let IrValue::Content(nodes) = table_semantic.as_ref() else {
+        let Some(nodes) = table_value.as_content_nodes() else {
             diagnostics.push(table_column_error(
                 name,
                 format!("`.{name}` requires evaluated Markdown table content"),
@@ -16600,8 +16602,7 @@ impl Evaluator {
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
             None => bound_table_value,
         };
-        let table_semantic = table_value.semantic_value();
-        let IrValue::Content(nodes) = table_semantic.as_ref() else {
+        let Some(nodes) = table_value.as_content_nodes() else {
             diagnostics.push(table_sort_error(
                 "E3001",
                 "`.tablesort` requires evaluated Markdown table content".to_string(),
@@ -16859,8 +16860,7 @@ impl Evaluator {
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
             None => bound_table_value,
         };
-        let table_semantic = table_value.semantic_value();
-        let IrValue::Content(nodes) = table_semantic.as_ref() else {
+        let Some(nodes) = table_value.as_content_nodes() else {
             diagnostics.push(table_filter_error(
                 "E3001",
                 "`.tablefilter` requires evaluated Markdown table content".to_string(),
@@ -17124,8 +17124,7 @@ impl Evaluator {
             Some(CallBody::Inline(_)) => unreachable!("inline table content was rejected above"),
             None => bound_table_value,
         };
-        let table_semantic = table_value.semantic_value();
-        let IrValue::Content(nodes) = table_semantic.as_ref() else {
+        let Some(nodes) = table_value.as_content_nodes() else {
             diagnostics.push(table_compute_error(
                 "E3001",
                 "`.tablecompute` requires evaluated Markdown table content".to_string(),
@@ -17221,7 +17220,7 @@ impl Evaluator {
             }
             CallOutcome::Value(value) => {
                 let result_span = runtime_value_source_span(&value, &compute.span);
-                let Some(text) = table_compute_result_text(value.semantic_value().as_ref()) else {
+                let Some(text) = table_compute_result_text(&value) else {
                     diagnostics.push(table_compute_error(
                         "E8001",
                         "`.tablecompute` callback result has no independently evidenced deterministic text projection"
@@ -17710,7 +17709,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
         let (separator, separator_span) = match slots.next() {
-            Some(BoundSlot::Explicit { value, span }) => (value.into_ir_value(), span),
+            Some(BoundSlot::Explicit { value, span }) => (value.into_legacy_ir_value(), span),
             Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => {
                 (IrValue::String(", ".to_string()), *span)
             }
@@ -17790,7 +17789,7 @@ impl Evaluator {
                 },
                 None => element,
             };
-            let content = match value_into_content_nodes(value.into_ir_value(), *span, diagnostics)
+            let content = match value_into_content_nodes(value.into_legacy_ir_value(), *span, diagnostics)
             {
                 Ok(content) => content,
                 Err(outcome) => return outcome,
@@ -18664,10 +18663,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<EvidencedIterableElement>, CallOutcome> {
         let value = value.into();
-        // Keep the semantic projection for span evidence only. Converting it
-        // back to RuntimeValue would erase Pair/Dictionary child provenance.
-        let semantic_value = value.to_ir_value();
-        let element_spans = iterable_element_spans(&semantic_value, *span);
+        let element_spans = runtime_iterable_element_spans(&value, *span);
         let values = self.coerce_iterable(value, span, diagnostics, context)?;
         let use_captured_spans = element_spans.len() == values.len();
         let mut elements = Vec::new();
@@ -18679,11 +18675,10 @@ impl Evaluator {
             return Err(CallOutcome::Failed);
         }
         for (index, value) in values.into_iter().enumerate() {
-            let semantic_value = value.to_ir_value();
             let element_span = if use_captured_spans {
                 element_spans[index]
             } else {
-                semantic_value_span(&semantic_value, *span)
+                runtime_semantic_value_span(&value, *span)
             };
             elements.push(EvidencedIterableElement {
                 value,
@@ -19099,14 +19094,12 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         };
-        let target_semantic = target_value.semantic_value();
-        let target_name = match target_semantic.as_ref() {
-            IrValue::Identifier(name) | IrValue::String(name)
-                if is_valid_normal_call_name(name) =>
-            {
-                name.clone()
-            }
-            _ => {
+        let target_name = match target_value
+            .text_identity()
+            .filter(|name| is_valid_normal_call_name(name))
+        {
+            Some(name) => name.to_string(),
+            None => {
                 diagnostics.push(extension_error(
                     "`.extend` target must be a normal callable name".to_string(),
                     *target_span,
@@ -20364,7 +20357,7 @@ impl Evaluator {
             // IR only for the legacy native argument array retained until G1-K.
             value = value.with_origin(value_origin);
             let implicit_argument = value.clone();
-            positional_args.push(value.to_ir_value());
+            positional_args.push(value.to_legacy_ir_value());
             positional_args.extend(source_segment.positional_args.iter().cloned());
             let mut ordered_args = Vec::with_capacity(
                 source_segment
@@ -21404,7 +21397,7 @@ impl Evaluator {
         }
         for value in values {
             match self.evaluate_value(value, diagnostics, context) {
-                CallOutcome::Value(value) => evaluated.push(value.into_ir_value()),
+                CallOutcome::Value(value) => evaluated.push(value.into_legacy_ir_value()),
                 CallOutcome::Unresolved => {
                     evaluated.push(self.preserve_value_expression(value, diagnostics, context)?)
                 }
@@ -21793,7 +21786,7 @@ impl Evaluator {
         }
         for arg in named {
             let value = match self.evaluate_value(&arg.value, diagnostics, context) {
-                CallOutcome::Value(value) => value.into_ir_value(),
+                CallOutcome::Value(value) => value.into_legacy_ir_value(),
                 CallOutcome::Unresolved => {
                     self.preserve_value_expression(&arg.value, diagnostics, context)?
                 }
@@ -21824,7 +21817,7 @@ impl Evaluator {
         for value in values {
             match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
-                    let value = value.into_ir_value();
+                    let value = value.into_legacy_ir_value();
                     self.validate_preserved_value(&value, diagnostics)?;
                     evaluated.push(value);
                 }
@@ -21852,7 +21845,7 @@ impl Evaluator {
         for arg in named {
             let value = match self.evaluate_value(&arg.value, diagnostics, context) {
                 CallOutcome::Value(value) => {
-                    let value = value.into_ir_value();
+                    let value = value.into_legacy_ir_value();
                     self.validate_preserved_value(&value, diagnostics)?;
                     value
                 }
@@ -22775,21 +22768,30 @@ fn convert_sizes(
     // reaches value evaluation as one plain content paragraph rather than a
     // scalar String. Preserve that typed boundary instead of widening generic
     // String conversion: only a paragraph made of Text/Whitespace is accepted.
-    let semantic_value = argument.semantic_value();
-    let raw = match (semantic_value.as_ref(), argument.origin) {
-        (IrValue::String(value) | IrValue::Identifier(value), ValueOrigin::Dynamic) => {
-            value.clone()
+    let raw = if argument.origin == ValueOrigin::Dynamic {
+        if let Some(value) = argument.text_identity() {
+            value.to_string()
+        } else if let Some(nodes) = argument.as_content_nodes() {
+            sizes_plain_text(nodes).ok_or(
+                value_conversion::ConversionError::UnsupportedValue {
+                    target: value_conversion::ConversionTarget::Size,
+                },
+            )?
+        } else {
+            return Err(value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Size,
+            });
         }
-        (IrValue::Content(_), _) => sizes_plain_text(semantic_value.as_ref()).ok_or(
+    } else if let Some(nodes) = argument.as_content_nodes() {
+        sizes_plain_text(nodes).ok_or(
             value_conversion::ConversionError::UnsupportedValue {
                 target: value_conversion::ConversionTarget::Size,
             },
-        )?,
-        _ => {
-            return Err(value_conversion::ConversionError::UnsupportedValue {
-                target: value_conversion::ConversionTarget::Size,
-            })
-        }
+        )?
+    } else {
+        return Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Size,
+        });
     };
     let parts = raw.split_whitespace().collect::<Vec<_>>();
     let parse = |value: &str| {
@@ -22817,11 +22819,8 @@ fn convert_sizes(
     }
 }
 
-fn sizes_plain_text(value: &IrValue) -> Option<String> {
-    let IrValue::Content(nodes) = value else {
-        return None;
-    };
-    let [IrNode::Paragraph { content, .. }] = nodes.as_slice() else {
+fn sizes_plain_text(nodes: &[IrNode]) -> Option<String> {
+    let [IrNode::Paragraph { content, .. }] = nodes else {
         return None;
     };
 
@@ -23601,6 +23600,134 @@ fn body_contains_raw_html(nodes: &[IrNode]) -> bool {
             }),
         _ => false,
     })
+}
+
+fn runtime_adapt_string_argument(value: &RuntimeValue) -> Option<String> {
+    if let Some(text) = value.text_identity() {
+        return Some(text.to_string());
+    }
+    if let Some(boolean) = value.as_boolean() {
+        return Some(boolean.to_string());
+    }
+    if let Some(number) = value.as_number() {
+        return Some(number.to_string());
+    }
+    let nodes = value.as_content_nodes()?;
+    let mut text = String::new();
+    for node in nodes {
+        let IrNode::Paragraph { content, .. } = node else {
+            return None;
+        };
+        for inline in content {
+            let IrInline::Text { content, .. } = inline else {
+                return None;
+            };
+            text.push_str(content);
+        }
+    }
+    Some(text)
+}
+
+fn runtime_code_value_text(value: &RuntimeValue) -> Option<String> {
+    if let Some(text) = value.text_identity() {
+        return Some(text.to_string());
+    }
+    if let Some(number) = value.as_number() {
+        return Some(number.to_string());
+    }
+    if let Some(boolean) = value.as_boolean() {
+        return Some(boolean.to_string());
+    }
+    if value.is_none() {
+        return Some(String::new());
+    }
+    let nodes = value.as_content_nodes()?;
+    let mut output = String::new();
+    for node in nodes {
+        append_code_node_text(node, &mut output)?;
+    }
+    Some(output)
+}
+
+fn runtime_code_callout_line(value: &RuntimeValue) -> Result<u32, String> {
+    let parsed = if let Some(number) = value.as_number() {
+        if !number.is_finite() || number.fract() != 0.0 {
+            return Err(format!("Callout keys must be integers, but got '{number}'."));
+        }
+        if number < i64::MIN as f64 || number > i64::MAX as f64 {
+            return Err(format!("Callout line number {number} is too large"));
+        }
+        number as i64
+    } else if let Some(text) = value.text_identity() {
+        text.parse::<i64>()
+            .map_err(|_| format!("Callout keys must be integers, but got '{text}'."))?
+    } else {
+        return Err("Callout keys must be integers.".to_string());
+    };
+    if parsed <= 0 {
+        return Err(format!(
+            "Callout line numbers must be positive, but got {parsed}."
+        ));
+    }
+    u32::try_from(parsed).map_err(|_| format!("Callout line number {parsed} is too large"))
+}
+
+fn parse_runtime_code_callouts(
+    value: &RuntimeValue,
+    span: SourceSpan,
+) -> Result<Vec<IrCodeCallout>, String> {
+    let mut entries = BTreeMap::<u32, String>::new();
+    if let Some(dictionary_entries) = value.as_dictionary_entries() {
+        for entry in dictionary_entries {
+            let Some((key, description)) = entry.as_pair_values() else {
+                return Err("`.code` callout dictionary entry is not a Pair".to_string());
+            };
+            let line = runtime_code_callout_line(key)?;
+            let description = runtime_code_value_text(description).ok_or_else(|| {
+                "`.code` callout descriptions must be displayable values".to_string()
+            })?;
+            entries.insert(line, description);
+        }
+    } else if value.as_content_nodes().is_some() || value.text_identity().is_some() {
+        let raw = runtime_code_value_text(value)
+            .ok_or_else(|| "`.code` `callouts` must be a map".to_string())?;
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(item) = trimmed.strip_prefix("- ") else {
+                return Err(
+                    "`.code` `callouts` must use map entries such as `- 1: description`"
+                        .to_string(),
+                );
+            };
+            let Some((key, description)) = item.split_once(':') else {
+                return Err("`.code` `callouts` entry is missing `:`".to_string());
+            };
+            let key = key.trim();
+            let parsed = key
+                .parse::<i64>()
+                .map_err(|_| format!("Callout keys must be integers, but got '{key}'."))?;
+            if parsed <= 0 {
+                return Err(format!(
+                    "Callout line numbers must be positive, but got {parsed}."
+                ));
+            }
+            let parsed = u32::try_from(parsed)
+                .map_err(|_| format!("Callout line number {parsed} is too large"))?;
+            entries.insert(
+                parsed,
+                normalize_code_callout_description(description.trim(), span),
+            );
+        }
+    } else {
+        return Err("`.code` `callouts` must be a map".to_string());
+    }
+    Ok(entries
+        .into_iter()
+        .map(|(line, description)| IrCodeCallout { line, description })
+        .collect())
 }
 
 fn parse_code_callouts(value: &IrValue, span: SourceSpan) -> Result<Vec<IrCodeCallout>, String> {
@@ -24512,7 +24639,7 @@ fn collection_access_operand(
             .map(|argument| {
                 (
                     argument.clone(),
-                    value_source_span(argument.semantic_value().as_ref(), span),
+                    runtime_value_source_span(argument, span),
                 )
             })
             .collect(),
@@ -24565,7 +24692,7 @@ fn collection_affix_operands(
             .map(|argument| {
                 (
                     argument.clone(),
-                    value_source_span(argument.semantic_value().as_ref(), span),
+                    runtime_value_source_span(argument, span),
                 )
             })
             .collect(),
@@ -24681,7 +24808,7 @@ fn getat_operands(
             .map(|argument| {
                 (
                     argument.clone(),
-                    value_source_span(argument.semantic_value().as_ref(), span),
+                    runtime_value_source_span(argument, span),
                 )
             })
             .collect(),
@@ -24770,12 +24897,12 @@ fn exact_collection_length(
 }
 
 fn collection_index(
-    value: &IrValue,
+    value: &RuntimeValue,
     length: f64,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Option<usize>, CallOutcome> {
-    let IrValue::Number(index) = value else {
+    let Some(index) = value.as_number() else {
         diagnostics.push(iteration_error(
             "`.getat` requires an integer numeric index".to_string(),
             *span,
@@ -24794,10 +24921,10 @@ fn collection_index(
     // negative, and values beyond the finite collection bounds ordinary
     // misses. Check the bounds before converting so an f64 cannot truncate or
     // saturate into a valid Rust index.
-    if *index < 1.0 || *index > length {
+    if index < 1.0 || index > length {
         return Ok(None);
     }
-    let zero_based = (*index - 1.0) as u64;
+    let zero_based = (index - 1.0) as u64;
     let Ok(zero_based) = usize::try_from(zero_based) else {
         diagnostics.push(iteration_error(
             "`.getat` index cannot be represented by this target".to_string(),
@@ -24816,19 +24943,18 @@ fn collection_index(
 fn project_owned_runtime_values(values: Vec<RuntimeValue>) -> Vec<IrValue> {
     values
         .into_iter()
-        .map(RuntimeValue::into_ir_value)
+        .map(RuntimeValue::into_legacy_ir_value)
         .collect()
 }
 
 fn collection_value_as_double(value: &RuntimeValue) -> f64 {
-    let semantic = value.semantic_value();
-    match semantic.as_ref() {
-        IrValue::Number(value) => *value,
-        IrValue::String(value) | IrValue::Identifier(value) => {
-            value.trim().parse::<f64>().ok().unwrap_or(0.0)
-        }
-        _ => 0.0,
+    if let Some(number) = value.as_number() {
+        return number;
     }
+    value
+        .text_identity()
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .unwrap_or(0.0)
 }
 
 fn collection_sum_all(elements: &[RuntimeValue]) -> f64 {
@@ -24897,9 +25023,7 @@ fn collection_values_equal(left: &IrValue, right: &IrValue) -> bool {
 }
 
 fn runtime_collection_values_equal(left: &RuntimeValue, right: &RuntimeValue) -> bool {
-    let left = left.semantic_value();
-    let right = right.semantic_value();
-    collection_values_equal(left.as_ref(), right.as_ref())
+    left.collection_semantic_eq(right)
 }
 
 fn distinct_collection_values(
@@ -25119,20 +25243,20 @@ fn scoped_parameter_bindings(
     }
 }
 
-fn repeat_count(value: &IrValue) -> Result<i32, String> {
-    let IrValue::Number(number) = value else {
+fn repeat_count(value: &RuntimeValue) -> Result<i32, String> {
+    let Some(number) = value.as_number() else {
         return Err("`.repeat` requires a semantic Number count".to_string());
     };
     if !number.is_finite() {
         return Err("`.repeat` count must be finite".to_string());
     }
-    if *number < 0.0 {
+    if number < 0.0 {
         return Err("`.repeat` count must not be negative".to_string());
     }
     if number.fract() != 0.0 {
         return Err("`.repeat` count must be an integer".to_string());
     }
-    if *number == 0.0 {
+    if number == 0.0 {
         return Ok(0);
     }
     number
@@ -27742,35 +27866,43 @@ fn value_source_span(value: &IrValue, fallback: &SourceSpan) -> SourceSpan {
     }
 }
 
-fn semantic_value_span(value: &IrValue, fallback: SourceSpan) -> SourceSpan {
-    match value {
-        IrValue::Content(nodes) => nodes.first().map_or(fallback, ir_node_source_span),
-        _ => value_source_span(value, &fallback),
-    }
+fn runtime_semantic_value_span(value: &RuntimeValue, fallback: SourceSpan) -> SourceSpan {
+    value
+        .as_content_nodes()
+        .and_then(|nodes| nodes.first())
+        .map_or_else(|| value.source_span_or(fallback), ir_node_source_span)
 }
 
-fn iterable_element_spans(value: &IrValue, fallback: SourceSpan) -> Vec<SourceSpan> {
-    match value {
-        IrValue::Content(nodes) => match nodes.as_slice() {
+fn runtime_iterable_element_spans(value: &RuntimeValue, fallback: SourceSpan) -> Vec<SourceSpan> {
+    if let Some(nodes) = value.as_content_nodes() {
+        return match nodes {
             [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => {
                 items.iter().map(|item| item.span).collect()
             }
             _ => Vec::new(),
-        },
-        IrValue::Collection(values) => values
-            .iter()
-            .map(|value| semantic_value_span(value, fallback))
-            .collect(),
-        IrValue::Pair(pair) => vec![
-            semantic_value_span(&pair.first, pair.span),
-            semantic_value_span(&pair.second, pair.span),
-        ],
-        IrValue::Dictionary(dictionary) => {
-            dictionary.entries.iter().map(|entry| entry.span).collect()
-        }
-        IrValue::Range(_) => Vec::new(),
-        _ => Vec::new(),
+        };
     }
+    if let Some(values) = value.as_collection_elements() {
+        return values
+            .iter()
+            .map(|value| runtime_semantic_value_span(value, fallback))
+            .collect();
+    }
+    if let Some((first, second)) = value.as_pair_values() {
+        let pair_span = value.source_span_or(fallback);
+        return vec![
+            runtime_semantic_value_span(first, pair_span),
+            runtime_semantic_value_span(second, pair_span),
+        ];
+    }
+    if let Some(entries) = value.as_dictionary_entries() {
+        let dictionary_span = value.source_span_or(fallback);
+        return entries
+            .iter()
+            .map(|entry| entry.source_span_or(dictionary_span))
+            .collect();
+    }
+    Vec::new()
 }
 
 fn no_value_required(span: SourceSpan) -> Diagnostic {
@@ -28314,10 +28446,7 @@ fn resolve_boolean_value(value: &RuntimeValue) -> Result<bool, value_conversion:
 /// Supports the Quarkdown boolean literals `true`/`yes` and `false`/`no`,
 /// case-insensitive (Quarkdown "Boolean" documentation, badged `v2.5.0`).
 fn scalar_boolean_value(value: &RuntimeValue) -> Option<bool> {
-    match value.semantic_value().as_ref() {
-        IrValue::Boolean(value) => Some(*value),
-        _ => None,
-    }
+    value.as_boolean()
 }
 
 /// Classifies the value expression at the Quarkdown invocation boundary.
@@ -28793,14 +28922,12 @@ impl Evaluator {
                 };
             match outcome {
                 CallOutcome::Value(value) => {
-                    let evaluated_list = matches!(
-                        value.semantic_value().as_ref(),
-                        IrValue::Content(nodes)
-                            if matches!(
-                                nodes.as_slice(),
-                                [IrNode::UnorderedList { .. } | IrNode::OrderedList { .. }]
-                            )
-                    );
+                    let evaluated_list = value.as_content_nodes().is_some_and(|nodes| {
+                        matches!(
+                            nodes,
+                            [IrNode::UnorderedList { .. } | IrNode::OrderedList { .. }]
+                        )
+                    });
                     context.assign_value(var_name.clone(), value);
                     if evaluated_list {
                         if let Some(source_text) = direct_markdown_list_text {
