@@ -2396,10 +2396,7 @@ impl<'a> EvaluationContext<'a> {
         read_parent: Option<ContextFrameLink>,
     ) -> Rc<RefCell<ContextFrame>> {
         let key = session.transaction.borrow_mut().allocate_frame_id();
-        Self::register_context_frame(
-            session,
-            ContextFrame::new(key, journal_floor, read_parent),
-        )
+        Self::register_context_frame(session, ContextFrame::new(key, journal_floor, read_parent))
     }
 
     fn context_frame(&self, frame_id: ContextFrameId) -> Option<Rc<RefCell<ContextFrame>>> {
@@ -2526,9 +2523,8 @@ impl<'a> EvaluationContext<'a> {
             )
         };
         local.or_else(|| {
-            parent.and_then(|parent| {
-                Self::get_extension_target_from_frame(&parent.frame, extension)
-            })
+            parent
+                .and_then(|parent| Self::get_extension_target_from_frame(&parent.frame, extension))
         })
     }
 
@@ -2538,7 +2534,10 @@ impl<'a> EvaluationContext<'a> {
     ) -> Option<Result<RuntimeValue, ImplicitParameterError>> {
         let (lambda_scope, parent) = {
             let frame_state = frame.borrow();
-            (frame_state.lambda_scope.clone(), frame_state.read_parent.clone())
+            (
+                frame_state.lambda_scope.clone(),
+                frame_state.read_parent.clone(),
+            )
         };
         match lambda_scope.as_ref() {
             Some(LambdaScope::Explicit) => Some(Err(ImplicitParameterError::Missing)),
@@ -2569,7 +2568,10 @@ impl<'a> EvaluationContext<'a> {
     fn visible_lambda_scope_from_frame(frame: &Rc<RefCell<ContextFrame>>) -> Option<LambdaScope> {
         let (scope, parent) = {
             let frame_state = frame.borrow();
-            (frame_state.lambda_scope.clone(), frame_state.read_parent.clone())
+            (
+                frame_state.lambda_scope.clone(),
+                frame_state.read_parent.clone(),
+            )
         };
         scope.or_else(|| {
             parent.and_then(|parent| Self::visible_lambda_scope_from_frame(&parent.frame))
@@ -3160,8 +3162,7 @@ impl<'a> EvaluationContext<'a> {
         // a directly authored list body is re-marked on its exact owner below.
         let value = without_direct_markdown_source_evidence(value.into());
         let real_owner = Self::find_real_owner_from_frame(&self.frame, &name);
-        let has_forwarded_owner =
-            Self::has_forwarded_variable_owner_from_frame(&self.frame, &name);
+        let has_forwarded_owner = Self::has_forwarded_variable_owner_from_frame(&self.frame, &name);
 
         match real_owner {
             Some(owner) if Rc::ptr_eq(&owner.frame, &self.frame) => {
@@ -3175,9 +3176,7 @@ impl<'a> EvaluationContext<'a> {
             None => {
                 // Parameters and forwarded caller bindings are lookup layers,
                 // not new variable owners.
-                if !self.frame.borrow().parameter_names.contains(&name)
-                    && !has_forwarded_owner
-                {
+                if !self.frame.borrow().parameter_names.contains(&name) && !has_forwarded_owner {
                     self.set_value(name.clone(), value.clone());
                     self.record_variable_owner_before(&name);
                     self.frame.borrow_mut().variable_owners.insert(name.clone());
@@ -37408,7 +37407,10 @@ mod tests {
 
         child.set_value("visible".into(), IrValue::String("child".into()));
         child.set_function("inherited".into(), vec!["child".into()]);
-        parent.set_value("visible".into(), IrValue::String("parent-after-shadow".into()));
+        parent.set_value(
+            "visible".into(),
+            IrValue::String("parent-after-shadow".into()),
+        );
         parent.set_function("inherited".into(), vec!["parent-after-shadow".into()]);
 
         assert_eq!(
