@@ -2031,6 +2031,7 @@ impl ContextFrameLink {
 
 struct ContextFrame {
     key: ContextFrameId,
+    owner_session: Weak<EvalSession>,
     read_parent: Option<ContextFrameLink>,
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, Rc<FunctionBinding>>,
@@ -2046,12 +2047,14 @@ struct ContextFrame {
 
 impl ContextFrame {
     fn new(
+        owner_session: &Rc<EvalSession>,
         key: ContextFrameId,
         journal_floor: Option<usize>,
         read_parent: Option<ContextFrameLink>,
     ) -> Self {
         Self {
             key,
+            owner_session: Rc::downgrade(owner_session),
             read_parent,
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
@@ -2488,7 +2491,10 @@ impl<'a> EvaluationContext<'a> {
         read_parent: Option<ContextFrameLink>,
     ) -> Rc<RefCell<ContextFrame>> {
         let key = session.transaction.borrow_mut().allocate_frame_id();
-        Self::register_context_frame(session, ContextFrame::new(key, journal_floor, read_parent))
+        Self::register_context_frame(
+            session,
+            ContextFrame::new(session, key, journal_floor, read_parent),
+        )
     }
 
     fn context_frame(&self, frame_id: ContextFrameId) -> Option<Rc<RefCell<ContextFrame>>> {
@@ -2504,25 +2510,45 @@ impl<'a> EvaluationContext<'a> {
             .collect::<Vec<_>>();
         retained_roots
             .into_iter()
-            .find_map(|root| Self::find_frame_in_ancestry(&root, frame_id))
+            .find_map(|root| self.find_frame_in_ancestry(&root, frame_id))
     }
 
     fn find_frame_in_ancestry(
+        &self,
         frame: &Rc<RefCell<ContextFrame>>,
         frame_id: ContextFrameId,
     ) -> Option<Rc<RefCell<ContextFrame>>> {
-        let (key, parent) = {
+        let (key, owner_session, parent) = {
             let frame_state = frame.borrow();
-            (frame_state.key, frame_state.read_parent.clone())
+            (
+                frame_state.key,
+                frame_state.owner_session.clone(),
+                frame_state.read_parent.clone(),
+            )
         };
+        if !owner_session
+            .upgrade()
+            .is_some_and(|owner| Rc::ptr_eq(&owner, &self.session))
+        {
+            return None;
+        }
         if key == frame_id {
             return Some(Rc::clone(frame));
         }
-        parent.and_then(|parent| Self::find_frame_in_ancestry(&parent.frame, frame_id))
+        parent.and_then(|parent| self.find_frame_in_ancestry(&parent.frame, frame_id))
     }
 
     fn retain_definition_frame(&self, frame: Rc<RefCell<ContextFrame>>) -> bool {
-        let frame_id = frame.borrow().key;
+        let (frame_id, owner_session) = {
+            let frame_state = frame.borrow();
+            (frame_state.key, frame_state.owner_session.clone())
+        };
+        if !owner_session
+            .upgrade()
+            .is_some_and(|owner| Rc::ptr_eq(&owner, &self.session))
+        {
+            return false;
+        }
         if let Some(retained) = self
             .session
             .retained_definition_frames
@@ -2532,13 +2558,6 @@ impl<'a> EvaluationContext<'a> {
         {
             return Rc::ptr_eq(&retained, &frame);
         }
-        if !self
-            .context_frame(frame_id)
-            .is_some_and(|owned| Rc::ptr_eq(&owned, &frame))
-        {
-            return false;
-        }
-
         let key = UndoKey::RetainedDefinitionFrame { frame: frame_id };
         let mut transaction = self.session.transaction.borrow_mut();
         if transaction.first_write(key) {
