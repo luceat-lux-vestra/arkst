@@ -19565,7 +19565,7 @@ impl Evaluator {
             parameters: wrapper_parameters,
             body: body_nodes.to_vec(),
             declaration_span: *span,
-            definition_frame: Some(DefinitionFrameRef::new(&context.frame)),
+            definition_frame: None,
             capture: Some(Box::new(context.capture_snapshot())),
             extension: Some(Rc::clone(&extension)),
         });
@@ -37477,35 +37477,40 @@ mod tests {
     fn g2_source_function_invocation_prefers_live_definition_frame_over_snapshot() {
         let evaluator = Evaluator::new();
         let mut diagnostics = Vec::new();
-        let mut context = EvaluationContext::new();
-        context.assign_value("definition_value".into(), IrValue::String("before".into()));
+        let mut definition = EvaluationContext::new();
+        definition.assign_value("definition_value".into(), IrValue::String("before".into()));
 
-        let capture = Some(Box::new(context.capture_snapshot()));
-        context.set_function_binding(
+        let capture = Some(Box::new(definition.capture_snapshot()));
+        definition.set_function_binding(
             "read_definition".into(),
             LambdaParameters::Explicit(Vec::new()),
             vec![var_ref("definition_value")],
             span(0, 10),
             capture,
         );
+        let binding = definition
+            .get_function("read_definition")
+            .expect("source function is installed");
 
-        context.assign_value("definition_value".into(), IrValue::String("after".into()));
-        let outcome = evaluator.evaluate_call_value(
-            "read_definition",
-            &[],
-            &[],
-            None,
-            None,
-            &span(20, 30),
+        definition.assign_value("definition_value".into(), IrValue::String("after".into()));
+
+        let mut caller = EvaluationContext::new();
+        let outcome = evaluator.invoke_bound_function_binding(
+            &binding,
+            BoundLambdaArguments::Explicit(Vec::new()),
+            IterationOptions {
+                span: span(20, 30),
+                allow_destructuring: false,
+            },
             &mut diagnostics,
-            &mut context,
+            &mut caller,
         );
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(
             project_legacy_outcome(&outcome),
             LegacyCallOutcome::Value(IrValue::String("after".into())),
-            "ordinary source-defined invocation must resolve through the live definition frame"
+            "an independent caller must resolve through the live definition frame rather than the retained before-state snapshot"
         );
     }
 
