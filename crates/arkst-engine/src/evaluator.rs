@@ -37184,12 +37184,15 @@ mod tests {
         assert_eq!(
             child
                 .get_function("inherited")
-                .and_then(|binding| binding.parameters.explicit())
-                .map(|parameters| parameters
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["value"])
+                .and_then(|binding| {
+                    binding.parameters.explicit().map(|parameters| {
+                        parameters
+                            .iter()
+                            .map(|parameter| parameter.name.clone())
+                            .collect::<Vec<_>>()
+                    })
+                }),
+            Some(vec!["value".to_string()])
         );
         child.set_value("local".into(), IrValue::String("child".into()));
         child.set_function("future".into(), vec!["value".into()]);
@@ -37202,12 +37205,15 @@ mod tests {
         assert_eq!(
             child
                 .get_function("future")
-                .and_then(|binding| binding.parameters.explicit())
-                .map(|parameters| parameters
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["value"])
+                .and_then(|binding| {
+                    binding.parameters.explicit().map(|parameters| {
+                        parameters
+                            .iter()
+                            .map(|parameter| parameter.name.clone())
+                            .collect::<Vec<_>>()
+                    })
+                }),
+            Some(vec!["value".to_string()])
         );
         child.set_value("visible".into(), IrValue::String("shadowed".into()));
         child.set_function("inherited".into(), vec!["shadowed".into()]);
@@ -37222,22 +37228,28 @@ mod tests {
         assert_eq!(
             child
                 .get_function("inherited")
-                .and_then(|binding| binding.parameters.explicit())
-                .map(|parameters| parameters
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["shadowed"])
+                .and_then(|binding| {
+                    binding.parameters.explicit().map(|parameters| {
+                        parameters
+                            .iter()
+                            .map(|parameter| parameter.name.clone())
+                            .collect::<Vec<_>>()
+                    })
+                }),
+            Some(vec!["shadowed".to_string()])
         );
         assert_eq!(
             parent
                 .get_function("inherited")
-                .and_then(|binding| binding.parameters.explicit())
-                .map(|parameters| parameters
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["value"])
+                .and_then(|binding| {
+                    binding.parameters.explicit().map(|parameters| {
+                        parameters
+                            .iter()
+                            .map(|parameter| parameter.name.clone())
+                            .collect::<Vec<_>>()
+                    })
+                }),
+            Some(vec!["value".to_string()])
         );
     }
 
