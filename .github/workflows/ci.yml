@@ -328,7 +328,7 @@ jobs:
           cache-targets: false
       - name: Install Typst 0.15.1 (pinned)
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
-        uses: typst-community/setup-typst@6a2cfaf0b28d636b00148f965e315bae81079aaa # v5
+        uses: typst-community/setup-typst@00ad6338f0b34724ea002136bfb701a6c18585b0 # v5
         with:
           typst-version: 0.15.1
 
@@ -660,7 +660,7 @@ jobs:
           toolchain: stable
 
       - if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (steps.scope.outputs.relevant == 'true') }}
-        uses: typst-community/setup-typst@6a2cfaf0b28d636b00148f965e315bae81079aaa # v5
+        uses: typst-community/setup-typst@00ad6338f0b34724ea002136bfb701a6c18585b0 # v5
         with:
           typst-version: 0.15.1
 
@@ -788,7 +788,7 @@ jobs:
         run: echo "full required-context validation is deferred until the pull request is ready for review"
       - name: Review dependency changes
         if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.scope.outputs.docs_only != 'true' }}
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           fail-on-severity: moderate
           license-check: true
