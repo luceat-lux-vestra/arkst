@@ -38012,6 +38012,15 @@ mod tests {
         root.end_invocation();
         assert_eq!(root.retained_definition_frame_count(), 1);
 
+        drop(definition);
+        assert!(
+            callable
+                .definition_identity
+                .as_ref()
+                .is_some_and(RuntimeCallableDefinitionIdentity::is_live),
+            "the committed nested root must be the remaining owner before outer rollback"
+        );
+
         outer.restore(&mut root);
         root.end_invocation();
         assert_eq!(
@@ -38019,7 +38028,6 @@ mod tests {
             0,
             "outer rollback must remove roots introduced by a committed nested savepoint"
         );
-        drop(definition);
         assert!(
             callable
                 .definition_identity
@@ -38056,11 +38064,9 @@ mod tests {
     #[test]
     fn g2_escape_root_rejects_foreign_eval_session_frames() {
         let evaluator = Evaluator::new();
-        let callable = {
-            let mut definition = EvaluationContext::new();
-            definition.runtime_authored_callables = true;
-            evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition)
-        };
+        let mut definition = EvaluationContext::new();
+        definition.runtime_authored_callables = true;
+        let callable = evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition);
         let value = RuntimeValue::static_callable(callable.clone());
         let foreign_session = EvaluationContext::new();
 
@@ -38070,8 +38076,17 @@ mod tests {
             callable
                 .definition_identity
                 .as_ref()
+                .is_some_and(RuntimeCallableDefinitionIdentity::is_live),
+            "the source definition is still live, but it must not be adopted by a foreign session"
+        );
+
+        drop(definition);
+        assert!(
+            callable
+                .definition_identity
+                .as_ref()
                 .is_some_and(|identity| !identity.is_live()),
-            "a foreign EvalSession must never adopt another compilation's definition frame"
+            "foreign-session rejection must not create a hidden strong owner"
         );
     }
 
