@@ -1940,15 +1940,31 @@ impl Drop for EvaluationDepthGuard {
 
 /// Identity-addressed lexical state for one evaluator context.
 ///
-/// This first G2-B slice moves every mutation-bearing lexical binding behind a
-/// stable frame identity registered in the compilation session. The existing
-/// parent snapshot tree remains deliberately intact until the next G2-B slice.
+/// Mutation-bearing lexical bindings live behind stable frame identities.
+/// G2-B3 links frames directly for live lexical reads and keeps write staging
+/// local until an existing successful publication boundary authorizes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct ContextFrameId(usize);
 
 #[derive(Clone)]
+struct ContextFrameLink {
+    id: ContextFrameId,
+    frame: Rc<RefCell<ContextFrame>>,
+}
+
+impl ContextFrameLink {
+    fn new(frame: &Rc<RefCell<ContextFrame>>) -> Self {
+        let id = frame.borrow().key;
+        Self {
+            id,
+            frame: Rc::clone(frame),
+        }
+    }
+}
+
 struct ContextFrame {
     key: ContextFrameId,
+    read_parent: Option<ContextFrameLink>,
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, Rc<FunctionBinding>>,
     extension_targets: BTreeMap<ExtensionId, ExtensionOverlay>,
@@ -1962,9 +1978,14 @@ struct ContextFrame {
 }
 
 impl ContextFrame {
-    fn new(key: ContextFrameId, journal_floor: Option<usize>) -> Self {
+    fn new(
+        key: ContextFrameId,
+        journal_floor: Option<usize>,
+        read_parent: Option<ContextFrameLink>,
+    ) -> Self {
         Self {
             key,
+            read_parent,
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
             extension_targets: BTreeMap::new(),
@@ -1983,11 +2004,10 @@ impl ContextFrame {
 ///
 /// Created fresh per `evaluate()` call to ensure isolation and determinism.
 /// Each live lexical frame is registered in `EvalSession` by stable identity.
-/// Parent contexts still use the historical snapshot tree in this bounded
-/// slice; G2-B follow-up work replaces that tree with frame identities without
-/// changing capture/caller-overlay policy.
+/// Lexical reads follow strong frame links while outer-owner writes are staged
+/// locally and relayed only across successful callable boundaries. G2-C still
+/// owns durable definition-capture/caller-overlay identity migration.
 struct EvaluationContext<'a> {
-    parent: Option<Box<EvaluationContext<'a>>>,
     frame: Rc<RefCell<ContextFrame>>,
     extension_invocation: Option<Rc<ExtensionInvocation>>,
     resources: Option<&'a dyn ResourceProvider>,
@@ -2341,9 +2361,8 @@ impl<'a> EvaluationContext<'a> {
 
     fn with_limits(limits: EvaluationLimits) -> Self {
         let session = Rc::new(EvalSession::new(limits));
-        let frame = Self::new_context_frame(&session, None);
+        let frame = Self::new_context_frame(&session, None, None);
         Self {
-            parent: None,
             frame,
             extension_invocation: None,
             resources: None,
@@ -2374,23 +2393,243 @@ impl<'a> EvaluationContext<'a> {
     fn new_context_frame(
         session: &Rc<EvalSession>,
         journal_floor: Option<usize>,
+        read_parent: Option<ContextFrameLink>,
     ) -> Rc<RefCell<ContextFrame>> {
         let key = session.transaction.borrow_mut().allocate_frame_id();
-        Self::register_context_frame(session, ContextFrame::new(key, journal_floor))
-    }
-
-    fn clone_context_frame(
-        session: &Rc<EvalSession>,
-        source: &ContextFrame,
-    ) -> Rc<RefCell<ContextFrame>> {
-        let key = session.transaction.borrow_mut().allocate_frame_id();
-        let mut frame = source.clone();
-        frame.key = key;
-        Self::register_context_frame(session, frame)
+        Self::register_context_frame(session, ContextFrame::new(key, journal_floor, read_parent))
     }
 
     fn context_frame(&self, frame_id: ContextFrameId) -> Option<Rc<RefCell<ContextFrame>>> {
         self.session.context_frames.borrow().get(&frame_id).cloned()
+    }
+
+    fn read_parent(frame: &Rc<RefCell<ContextFrame>>) -> Option<ContextFrameLink> {
+        let parent = frame.borrow().read_parent.clone();
+        if let Some(parent) = parent.as_ref() {
+            debug_assert_eq!(parent.id, parent.frame.borrow().key);
+        }
+        parent
+    }
+
+    fn get_from_frame(frame: &Rc<RefCell<ContextFrame>>, name: &str) -> Option<VariableValue> {
+        let (local, staged, local_is_authoritative, parent) = {
+            let frame_state = frame.borrow();
+            (
+                frame_state.variables.get(name).cloned(),
+                frame_state
+                    .assigned_variables
+                    .get(name)
+                    .cloned()
+                    .map(VariableValue::from_runtime_value),
+                frame_state.parameter_names.contains(name)
+                    || frame_state.variable_owners.contains(name),
+                frame_state.read_parent.clone(),
+            )
+        };
+        let current = if local_is_authoritative {
+            local.or(staged)
+        } else {
+            staged.or(local)
+        };
+        current.or_else(|| parent.and_then(|parent| Self::get_from_frame(&parent.frame, name)))
+    }
+
+    fn get_function_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        name: &str,
+    ) -> Option<Rc<FunctionBinding>> {
+        let (local, parent) = {
+            let frame_state = frame.borrow();
+            (
+                frame_state.functions.get(name).cloned(),
+                frame_state.read_parent.clone(),
+            )
+        };
+        local.or_else(|| {
+            parent.and_then(|parent| Self::get_function_from_frame(&parent.frame, name))
+        })
+    }
+
+    fn collect_bindings_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        variables: &mut BTreeMap<String, RuntimeValue>,
+        functions: &mut BTreeMap<String, Rc<FunctionBinding>>,
+    ) {
+        if let Some(parent) = Self::read_parent(frame) {
+            Self::collect_bindings_from_frame(&parent.frame, variables, functions);
+        }
+        let frame_state = frame.borrow();
+        variables.extend(
+            frame_state
+                .variables
+                .iter()
+                .map(|(name, value)| (name.clone(), value.runtime_value().clone())),
+        );
+        for (name, value) in &frame_state.assigned_variables {
+            if !frame_state.parameter_names.contains(name)
+                && !frame_state.variable_owners.contains(name)
+            {
+                variables.insert(name.clone(), value.clone());
+            }
+        }
+        functions.extend(frame_state.functions.clone());
+    }
+
+    fn collect_extension_targets_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        targets: &mut BTreeMap<ExtensionId, ExtensionOverlay>,
+    ) {
+        if let Some(parent) = Self::read_parent(frame) {
+            Self::collect_extension_targets_from_frame(&parent.frame, targets);
+        }
+        targets.extend(frame.borrow().extension_targets.clone());
+    }
+
+    fn collect_library_registry_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        entries: &mut Vec<crate::library_inspection::RegistryEntry>,
+    ) {
+        if let Some(parent) = Self::read_parent(frame) {
+            Self::collect_library_registry_from_frame(&parent.frame, entries);
+        }
+        let frame_state = frame.borrow();
+        for entry in &frame_state.library_registry {
+            let name = entry.visible_name();
+            if !entries
+                .iter()
+                .any(|existing| existing.matches_visible_name(&name))
+            {
+                entries.push(entry.clone());
+            }
+        }
+    }
+
+    fn get_extension_target_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        extension: &Rc<FunctionExtension>,
+    ) -> Option<FunctionTarget> {
+        let key = extension.id;
+        let (local, parent) = {
+            let frame_state = frame.borrow();
+            (
+                frame_state.extension_targets.get(&key).and_then(|overlay| {
+                    overlay
+                        .owner
+                        .upgrade()
+                        .filter(|owner| Rc::ptr_eq(owner, extension))
+                        .map(|_| overlay.target.clone())
+                }),
+                frame_state.read_parent.clone(),
+            )
+        };
+        local.or_else(|| {
+            parent
+                .and_then(|parent| Self::get_extension_target_from_frame(&parent.frame, extension))
+        })
+    }
+
+    fn get_implicit_parameter_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        parameter_index: ImplicitParameterIndex,
+    ) -> Option<Result<RuntimeValue, ImplicitParameterError>> {
+        let (lambda_scope, parent) = {
+            let frame_state = frame.borrow();
+            (
+                frame_state.lambda_scope.clone(),
+                frame_state.read_parent.clone(),
+            )
+        };
+        match lambda_scope.as_ref() {
+            Some(LambdaScope::Explicit) => Some(Err(ImplicitParameterError::Missing)),
+            Some(LambdaScope::Implicit(arguments)) => match parameter_index {
+                ImplicitParameterIndex::Valid(index) => {
+                    let resolved = arguments
+                        .get(index.saturating_sub(1))
+                        .cloned()
+                        .map(Ok)
+                        .or_else(|| {
+                            parent.and_then(|parent| {
+                                Self::get_implicit_parameter_from_frame(
+                                    &parent.frame,
+                                    parameter_index,
+                                )
+                            })
+                        });
+                    Some(resolved.unwrap_or(Err(ImplicitParameterError::Missing)))
+                }
+                ImplicitParameterIndex::Overflow => Some(Err(ImplicitParameterError::Overflow)),
+            },
+            None => parent.and_then(|parent| {
+                Self::get_implicit_parameter_from_frame(&parent.frame, parameter_index)
+            }),
+        }
+    }
+
+    fn visible_lambda_scope_from_frame(frame: &Rc<RefCell<ContextFrame>>) -> Option<LambdaScope> {
+        let (scope, parent) = {
+            let frame_state = frame.borrow();
+            (
+                frame_state.lambda_scope.clone(),
+                frame_state.read_parent.clone(),
+            )
+        };
+        scope.or_else(|| {
+            parent.and_then(|parent| Self::visible_lambda_scope_from_frame(&parent.frame))
+        })
+    }
+
+    fn find_real_owner_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        name: &str,
+    ) -> Option<ContextFrameLink> {
+        if let Some(parent) = Self::read_parent(frame) {
+            if let Some(owner) = Self::find_real_owner_from_frame(&parent.frame, name) {
+                return Some(owner);
+            }
+        }
+        let owns = frame.borrow().variable_owners.contains(name);
+        owns.then(|| ContextFrameLink::new(frame))
+    }
+
+    fn find_owner_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        name: &str,
+    ) -> Option<ContextFrameLink> {
+        if let Some(parent) = Self::read_parent(frame) {
+            if let Some(owner) = Self::find_owner_from_frame(&parent.frame, name) {
+                return Some(owner);
+            }
+        }
+        let owns = {
+            let frame_state = frame.borrow();
+            frame_state.variable_owners.contains(name)
+                || frame_state.forwarded_variable_owners.contains(name)
+        };
+        owns.then(|| ContextFrameLink::new(frame))
+    }
+
+    fn has_forwarded_variable_owner_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        name: &str,
+    ) -> bool {
+        if let Some(parent) = Self::read_parent(frame) {
+            if Self::has_forwarded_variable_owner_from_frame(&parent.frame, name) {
+                return true;
+            }
+        }
+        frame.borrow().forwarded_variable_owners.contains(name)
+    }
+
+    fn collect_variable_owners_from_frame(
+        frame: &Rc<RefCell<ContextFrame>>,
+        owners: &mut BTreeSet<String>,
+    ) {
+        if let Some(parent) = Self::read_parent(frame) {
+            Self::collect_variable_owners_from_frame(&parent.frame, owners);
+        }
+        let frame_state = frame.borrow();
+        owners.extend(frame_state.variable_owners.iter().cloned());
+        owners.extend(frame_state.forwarded_variable_owners.iter().cloned());
     }
 
     fn journal_floor(&self) -> Option<usize> {
@@ -2413,8 +2652,11 @@ impl<'a> EvaluationContext<'a> {
 
     fn child_with_journal_floor(&self, journal_floor: Option<usize>) -> Self {
         Self {
-            parent: Some(Box::new(self.clone_scope_tree())),
-            frame: Self::new_context_frame(&self.session, journal_floor),
+            frame: Self::new_context_frame(
+                &self.session,
+                journal_floor,
+                Some(ContextFrameLink::new(&self.frame)),
+            ),
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
@@ -2521,26 +2763,6 @@ impl<'a> EvaluationContext<'a> {
 
     fn rollback_transaction(&mut self) -> Vec<InvocationUndo> {
         self.session.transaction.borrow_mut().rollback_savepoint()
-    }
-
-    fn clone_scope_tree(&self) -> Self {
-        Self {
-            parent: self
-                .parent
-                .as_deref()
-                .map(|parent| Box::new(parent.clone_scope_tree())),
-            frame: Self::clone_context_frame(&self.session, &self.frame.borrow()),
-            extension_invocation: self.extension_invocation.clone(),
-            resources: self.resources,
-            loadable_libraries: self.loadable_libraries,
-            log_sink: self.log_sink,
-            environment: self.environment,
-            metadata_defaults: self.metadata_defaults.clone(),
-            current_source: self.current_source,
-            subdocument_root: self.subdocument_root,
-            active_sources: self.active_sources.clone(),
-            session: Rc::clone(&self.session),
-        }
     }
 
     fn frame_id(&self) -> ContextFrameId {
@@ -2708,19 +2930,7 @@ impl<'a> EvaluationContext<'a> {
         &self,
         entries: &mut Vec<crate::library_inspection::RegistryEntry>,
     ) {
-        if let Some(parent) = self.parent.as_deref() {
-            parent.collect_library_registry(entries);
-        }
-        let frame = self.frame.borrow();
-        for entry in &frame.library_registry {
-            let name = entry.visible_name();
-            if !entries
-                .iter()
-                .any(|existing| existing.matches_visible_name(&name))
-            {
-                entries.push(entry.clone());
-            }
-        }
+        Self::collect_library_registry_from_frame(&self.frame, entries);
     }
 
     fn inspection_library_names(&self) -> Vec<String> {
@@ -2761,25 +2971,7 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn get_extension_target(&self, extension: &Rc<FunctionExtension>) -> FunctionTarget {
-        let key = extension.id;
-        let local_target = self
-            .frame
-            .borrow()
-            .extension_targets
-            .get(&key)
-            .and_then(|overlay| {
-                overlay
-                    .owner
-                    .upgrade()
-                    .filter(|owner| Rc::ptr_eq(owner, extension))
-                    .map(|_| overlay.target.clone())
-            });
-        local_target
-            .or_else(|| {
-                self.parent
-                    .as_deref()
-                    .map(|parent| parent.get_extension_target(extension))
-            })
+        Self::get_extension_target_from_frame(&self.frame, extension)
             .unwrap_or_else(|| extension.super_target.clone())
     }
 
@@ -2969,19 +3161,29 @@ impl<'a> EvaluationContext<'a> {
         // source-backed classification while dropping that one-shot evidence;
         // a directly authored list body is re-marked on its exact owner below.
         let value = without_direct_markdown_source_evidence(value.into());
-        let has_forwarded_owner = self.has_forwarded_variable_owner(&name);
-        if !self.assign_to_real_owner(&name, value.clone()) {
-            // A lambda parameter is a lookup binding, not a variable owner.
-            // Keep it shadowing a same-named `.var` declaration while still
-            // recording the assignment for a real owner at the boundary.
-            if !self.frame.borrow().parameter_names.contains(&name) {
+        let real_owner = Self::find_real_owner_from_frame(&self.frame, &name);
+        let has_forwarded_owner = Self::has_forwarded_variable_owner_from_frame(&self.frame, &name);
+
+        match real_owner {
+            Some(owner) if Rc::ptr_eq(&owner.frame, &self.frame) => {
                 self.set_value(name.clone(), value.clone());
             }
-            if !has_forwarded_owner {
-                self.record_variable_owner_before(&name);
-                self.frame.borrow_mut().variable_owners.insert(name.clone());
+            Some(_) => {
+                // Outer-owner writes remain staged in this frame. Reads see
+                // the staged value, but the real owner is updated only when a
+                // surrounding callable boundary publishes successfully.
+            }
+            None => {
+                // Parameters and forwarded caller bindings are lookup layers,
+                // not new variable owners.
+                if !self.frame.borrow().parameter_names.contains(&name) && !has_forwarded_owner {
+                    self.set_value(name.clone(), value.clone());
+                    self.record_variable_owner_before(&name);
+                    self.frame.borrow_mut().variable_owners.insert(name.clone());
+                }
             }
         }
+
         self.record_assigned_variable_before(&name);
         self.frame
             .borrow_mut()
@@ -3013,14 +3215,18 @@ impl<'a> EvaluationContext<'a> {
             .is_some_and(|value| value.mark_source_backed_markdown(source_text))
     }
 
-    /// Publishes a successful nested callable assignment into an actual
-    /// variable owner visible from the caller. Lookup-only bindings such as
-    /// parameters, captures, and copied caller overlays are never owners by
-    /// themselves. A forwarded overlay is updated as a relay so an outer
-    /// callable boundary can continue the writeback to its real caller.
+    /// Relays a successful nested callable assignment through one caller
+    /// boundary without bypassing that caller's failure-atomicity boundary.
+    ///
+    /// If the visible owner is this exact frame, publication is final here.
+    /// Otherwise the value remains staged in this frame and is relayed by the
+    /// next successful callable boundary.
     fn apply_callable_assignment(&mut self, name: String, value: RuntimeValue) -> bool {
-        if !self.assign_to_owner(&name, value.clone()) {
+        let Some(owner) = Self::find_owner_from_frame(&self.frame, &name) else {
             return false;
+        };
+        if Rc::ptr_eq(&owner.frame, &self.frame) {
+            self.set_value(name.clone(), value.clone());
         }
         self.record_assigned_variable_before(&name);
         self.frame
@@ -3030,58 +3236,8 @@ impl<'a> EvaluationContext<'a> {
         true
     }
 
-    /// Assigns directly to the outermost real `.var` owner in this parent
-    /// chain. This is used for ordinary child scopes, not copied callable
-    /// overlays.
-    fn assign_to_real_owner(&mut self, name: &str, value: RuntimeValue) -> bool {
-        if let Some(parent) = self.parent.as_mut() {
-            if parent.assign_to_real_owner(name, value.clone()) {
-                return true;
-            }
-        }
-        if self.frame.borrow().variable_owners.contains(name) {
-            self.set_value(name.to_string(), value);
-            return true;
-        }
-        false
-    }
-
-    /// Assigns to the outermost real or forwarded owner. Forwarded owners
-    /// represent caller libraries copied into an invocation overlay; they are
-    /// relays rather than proof that the overlay itself owns the variable.
-    fn assign_to_owner(&mut self, name: &str, value: RuntimeValue) -> bool {
-        if let Some(parent) = self.parent.as_mut() {
-            if parent.assign_to_owner(name, value.clone()) {
-                return true;
-            }
-        }
-        let frame = self.frame.borrow();
-        let owns_variable =
-            frame.variable_owners.contains(name) || frame.forwarded_variable_owners.contains(name);
-        drop(frame);
-        if owns_variable {
-            self.set_value(name.to_string(), value);
-            return true;
-        }
-        false
-    }
-
-    fn has_forwarded_variable_owner(&self, name: &str) -> bool {
-        if self.frame.borrow().forwarded_variable_owners.contains(name) {
-            return true;
-        }
-        self.parent
-            .as_deref()
-            .is_some_and(|parent| parent.has_forwarded_variable_owner(name))
-    }
-
     fn collect_variable_owners(&self, owners: &mut BTreeSet<String>) {
-        if let Some(parent) = self.parent.as_deref() {
-            parent.collect_variable_owners(owners);
-        }
-        let frame = self.frame.borrow();
-        owners.extend(frame.variable_owners.iter().cloned());
-        owners.extend(frame.forwarded_variable_owners.iter().cloned());
+        Self::collect_variable_owners_from_frame(&self.frame, owners);
     }
 
     /// Installs a user-function binding in the current local scope.
@@ -3160,24 +3316,11 @@ impl<'a> EvaluationContext<'a> {
         variables: &mut BTreeMap<String, RuntimeValue>,
         functions: &mut BTreeMap<String, Rc<FunctionBinding>>,
     ) {
-        if let Some(parent) = self.parent.as_deref() {
-            parent.collect_bindings(variables, functions);
-        }
-        let frame = self.frame.borrow();
-        variables.extend(
-            frame
-                .variables
-                .iter()
-                .map(|(name, value)| (name.clone(), value.runtime_value().clone())),
-        );
-        functions.extend(frame.functions.clone());
+        Self::collect_bindings_from_frame(&self.frame, variables, functions);
     }
 
     fn collect_extension_targets(&self, targets: &mut BTreeMap<ExtensionId, ExtensionOverlay>) {
-        if let Some(parent) = self.parent.as_deref() {
-            parent.collect_extension_targets(targets);
-        }
-        targets.extend(self.frame.borrow().extension_targets.clone());
+        Self::collect_extension_targets_from_frame(&self.frame, targets);
     }
 
     fn from_capture(capture: &RuntimeCallableCapture) -> Self {
@@ -3230,7 +3373,11 @@ impl<'a> EvaluationContext<'a> {
             .current_savepoint_index();
         let has_resource_context = resource_context.is_some();
 
-        let frame = Self::new_context_frame(&caller_context.session, journal_floor);
+        let frame = Self::new_context_frame(
+            &caller_context.session,
+            journal_floor,
+            Some(ContextFrameLink::new(&definition_context.frame)),
+        );
         {
             let mut frame_state = frame.borrow_mut();
             frame_state.variables = variables
@@ -3245,7 +3392,6 @@ impl<'a> EvaluationContext<'a> {
         }
 
         Self {
-            parent: Some(Box::new(definition_context)),
             frame,
             extension_invocation: caller_context.extension_invocation.clone(),
             // Provider objects are never captured. A callable may reuse the current
@@ -3838,8 +3984,7 @@ impl<'a> EvaluationContext<'a> {
 
     /// Gets a variable value if it exists in the visible scope chain.
     fn get(&self, name: &str) -> Option<VariableValue> {
-        self.get_local(name)
-            .or_else(|| self.parent.as_deref().and_then(|parent| parent.get(name)))
+        Self::get_from_frame(&self.frame, name)
     }
 
     /// Checks if a name is bound as a variable.
@@ -3849,16 +3994,7 @@ impl<'a> EvaluationContext<'a> {
 
     /// Looks up a function binding through the visible scope chain.
     fn get_function(&self, name: &str) -> Option<Rc<FunctionBinding>> {
-        self.frame
-            .borrow()
-            .functions
-            .get(name)
-            .cloned()
-            .or_else(|| {
-                self.parent
-                    .as_deref()
-                    .and_then(|parent| parent.get_function(name))
-            })
+        Self::get_function_from_frame(&self.frame, name)
     }
 
     /// Resolves a numeric implicit parameter only inside the nearest lambda
@@ -3870,40 +4006,14 @@ impl<'a> EvaluationContext<'a> {
         name: &str,
     ) -> Option<Result<RuntimeValue, ImplicitParameterError>> {
         let index = implicit_parameter_index(name)?;
-        let lambda_scope = self.frame.borrow().lambda_scope.clone();
-        match lambda_scope.as_ref() {
-            Some(LambdaScope::Explicit) => Some(Err(ImplicitParameterError::Missing)),
-            Some(LambdaScope::Implicit(arguments)) => match index {
-                ImplicitParameterIndex::Valid(index) => {
-                    let resolved = arguments
-                        .get(index.saturating_sub(1))
-                        .cloned()
-                        .map(Ok)
-                        .or_else(|| {
-                            self.parent
-                                .as_deref()
-                                .and_then(|parent| parent.get_implicit_parameter(name))
-                        });
-                    Some(resolved.unwrap_or(Err(ImplicitParameterError::Missing)))
-                }
-                ImplicitParameterIndex::Overflow => Some(Err(ImplicitParameterError::Overflow)),
-            },
-            None => self
-                .parent
-                .as_deref()
-                .and_then(|parent| parent.get_implicit_parameter(name)),
-        }
+        Self::get_implicit_parameter_from_frame(&self.frame, index)
     }
 
     /// Returns the nearest lambda scope that is visible from this context.
     /// The caller overlay copies this one scope as lookup state; it does not
     /// retain a reference to the mutable caller context.
     fn visible_lambda_scope(&self) -> Option<LambdaScope> {
-        self.frame.borrow().lambda_scope.clone().or_else(|| {
-            self.parent
-                .as_deref()
-                .and_then(|parent| parent.visible_lambda_scope())
-        })
+        Self::visible_lambda_scope_from_frame(&self.frame)
     }
 }
 
@@ -37254,6 +37364,144 @@ mod tests {
     }
 
     #[test]
+    fn g2_live_read_ancestry_observes_parent_updates_and_preserves_child_shadowing() {
+        let mut parent = EvaluationContext::new();
+        parent.set_value("visible".into(), IrValue::String("initial".into()));
+        parent.set_function("inherited".into(), vec!["initial".into()]);
+
+        let mut child = parent.child();
+        let read_parent = child
+            .frame
+            .borrow()
+            .read_parent
+            .clone()
+            .expect("child frame keeps a live read-parent link");
+        assert_eq!(read_parent.id, parent.frame_id());
+        assert!(Rc::ptr_eq(&read_parent.frame, &parent.frame));
+
+        parent.set_value("visible".into(), IrValue::String("updated".into()));
+        parent.set_value("late".into(), IrValue::String("late-parent".into()));
+        parent.set_function("inherited".into(), vec!["updated".into()]);
+        parent.set_function("late_fn".into(), vec!["late".into()]);
+
+        assert_eq!(
+            child.get("visible").map(|value| value.to_value()),
+            Some(IrValue::String("updated".into()))
+        );
+        assert_eq!(
+            child.get("late").map(|value| value.to_value()),
+            Some(IrValue::String("late-parent".into()))
+        );
+        assert_eq!(
+            child.get_function("inherited").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
+            Some(vec!["updated".to_string()])
+        );
+        assert!(child.get_function("late_fn").is_some());
+
+        child.set_value("visible".into(), IrValue::String("child".into()));
+        child.set_function("inherited".into(), vec!["child".into()]);
+        parent.set_value(
+            "visible".into(),
+            IrValue::String("parent-after-shadow".into()),
+        );
+        parent.set_function("inherited".into(), vec!["parent-after-shadow".into()]);
+
+        assert_eq!(
+            child.get("visible").map(|value| value.to_value()),
+            Some(IrValue::String("child".into()))
+        );
+        assert_eq!(
+            child.get_function("inherited").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
+            Some(vec!["child".to_string()])
+        );
+    }
+
+    #[test]
+    fn g2_live_read_parent_frame_outlives_parent_context_without_session_retention() {
+        let (child, parent_frame_id) = {
+            let mut parent = EvaluationContext::new();
+            parent.set_value("visible".into(), IrValue::String("parent".into()));
+            let parent_frame_id = parent.frame_id();
+            (parent.child(), parent_frame_id)
+        };
+
+        assert!(
+            child.context_frame(parent_frame_id).is_none(),
+            "dropping the parent context must release its session-registry entry"
+        );
+        assert_eq!(
+            child.get("visible").map(|value| value.to_value()),
+            Some(IrValue::String("parent".into())),
+            "the lexical read link must keep only the required parent frame alive"
+        );
+    }
+
+    #[test]
+    fn g2_staged_outer_assignment_shadows_live_parent_read_without_overwriting_parameters() {
+        let mut parent = EvaluationContext::new();
+        let mut child = parent.child();
+
+        parent.assign_value("shared".into(), IrValue::String("parent".into()));
+        child.assign_value("shared".into(), IrValue::String("staged".into()));
+
+        assert_eq!(
+            parent.get("shared").map(|value| value.to_value()),
+            Some(IrValue::String("parent".into())),
+            "a child write must not publish through a live read link immediately"
+        );
+        assert_eq!(
+            child.get("shared").map(|value| value.to_value()),
+            Some(IrValue::String("staged".into())),
+            "the staged write must shadow the live parent value inside the child"
+        );
+
+        let staged = child
+            .assigned_values()
+            .get("shared")
+            .cloned()
+            .expect("child records the staged outer-owner write");
+        assert!(parent.apply_callable_assignment("shared".into(), staged));
+        assert_eq!(
+            parent.get("shared").map(|value| value.to_value()),
+            Some(IrValue::String("staged".into())),
+            "the successful outer boundary publishes to the real owner"
+        );
+
+        let mut parameter_child = parent.child();
+        parameter_child.register_parameter_name("shared".into());
+        parameter_child.set_value("shared".into(), IrValue::String("parameter".into()));
+        parameter_child.assign_value("shared".into(), IrValue::String("outer-write".into()));
+
+        assert_eq!(
+            parameter_child.get("shared").map(|value| value.to_value()),
+            Some(IrValue::String("parameter".into())),
+            "parameter lookup must keep shadowing a staged outer-owner write"
+        );
+        assert_eq!(
+            parameter_child
+                .assigned_values()
+                .get("shared")
+                .map(RuntimeValue::to_ir_value),
+            Some(IrValue::String("outer-write".into())),
+            "the staged outer-owner write must remain publishable at the callable boundary"
+        );
+    }
+
+    #[test]
     fn direct_runtime_variable_fast_path_is_exact_frame_local_only() {
         let runtime = RuntimeValue::dynamic_value(IrValue::Content(vec![text_paragraph("value")]))
             .with_provenance(ValueProvenance::source_backed_markdown_text("value-source"));
@@ -38825,23 +39073,20 @@ mod tests {
 
     #[test]
     fn issue_167_function_binding_undo_reaches_parent_scope() {
-        let mut context = EvaluationContext::new().child();
+        let mut parent = EvaluationContext::new();
+        let parent_frame_id = parent.frame_id();
+        let mut context = parent.child();
         context.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
-        context
-            .parent
-            .as_mut()
-            .expect("child has a parent scope")
-            .set_function("parent_leaked".to_string(), Vec::new());
+        parent.set_function("parent_leaked".to_string(), Vec::new());
 
+        assert!(context.get_function("parent_leaked").is_some());
         checkpoint.restore(&mut context);
         context.end_invocation();
 
         assert!(context.get_function("parent_leaked").is_none());
-        assert!(context
-            .parent
-            .as_deref()
-            .is_some_and(|parent| parent.get_function("parent_leaked").is_none()));
+        assert!(parent.get_function("parent_leaked").is_none());
+        assert!(context.context_frame(parent_frame_id).is_some());
     }
 
     #[test]
