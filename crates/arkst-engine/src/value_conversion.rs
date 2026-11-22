@@ -354,6 +354,25 @@ impl RuntimeCallable {
         }
     }
 
+    pub(crate) fn visit_definition_identities(
+        &self,
+        visit: &mut impl FnMut(&RuntimeCallableDefinitionIdentity),
+    ) {
+        if let Some(identity) = self.definition_identity.as_ref() {
+            visit(identity);
+        }
+        if let Some(capture) = self.capture.as_deref() {
+            for variable in &capture.variables {
+                variable
+                    .value
+                    .visit_callable_definition_identities(visit);
+            }
+            for function in &capture.functions {
+                function.callable.visit_definition_identities(visit);
+            }
+        }
+    }
+
     fn to_ir(&self) -> IrCallable {
         IrCallable {
             parameters: self.parameters.clone(),
@@ -1041,6 +1060,44 @@ impl RuntimeValue {
             return None;
         };
         Some(value)
+    }
+
+    pub(crate) fn visit_callable_definition_identities(
+        &self,
+        visit: &mut impl FnMut(&RuntimeCallableDefinitionIdentity),
+    ) {
+        match &self.kind {
+            RuntimeValueKind::Pair(pair) => {
+                pair.first.visit_callable_definition_identities(visit);
+                pair.second.visit_callable_definition_identities(visit);
+            }
+            RuntimeValueKind::Dictionary(dictionary) => {
+                for entry in &dictionary.entries {
+                    entry.visit_callable_definition_identities(visit);
+                }
+            }
+            RuntimeValueKind::Callable(callable) => {
+                callable.visit_definition_identities(visit);
+            }
+            RuntimeValueKind::Collection(elements) => {
+                for element in elements {
+                    element.visit_callable_definition_identities(visit);
+                }
+            }
+            RuntimeValueKind::Unit
+            | RuntimeValueKind::None
+            | RuntimeValueKind::Boolean(_)
+            | RuntimeValueKind::Number(_)
+            | RuntimeValueKind::String(_)
+            | RuntimeValueKind::Identifier(_)
+            | RuntimeValueKind::Range(_)
+            | RuntimeValueKind::Size(_)
+            | RuntimeValueKind::Color(_)
+            | RuntimeValueKind::Enum(_)
+            | RuntimeValueKind::Content(_)
+            | RuntimeValueKind::Component(_)
+            | RuntimeValueKind::InlineBody(_) => {}
+        }
     }
 
     pub(crate) fn into_callable(self) -> Option<RuntimeCallable> {
