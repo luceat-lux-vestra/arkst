@@ -509,6 +509,10 @@ impl RuntimeValue {
         Self::materialized(RuntimeValueKind::String(value.into()), ValueOrigin::Static)
     }
 
+    pub(crate) fn dynamic_string(value: impl Into<String>) -> Self {
+        Self::materialized(RuntimeValueKind::String(value.into()), ValueOrigin::Dynamic)
+    }
+
     pub(crate) fn static_range(value: IrRange) -> Self {
         Self::materialized(RuntimeValueKind::Range(value), ValueOrigin::Static)
     }
@@ -2225,7 +2229,7 @@ pub(crate) fn convert_color_with_origin(
         let Some(text) = plain_dynamic_color_content(nodes) else {
             return Err(error);
         };
-        convert(&RuntimeValue::dynamic_value(IrValue::String(text)))
+        convert(&RuntimeValue::dynamic_string(text))
     })
 }
 
@@ -4528,6 +4532,38 @@ mod tests {
             .try_into_pair_parts()
             .expect_err("non-Pair must remain available to the fallback");
         assert_eq!(restored, non_pair);
+    }
+
+    #[test]
+    fn g1_target_conversion_generated_values_stay_runtime_native() {
+        let dynamic = RuntimeValue::dynamic_string("rgba(1,2,3,0.5)");
+        assert_eq!(dynamic.origin, ValueOrigin::Dynamic);
+        assert_eq!(dynamic.provenance(), &ValueProvenance::Materialized);
+        assert!(matches!(
+            &dynamic.kind,
+            RuntimeValueKind::String(value) if value == "rgba(1,2,3,0.5)"
+        ));
+
+        let source = include_str!("value_conversion.rs");
+        let start = source
+            .find("pub(crate) fn convert_target_with_origin(")
+            .expect("target conversion entry point");
+        let end = source
+            .find("#[cfg(test)]\nmod tests {")
+            .expect("test module boundary");
+        let production_target_conversion = &source[start..end];
+
+        for forbidden in [
+            "RuntimeValue::static_value(IrValue::",
+            "RuntimeValue::dynamic_value(IrValue::",
+            "RuntimeValue::new(IrValue::",
+            "RuntimeValue::from(IrValue::",
+        ] {
+            assert!(
+                !production_target_conversion.contains(forbidden),
+                "G1 target conversion must not generate RuntimeValue through IrValue: {forbidden}"
+            );
+        }
     }
 
     #[test]
