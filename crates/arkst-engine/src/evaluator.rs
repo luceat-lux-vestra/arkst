@@ -3828,13 +3828,14 @@ impl<'a> EvaluationContext<'a> {
         Ok(())
     }
 
-    /// Gets a variable value if it exists.
+    /// Gets a variable value from this exact lexical frame only.
+    fn get_local(&self, name: &str) -> Option<VariableValue> {
+        self.frame.borrow().variables.get(name).cloned()
+    }
+
+    /// Gets a variable value if it exists in the visible scope chain.
     fn get(&self, name: &str) -> Option<VariableValue> {
-        self.frame
-            .borrow()
-            .variables
-            .get(name)
-            .cloned()
+        self.get_local(name)
             .or_else(|| self.parent.as_deref().and_then(|parent| parent.get(name)))
     }
 
@@ -28534,20 +28535,13 @@ fn direct_variable_runtime_value(
     ) {
         return None;
     }
-    // Source spelling is owned by the actual declaration frame. Caller
-    // overlays and copied parent bindings are lookup-only, not new owners.
-    // Keep the runtime value, but never forward that one-shot source evidence.
-    let direct_owner = context.frame.borrow().variable_owners.contains(name);
+    // This fast path is deliberately local-only. Parent/caller-overlay values
+    // are visible to ordinary evaluation, but they are not direct values owned
+    // by this exact evaluation scope and must follow the normal materialization
+    // path instead.
     context
-        .get(name)
+        .get_local(name)
         .map(|value| value.runtime_value().clone())
-        .map(|value| {
-            if direct_owner {
-                value
-            } else {
-                without_direct_markdown_source_evidence(value)
-            }
-        })
         .filter(|value| value.is_callable() || !value.provenance().is_materialized())
 }
 
