@@ -16,8 +16,10 @@ use arkst_ir::{
     IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
 use arkst_source::{SourceId, SourceSpan};
+use std::any::Any;
 #[cfg(test)]
 use std::borrow::Cow;
+use std::rc::{Rc, Weak};
 
 /// Materialize the Quarkdown body `DynamicValue` only at a conversion target
 /// that explicitly requests it. The source slice is lossless and shared;
@@ -171,6 +173,51 @@ struct RuntimeDictionary {
     span: SourceSpan,
 }
 
+/// Evaluator-only identity for the lexical frame that authored a runtime callable.
+///
+/// The concrete frame type stays owned by the evaluator. Type erasure lets this
+/// value module retain only a weak, non-serializable identity without creating
+/// a dependency cycle or a strong frame -> callable -> frame retention cycle.
+#[derive(Clone)]
+pub(crate) struct RuntimeCallableDefinitionIdentity {
+    frame: Weak<dyn Any>,
+}
+
+impl RuntimeCallableDefinitionIdentity {
+    pub(crate) fn new<T: Any>(frame: &Rc<T>) -> Self {
+        let erased: Rc<dyn Any> = frame.clone();
+        Self {
+            frame: Rc::downgrade(&erased),
+        }
+    }
+
+    pub(crate) fn upgrade<T: Any>(&self) -> Option<Rc<T>> {
+        self.frame.upgrade()?.downcast::<T>().ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_live(&self) -> bool {
+        self.frame.strong_count() > 0
+    }
+}
+
+impl std::fmt::Debug for RuntimeCallableDefinitionIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeCallableDefinitionIdentity")
+            .field("live", &(self.frame.strong_count() > 0))
+            .finish()
+    }
+}
+
+impl PartialEq for RuntimeCallableDefinitionIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        self.frame.ptr_eq(&other.frame)
+    }
+}
+
+impl Eq for RuntimeCallableDefinitionIdentity {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RuntimeCallableResourceContext {
     pub(crate) current_source: SourceId,
@@ -291,6 +338,7 @@ pub(crate) struct RuntimeCallable {
     pub(crate) body: Vec<IrNode>,
     pub(crate) span: SourceSpan,
     pub(crate) capture: Option<Box<RuntimeCallableCapture>>,
+    pub(crate) definition_identity: Option<RuntimeCallableDefinitionIdentity>,
 }
 
 impl RuntimeCallable {
@@ -302,6 +350,7 @@ impl RuntimeCallable {
             capture: value
                 .capture
                 .map(|capture| Box::new(RuntimeCallableCapture::from_ir(*capture))),
+            definition_identity: None,
         }
     }
 
@@ -369,6 +418,7 @@ impl RuntimeInlineBody {
             body: self.body,
             span: self.span,
             capture: None,
+            definition_identity: None,
         }
     }
 }
@@ -4360,6 +4410,7 @@ mod tests {
                 functions: Vec::new(),
                 resource_context: None,
             })),
+            definition_identity: None,
         };
         let runtime = RuntimeValue::callable(callable, ValueOrigin::Static);
         let captured = &runtime
