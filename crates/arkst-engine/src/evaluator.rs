@@ -37251,6 +37251,31 @@ mod tests {
     }
 
     #[test]
+    fn direct_runtime_variable_fast_path_is_exact_frame_local_only() {
+        let runtime = RuntimeValue::dynamic_value(IrValue::Content(vec![text_paragraph("value")]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("value-source"));
+        let mut parent = EvaluationContext::new();
+        parent.set_value("visible".into(), runtime.clone());
+
+        let mut child = parent.child();
+        let inherited_reference = call_value("visible", Vec::new());
+        assert!(
+            direct_variable_runtime_value(&inherited_reference, &child).is_none(),
+            "parent-visible bindings must use the ordinary materialization path"
+        );
+
+        child.set_value("local".into(), runtime);
+        let local_reference = call_value("local", Vec::new());
+        let direct = direct_variable_runtime_value(&local_reference, &child)
+            .expect("same-frame runtime value keeps the direct fast path");
+        assert_eq!(
+            direct.source_backed_markdown_text(),
+            Some("value-source"),
+            "same-frame direct source evidence must remain available"
+        );
+    }
+
+    #[test]
     fn if_true_keeps_block_body() {
         let nodes = evaluate(vec![if_call(
             "if",
