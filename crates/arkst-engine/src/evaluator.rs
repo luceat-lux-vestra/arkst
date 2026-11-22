@@ -37553,6 +37553,144 @@ mod tests {
     }
 
     #[test]
+    fn g2_first_class_runtime_callable_prefers_live_definition_frame_over_snapshot() {
+        let evaluator = Evaluator::new();
+        let mut definition = EvaluationContext::new();
+        definition.runtime_authored_callables = true;
+        definition.assign_value("definition_value".into(), IrValue::String("before".into()));
+
+        let callable = evaluator.make_callable(
+            Some(&[]),
+            &[var_ref("definition_value")],
+            span(0, 10),
+            &definition,
+        );
+        assert!(
+            callable.definition_identity.is_some(),
+            "frontend-authored callable must carry a live definition identity"
+        );
+
+        definition.assign_value("definition_value".into(), IrValue::String("after".into()));
+
+        let mut caller = EvaluationContext::new();
+        let mut diagnostics = Vec::new();
+        let outcome = evaluator.invoke_callable(
+            &callable,
+            Vec::new(),
+            IterationOptions {
+                span: span(20, 30),
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut caller,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            project_legacy_outcome(&outcome),
+            LegacyCallOutcome::Value(IrValue::String("after".into())),
+            "a first-class runtime callable must prefer its still-live definition frame over the retained before-state snapshot"
+        );
+    }
+
+    #[test]
+    fn g2_first_class_runtime_callable_uses_snapshot_after_definition_frame_expires() {
+        let evaluator = Evaluator::new();
+        let callable = {
+            let mut definition = EvaluationContext::new();
+            definition.runtime_authored_callables = true;
+            definition.assign_value("definition_value".into(), IrValue::String("before".into()));
+            evaluator.make_callable(
+                Some(&[]),
+                &[var_ref("definition_value")],
+                span(0, 10),
+                &definition,
+            )
+        };
+
+        assert!(
+            callable
+                .definition_identity
+                .as_ref()
+                .is_some_and(|identity| !identity.is_live()),
+            "the runtime callable identity must stay weak after its definition context drops"
+        );
+
+        let mut caller = EvaluationContext::new();
+        let mut diagnostics = Vec::new();
+        let outcome = evaluator.invoke_callable(
+            &callable,
+            Vec::new(),
+            IterationOptions {
+                span: span(20, 30),
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut caller,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            project_legacy_outcome(&outcome),
+            LegacyCallOutcome::Value(IrValue::String("before".into())),
+            "G2-C2 must retain the historical snapshot fallback until durable escaping-closure lifetime is migrated"
+        );
+    }
+
+    #[test]
+    fn g2_runtime_callable_projection_drops_definition_identity_and_legacy_ingress_stays_detached() {
+        let evaluator = Evaluator::new();
+        let mut definition = EvaluationContext::new();
+        definition.runtime_authored_callables = true;
+        let callable = evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition);
+        assert!(callable.definition_identity.is_some());
+
+        let projected = RuntimeValue::static_callable(callable).into_legacy_ir_value();
+        let IrValue::Callable(projected) = projected else {
+            panic!("runtime callable projection must remain callable-shaped");
+        };
+        let decoded = RuntimeCallable::from_ir(projected);
+        assert!(
+            decoded.definition_identity.is_none(),
+            "legacy/wire projection must not serialize the live definition identity"
+        );
+
+        let legacy_context = EvaluationContext::new();
+        let rematerialized = evaluator.materialize_runtime_callable(decoded, &legacy_context);
+        assert!(
+            rematerialized.definition_identity.is_none(),
+            "legacy executable-IR ingress must not acquire caller definition identity"
+        );
+        assert!(
+            rematerialized.capture.is_some(),
+            "legacy ingress keeps the transitional snapshot materialization contract"
+        );
+    }
+
+    #[test]
+    fn g2_captured_runtime_function_preserves_live_definition_identity() {
+        let mut context = EvaluationContext::new();
+        context.set_function_binding(
+            "captured_fn".into(),
+            LambdaParameters::Explicit(Vec::new()),
+            Vec::new(),
+            span(0, 1),
+            Some(Box::new(context.capture_snapshot())),
+        );
+
+        let capture = context.capture_snapshot();
+        let captured = capture
+            .functions
+            .iter()
+            .find(|function| function.name == "captured_fn")
+            .expect("captured function remains registered");
+        assert!(
+            captured.callable.definition_identity.is_some(),
+            "nested runtime captures must preserve the live definition identity while the frame is live"
+        );
+    }
+
+    #[test]
     fn g2_live_read_ancestry_observes_parent_updates_and_preserves_child_shadowing() {
         let mut parent = EvaluationContext::new();
         parent.set_value("visible".into(), IrValue::String("initial".into()));
