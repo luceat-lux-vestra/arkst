@@ -1,45 +1,120 @@
 # #719 G1 — residual runtime / IR bridge inventory
 
-- **Status:** scoped, read-only source audit at protected `main@68afd804ef0aa5376575f905fe7aa53f7ad0435b`; documentation candidate, **not G1 exit proof**
+- **Status:** refreshed after PR #819 exact-head compiler evidence; **G1 exit proof remains pending**
+- **Protected baseline:** `main@76a475d9676bf7133a003be2283e33a20adb48c0`
 - **Authority:** [issue #719](https://github.com/luceat-lux-vestra/arkst/issues/719), [ADR-0022](../adr/0022-runtime-final-document-ir.md), [G0 surface ledger](719-g0-audit.md)
-- **Reason:** #800 finished G1-L1c iterable conversion. Inventory the remaining evaluator-owned-runtime / legacy-IR transitions before selecting the next bounded change.
-- **Scope inspected:** `arkst-engine/src/{evaluator,value_conversion,builtins,invocation_binder,ast_to_ir,lib}.rs`, `arkst-core/src/lib.rs`, G0 ledger, ADR-0022. Source line anchors below refer to **this frozen main SHA**, not future moving lines. This is a **scoped G1 inventory**, not an exhaustive all-crate/G8 negative proof.
+- **Purpose:** distinguish evaluator-owned runtime inspection from explicit legacy/final IR emission boundaries. Absence of search results is not accepted as proof for large source files.
 
-## Confirmed landed state
+## Evidence correction
 
-1. `value_conversion.rs:382-406`: `RuntimeValueKind` now has runtime-owned scalar/domain, Range, Collection, Pair, Dictionary, Content, Component and Callable/InlineBody variants, with origin and provenance held per runtime child. The old `SemanticLeaf(IrValue)` and `InvocationValue` identifiers are absent from the audited live engine files. Historical references in G0 documentation remain historical, **not current production evidence**.
-2. `value_conversion.rs:553-571` and `evaluator.rs:18462-18599`: G1-L1c/#800 keeps `TargetValue::Value(RuntimeValue)` and iterable aggregate children runtime-owned; typed Range and parsed Markdown Content no longer go through `RuntimeValue -> IrValue -> RuntimeValue` for type dispatch. Verified exact-head [CI #44599285764](https://github.com/luceat-lux-vestra/arkst/actions/runs/44599285764), then source/squash tree equivalence at main `68afd804ef0aa5376575f905fe7aa53f7ad0435b`.
-3. The prior scoped regression families include `g1l1c_iterable_target_uses_runtime_range_and_content_without_ir_roundtrip`, `g1k3b_raw_iterable_fallback_and_range_limit_remain_bounded`, `g1k3c_table_row_adapter_preserves_typed_and_source_wrapped_rows`, and `g1l1b_collection_access_preserves_runtime_children_and_fallback_provenance`. These do **not** prove universal G1 closure.
+The earlier G1-exit audit incorrectly treated `evaluator.rs` as a zero-projection production baseline. The connector's ordinary file/search path returned incomplete data for the large evaluator source, and that absence was mistakenly interpreted as evidence.
 
-## Residual route ledger — current code, not completed work
+PR #819 CI #2416 / run #44931779968 invalidated that conclusion with compiler diagnostics after the generic projection helpers were test-confined. The exact evaluator blob was then read through the Git blob API and showed 61 production references to `semantic_value`, `to_ir_value`, or `into_ir_value`.
 
-| ID | Current producer -> consumer / source anchor | Classification and risk | Assigned owner |
-| --- | --- | --- | --- |
-| **R01** | `evaluator.rs:1731-1755` `unwrap_source_backed_table_row`: `RuntimeValue -> to_ir_value() -> IrValue::Content -> RuntimeValue::new` | **Direct roundtrip still present** for parser-evidenced nested list wrapper; outer provenance is manually restored, but the complete intermediate semantic projection is unnecessary. Narrow, independently testable. | **G1-L1d — next bounded implementation candidate** |
-| R02 | `evaluator.rs:715-751`: `CallOutcome = CallResult<RuntimeValue>` alongside `LegacyCallOutcome = CallResult<IrValue>`; bidirectional `From` adapters | **Production dual value carrier**, not a mere final-output formatter; refactor only with owner-by-owner native/extension dispatch and return coverage. | G1 dispatch/builtin migration; later G3/G4 cleanup |
-| R03 | `evaluator.rs:20298-20377`: `continue_chain_from_value` projects predecessor through `value.to_ir_value()` into legacy positional array while separately retaining `implicit_argument: RuntimeValue` | Transitional **dual predecessor** could diverge in nested provenance, ordering, shadowing; do not drop the implicit runtime predecessor until all selected owners consume it. | G1/G3 chain owner |
-| R04 | `evaluator.rs:21325-21353,21714-21810`: `evaluate_values`, `evaluate_named`, preservation helpers emit `IrValue` / `IrNamedArg` after runtime evaluation | **Evaluated argument re-projection** for selected and preserved legacy invocation shapes; preserve unresolved-policy, eager/lazy ordering and fail-first behavior. | G1/G3; G4 for nested/callable retention |
-| R05 | `evaluator.rs:1294-1410,20784-20825`: callable-body accumulator and content argument paths consume runtime values into `IrValue`; `scalar_or_content` then produces a runtime `CallOutcome` | **Semantic value -> content -> runtime** conversions remain while body execution uses IR. Preserve multi-statement Unit/empty, failure, explicit error and source spans. | G1 with G4 callable-body migration |
-| R06 | `evaluator.rs:10850-10865,11160-11175,12833-12850,12930-13074`: typed dictionary/metadata paths use `into_ir_value` and legacy structural consumers | Typed runtime children may be projected before further evaluation/state application; scope before rewriting each. Document-state publication is separate. | G1 conversion; G5 mutable document state |
-| R07 | `evaluator.rs:15517-15538,15570-15592`: `.get` dictionary operand already runtime-owned; `key` String target still projects to `IrValue::String` to extract text | **Low-risk scalar projection**; do not widen static-string/dynamic-text conversion. Future typed accessor can remove unnecessary IR intermediate. | G1 later narrow slice |
-| R08 | `evaluator.rs:1711-1723,18600-18630,16285,16540,16799,17064`: table cell normalization and table transforms use IR projection for semantic table inspection | Differentiate **runtime-carried table values** from **final table-cell emission**; only runtime reuse is a provenance hazard. Do not promote independent Quarkdown v2.7 `.table subTables` feature. | G1/G4; independent feature #718 |
-| R09 | `builtins.rs:1514`: `.text` accepts `RuntimeValue`, projects `IrValue` for component/text production | Output-adjacent projection. Confirm whether return is final semantic content or re-enters runtime before treating it as loss; retain empty-body and URL diagnostics. | G1 producer audit, G6 final-output boundary |
-| R10 | `evaluator.rs:4584,4600,4811,4819,4971,4995,5326,5379,5474,5705,5739`: legacy inline/block/node output materialization | **Expected final-emission projection** where outputs genuinely terminate, **transitional bridge** if wrapped again as runtime and consumed by chain/body. Categorize each call path rather than banning all IR output. | G1 selectively; G3/G4/G6 removal gates |
-| R11 | `evaluator.rs:18606-18629,24758-24770` and scalar consumers: `semantic_value()` projection for spans, comparison, numeric interpretation | **Read-only semantic inspection** may allocate and deserves cleanup, but does not by itself discard live runtime children. Lower priority than roundtrip paths. | G1 optimization or G8 cleanup |
-| R12 | `arkst-core/src/lib.rs` legacy evaluator facade and `arkst-engine/src/ast_to_ir.rs` executable AST->IR route | Outside standalone G1 conversion refactor. Do not claim public API or final document IR corrected early. | G3/G4 and G6/G7 |
+That historical audit result is superseded. CI #2416 is retained as immutable evidence of the inventory defect.
 
-**Counts are lexical signals, not acceptance metrics.** The frozen `evaluator.rs` source contains 30 occurrences of `.into_ir_value(`, 18 of `.to_ir_value(` and 27 of `.semantic_value(` (tests and final materialization included); `builtins.rs` contains one `.into_ir_value(`. These counts do not equal the number of distinct bugs, and should not be used as G1 completion percentages. Earlier G0 ledger path/line snapshots precede #800 and require reconciliation.
+## Current G1 ownership model
 
-## Next atomic work unit: G1-L1d (proposed)
+### A1 — runtime inspection: must remain RuntimeValue-native
 
-**Only** replace the table-row wrapper's `RuntimeValue -> IrValue::Content -> RuntimeValue` reshaping at `unwrap_source_backed_table_row`. Borrow/mutate the existing `RuntimeValueKind::Content` carrier through a narrowly scoped runtime Content operation; carry forward **exact** origin and source-backed/materialized provenance. Do **not** widen table semantics, flatten runtime Collection/Pair/Dictionary, or modify normal generated table rows.
+Runtime semantics must not project through `IrValue` merely to inspect a value. PR #819 now migrates these evaluator consumers to typed RuntimeValue operations:
 
-**Regression matrix:** nested ordered and unordered list wrapper; single-item exact wrapper versus arbitrary one-cell typed Collection; source-backed text and metadata preserved; generated materialized wrapper remains materialized; nested cell spans; malformed/non-list passthrough; no unexpected diagnostics; existing `g1k3c_table_row_adapter_preserves_typed_and_source_wrapped_rows`, G1-L1b/L1c tests and table-by-rows fixtures unchanged. No source-offset heuristic; no conversion of source-backed Markdown to generated Table.
+- sort-key Number/String/Boolean classification;
+- explicit-error rollback/owner detection;
+- runtime source-span recovery;
+- dynamic table sort-order classification;
+- table Content inspection;
+- code callout/text evaluation;
+- document-theme scalar validation;
+- `.includeall` String adaptation;
+- collection index and repeat-count Number inspection;
+- table-compute deterministic text projection;
+- iterable child-span evidence;
+- `.extend` target-name classification;
+- page-format multi-size text inspection;
+- collection `asDouble` and collection equality semantics;
+- scalar Boolean inspection;
+- evaluated Markdown-list detection for variable assignment.
 
-**STOP/gate:** one production candidate PR only after this documentation checkpoint is separately reviewed/qualified. Test it on the exact candidate HEAD across all required CI, compare semantic result/diagnostics and source tree, guarded squash merge, reconcile #719. R02–R12 remain open after R01; **G1 exit must not be declared**.
+RuntimeValue now exposes only the typed access required by those consumers, including Number/Boolean/Component/Collection access, text identity, source-span recovery, and collection-specific equality semantics.
 
-## Documentation custody and acceptance boundaries
+**Candidate source invariant:** production `evaluator.rs` contains zero calls to `.semantic_value()`, `.to_ir_value()`, `.into_ir_value()`, or `RuntimeValue::into_ir_value`.
 
-The rolling block formerly carried inside #719 is approximately 225k characters and has accumulated historical CI/semantic evidence. Its **verbatim dated snapshot** is stored in [the checkpoint archive](719-checkpoint-archive-2026-11-20.md) in the **same documentation candidate**. The archive does not supersede the issue's G0–G8 contract, the G0 evidence files or ADR-0022. **Only after the archive commit is merged and verified on protected main** may the rolling issue block be replaced with a concise current checkpoint linking to the archive; do not delete its normative non-rolling suffix or rewrite the original issue until preservation is durable. Later cleanups may require a separate reviewed semantic archive/update; no silent history deletion.
+### A2/C — explicit transitional IR emission boundaries
 
-The unresolved structured String policy (#682) and v2.7 table feature (#718) remain with their respective owners but supply mandatory G1 provenance/conversion integration evidence. G1 is in progress; this inventory is not a claim that the audited code, output, upstream language, or security properties have been independently revalidated.
+Some paths still have an `IrValue` contract because later mandatory gates have not yet replaced the mixed/executable IR model. These are not runtime-inspection consumers.
+
+They use the deliberately explicit names `to_legacy_ir_value` / `into_legacy_ir_value` and are grouped as follows:
+
+| Boundary family | Why IR still exists | Required owner |
+| --- | --- | --- |
+| legacy scope/outcome adapters | compatibility evaluator surfaces still return `IrValue` | G3/G4/G7 |
+| block/inline/content materialization fallback | final document materializers still consume mixed `IrValue` | G4/G6 |
+| table-cell / flow-join materialization | current document-node materializers accept legacy semantic values | G4/G6 |
+| numbering/localization/authors/keywords state | DocumentState remains IR-shaped | G5 |
+| target resolution / chain native argument array | legacy executable invocation pipeline remains IR-shaped | G3/G4 |
+| evaluate/preserve positional and named values | unresolved/executable preservation still serializes mixed IR | G3/G4/G7 |
+| owned collection projection helper | legacy collection-output callers still require `Vec<IrValue>` | G3/G4/G6 |
+
+At the current PR #819 candidate there are 26 explicit legacy projection call sites in production evaluator code: 2 borrowed projections, 22 consuming projections, and 2 consuming function references.
+
+These boundaries must not be reused for ordinary runtime inspection. Their retirement belongs to the later gate listed above.
+
+## B — allowed semantic leaf sharing at G1 exit
+
+The crate that defines a data type does not alone determine evaluator ownership. Immutable backend-neutral leaf payloads may remain shared where they carry no execution state:
+
+- `IrRange`
+- `IrSize`
+- `IrColor`
+- `IrEnumValue`
+- `IrComponent`
+- already-evaluated semantic `IrNode` content carried by RuntimeValue during this migration stage
+
+G1 does not introduce duplicate RuntimeRange/RuntimeSize/etc. wrappers merely to remove an `arkst-ir` type name.
+
+## C — later-gate migration debt
+
+The following remain intentionally outside G1 completion:
+
+| Boundary | Current purpose | Required owner |
+| --- | --- | --- |
+| `RuntimeValue::new(IrValue, origin)` / `static_value(IrValue)` | one-way ingress from legacy IR execution/facade paths | G3/G4/G7 |
+| callable capture reconstruction from `IrCallableCapture` | one-way legacy callable ingress | G4 |
+| `RuntimeCallable.body: Vec<IrNode>` | callable bodies still execute through mixed IR | G4 |
+| `RuntimeInlineBody::{content, body}: Vec<IrNode>` | contextual body carrier before direct nested AST execution | G4 |
+| `numbering::format_from_value(&IrValue)` | document metadata still uses legacy IR-shaped state | G5/G6 |
+| `ast_to_ir` and the core compatibility facade | pre-evaluation/executable IR route | G3/G4/G7 |
+| executable `IrNode::{FunctionCall, ChainedFunctionCall, FunctionDeclaration}` | transitional execution model | G3/G4/G6 |
+| `IrInline::{DirectiveCall, ChainedDirectiveCall}` | transitional nested executable model | G4/G6 |
+| durable `IrValue::{Callable, InlineBody}` and executable wire variants | mixed final/runtime schema | G6/G7 |
+| Typst handling of executable/mixed IR | negative baseline until final-only IR | G6 |
+
+## PR #819 candidate acceptance
+
+Before the PR can be qualified, authoritative read-back and CI must establish all of the following:
+
+- no production evaluator use of the old generic projection names;
+- A1 runtime inspection is implemented through RuntimeValue-native accessors/helpers;
+- every remaining production RuntimeValue→IrValue projection is explicitly named as a legacy boundary and belongs to an A2/C family above;
+- production builtins still have no generated `IrValue -> RuntimeValue` immediate wrapper;
+- conversion-generated scalar/domain/content/callable values remain runtime-native;
+- InlineBody→Callable target conversion does not round-trip through `IrCallable`/`IrValue`;
+- origin/provenance behavior remains unchanged at fresh materialization boundaries;
+- formatting, stable/MSRV build, clippy, platform tests, WASM, compatibility/oracle checks and required Merge Gate pass on one exact candidate HEAD.
+
+Historical failures remain evidence:
+
+- `f8ed58bb40db6c52c869e85e2f4b5a5c1eb63503` / CI #2415 / run #44929119886 — malformed `LoremIpsum` delimiter;
+- `de521ce90d3c02c6f0f824786721fb6ce2c87411` / CI #2416 / run #44931779968 — evaluator projection inventory defect exposed by compilation.
+
+## Exit sequencing
+
+1. authoritative candidate read-back;
+2. exact-head CI qualification once;
+3. deterministic remediation only if that exact run fails;
+4. guarded squash merge only after qualification;
+5. post-merge reconciliation;
+6. fresh G1 exit proof against protected main.
+
+Only the final proof may mark G1 complete. Later-gate C debt remains open by design.

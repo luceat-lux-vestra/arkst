@@ -16,6 +16,7 @@ use arkst_ir::{
     IrTextCase, IrTextDecoration, IrTextSize, IrTextStyle, IrTextVariant, IrTextWeight, IrValue,
 };
 use arkst_source::{SourceId, SourceSpan};
+#[cfg(test)]
 use std::borrow::Cow;
 
 /// Materialize the Quarkdown body `DynamicValue` only at a conversion target
@@ -246,7 +247,7 @@ impl RuntimeCallableCapture {
                 .iter()
                 .map(|variable| IrCapturedVariable {
                     name: variable.name.clone(),
-                    value: variable.value.to_ir_value(),
+                    value: variable.value.to_legacy_ir_value(),
                 })
                 .collect(),
             functions: self
@@ -268,7 +269,7 @@ impl RuntimeCallableCapture {
                 .into_iter()
                 .map(|variable| IrCapturedVariable {
                     name: variable.name,
-                    value: variable.value.into_ir_value(),
+                    value: variable.value.into_legacy_ir_value(),
                 })
                 .collect(),
             functions: self
@@ -304,7 +305,7 @@ impl RuntimeCallable {
         }
     }
 
-    pub(crate) fn to_ir(&self) -> IrCallable {
+    fn to_ir(&self) -> IrCallable {
         IrCallable {
             parameters: self.parameters.clone(),
             body: self.body.clone(),
@@ -316,7 +317,7 @@ impl RuntimeCallable {
         }
     }
 
-    pub(crate) fn into_ir(self) -> IrCallable {
+    fn into_ir(self) -> IrCallable {
         IrCallable {
             parameters: self.parameters,
             body: self.body,
@@ -469,6 +470,10 @@ impl RuntimeValue {
                 );
             }
         };
+        Self::materialized(kind, origin)
+    }
+
+    fn materialized(kind: RuntimeValueKind, origin: ValueOrigin) -> Self {
         Self {
             kind,
             origin,
@@ -476,6 +481,9 @@ impl RuntimeValue {
         }
     }
 
+    /// Transitional one-way ingress for legacy IR-backed callers that have not
+    /// yet moved to direct AST/runtime construction. G1 production code must
+    /// not use this as a generated-value factory.
     pub(crate) fn static_value(value: IrValue) -> Self {
         Self::new(value, ValueOrigin::Static)
     }
@@ -483,6 +491,54 @@ impl RuntimeValue {
     #[allow(dead_code)]
     pub(crate) fn dynamic_value(value: IrValue) -> Self {
         Self::new(value, ValueOrigin::Dynamic)
+    }
+
+    pub(crate) fn static_none() -> Self {
+        Self::materialized(RuntimeValueKind::None, ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_boolean(value: bool) -> Self {
+        Self::materialized(RuntimeValueKind::Boolean(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_number(value: f64) -> Self {
+        Self::materialized(RuntimeValueKind::Number(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_string(value: impl Into<String>) -> Self {
+        Self::materialized(RuntimeValueKind::String(value.into()), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_range(value: IrRange) -> Self {
+        Self::materialized(RuntimeValueKind::Range(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_size(value: IrSize) -> Self {
+        Self::materialized(RuntimeValueKind::Size(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_color(value: IrColor) -> Self {
+        Self::materialized(RuntimeValueKind::Color(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_enum(value: IrEnumValue) -> Self {
+        Self::materialized(RuntimeValueKind::Enum(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_content(nodes: Vec<IrNode>) -> Self {
+        Self::materialized(RuntimeValueKind::Content(nodes), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_callable(value: RuntimeCallable) -> Self {
+        Self::materialized(RuntimeValueKind::Callable(value), ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_collection(elements: Vec<Self>) -> Self {
+        Self::collection(elements, ValueOrigin::Static)
+    }
+
+    pub(crate) fn static_dictionary(entries: Vec<Self>, span: SourceSpan) -> Option<Self> {
+        Self::dictionary(entries, span, ValueOrigin::Static)
     }
 
     pub(crate) fn pair(first: Self, second: Self, span: SourceSpan, origin: ValueOrigin) -> Self {
@@ -576,6 +632,59 @@ impl RuntimeValue {
         }
     }
 
+    pub(crate) fn as_number(&self) -> Option<f64> {
+        match &self.kind {
+            RuntimeValueKind::Number(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_boolean(&self) -> Option<bool> {
+        match &self.kind {
+            RuntimeValueKind::Boolean(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_component(&self) -> Option<&IrComponent> {
+        match &self.kind {
+            RuntimeValueKind::Component(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn into_component(self) -> Option<IrComponent> {
+        let RuntimeValueKind::Component(value) = self.kind else {
+            return None;
+        };
+        Some(value)
+    }
+
+    pub(crate) fn as_collection_elements(&self) -> Option<&[Self]> {
+        match &self.kind {
+            RuntimeValueKind::Collection(elements) => Some(elements.as_slice()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn source_span_or(&self, fallback: SourceSpan) -> SourceSpan {
+        match &self.kind {
+            RuntimeValueKind::Pair(pair) => pair.span,
+            RuntimeValueKind::Dictionary(dictionary) => dictionary.span,
+            RuntimeValueKind::Range(range) => range.span,
+            RuntimeValueKind::Callable(callable) => callable.span,
+            RuntimeValueKind::InlineBody(body) => body.span,
+            RuntimeValueKind::Component(component) => component.span(),
+            RuntimeValueKind::Content(nodes) => match nodes.as_slice() {
+                [IrNode::FunctionCall { span, .. }]
+                | [IrNode::ChainedFunctionCall { span, .. }]
+                | [IrNode::FunctionDeclaration { span, .. }] => *span,
+                _ => fallback,
+            },
+            _ => fallback,
+        }
+    }
+
     pub(crate) fn into_string(self) -> Option<String> {
         let RuntimeValueKind::String(value) = self.kind else {
             return None;
@@ -653,6 +762,61 @@ impl RuntimeValue {
                         .iter()
                         .zip(right)
                         .all(|(left, right)| left.semantic_eq(right))
+            }
+            _ => false,
+        }
+    }
+
+    /// Equality semantics used by collection operations such as `.distinct`
+    /// and `.groupvalues`. Source spans on Range/Pair/Dictionary wrappers
+    /// are intentionally ignored, and String/Identifier remain distinct kinds,
+    /// matching the legacy collection comparator without IR projection.
+    pub(crate) fn collection_semantic_eq(&self, other: &Self) -> bool {
+        match (&self.kind, &other.kind) {
+            (RuntimeValueKind::String(left), RuntimeValueKind::String(right))
+            | (RuntimeValueKind::Identifier(left), RuntimeValueKind::Identifier(right)) => {
+                left == right
+            }
+            (RuntimeValueKind::Number(left), RuntimeValueKind::Number(right)) => {
+                (left.is_nan() && right.is_nan()) || left.total_cmp(right).is_eq()
+            }
+            (RuntimeValueKind::Boolean(left), RuntimeValueKind::Boolean(right)) => left == right,
+            (RuntimeValueKind::Unit, RuntimeValueKind::Unit)
+            | (RuntimeValueKind::None, RuntimeValueKind::None) => true,
+            (RuntimeValueKind::Range(left), RuntimeValueKind::Range(right)) => {
+                left.start == right.start && left.end == right.end
+            }
+            (RuntimeValueKind::Collection(left), RuntimeValueKind::Collection(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| left.collection_semantic_eq(right))
+            }
+            (RuntimeValueKind::Pair(left), RuntimeValueKind::Pair(right)) => {
+                left.first.collection_semantic_eq(&right.first)
+                    && left.second.collection_semantic_eq(&right.second)
+            }
+            (RuntimeValueKind::Dictionary(left), RuntimeValueKind::Dictionary(right)) => {
+                left.entries.len() == right.entries.len()
+                    && left.entries.iter().all(|left_entry| {
+                        right.entries.iter().any(|right_entry| {
+                            let (Some((left_key, left_value)), Some((right_key, right_value))) =
+                                (left_entry.as_pair_values(), right_entry.as_pair_values())
+                            else {
+                                return false;
+                            };
+                            left_key.collection_semantic_eq(right_key)
+                                && left_value.collection_semantic_eq(right_value)
+                        })
+                    })
+            }
+            (RuntimeValueKind::Content(left), RuntimeValueKind::Content(right)) => left == right,
+            (RuntimeValueKind::Callable(left), RuntimeValueKind::Callable(right)) => {
+                runtime_callable_semantic_eq(left, right)
+            }
+            (RuntimeValueKind::InlineBody(left), RuntimeValueKind::InlineBody(right)) => {
+                left == right
             }
             _ => false,
         }
@@ -840,73 +1004,122 @@ impl RuntimeValue {
         }
     }
 
-    fn to_ir_pair(&self) -> Option<IrPair> {
+    fn to_legacy_ir_pair(&self) -> Option<IrPair> {
         let RuntimeValueKind::Pair(pair) = &self.kind else {
             return None;
         };
         Some(IrPair {
-            first: Box::new(pair.first.to_ir_value()),
-            second: Box::new(pair.second.to_ir_value()),
+            first: Box::new(pair.first.to_legacy_ir_value()),
+            second: Box::new(pair.second.to_legacy_ir_value()),
             span: pair.span,
         })
     }
 
-    fn into_ir_pair(self) -> Option<IrPair> {
+    fn into_legacy_ir_pair(self) -> Option<IrPair> {
         let RuntimeValueKind::Pair(pair) = self.kind else {
             return None;
         };
         Some(IrPair {
-            first: Box::new(pair.first.into_ir_value()),
-            second: Box::new(pair.second.into_ir_value()),
+            first: Box::new(pair.first.into_legacy_ir_value()),
+            second: Box::new(pair.second.into_legacy_ir_value()),
             span: pair.span,
         })
     }
 
-    /// Project evaluator-owned runtime values back into the transitional
-    /// `IrValue` model only when an existing semantic consumer explicitly
-    /// requires that boundary during the G1 migration.
-    pub(crate) fn semantic_value(&self) -> Cow<'_, IrValue> {
+    /// Explicit transitional projection used only at named legacy evaluator
+    /// emission/preservation boundaries that still require `IrValue`.
+    ///
+    /// Runtime inspection must use typed accessors instead. G3/G4/G6/G7 own
+    /// retirement of the remaining legacy emission boundaries.
+    pub(crate) fn to_legacy_ir_value(&self) -> IrValue {
         match &self.kind {
-            RuntimeValueKind::Unit => Cow::Owned(IrValue::Unit),
-            RuntimeValueKind::None => Cow::Owned(IrValue::None),
-            RuntimeValueKind::Boolean(value) => Cow::Owned(IrValue::Boolean(*value)),
-            RuntimeValueKind::Number(value) => Cow::Owned(IrValue::Number(*value)),
-            RuntimeValueKind::String(value) => Cow::Owned(IrValue::String(value.clone())),
-            RuntimeValueKind::Identifier(value) => Cow::Owned(IrValue::Identifier(value.clone())),
-            RuntimeValueKind::Range(value) => Cow::Owned(IrValue::Range(value.clone())),
-            RuntimeValueKind::Size(value) => Cow::Owned(IrValue::Size(value.clone())),
-            RuntimeValueKind::Color(value) => Cow::Owned(IrValue::Color(value.clone())),
-            RuntimeValueKind::Enum(value) => Cow::Owned(IrValue::Enum(*value)),
-            RuntimeValueKind::Pair(_) => Cow::Owned(IrValue::Pair(
-                self.to_ir_pair().expect("runtime pair invariant"),
-            )),
-            RuntimeValueKind::Dictionary(value) => Cow::Owned(IrValue::Dictionary(IrDictionary {
+            RuntimeValueKind::Unit => IrValue::Unit,
+            RuntimeValueKind::None => IrValue::None,
+            RuntimeValueKind::Boolean(value) => IrValue::Boolean(*value),
+            RuntimeValueKind::Number(value) => IrValue::Number(*value),
+            RuntimeValueKind::String(value) => IrValue::String(value.clone()),
+            RuntimeValueKind::Identifier(value) => IrValue::Identifier(value.clone()),
+            RuntimeValueKind::Range(value) => IrValue::Range(value.clone()),
+            RuntimeValueKind::Size(value) => IrValue::Size(value.clone()),
+            RuntimeValueKind::Color(value) => IrValue::Color(value.clone()),
+            RuntimeValueKind::Enum(value) => IrValue::Enum(*value),
+            RuntimeValueKind::Pair(_) => {
+                IrValue::Pair(self.to_legacy_ir_pair().expect("runtime pair invariant"))
+            }
+            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
                 entries: value
                     .entries
                     .iter()
                     .map(|entry| {
                         entry
-                            .to_ir_pair()
+                            .to_legacy_ir_pair()
                             .expect("runtime dictionary entry invariant")
                     })
                     .collect(),
                 span: value.span,
-            })),
-            RuntimeValueKind::Content(value) => Cow::Owned(IrValue::Content(value.clone())),
-            RuntimeValueKind::Component(value) => Cow::Owned(IrValue::Component(value.clone())),
-            RuntimeValueKind::Callable(value) => Cow::Owned(IrValue::Callable(value.to_ir())),
-            RuntimeValueKind::InlineBody(value) => Cow::Owned(IrValue::InlineBody(value.to_ir())),
-            RuntimeValueKind::Collection(elements) => Cow::Owned(IrValue::Collection(
-                elements.iter().map(Self::to_ir_value).collect(),
-            )),
+            }),
+            RuntimeValueKind::Content(value) => IrValue::Content(value.clone()),
+            RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
+            RuntimeValueKind::Callable(value) => IrValue::Callable(value.to_ir()),
+            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.to_ir()),
+            RuntimeValueKind::Collection(elements) => {
+                IrValue::Collection(elements.iter().map(Self::to_legacy_ir_value).collect())
+            }
         }
+    }
+
+    pub(crate) fn into_legacy_ir_value(self) -> IrValue {
+        match self.kind {
+            RuntimeValueKind::Unit => IrValue::Unit,
+            RuntimeValueKind::None => IrValue::None,
+            RuntimeValueKind::Boolean(value) => IrValue::Boolean(value),
+            RuntimeValueKind::Number(value) => IrValue::Number(value),
+            RuntimeValueKind::String(value) => IrValue::String(value),
+            RuntimeValueKind::Identifier(value) => IrValue::Identifier(value),
+            RuntimeValueKind::Range(value) => IrValue::Range(value),
+            RuntimeValueKind::Size(value) => IrValue::Size(value),
+            RuntimeValueKind::Color(value) => IrValue::Color(value),
+            RuntimeValueKind::Enum(value) => IrValue::Enum(value),
+            RuntimeValueKind::Pair(pair) => IrValue::Pair(IrPair {
+                first: Box::new(pair.first.into_legacy_ir_value()),
+                second: Box::new(pair.second.into_legacy_ir_value()),
+                span: pair.span,
+            }),
+            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
+                entries: value
+                    .entries
+                    .into_iter()
+                    .map(|entry| {
+                        entry
+                            .into_legacy_ir_pair()
+                            .expect("runtime dictionary entry invariant")
+                    })
+                    .collect(),
+                span: value.span,
+            }),
+            RuntimeValueKind::Content(value) => IrValue::Content(value),
+            RuntimeValueKind::Component(value) => IrValue::Component(value),
+            RuntimeValueKind::Callable(value) => IrValue::Callable(value.into_ir()),
+            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.into_ir()),
+            RuntimeValueKind::Collection(elements) => IrValue::Collection(
+                elements
+                    .into_iter()
+                    .map(Self::into_legacy_ir_value)
+                    .collect(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn semantic_value(&self) -> Cow<'_, IrValue> {
+        Cow::Owned(self.to_legacy_ir_value())
     }
 
     pub(crate) fn is_none(&self) -> bool {
         matches!(&self.kind, RuntimeValueKind::None)
     }
 
-    fn text_identity(&self) -> Option<&str> {
+    pub(crate) fn text_identity(&self) -> Option<&str> {
         match &self.kind {
             RuntimeValueKind::String(value) | RuntimeValueKind::Identifier(value) => Some(value),
             _ => None,
@@ -920,85 +1133,20 @@ impl RuntimeValue {
         self.text_identity()
     }
 
+    #[cfg(test)]
     pub(crate) fn replace_semantic_value(&mut self, value: IrValue) {
         let origin = self.origin;
         *self = Self::new(value, origin);
     }
 
+    #[cfg(test)]
     pub(crate) fn to_ir_value(&self) -> IrValue {
-        match &self.kind {
-            RuntimeValueKind::Unit => IrValue::Unit,
-            RuntimeValueKind::None => IrValue::None,
-            RuntimeValueKind::Boolean(value) => IrValue::Boolean(*value),
-            RuntimeValueKind::Number(value) => IrValue::Number(*value),
-            RuntimeValueKind::String(value) => IrValue::String(value.clone()),
-            RuntimeValueKind::Identifier(value) => IrValue::Identifier(value.clone()),
-            RuntimeValueKind::Range(value) => IrValue::Range(value.clone()),
-            RuntimeValueKind::Size(value) => IrValue::Size(value.clone()),
-            RuntimeValueKind::Color(value) => IrValue::Color(value.clone()),
-            RuntimeValueKind::Enum(value) => IrValue::Enum(*value),
-            RuntimeValueKind::Pair(_) => {
-                IrValue::Pair(self.to_ir_pair().expect("runtime pair invariant"))
-            }
-            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
-                entries: value
-                    .entries
-                    .iter()
-                    .map(|entry| {
-                        entry
-                            .to_ir_pair()
-                            .expect("runtime dictionary entry invariant")
-                    })
-                    .collect(),
-                span: value.span,
-            }),
-            RuntimeValueKind::Content(value) => IrValue::Content(value.clone()),
-            RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
-            RuntimeValueKind::Callable(value) => IrValue::Callable(value.to_ir()),
-            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.to_ir()),
-            RuntimeValueKind::Collection(elements) => {
-                IrValue::Collection(elements.iter().map(Self::to_ir_value).collect())
-            }
-        }
+        self.to_legacy_ir_value()
     }
 
+    #[cfg(test)]
     pub(crate) fn into_ir_value(self) -> IrValue {
-        match self.kind {
-            RuntimeValueKind::Unit => IrValue::Unit,
-            RuntimeValueKind::None => IrValue::None,
-            RuntimeValueKind::Boolean(value) => IrValue::Boolean(value),
-            RuntimeValueKind::Number(value) => IrValue::Number(value),
-            RuntimeValueKind::String(value) => IrValue::String(value),
-            RuntimeValueKind::Identifier(value) => IrValue::Identifier(value),
-            RuntimeValueKind::Range(value) => IrValue::Range(value),
-            RuntimeValueKind::Size(value) => IrValue::Size(value),
-            RuntimeValueKind::Color(value) => IrValue::Color(value),
-            RuntimeValueKind::Enum(value) => IrValue::Enum(value),
-            RuntimeValueKind::Pair(pair) => IrValue::Pair(IrPair {
-                first: Box::new(pair.first.into_ir_value()),
-                second: Box::new(pair.second.into_ir_value()),
-                span: pair.span,
-            }),
-            RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
-                entries: value
-                    .entries
-                    .into_iter()
-                    .map(|entry| {
-                        entry
-                            .into_ir_pair()
-                            .expect("runtime dictionary entry invariant")
-                    })
-                    .collect(),
-                span: value.span,
-            }),
-            RuntimeValueKind::Content(value) => IrValue::Content(value),
-            RuntimeValueKind::Component(value) => IrValue::Component(value),
-            RuntimeValueKind::Callable(value) => IrValue::Callable(value.into_ir()),
-            RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.into_ir()),
-            RuntimeValueKind::Collection(elements) => {
-                IrValue::Collection(elements.into_iter().map(Self::into_ir_value).collect())
-            }
-        }
+        self.into_legacy_ir_value()
     }
 
     pub(crate) fn into_collection(self) -> Option<Vec<Self>> {
@@ -1051,12 +1199,14 @@ impl From<IrValue> for RuntimeValue {
     }
 }
 
+#[cfg(test)]
 impl PartialEq<IrValue> for RuntimeValue {
     fn eq(&self, other: &IrValue) -> bool {
         self.semantic_value().as_ref() == other
     }
 }
 
+#[cfg(test)]
 impl PartialEq<RuntimeValue> for IrValue {
     fn eq(&self, other: &RuntimeValue) -> bool {
         self == other.semantic_value().as_ref()
@@ -1737,7 +1887,7 @@ pub(crate) fn convert_target_with_origin(
                 .map(scalar_value_to_runtime),
         },
         ConversionTarget::Integer => convert_integer_with_origin(argument)
-            .map(|value| materialized_target_value(IrValue::Number(f64::from(value)))),
+            .map(|value| TargetValue::Value(RuntimeValue::static_number(f64::from(value)))),
         ConversionTarget::Boolean => match &argument.kind {
             RuntimeValueKind::Boolean(_) => Ok(TargetValue::Value(argument.clone())),
             _ => convert_scalar_with_origin(argument, ScalarTarget::Boolean)
@@ -1751,7 +1901,7 @@ pub(crate) fn convert_target_with_origin(
         ConversionTarget::Range => match &argument.kind {
             RuntimeValueKind::Range(_) => Ok(TargetValue::Value(argument.clone())),
             _ => convert_range_with_origin(argument, span)
-                .map(|value| materialized_target_value(IrValue::Range(value))),
+                .map(|value| TargetValue::Value(RuntimeValue::static_range(value))),
         },
         ConversionTarget::Size => match &argument.kind {
             RuntimeValueKind::Size(_) => Ok(TargetValue::Value(argument.clone())),
@@ -1795,9 +1945,9 @@ pub(crate) fn convert_target_with_origin(
         ),
         ConversionTarget::Callable => match &argument.kind {
             RuntimeValueKind::Callable(_) => Ok(TargetValue::Value(argument.clone())),
-            RuntimeValueKind::InlineBody(body) => Ok(materialized_target_value(IrValue::Callable(
-                body.clone().into_callable().into_ir(),
-            ))),
+            RuntimeValueKind::InlineBody(body) => Ok(TargetValue::Value(
+                RuntimeValue::static_callable(body.clone().into_callable()),
+            )),
             _ => match argument.dynamic_text() {
                 Some(value) => Ok(TargetValue::RawMarkdown {
                     target: RawMarkdownTarget::Callable,
@@ -1811,23 +1961,19 @@ pub(crate) fn convert_target_with_origin(
     }
 }
 
-fn materialized_target_value(value: IrValue) -> TargetValue {
-    TargetValue::Value(RuntimeValue::static_value(value))
-}
-
 fn scalar_value_to_runtime(value: ScalarValue) -> TargetValue {
-    materialized_target_value(match value {
-        ScalarValue::Number(value) => IrValue::Number(value),
-        ScalarValue::Boolean(value) => IrValue::Boolean(value),
-        ScalarValue::String(value) => IrValue::String(value),
+    TargetValue::Value(match value {
+        ScalarValue::Number(value) => RuntimeValue::static_number(value),
+        ScalarValue::Boolean(value) => RuntimeValue::static_boolean(value),
+        ScalarValue::String(value) => RuntimeValue::static_string(value),
     })
 }
 
 fn domain_value_to_runtime(value: DomainValue) -> TargetValue {
-    materialized_target_value(match value {
-        DomainValue::Size(value) => IrValue::Size(value),
-        DomainValue::Color(value) => IrValue::Color(value),
-        DomainValue::Enum(value) => IrValue::Enum(value),
+    TargetValue::Value(match value {
+        DomainValue::Size(value) => RuntimeValue::static_size(value),
+        DomainValue::Color(value) => RuntimeValue::static_color(value),
+        DomainValue::Enum(value) => RuntimeValue::static_enum(value),
     })
 }
 
@@ -1851,8 +1997,8 @@ fn convert_content_target(
         RuntimeValueKind::Content(_) => Ok(TargetValue::Value(argument.clone())),
         // An inline contextual body is not a block body. It becomes fresh
         // materialized inline content only when this target requests it.
-        RuntimeValueKind::InlineBody(body) if !block_target => Ok(materialized_target_value(
-            IrValue::Content(body.content.clone()),
+        RuntimeValueKind::InlineBody(body) if !block_target => Ok(TargetValue::Value(
+            RuntimeValue::static_content(body.content.clone()),
         )),
         RuntimeValueKind::String(value)
             if block_target || argument.origin == ValueOrigin::Dynamic =>
@@ -1884,7 +2030,7 @@ fn convert_content_target(
             Ok(literal_content_value("None".to_string(), span))
         }
         RuntimeValueKind::String(value) if !block_target => {
-            Ok(materialized_target_value(IrValue::Content(vec![
+            Ok(TargetValue::Value(RuntimeValue::static_content(vec![
                 IrNode::Paragraph {
                     content: vec![IrInline::Text {
                         content: value.clone(),
@@ -1905,7 +2051,7 @@ fn convert_content_target(
 }
 
 fn literal_content_value(text: String, span: SourceSpan) -> TargetValue {
-    materialized_target_value(IrValue::Content(vec![IrNode::Paragraph {
+    TargetValue::Value(RuntimeValue::static_content(vec![IrNode::Paragraph {
         content: vec![IrInline::Text {
             content: text,
             span,
@@ -6463,6 +6609,119 @@ mod tests {
                 target: ConversionTarget::Integer
             })
         ));
+    }
+
+    #[test]
+    fn g1_exit_conversion_materializes_runtime_native_values() {
+        let span = span();
+
+        let number = convert_target_with_origin(
+            &RuntimeValue::dynamic_value(IrValue::String("2".into())),
+            ConversionTarget::Integer,
+            span,
+        )
+        .expect("dynamic integer conversion");
+        let TargetValue::Value(number) = number else {
+            panic!("integer target must materialize a runtime value");
+        };
+        assert!(matches!(number.kind, RuntimeValueKind::Number(value) if value == 2.0));
+        assert_eq!(number.origin, ValueOrigin::Static);
+        assert_eq!(number.provenance(), &ValueProvenance::Materialized);
+
+        let color = convert_target_with_origin(
+            &RuntimeValue::dynamic_value(IrValue::String("#112233".into())),
+            ConversionTarget::Color,
+            span,
+        )
+        .expect("dynamic color conversion");
+        let TargetValue::Value(color) = color else {
+            panic!("color target must materialize a runtime value");
+        };
+        assert!(matches!(color.kind, RuntimeValueKind::Color(_)));
+        assert_eq!(color.origin, ValueOrigin::Static);
+        assert_eq!(color.provenance(), &ValueProvenance::Materialized);
+
+        let inline = IrInlineBody {
+            content: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "body".into(),
+                    span,
+                }],
+                span,
+            }],
+            parameters: None,
+            body: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "callable".into(),
+                    span,
+                }],
+                span,
+            }],
+            span,
+        };
+        let runtime_inline =
+            RuntimeValue::new(IrValue::InlineBody(inline.clone()), ValueOrigin::Dynamic)
+                .with_provenance(ValueProvenance::source_backed_markdown_text("body"));
+        let callable =
+            convert_target_with_origin(&runtime_inline, ConversionTarget::Callable, span)
+                .expect("inline body callable conversion");
+        let TargetValue::Value(callable) = callable else {
+            panic!("callable target must materialize a runtime value");
+        };
+        let RuntimeValueKind::Callable(callable_value) = &callable.kind else {
+            panic!("expected runtime callable");
+        };
+        assert_eq!(callable_value.parameters, inline.parameters);
+        assert_eq!(callable_value.body, inline.body);
+        assert_eq!(callable_value.span, inline.span);
+        assert!(callable_value.capture.is_none());
+        assert_eq!(callable.origin, ValueOrigin::Static);
+        assert_eq!(callable.provenance(), &ValueProvenance::Materialized);
+
+        let content =
+            convert_target_with_origin(&runtime_inline, ConversionTarget::InlineContent, span)
+                .expect("inline body content conversion");
+        let TargetValue::Value(content) = content else {
+            panic!("inline content target must materialize a runtime value");
+        };
+        assert!(
+            matches!(&content.kind, RuntimeValueKind::Content(nodes) if nodes == &inline.content)
+        );
+        assert_eq!(content.origin, ValueOrigin::Static);
+        assert_eq!(content.provenance(), &ValueProvenance::Materialized);
+    }
+
+    #[test]
+    fn g1_exit_runtime_inspection_keeps_collection_semantics_without_ir_projection() {
+        let first_span = SourceSpan::new(SourceId(71), 3, 8);
+        let second_span = SourceSpan::new(SourceId(72), 11, 16);
+
+        let first = RuntimeValue::new(
+            IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(3),
+                span: first_span,
+            }),
+            ValueOrigin::Dynamic,
+        );
+        let second = RuntimeValue::new(
+            IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(3),
+                span: second_span,
+            }),
+            ValueOrigin::Static,
+        );
+
+        assert!(first.collection_semantic_eq(&second));
+        assert_eq!(first.source_span_or(second_span), first_span);
+        assert!(
+            !RuntimeValue::new(IrValue::String("same".into()), ValueOrigin::Dynamic,)
+                .collection_semantic_eq(&RuntimeValue::new(
+                    IrValue::Identifier("same".into()),
+                    ValueOrigin::Dynamic,
+                ))
+        );
     }
 
     #[test]
