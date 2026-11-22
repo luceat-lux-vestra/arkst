@@ -1908,6 +1908,7 @@ struct EvalSession {
     runtime: RefCell<EvaluationRuntime>,
     invocation_depth: RefCell<usize>,
     transaction: RefCell<InvocationTransaction>,
+    context_frames: RefCell<BTreeMap<usize, Rc<RefCell<ContextFrame>>>>,
 }
 
 impl EvalSession {
@@ -1919,6 +1920,7 @@ impl EvalSession {
             runtime: RefCell::new(EvaluationRuntime::default()),
             invocation_depth: RefCell::new(0),
             transaction: RefCell::new(InvocationTransaction::default()),
+            context_frames: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -1936,22 +1938,54 @@ impl Drop for EvaluationDepthGuard {
     }
 }
 
-/// Evaluation context with explicit parent visibility and local bindings.
+/// Identity-addressed lexical state for one evaluator context.
 ///
-/// Created fresh per `evaluate()` call to ensure isolation and determinism.
-/// Lookups walk the parent chain without cloning it. A child scope snapshots
-/// the visible parent context at creation time; new local declarations stay in
-/// the child, while successful writes to caller-visible variables are
-/// published at the callable boundary. The snapshot is deliberate: a lambda
-/// observes the bindings visible when it is entered, while new locals cannot
-/// leak back.
-struct EvaluationContext<'a> {
-    parent: Option<Box<EvaluationContext<'a>>>,
+/// This first G2-B slice moves every mutation-bearing lexical binding behind a
+/// stable frame identity registered in the compilation session. The existing
+/// parent snapshot tree remains deliberately intact until the next G2-B slice.
+#[derive(Clone)]
+struct ContextFrame {
+    key: usize,
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, Rc<FunctionBinding>>,
     extension_targets: BTreeMap<ExtensionId, ExtensionOverlay>,
     library_registry: Vec<crate::library_inspection::RegistryEntry>,
     lambda_scope: Option<LambdaScope>,
+    journal_floor: Option<usize>,
+    assigned_variables: BTreeMap<String, RuntimeValue>,
+    variable_owners: BTreeSet<String>,
+    forwarded_variable_owners: BTreeSet<String>,
+    parameter_names: BTreeSet<String>,
+}
+
+impl ContextFrame {
+    fn new(key: usize, journal_floor: Option<usize>) -> Self {
+        Self {
+            key,
+            variables: BTreeMap::new(),
+            functions: BTreeMap::new(),
+            extension_targets: BTreeMap::new(),
+            library_registry: Vec::new(),
+            lambda_scope: None,
+            journal_floor,
+            assigned_variables: BTreeMap::new(),
+            variable_owners: BTreeSet::new(),
+            forwarded_variable_owners: BTreeSet::new(),
+            parameter_names: BTreeSet::new(),
+        }
+    }
+}
+
+/// Evaluation context with explicit parent visibility and frame-local bindings.
+///
+/// Created fresh per `evaluate()` call to ensure isolation and determinism.
+/// Each live lexical frame is registered in `EvalSession` by stable identity.
+/// Parent contexts still use the historical snapshot tree in this bounded
+/// slice; G2-B follow-up work replaces that tree with frame identities without
+/// changing capture/caller-overlay policy.
+struct EvaluationContext<'a> {
+    parent: Option<Box<EvaluationContext<'a>>>,
+    frame: Rc<RefCell<ContextFrame>>,
     extension_invocation: Option<Rc<ExtensionInvocation>>,
     resources: Option<&'a dyn ResourceProvider>,
     loadable_libraries: Option<&'a dyn LoadableLibraryProvider>,
@@ -1965,20 +1999,6 @@ struct EvaluationContext<'a> {
     /// Shared across child scopes so source-backed callable bodies keep their
     /// defining parser mode even when invoked after an include returns.
     session: Rc<EvalSession>,
-    scope_identity: Rc<ScopeIdentity>,
-    /// The savepoint at which this scope was created as an ephemeral scope.
-    /// Writes made by that scope at its own savepoint are dead with the scope,
-    /// while writes made from a deeper savepoint can still need rollback while
-    /// this scope remains live.
-    journal_floor: Option<usize>,
-    assigned_variables: BTreeMap<String, RuntimeValue>,
-    variable_owners: BTreeSet<String>,
-    forwarded_variable_owners: BTreeSet<String>,
-    parameter_names: BTreeSet<String>,
-}
-
-struct ScopeIdentity {
-    key: usize,
 }
 
 #[derive(Default)]
@@ -2318,14 +2338,10 @@ impl<'a> EvaluationContext<'a> {
 
     fn with_limits(limits: EvaluationLimits) -> Self {
         let session = Rc::new(EvalSession::new(limits));
-        let scope_identity = Self::new_scope_identity(&session);
+        let frame = Self::new_context_frame(&session, None);
         Self {
             parent: None,
-            variables: BTreeMap::new(),
-            functions: BTreeMap::new(),
-            extension_targets: BTreeMap::new(),
-            library_registry: Vec::new(),
-            lambda_scope: None,
+            frame,
             extension_invocation: None,
             resources: None,
             loadable_libraries: None,
@@ -2336,19 +2352,52 @@ impl<'a> EvaluationContext<'a> {
             subdocument_root: None,
             active_sources: Vec::new(),
             session,
-            scope_identity,
-            journal_floor: None,
-            assigned_variables: BTreeMap::new(),
-            variable_owners: BTreeSet::new(),
-            forwarded_variable_owners: BTreeSet::new(),
-            parameter_names: BTreeSet::new(),
         }
+    }
+
+    fn register_context_frame(
+        session: &Rc<EvalSession>,
+        frame: ContextFrame,
+    ) -> Rc<RefCell<ContextFrame>> {
+        let key = frame.key;
+        let frame = Rc::new(RefCell::new(frame));
+        session
+            .context_frames
+            .borrow_mut()
+            .insert(key, Rc::clone(&frame));
+        frame
+    }
+
+    fn new_context_frame(
+        session: &Rc<EvalSession>,
+        journal_floor: Option<usize>,
+    ) -> Rc<RefCell<ContextFrame>> {
+        let key = session.transaction.borrow_mut().allocate_scope_key();
+        Self::register_context_frame(session, ContextFrame::new(key, journal_floor))
+    }
+
+    fn clone_context_frame(
+        session: &Rc<EvalSession>,
+        source: &ContextFrame,
+    ) -> Rc<RefCell<ContextFrame>> {
+        let key = session.transaction.borrow_mut().allocate_scope_key();
+        let mut frame = source.clone();
+        frame.key = key;
+        Self::register_context_frame(session, frame)
+    }
+
+    fn context_frame(&self, scope: usize) -> Option<Rc<RefCell<ContextFrame>>> {
+        self.session.context_frames.borrow().get(&scope).cloned()
+    }
+
+    fn journal_floor(&self) -> Option<usize> {
+        self.frame.borrow().journal_floor
     }
 
     /// Creates a child scope with parent-visible bindings and isolated locals.
     #[allow(dead_code)]
     fn child(&self) -> Self {
-        self.child_with_journal_floor(self.journal_floor)
+        self.child_with_journal_floor(self.journal_floor())
     }
 
     /// Creates a scope whose local bindings cannot outlive this invocation.
@@ -2362,11 +2411,7 @@ impl<'a> EvaluationContext<'a> {
     fn child_with_journal_floor(&self, journal_floor: Option<usize>) -> Self {
         Self {
             parent: Some(Box::new(self.clone_scope_tree())),
-            variables: BTreeMap::new(),
-            functions: BTreeMap::new(),
-            extension_targets: BTreeMap::new(),
-            library_registry: Vec::new(),
-            lambda_scope: None,
+            frame: Self::new_context_frame(&self.session, journal_floor),
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
@@ -2377,12 +2422,6 @@ impl<'a> EvaluationContext<'a> {
             subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
             session: Rc::clone(&self.session),
-            scope_identity: Self::new_scope_identity(&self.session),
-            journal_floor,
-            assigned_variables: BTreeMap::new(),
-            variable_owners: BTreeSet::new(),
-            forwarded_variable_owners: BTreeSet::new(),
-            parameter_names: BTreeSet::new(),
         }
     }
 
@@ -2487,11 +2526,7 @@ impl<'a> EvaluationContext<'a> {
                 .parent
                 .as_deref()
                 .map(|parent| Box::new(parent.clone_scope_tree())),
-            variables: self.variables.clone(),
-            functions: self.functions.clone(),
-            extension_targets: self.extension_targets.clone(),
-            library_registry: self.library_registry.clone(),
-            lambda_scope: self.lambda_scope.clone(),
+            frame: Self::clone_context_frame(&self.session, &self.frame.borrow()),
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
@@ -2502,27 +2537,16 @@ impl<'a> EvaluationContext<'a> {
             subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
             session: Rc::clone(&self.session),
-            scope_identity: Self::new_scope_identity(&self.session),
-            journal_floor: self.journal_floor,
-            assigned_variables: self.assigned_variables.clone(),
-            variable_owners: self.variable_owners.clone(),
-            forwarded_variable_owners: self.forwarded_variable_owners.clone(),
-            parameter_names: self.parameter_names.clone(),
         }
     }
 
     fn scope_key(&self) -> usize {
-        self.scope_identity.key
+        self.frame.borrow().key
     }
 
     #[cfg(test)]
     fn extension_target_count(&self) -> usize {
-        self.extension_targets.len()
-    }
-
-    fn new_scope_identity(session: &Rc<EvalSession>) -> Rc<ScopeIdentity> {
-        let key = session.transaction.borrow_mut().allocate_scope_key();
-        Rc::new(ScopeIdentity { key })
+        self.frame.borrow().extension_targets.len()
     }
 
     fn allocate_extension_id(&self) -> Option<ExtensionId> {
@@ -2533,7 +2557,7 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn should_journal_scope_write(&self) -> bool {
-        let Some(floor) = self.journal_floor else {
+        let Some(floor) = self.journal_floor() else {
             return true;
         };
         self.session
@@ -2548,13 +2572,13 @@ impl<'a> EvaluationContext<'a> {
             return;
         }
         let scope = self.scope_key();
-        let journal_floor = self.journal_floor;
+        let journal_floor = self.journal_floor();
         let key = UndoKey::Variable {
             scope,
             name: name.to_string(),
         };
         if self.session.transaction.borrow_mut().first_write(key) {
-            let previous = self.variables.get(name).cloned();
+            let previous = self.frame.borrow().variables.get(name).cloned();
             self.session
                 .transaction
                 .borrow_mut()
@@ -2572,13 +2596,13 @@ impl<'a> EvaluationContext<'a> {
             return;
         }
         let scope = self.scope_key();
-        let journal_floor = self.journal_floor;
+        let journal_floor = self.journal_floor();
         let key = UndoKey::AssignedVariable {
             scope,
             name: name.to_string(),
         };
         if self.session.transaction.borrow_mut().first_write(key) {
-            let previous = self.assigned_variables.get(name).cloned();
+            let previous = self.frame.borrow().assigned_variables.get(name).cloned();
             self.session
                 .transaction
                 .borrow_mut()
@@ -2596,13 +2620,13 @@ impl<'a> EvaluationContext<'a> {
             return;
         }
         let scope = self.scope_key();
-        let journal_floor = self.journal_floor;
+        let journal_floor = self.journal_floor();
         let key = UndoKey::VariableOwner {
             scope,
             name: name.to_string(),
         };
         if self.session.transaction.borrow_mut().first_write(key) {
-            let was_present = self.variable_owners.contains(name);
+            let was_present = self.frame.borrow().variable_owners.contains(name);
             self.session
                 .transaction
                 .borrow_mut()
@@ -2620,13 +2644,13 @@ impl<'a> EvaluationContext<'a> {
             return;
         }
         let scope = self.scope_key();
-        let journal_floor = self.journal_floor;
+        let journal_floor = self.journal_floor();
         let key = UndoKey::Function {
             scope,
             name: name.to_string(),
         };
         if self.session.transaction.borrow_mut().first_write(key) {
-            let previous = self.functions.get(name).cloned();
+            let previous = self.frame.borrow().functions.get(name).cloned();
             self.session
                 .transaction
                 .borrow_mut()
@@ -2644,7 +2668,7 @@ impl<'a> EvaluationContext<'a> {
             return;
         }
         let scope = self.scope_key();
-        let journal_floor = self.journal_floor;
+        let journal_floor = self.journal_floor();
         let key = UndoKey::LibraryRegistry { scope };
         if self.session.transaction.borrow_mut().first_write(key) {
             self.session
@@ -2653,7 +2677,7 @@ impl<'a> EvaluationContext<'a> {
                 .push(InvocationUndo::LibraryRegistry {
                     scope,
                     journal_floor,
-                    previous_len: self.library_registry.len(),
+                    previous_len: self.frame.borrow().library_registry.len(),
                 });
         }
     }
@@ -2666,7 +2690,7 @@ impl<'a> EvaluationContext<'a> {
             return;
         }
         self.record_library_registry_before();
-        self.library_registry.push(entry);
+        self.frame.borrow_mut().library_registry.push(entry);
     }
 
     fn register_container_library(&mut self, name: String) {
@@ -2684,7 +2708,8 @@ impl<'a> EvaluationContext<'a> {
         if let Some(parent) = self.parent.as_deref() {
             parent.collect_library_registry(entries);
         }
-        for entry in &self.library_registry {
+        let frame = self.frame.borrow();
+        for entry in &frame.library_registry {
             let name = entry.visible_name();
             if !entries
                 .iter()
@@ -2734,7 +2759,10 @@ impl<'a> EvaluationContext<'a> {
 
     fn get_extension_target(&self, extension: &Rc<FunctionExtension>) -> FunctionTarget {
         let key = extension.id;
-        self.extension_targets
+        let local_target = self
+            .frame
+            .borrow()
+            .extension_targets
             .get(&key)
             .and_then(|overlay| {
                 overlay
@@ -2742,7 +2770,8 @@ impl<'a> EvaluationContext<'a> {
                     .upgrade()
                     .filter(|owner| Rc::ptr_eq(owner, extension))
                     .map(|_| overlay.target.clone())
-            })
+            });
+        local_target
             .or_else(|| {
                 self.parent
                     .as_deref()
@@ -2756,10 +2785,15 @@ impl<'a> EvaluationContext<'a> {
             return;
         }
         let scope = self.scope_key();
-        let journal_floor = self.journal_floor;
+        let journal_floor = self.journal_floor();
         let key = UndoKey::ExtensionTarget { scope, extension };
         if self.session.transaction.borrow_mut().first_write(key) {
-            let previous = self.extension_targets.get(&extension).cloned();
+            let previous = self
+                .frame
+                .borrow()
+                .extension_targets
+                .get(&extension)
+                .cloned();
             self.session
                 .transaction
                 .borrow_mut()
@@ -2778,7 +2812,7 @@ impl<'a> EvaluationContext<'a> {
 
     fn set_extension_target(&mut self, extension: &Rc<FunctionExtension>, target: FunctionTarget) {
         self.record_extension_target_before(extension);
-        self.extension_targets.insert(
+        self.frame.borrow_mut().extension_targets.insert(
             extension.id,
             ExtensionOverlay {
                 owner: Rc::downgrade(extension),
@@ -2788,9 +2822,14 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn remove_extension_target(&mut self, extension: ExtensionId) {
-        if self.extension_targets.contains_key(&extension) {
+        if self
+            .frame
+            .borrow()
+            .extension_targets
+            .contains_key(&extension)
+        {
             self.record_extension_target_before_id(extension);
-            self.extension_targets.remove(&extension);
+            self.frame.borrow_mut().extension_targets.remove(&extension);
         }
     }
 
@@ -2816,57 +2855,57 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn restore_undo(&mut self, undo: InvocationUndo) -> bool {
-        if let Some(scope) = undo.scope() {
-            if self.scope_key() != scope {
-                // Callable-local scope trees may be dropped before the outer
-                // invocation rolls back. Those writes are already
-                // unreachable; caller-visible scopes remain rooted at this
-                // context and are restored by their stable scope identity.
-                return self
-                    .parent
-                    .as_mut()
-                    .is_some_and(|parent| parent.restore_undo(undo));
-            }
-        }
-        match undo {
-            InvocationUndo::DocumentState { previous, .. } => {
+        let Some(scope) = undo.scope() else {
+            if let InvocationUndo::DocumentState { previous, .. } = undo {
                 self.restore_document_state_undo(previous);
+                return true;
             }
+            return false;
+        };
+        // Dropped callable-local frames are deliberately absent from the
+        // registry. Live scopes are restored directly by stable identity
+        // instead of recursively walking parent context snapshots.
+        let Some(frame) = self.context_frame(scope) else {
+            return false;
+        };
+        let mut frame = frame.borrow_mut();
+        match undo {
+            InvocationUndo::DocumentState { .. } => unreachable!("document state has no scope"),
             InvocationUndo::Variable { name, previous, .. } => match previous {
                 Some(previous) => {
-                    self.variables.insert(name, previous);
+                    frame.variables.insert(name, previous);
                 }
                 None => {
-                    self.variables.remove(&name);
+                    frame.variables.remove(&name);
                 }
             },
             InvocationUndo::AssignedVariable { name, previous, .. } => match previous {
                 Some(previous) => {
-                    self.assigned_variables.insert(name, previous);
+                    frame.assigned_variables.insert(name, previous);
                 }
                 None => {
-                    self.assigned_variables.remove(&name);
+                    frame.assigned_variables.remove(&name);
                 }
             },
             InvocationUndo::VariableOwner {
                 name, was_present, ..
             } => {
                 if was_present {
-                    self.variable_owners.insert(name);
+                    frame.variable_owners.insert(name);
                 } else {
-                    self.variable_owners.remove(&name);
+                    frame.variable_owners.remove(&name);
                 }
             }
             InvocationUndo::Function { name, previous, .. } => match previous {
                 Some(previous) => {
-                    self.functions.insert(name, previous);
+                    frame.functions.insert(name, previous);
                 }
                 None => {
-                    self.functions.remove(&name);
+                    frame.functions.remove(&name);
                 }
             },
             InvocationUndo::LibraryRegistry { previous_len, .. } => {
-                self.library_registry.truncate(previous_len);
+                frame.library_registry.truncate(previous_len);
             }
             InvocationUndo::ExtensionTarget {
                 extension,
@@ -2874,10 +2913,10 @@ impl<'a> EvaluationContext<'a> {
                 ..
             } => match previous {
                 Some(previous) => {
-                    self.extension_targets.insert(extension, previous);
+                    frame.extension_targets.insert(extension, previous);
                 }
                 None => {
-                    self.extension_targets.remove(&extension);
+                    frame.extension_targets.remove(&extension);
                 }
             },
         }
@@ -2908,7 +2947,9 @@ impl<'a> EvaluationContext<'a> {
     /// Declares or reassigns a variable from an evaluated runtime value.
     fn set_value(&mut self, name: String, value: impl Into<RuntimeValue>) {
         self.record_variable_before(&name);
-        self.variables
+        self.frame
+            .borrow_mut()
+            .variables
             .insert(name, VariableValue::from_runtime_value(value.into()));
     }
 
@@ -2930,20 +2971,23 @@ impl<'a> EvaluationContext<'a> {
             // A lambda parameter is a lookup binding, not a variable owner.
             // Keep it shadowing a same-named `.var` declaration while still
             // recording the assignment for a real owner at the boundary.
-            if !self.parameter_names.contains(&name) {
+            if !self.frame.borrow().parameter_names.contains(&name) {
                 self.set_value(name.clone(), value.clone());
             }
             if !has_forwarded_owner {
                 self.record_variable_owner_before(&name);
-                self.variable_owners.insert(name.clone());
+                self.frame.borrow_mut().variable_owners.insert(name.clone());
             }
         }
         self.record_assigned_variable_before(&name);
-        self.assigned_variables.insert(name, value);
+        self.frame
+            .borrow_mut()
+            .assigned_variables
+            .insert(name, value);
     }
 
     fn assigned_values(&self) -> BTreeMap<String, RuntimeValue> {
-        self.assigned_variables.clone()
+        self.frame.borrow().assigned_variables.clone()
     }
 
     /// Marks only a variable owner in this exact scope with the evidenced
@@ -2955,11 +2999,13 @@ impl<'a> EvaluationContext<'a> {
     /// participates in the same rollback entry rather than creating a second
     /// transaction path.
     fn mark_source_backed_markdown_owner(&mut self, name: &str, source_text: String) -> bool {
-        if !self.variable_owners.contains(name) {
+        if !self.frame.borrow().variable_owners.contains(name) {
             return false;
         }
         self.record_variable_before(name);
-        self.variables
+        self.frame
+            .borrow_mut()
+            .variables
             .get_mut(name)
             .is_some_and(|value| value.mark_source_backed_markdown(source_text))
     }
@@ -2974,7 +3020,10 @@ impl<'a> EvaluationContext<'a> {
             return false;
         }
         self.record_assigned_variable_before(&name);
-        self.assigned_variables.insert(name, value);
+        self.frame
+            .borrow_mut()
+            .assigned_variables
+            .insert(name, value);
         true
     }
 
@@ -2987,7 +3036,7 @@ impl<'a> EvaluationContext<'a> {
                 return true;
             }
         }
-        if self.variable_owners.contains(name) {
+        if self.frame.borrow().variable_owners.contains(name) {
             self.set_value(name.to_string(), value);
             return true;
         }
@@ -3003,7 +3052,11 @@ impl<'a> EvaluationContext<'a> {
                 return true;
             }
         }
-        if self.variable_owners.contains(name) || self.forwarded_variable_owners.contains(name) {
+        let frame = self.frame.borrow();
+        let owns_variable =
+            frame.variable_owners.contains(name) || frame.forwarded_variable_owners.contains(name);
+        drop(frame);
+        if owns_variable {
             self.set_value(name.to_string(), value);
             return true;
         }
@@ -3011,19 +3064,21 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn has_forwarded_variable_owner(&self, name: &str) -> bool {
-        self.forwarded_variable_owners.contains(name)
-            || self
-                .parent
-                .as_deref()
-                .is_some_and(|parent| parent.has_forwarded_variable_owner(name))
+        if self.frame.borrow().forwarded_variable_owners.contains(name) {
+            return true;
+        }
+        self.parent
+            .as_deref()
+            .is_some_and(|parent| parent.has_forwarded_variable_owner(name))
     }
 
     fn collect_variable_owners(&self, owners: &mut BTreeSet<String>) {
         if let Some(parent) = self.parent.as_deref() {
             parent.collect_variable_owners(owners);
         }
-        owners.extend(self.variable_owners.iter().cloned());
-        owners.extend(self.forwarded_variable_owners.iter().cloned());
+        let frame = self.frame.borrow();
+        owners.extend(frame.variable_owners.iter().cloned());
+        owners.extend(frame.forwarded_variable_owners.iter().cloned());
     }
 
     /// Installs a user-function binding in the current local scope.
@@ -3047,12 +3102,12 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn replace_function_binding(&mut self, name: String, binding: Rc<FunctionBinding>) {
-        let previous = self.functions.get(&name).cloned();
+        let previous = self.frame.borrow().functions.get(&name).cloned();
         self.record_function_before(&name);
         if let Some(previous) = previous.as_ref() {
             self.retire_extension_chain(previous);
         }
-        self.functions.insert(name, binding);
+        self.frame.borrow_mut().functions.insert(name, binding);
     }
 
     fn capture_snapshot(&self) -> RuntimeCallableCapture {
@@ -3105,32 +3160,34 @@ impl<'a> EvaluationContext<'a> {
         if let Some(parent) = self.parent.as_deref() {
             parent.collect_bindings(variables, functions);
         }
+        let frame = self.frame.borrow();
         variables.extend(
-            self.variables
+            frame
+                .variables
                 .iter()
                 .map(|(name, value)| (name.clone(), value.runtime_value().clone())),
         );
-        functions.extend(self.functions.clone());
+        functions.extend(frame.functions.clone());
     }
 
     fn collect_extension_targets(&self, targets: &mut BTreeMap<ExtensionId, ExtensionOverlay>) {
         if let Some(parent) = self.parent.as_deref() {
             parent.collect_extension_targets(targets);
         }
-        targets.extend(self.extension_targets.clone());
+        targets.extend(self.frame.borrow().extension_targets.clone());
     }
 
     fn from_capture(capture: &RuntimeCallableCapture) -> Self {
         let mut context = Self::new();
         for variable in &capture.variables {
-            context.variables.insert(
+            context.frame.borrow_mut().variables.insert(
                 variable.name.clone(),
                 VariableValue::from_runtime_value(variable.value.clone()),
             );
         }
         for function in &capture.functions {
             let name = function.name.clone();
-            context.functions.insert(
+            context.frame.borrow_mut().functions.insert(
                 name.clone(),
                 Rc::new(FunctionBinding {
                     parameters: LambdaParameters::from_ir(function.callable.parameters.clone()),
@@ -3170,16 +3227,23 @@ impl<'a> EvaluationContext<'a> {
             .current_savepoint_index();
         let has_resource_context = resource_context.is_some();
 
-        Self {
-            parent: Some(Box::new(definition_context)),
-            variables: variables
+        let frame = Self::new_context_frame(&caller_context.session, journal_floor);
+        {
+            let mut frame_state = frame.borrow_mut();
+            frame_state.variables = variables
                 .into_iter()
                 .map(|(name, value)| (name, VariableValue::from_runtime_value(value)))
-                .collect(),
-            functions,
-            extension_targets,
-            library_registry,
-            lambda_scope: caller_context.visible_lambda_scope(),
+                .collect();
+            frame_state.functions = functions;
+            frame_state.extension_targets = extension_targets;
+            frame_state.library_registry = library_registry;
+            frame_state.lambda_scope = caller_context.visible_lambda_scope();
+            frame_state.forwarded_variable_owners = forwarded_variable_owners;
+        }
+
+        Self {
+            parent: Some(Box::new(definition_context)),
+            frame,
             extension_invocation: caller_context.extension_invocation.clone(),
             // Provider objects are never captured. A callable may reuse the current
             // compilation's injected providers only when its immutable definition
@@ -3205,12 +3269,6 @@ impl<'a> EvaluationContext<'a> {
                 Vec::new()
             },
             session: Rc::clone(&caller_context.session),
-            scope_identity: Self::new_scope_identity(&caller_context.session),
-            journal_floor,
-            assigned_variables: BTreeMap::new(),
-            variable_owners: BTreeSet::new(),
-            forwarded_variable_owners,
-            parameter_names: BTreeSet::new(),
         }
     }
 
@@ -3235,7 +3293,11 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn set_lambda_scope(&mut self, scope: LambdaScope) {
-        self.lambda_scope = Some(scope);
+        self.frame.borrow_mut().lambda_scope = Some(scope);
+    }
+
+    fn register_parameter_name(&mut self, name: String) {
+        self.frame.borrow_mut().parameter_names.insert(name);
     }
 
     fn initialize_document_state(&mut self, snapshot: &arkst_ir::IrDocumentState) {
@@ -3766,10 +3828,14 @@ impl<'a> EvaluationContext<'a> {
         Ok(())
     }
 
-    /// Gets a variable value if it exists.
-    fn get(&self, name: &str) -> Option<&VariableValue> {
-        self.variables
-            .get(name)
+    /// Gets a variable value from this exact lexical frame only.
+    fn get_local(&self, name: &str) -> Option<VariableValue> {
+        self.frame.borrow().variables.get(name).cloned()
+    }
+
+    /// Gets a variable value if it exists in the visible scope chain.
+    fn get(&self, name: &str) -> Option<VariableValue> {
+        self.get_local(name)
             .or_else(|| self.parent.as_deref().and_then(|parent| parent.get(name)))
     }
 
@@ -3779,12 +3845,17 @@ impl<'a> EvaluationContext<'a> {
     }
 
     /// Looks up a function binding through the visible scope chain.
-    fn get_function(&self, name: &str) -> Option<&Rc<FunctionBinding>> {
-        self.functions.get(name).or_else(|| {
-            self.parent
-                .as_deref()
-                .and_then(|parent| parent.get_function(name))
-        })
+    fn get_function(&self, name: &str) -> Option<Rc<FunctionBinding>> {
+        self.frame
+            .borrow()
+            .functions
+            .get(name)
+            .cloned()
+            .or_else(|| {
+                self.parent
+                    .as_deref()
+                    .and_then(|parent| parent.get_function(name))
+            })
     }
 
     /// Resolves a numeric implicit parameter only inside the nearest lambda
@@ -3796,7 +3867,8 @@ impl<'a> EvaluationContext<'a> {
         name: &str,
     ) -> Option<Result<RuntimeValue, ImplicitParameterError>> {
         let index = implicit_parameter_index(name)?;
-        match self.lambda_scope.as_ref() {
+        let lambda_scope = self.frame.borrow().lambda_scope.clone();
+        match lambda_scope.as_ref() {
             Some(LambdaScope::Explicit) => Some(Err(ImplicitParameterError::Missing)),
             Some(LambdaScope::Implicit(arguments)) => match index {
                 ImplicitParameterIndex::Valid(index) => {
@@ -3824,11 +3896,18 @@ impl<'a> EvaluationContext<'a> {
     /// The caller overlay copies this one scope as lookup state; it does not
     /// retain a reference to the mutable caller context.
     fn visible_lambda_scope(&self) -> Option<LambdaScope> {
-        self.lambda_scope.clone().or_else(|| {
+        self.frame.borrow().lambda_scope.clone().or_else(|| {
             self.parent
                 .as_deref()
                 .and_then(|parent| parent.visible_lambda_scope())
         })
+    }
+}
+
+impl Drop for EvaluationContext<'_> {
+    fn drop(&mut self) {
+        let scope = self.scope_key();
+        self.session.context_frames.borrow_mut().remove(&scope);
     }
 }
 
@@ -6386,7 +6465,7 @@ impl Evaluator {
         // can interpret an InlineBody as a callable. Other native dispatch
         // keeps its existing precedence.
         if matches!(name, "foreach" | "repeat") {
-            if let Some(binding) = context.get_function(name).cloned() {
+            if let Some(binding) = context.get_function(name) {
                 return self.evaluate_function_binding(
                     &binding,
                     ordered_args,
@@ -6446,7 +6525,7 @@ impl Evaluator {
         // The v2.7 search callbacks are target-sensitive in the frontend, so
         // preserve source-defined bindings before native callback dispatch.
         if matches!(name, "findfirst" | "findall") {
-            if let Some(binding) = context.get_function(name).cloned() {
+            if let Some(binding) = context.get_function(name) {
                 return self.evaluate_function_binding(
                     &binding,
                     ordered_args,
@@ -6526,7 +6605,7 @@ impl Evaluator {
         // Preserve the existing fallback for source-defined names that are
         // not handled by an earlier native branch. Iteration shadowing is
         // resolved explicitly above because its inline body is contextual.
-        if let Some(binding) = context.get_function(name).cloned() {
+        if let Some(binding) = context.get_function(name) {
             if let Some(frontend) = frontend {
                 // Extension bindings still require evaluate_extension_call() to
                 // install the active super target and preserve extension-chain
@@ -18283,7 +18362,7 @@ impl Evaluator {
                     child.set_lambda_scope(LambdaScope::Explicit);
                     if let Some(parameters) = callable.parameters.as_deref() {
                         for (parameter, value) in parameters.iter().zip(values) {
-                            child.parameter_names.insert(parameter.name.clone());
+                            child.register_parameter_name(parameter.name.clone());
                             child.set_value(parameter.name.clone(), value);
                         }
                     }
@@ -27016,7 +27095,7 @@ fn function_target_contract(
 
 fn resolve_function_target(name: &str, context: &EvaluationContext<'_>) -> Option<FunctionTarget> {
     if let Some(binding) = context.get_function(name) {
-        return Some(FunctionTarget::Binding(Rc::clone(binding)));
+        return Some(FunctionTarget::Binding(binding));
     }
     // This bounded slice can re-dispatch regular scalar builtins through the
     // same binder/conversion boundary as ordinary calls. Bespoke native
@@ -28456,12 +28535,14 @@ fn direct_variable_runtime_value(
     ) {
         return None;
     }
+    // This fast path is deliberately local-only. Parent/caller-overlay values
+    // are visible to ordinary evaluation, but they are not direct values owned
+    // by this exact evaluation scope and must follow the normal materialization
+    // path instead.
     context
-        .variables
-        .get(name)
-        .map(VariableValue::runtime_value)
+        .get_local(name)
+        .map(|value| value.runtime_value().clone())
         .filter(|value| value.is_callable() || !value.provenance().is_materialized())
-        .cloned()
 }
 
 fn direct_markdown_list_source_text(
@@ -29297,6 +29378,33 @@ mod tests {
         root.session.document_state.borrow_mut().name = "shared".to_string();
         assert_eq!(child.session.document_state.borrow().name, "shared");
         assert!(independent.session.document_state.borrow().name.is_empty());
+    }
+
+    #[test]
+    fn g2_context_frame_registry_addresses_live_scopes_without_cross_compile_aliasing() {
+        let root = EvaluationContext::new();
+        let root_scope = root.scope_key();
+        let registered_root = root
+            .context_frame(root_scope)
+            .expect("root frame is registered in its session");
+        assert!(Rc::ptr_eq(&registered_root, &root.frame));
+
+        let independent = EvaluationContext::new();
+        let independent_scope = independent.scope_key();
+        let registered_independent = independent
+            .context_frame(independent_scope)
+            .expect("independent frame is registered in its own session");
+        assert!(Rc::ptr_eq(&registered_independent, &independent.frame));
+        assert!(!Rc::ptr_eq(&registered_root, &registered_independent));
+
+        let child = root.child();
+        let child_scope = child.scope_key();
+        assert!(child.context_frame(child_scope).is_some());
+        drop(child);
+        assert!(
+            root.context_frame(child_scope).is_none(),
+            "session registry must release dropped frames"
+        );
     }
 
     fn frontend_invocation_block(
@@ -36310,7 +36418,7 @@ mod tests {
                 if values == vec![IrValue::Number(1.0), IrValue::Number(2.0)]
         ));
         assert_eq!(
-            context.get("total").map(VariableValue::to_value),
+            context.get("total").map(|value| value.to_value()),
             Some(IrValue::Number(2.0))
         );
         assert!(context.get("local").is_none());
@@ -36363,7 +36471,7 @@ mod tests {
             LegacyCallOutcome::Value(IrValue::Collection(_))
         ));
         assert_eq!(
-            context.get("total").map(VariableValue::to_value),
+            context.get("total").map(|value| value.to_value()),
             Some(IrValue::Number(2.0))
         );
     }
@@ -36414,7 +36522,7 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].primary, Some(failure_span));
         assert_eq!(
-            context.get("total").map(VariableValue::to_value),
+            context.get("total").map(|value| value.to_value()),
             Some(IrValue::Number(0.0))
         );
     }
@@ -37075,66 +37183,95 @@ mod tests {
 
         let mut child = parent.child();
         assert_eq!(
-            child.get("visible").map(VariableValue::to_value),
+            child.get("visible").map(|value| value.to_value()),
             Some(IrValue::String("parent".into()))
         );
         assert_eq!(
-            child
-                .get_function("inherited")
-                .and_then(|binding| binding.parameters.explicit())
-                .map(|parameters| parameters
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["value"])
+            child.get_function("inherited").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
+            Some(vec!["value".to_string()])
         );
         child.set_value("local".into(), IrValue::String("child".into()));
         child.set_function("future".into(), vec!["value".into()]);
 
         assert!(parent.get("local").is_none());
         assert_eq!(
-            child.get("local").map(VariableValue::to_value),
+            child.get("local").map(|value| value.to_value()),
             Some(IrValue::String("child".into()))
         );
         assert_eq!(
-            child
-                .get_function("future")
-                .and_then(|binding| binding.parameters.explicit())
-                .map(|parameters| parameters
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["value"])
+            child.get_function("future").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
+            Some(vec!["value".to_string()])
         );
         child.set_value("visible".into(), IrValue::String("shadowed".into()));
         child.set_function("inherited".into(), vec!["shadowed".into()]);
         assert_eq!(
-            child.get("visible").map(VariableValue::to_value),
+            child.get("visible").map(|value| value.to_value()),
             Some(IrValue::String("shadowed".into()))
         );
         assert_eq!(
-            parent.get("visible").map(VariableValue::to_value),
+            parent.get("visible").map(|value| value.to_value()),
             Some(IrValue::String("parent".into()))
         );
         assert_eq!(
-            child
-                .get_function("inherited")
-                .and_then(|binding| binding.parameters.explicit())
-                .map(|parameters| parameters
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["shadowed"])
+            child.get_function("inherited").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
+            Some(vec!["shadowed".to_string()])
         );
         assert_eq!(
-            parent
-                .get_function("inherited")
-                .and_then(|binding| binding.parameters.explicit())
-                .map(|parameters| parameters
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["value"])
+            parent.get_function("inherited").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
+            Some(vec!["value".to_string()])
+        );
+    }
+
+    #[test]
+    fn direct_runtime_variable_fast_path_is_exact_frame_local_only() {
+        let runtime = RuntimeValue::dynamic_value(IrValue::Content(vec![text_paragraph("value")]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text("value-source"));
+        let mut parent = EvaluationContext::new();
+        parent.set_value("visible".into(), runtime.clone());
+
+        let mut child = parent.child();
+        let inherited_reference = call_value("visible", Vec::new());
+        assert!(
+            direct_variable_runtime_value(&inherited_reference, &child).is_none(),
+            "parent-visible bindings must use the ordinary materialization path"
+        );
+
+        child.set_value("local".into(), runtime);
+        let local_reference = call_value("local", Vec::new());
+        let direct = direct_variable_runtime_value(&local_reference, &child)
+            .expect("same-frame runtime value keeps the direct fast path");
+        assert_eq!(
+            direct.source_backed_markdown_text(),
+            Some("value-source"),
+            "same-frame direct source evidence must remain available"
         );
     }
 
@@ -38328,20 +38465,18 @@ mod tests {
     #[test]
     fn runtime_callable_capture_and_caller_overlay_preserve_nested_runtime_provenance() {
         let mut definition = EvaluationContext::new();
-        definition.variables.insert(
+        definition.set_value(
             "captured".to_string(),
-            VariableValue::from_runtime_value(
-                RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
-                    content: vec![IrInline::Text {
-                        content: "captured".to_string(),
-                        span: span(0, 8),
-                    }],
+            RuntimeValue::dynamic_value(IrValue::Content(vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "captured".to_string(),
                     span: span(0, 8),
-                }]))
-                .with_provenance(ValueProvenance::source_backed_markdown_text(
-                    "captured-source",
-                )),
-            ),
+                }],
+                span: span(0, 8),
+            }]))
+            .with_provenance(ValueProvenance::source_backed_markdown_text(
+                "captured-source",
+            )),
         );
         let capture = definition.capture_snapshot();
         let captured = &capture.variables[0].value;
@@ -38357,11 +38492,10 @@ mod tests {
             EvaluationContext::with_caller_overlay(restored, &caller, capture.resource_context);
         let restored = overlay
             .get("captured")
-            .expect("captured runtime value survives overlay")
-            .runtime_value();
-        assert_eq!(restored.origin, ValueOrigin::Dynamic);
+            .expect("captured runtime value survives overlay");
+        assert_eq!(restored.runtime_value().origin, ValueOrigin::Dynamic);
         assert_eq!(
-            restored.source_backed_markdown_text(),
+            restored.runtime_value().source_backed_markdown_text(),
             Some("captured-source")
         );
 
@@ -38427,7 +38561,7 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(callable.capture, original_capture);
         assert_eq!(
-            caller_context.get("value").map(VariableValue::to_value),
+            caller_context.get("value").map(|value| value.to_value()),
             Some(IrValue::String("caller".to_string()))
         );
     }
@@ -38842,7 +38976,7 @@ mod tests {
         assert!(matches!(outcome, CallOutcome::Value(_)));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(
-            context.get("observed").map(VariableValue::to_value),
+            context.get("observed").map(|value| value.to_value()),
             Some(IrValue::Number(0.0))
         );
     }
