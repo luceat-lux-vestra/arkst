@@ -1896,14 +1896,41 @@ struct EvaluationRuntime {
     active_evaluation_depth: usize,
 }
 
+/// Compilation-scoped mutable evaluator state shared by every context frame.
+///
+/// G2 deliberately separates this state from lexical/frame-local bindings.
+/// Context identity still uses the existing tree during the first foundation
+/// slice; later G2 work replaces that tree with identity-addressed frames.
+struct EvalSession {
+    source_modes: RefCell<BTreeMap<u32, Mode>>,
+    document_state: RefCell<DocumentState>,
+    limits: EvaluationLimits,
+    runtime: RefCell<EvaluationRuntime>,
+    invocation_depth: RefCell<usize>,
+    transaction: RefCell<InvocationTransaction>,
+}
+
+impl EvalSession {
+    fn new(limits: EvaluationLimits) -> Self {
+        Self {
+            source_modes: RefCell::new(BTreeMap::new()),
+            document_state: RefCell::new(DocumentState::default()),
+            limits,
+            runtime: RefCell::new(EvaluationRuntime::default()),
+            invocation_depth: RefCell::new(0),
+            transaction: RefCell::new(InvocationTransaction::default()),
+        }
+    }
+}
+
 /// Releases one active evaluator frame even when evaluation returns early.
 struct EvaluationDepthGuard {
-    runtime: Rc<RefCell<EvaluationRuntime>>,
+    session: Rc<EvalSession>,
 }
 
 impl Drop for EvaluationDepthGuard {
     fn drop(&mut self) {
-        let mut runtime = self.runtime.borrow_mut();
+        let mut runtime = self.session.runtime.borrow_mut();
         debug_assert!(runtime.active_evaluation_depth > 0);
         runtime.active_evaluation_depth = runtime.active_evaluation_depth.saturating_sub(1);
     }
@@ -1937,12 +1964,7 @@ struct EvaluationContext<'a> {
     /// Parser mode provenance keyed by the source identity carried in IR spans.
     /// Shared across child scopes so source-backed callable bodies keep their
     /// defining parser mode even when invoked after an include returns.
-    source_modes: Rc<RefCell<BTreeMap<u32, Mode>>>,
-    document_state: Rc<RefCell<DocumentState>>,
-    limits: EvaluationLimits,
-    runtime: Rc<RefCell<EvaluationRuntime>>,
-    invocation_depth: Rc<RefCell<usize>>,
-    transaction: Rc<RefCell<InvocationTransaction>>,
+    session: Rc<EvalSession>,
     scope_identity: Rc<ScopeIdentity>,
     /// The savepoint at which this scope was created as an ephemeral scope.
     /// Writes made by that scope at its own savepoint are dead with the scope,
@@ -2295,8 +2317,8 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn with_limits(limits: EvaluationLimits) -> Self {
-        let transaction = Rc::new(RefCell::new(InvocationTransaction::default()));
-        let scope_identity = Self::new_scope_identity(&transaction);
+        let session = Rc::new(EvalSession::new(limits));
+        let scope_identity = Self::new_scope_identity(&session);
         Self {
             parent: None,
             variables: BTreeMap::new(),
@@ -2313,12 +2335,7 @@ impl<'a> EvaluationContext<'a> {
             current_source: None,
             subdocument_root: None,
             active_sources: Vec::new(),
-            source_modes: Rc::new(RefCell::new(BTreeMap::new())),
-            document_state: Rc::new(RefCell::new(DocumentState::default())),
-            limits,
-            runtime: Rc::new(RefCell::new(EvaluationRuntime::default())),
-            invocation_depth: Rc::new(RefCell::new(0)),
-            transaction,
+            session,
             scope_identity,
             journal_floor: None,
             assigned_variables: BTreeMap::new(),
@@ -2338,7 +2355,7 @@ impl<'a> EvaluationContext<'a> {
     /// Caller-visible owner writes still travel to their real owner and are
     /// journaled there; only dead local bindings skip the transaction log.
     fn ephemeral_child(&self) -> Self {
-        let journal_floor = self.transaction.borrow().current_savepoint_index();
+        let journal_floor = self.session.transaction.borrow().current_savepoint_index();
         self.child_with_journal_floor(journal_floor)
     }
 
@@ -2359,13 +2376,8 @@ impl<'a> EvaluationContext<'a> {
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
-            source_modes: Rc::clone(&self.source_modes),
-            document_state: Rc::clone(&self.document_state),
-            limits: self.limits,
-            runtime: Rc::clone(&self.runtime),
-            invocation_depth: Rc::clone(&self.invocation_depth),
-            transaction: Rc::clone(&self.transaction),
-            scope_identity: Self::new_scope_identity(&self.transaction),
+            session: Rc::clone(&self.session),
+            scope_identity: Self::new_scope_identity(&self.session),
             journal_floor,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
@@ -2381,17 +2393,17 @@ impl<'a> EvaluationContext<'a> {
         metadata_defaults: &crate::DocumentMetadataDefaults,
         limits: EvaluationLimits,
     ) -> Self {
-        let mut source_modes = BTreeMap::new();
-        source_modes.insert(source_id.0, source_mode);
-        Self {
-            resources: Some(resources),
-            metadata_defaults: metadata_defaults.clone(),
-            current_source: Some(source_id),
-            subdocument_root: None,
-            active_sources: vec![source_id],
-            source_modes: Rc::new(RefCell::new(source_modes)),
-            ..Self::with_limits(limits)
-        }
+        let mut context = Self::with_limits(limits);
+        context.resources = Some(resources);
+        context.metadata_defaults = metadata_defaults.clone();
+        context.current_source = Some(source_id);
+        context.active_sources = vec![source_id];
+        context
+            .session
+            .source_modes
+            .borrow_mut()
+            .insert(source_id.0, source_mode);
+        context
     }
 
     fn with_resources_and_libraries(
@@ -2409,11 +2421,11 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn source_mode(&self, source_id: SourceId) -> Option<Mode> {
-        self.source_modes.borrow().get(&source_id.0).copied()
+        self.session.source_modes.borrow().get(&source_id.0).copied()
     }
 
     fn register_source_mode(&self, source_id: SourceId, mode: Mode) -> Result<(), Mode> {
-        let mut modes = self.source_modes.borrow_mut();
+        let mut modes = self.session.source_modes.borrow_mut();
         match modes.get(&source_id.0).copied() {
             Some(existing) if existing != mode => Err(existing),
             Some(_) => Ok(()),
@@ -2429,10 +2441,10 @@ impl<'a> EvaluationContext<'a> {
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<EvaluationDepthGuard, CallOutcome> {
-        let mut runtime = self.runtime.borrow_mut();
-        if runtime.active_evaluation_depth >= self.limits.max_evaluation_depth {
+        let mut runtime = self.session.runtime.borrow_mut();
+        if runtime.active_evaluation_depth >= self.session.limits.max_evaluation_depth {
             diagnostics.push(evaluation_depth_limit_error(
-                self.limits.max_evaluation_depth,
+                self.session.limits.max_evaluation_depth,
                 span,
             ));
             return Err(CallOutcome::Failed);
@@ -2440,29 +2452,29 @@ impl<'a> EvaluationContext<'a> {
         runtime.active_evaluation_depth += 1;
         drop(runtime);
         Ok(EvaluationDepthGuard {
-            runtime: Rc::clone(&self.runtime),
+            session: Rc::clone(&self.session),
         })
     }
 
     fn begin_invocation(&self) {
-        let mut depth = self.invocation_depth.borrow_mut();
+        let mut depth = self.session.invocation_depth.borrow_mut();
         let outermost = *depth == 0;
-        self.transaction.borrow_mut().begin(outermost);
+        self.session.transaction.borrow_mut().begin(outermost);
         *depth += 1;
     }
 
     fn end_invocation(&self) {
-        let mut depth = self.invocation_depth.borrow_mut();
+        let mut depth = self.session.invocation_depth.borrow_mut();
         debug_assert!(*depth > 0);
         *depth = depth.saturating_sub(1);
     }
 
     fn commit_transaction(&self) {
-        self.transaction.borrow_mut().commit_savepoint();
+        self.session.transaction.borrow_mut().commit_savepoint();
     }
 
     fn rollback_transaction(&mut self) -> Vec<InvocationUndo> {
-        self.transaction.borrow_mut().rollback_savepoint()
+        self.session.transaction.borrow_mut().rollback_savepoint()
     }
 
     fn clone_scope_tree(&self) -> Self {
@@ -2485,13 +2497,8 @@ impl<'a> EvaluationContext<'a> {
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
-            source_modes: Rc::clone(&self.source_modes),
-            document_state: Rc::clone(&self.document_state),
-            limits: self.limits,
-            runtime: Rc::clone(&self.runtime),
-            invocation_depth: Rc::clone(&self.invocation_depth),
-            transaction: Rc::clone(&self.transaction),
-            scope_identity: Self::new_scope_identity(&self.transaction),
+            session: Rc::clone(&self.session),
+            scope_identity: Self::new_scope_identity(&self.session),
             journal_floor: self.journal_floor,
             assigned_variables: self.assigned_variables.clone(),
             variable_owners: self.variable_owners.clone(),
@@ -2509,20 +2516,20 @@ impl<'a> EvaluationContext<'a> {
         self.extension_targets.len()
     }
 
-    fn new_scope_identity(transaction: &Rc<RefCell<InvocationTransaction>>) -> Rc<ScopeIdentity> {
-        let key = transaction.borrow_mut().allocate_scope_key();
+    fn new_scope_identity(session: &Rc<EvalSession>) -> Rc<ScopeIdentity> {
+        let key = session.transaction.borrow_mut().allocate_scope_key();
         Rc::new(ScopeIdentity { key })
     }
 
     fn allocate_extension_id(&self) -> Option<ExtensionId> {
-        self.transaction.borrow_mut().allocate_extension_id()
+        self.session.transaction.borrow_mut().allocate_extension_id()
     }
 
     fn should_journal_scope_write(&self) -> bool {
         let Some(floor) = self.journal_floor else {
             return true;
         };
-        self.transaction
+        self.session.transaction
             .borrow()
             .current_savepoint_index()
             .is_some_and(|current| current > floor)
@@ -2538,9 +2545,9 @@ impl<'a> EvaluationContext<'a> {
             scope,
             name: name.to_string(),
         };
-        if self.transaction.borrow_mut().first_write(key) {
+        if self.session.transaction.borrow_mut().first_write(key) {
             let previous = self.variables.get(name).cloned();
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::Variable {
                     scope,
@@ -2561,9 +2568,9 @@ impl<'a> EvaluationContext<'a> {
             scope,
             name: name.to_string(),
         };
-        if self.transaction.borrow_mut().first_write(key) {
+        if self.session.transaction.borrow_mut().first_write(key) {
             let previous = self.assigned_variables.get(name).cloned();
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::AssignedVariable {
                     scope,
@@ -2584,9 +2591,9 @@ impl<'a> EvaluationContext<'a> {
             scope,
             name: name.to_string(),
         };
-        if self.transaction.borrow_mut().first_write(key) {
+        if self.session.transaction.borrow_mut().first_write(key) {
             let was_present = self.variable_owners.contains(name);
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::VariableOwner {
                     scope,
@@ -2607,9 +2614,9 @@ impl<'a> EvaluationContext<'a> {
             scope,
             name: name.to_string(),
         };
-        if self.transaction.borrow_mut().first_write(key) {
+        if self.session.transaction.borrow_mut().first_write(key) {
             let previous = self.functions.get(name).cloned();
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::Function {
                     scope,
@@ -2627,8 +2634,8 @@ impl<'a> EvaluationContext<'a> {
         let scope = self.scope_key();
         let journal_floor = self.journal_floor;
         let key = UndoKey::LibraryRegistry { scope };
-        if self.transaction.borrow_mut().first_write(key) {
-            self.transaction
+        if self.session.transaction.borrow_mut().first_write(key) {
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::LibraryRegistry {
                     scope,
@@ -2738,9 +2745,9 @@ impl<'a> EvaluationContext<'a> {
         let scope = self.scope_key();
         let journal_floor = self.journal_floor;
         let key = UndoKey::ExtensionTarget { scope, extension };
-        if self.transaction.borrow_mut().first_write(key) {
+        if self.session.transaction.borrow_mut().first_write(key) {
             let previous = self.extension_targets.get(&extension).cloned();
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::ExtensionTarget {
                     scope,
@@ -2868,15 +2875,15 @@ impl<'a> EvaluationContext<'a> {
         F: FnOnce() -> (DocumentStateUndo, usize),
     {
         let key = UndoKey::DocumentState { field };
-        if self.transaction.borrow_mut().first_write(key) {
+        if self.session.transaction.borrow_mut().first_write(key) {
             let (previous, copied_units) = previous();
             #[cfg(test)]
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .record_document_state_copy_work(copied_units);
             #[cfg(not(test))]
             let _ = copied_units;
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::DocumentState { field, previous });
         }
@@ -3180,13 +3187,8 @@ impl<'a> EvaluationContext<'a> {
             } else {
                 Vec::new()
             },
-            source_modes: Rc::clone(&caller_context.source_modes),
-            document_state: Rc::clone(&caller_context.document_state),
-            limits: caller_context.limits,
-            runtime: Rc::clone(&caller_context.runtime),
-            invocation_depth: Rc::clone(&caller_context.invocation_depth),
-            transaction: Rc::clone(&caller_context.transaction),
-            scope_identity: Self::new_scope_identity(&caller_context.transaction),
+            session: Rc::clone(&caller_context.session),
+            scope_identity: Self::new_scope_identity(&caller_context.session),
             journal_floor,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
@@ -3220,15 +3222,15 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn initialize_document_state(&mut self, snapshot: &arkst_ir::IrDocumentState) {
-        self.document_state = Rc::new(RefCell::new(DocumentState::from_snapshot(snapshot)));
+        *self.session.document_state.borrow_mut() = DocumentState::from_snapshot(snapshot);
     }
 
     fn document_state_snapshot(&self) -> arkst_ir::IrDocumentState {
-        self.document_state.borrow().snapshot()
+        self.session.document_state.borrow().snapshot()
     }
 
     fn document_state_value(&self, name: &str) -> IrValue {
-        let state = self.document_state.borrow();
+        let state = self.session.document_state.borrow();
         match name {
             "docname" => IrValue::String(state.name.clone()),
             "docdescription" => IrValue::String(state.description.clone()),
@@ -3260,11 +3262,11 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn document_authors_snapshot(&self) -> Vec<IrDocumentAuthor> {
-        self.document_state.borrow().authors.clone()
+        self.session.document_state.borrow().authors.clone()
     }
 
     fn restore_document_state_undo(&self, undo: DocumentStateUndo) {
-        let mut state = self.document_state.borrow_mut();
+        let mut state = self.session.document_state.borrow_mut();
         match undo {
             DocumentStateUndo::Name(previous) => state.name = previous,
             DocumentStateUndo::Description(previous) => state.description = previous,
@@ -3309,19 +3311,19 @@ impl<'a> EvaluationContext<'a> {
         match name {
             "docname" => {
                 self.record_document_state_undo(DocumentStateField::Name, || {
-                    let previous = self.document_state.borrow().name.clone();
+                    let previous = self.session.document_state.borrow().name.clone();
                     let copied_units = previous.len();
                     (DocumentStateUndo::Name(previous), copied_units)
                 });
-                self.document_state.borrow_mut().name = value;
+                self.session.document_state.borrow_mut().name = value;
             }
             "docdescription" => {
                 self.record_document_state_undo(DocumentStateField::Description, || {
-                    let previous = self.document_state.borrow().description.clone();
+                    let previous = self.session.document_state.borrow().description.clone();
                     let copied_units = previous.len();
                     (DocumentStateUndo::Description(previous), copied_units)
                 });
-                self.document_state.borrow_mut().description = value;
+                self.session.document_state.borrow_mut().description = value;
             }
             _ => unreachable!("document state field must be validated by the caller"),
         }
@@ -3330,20 +3332,20 @@ impl<'a> EvaluationContext<'a> {
     fn set_document_type(&self, value: arkst_ir::IrDocumentType) {
         self.record_document_state_undo(DocumentStateField::DocumentType, || {
             (
-                DocumentStateUndo::DocumentType(self.document_state.borrow().document_type),
+                DocumentStateUndo::DocumentType(self.session.document_state.borrow().document_type),
                 0,
             )
         });
-        self.document_state.borrow_mut().document_type = value;
+        self.session.document_state.borrow_mut().document_type = value;
     }
 
     fn publish_numbering_layer(&self, layer: IrNumberingLayer) {
         self.record_document_state_undo(DocumentStateField::Numbering, || {
-            let previous = self.document_state.borrow().numbering.clone();
+            let previous = self.session.document_state.borrow().numbering.clone();
             let copied_units = previous.layers.len();
             (DocumentStateUndo::Numbering(previous), copied_units)
         });
-        let mut state = self.document_state.borrow_mut();
+        let mut state = self.session.document_state.borrow_mut();
         if !layer.merge {
             state.numbering.layers.clear();
         }
@@ -3352,21 +3354,21 @@ impl<'a> EvaluationContext<'a> {
 
     fn publish_font_layer(&self, layer: IrFontLayer) {
         self.record_document_state_undo(DocumentStateField::Font, || {
-            let previous = self.document_state.borrow().font.clone();
+            let previous = self.session.document_state.borrow().font.clone();
             let copied_units = previous.layers.len();
             (DocumentStateUndo::Font(previous), copied_units)
         });
-        self.document_state.borrow_mut().font.layers.push(layer);
+        self.session.document_state.borrow_mut().font.layers.push(layer);
     }
 
     fn merge_paragraph_style(&self, partial: IrParagraphStyleInfo) {
         self.record_document_state_undo(DocumentStateField::ParagraphStyle, || {
             (
-                DocumentStateUndo::ParagraphStyle(self.document_state.borrow().paragraph_style),
+                DocumentStateUndo::ParagraphStyle(self.session.document_state.borrow().paragraph_style),
                 0,
             )
         });
-        let mut state = self.document_state.borrow_mut();
+        let mut state = self.session.document_state.borrow_mut();
         if let Some(value) = partial.line_height {
             state.paragraph_style.line_height = Some(value);
         }
@@ -3385,107 +3387,107 @@ impl<'a> EvaluationContext<'a> {
         self.record_document_state_undo(DocumentStateField::AutoPageBreakMaxDepth, || {
             (
                 DocumentStateUndo::AutoPageBreakMaxDepth(
-                    self.document_state.borrow().auto_page_break_max_depth,
+                    self.session.document_state.borrow().auto_page_break_max_depth,
                 ),
                 0,
             )
         });
-        self.document_state.borrow_mut().auto_page_break_max_depth = value;
+        self.session.document_state.borrow_mut().auto_page_break_max_depth = value;
     }
 
     fn set_page_alignment(&self, value: Option<IrDocumentAlignment>) {
         self.record_document_state_undo(DocumentStateField::PageAlignment, || {
             (
-                DocumentStateUndo::PageAlignment(self.document_state.borrow().page_alignment),
+                DocumentStateUndo::PageAlignment(self.session.document_state.borrow().page_alignment),
                 0,
             )
         });
-        self.document_state.borrow_mut().page_alignment = value;
+        self.session.document_state.borrow_mut().page_alignment = value;
     }
 
     fn set_page_geometry(&self, value: Option<IrPageGeometry>) {
         self.record_document_state_undo(DocumentStateField::PageGeometry, || {
             (
-                DocumentStateUndo::PageGeometry(self.document_state.borrow().page_geometry.clone()),
+                DocumentStateUndo::PageGeometry(self.session.document_state.borrow().page_geometry.clone()),
                 0,
             )
         });
-        self.document_state.borrow_mut().page_geometry = value;
+        self.session.document_state.borrow_mut().page_geometry = value;
     }
 
     fn set_page_columns(&self, value: Option<u32>) {
         self.record_document_state_undo(DocumentStateField::PageColumns, || {
             (
-                DocumentStateUndo::PageColumns(self.document_state.borrow().page_columns),
+                DocumentStateUndo::PageColumns(self.session.document_state.borrow().page_columns),
                 0,
             )
         });
-        self.document_state.borrow_mut().page_columns = value;
+        self.session.document_state.borrow_mut().page_columns = value;
     }
 
     fn set_page_size(&self, value: IrPageSizeSelection) {
         self.record_document_state_undo(DocumentStateField::PageSize, || {
             (
-                DocumentStateUndo::PageSize(self.document_state.borrow().page_size),
+                DocumentStateUndo::PageSize(self.session.document_state.borrow().page_size),
                 0,
             )
         });
-        self.document_state.borrow_mut().page_size = Some(value);
+        self.session.document_state.borrow_mut().page_size = Some(value);
     }
 
     fn set_page_margin(&self, value: IrPageMargins) {
         self.record_document_state_undo(DocumentStateField::PageMargin, || {
             (
-                DocumentStateUndo::PageMargin(self.document_state.borrow().page_margin.clone()),
+                DocumentStateUndo::PageMargin(self.session.document_state.borrow().page_margin.clone()),
                 0,
             )
         });
-        self.document_state.borrow_mut().page_margin = Some(value);
+        self.session.document_state.borrow_mut().page_margin = Some(value);
     }
 
     fn set_page_border_widths(&self, value: IrPageBorderWidths) {
         self.record_document_state_undo(DocumentStateField::PageBorderWidths, || {
             (
                 DocumentStateUndo::PageBorderWidths(
-                    self.document_state.borrow().page_border_widths.clone(),
+                    self.session.document_state.borrow().page_border_widths.clone(),
                 ),
                 0,
             )
         });
-        self.document_state.borrow_mut().page_border_widths = Some(value);
+        self.session.document_state.borrow_mut().page_border_widths = Some(value);
     }
 
     fn set_page_border_color(&self, value: IrColor) {
         self.record_document_state_undo(DocumentStateField::PageBorderColor, || {
             (
                 DocumentStateUndo::PageBorderColor(
-                    self.document_state.borrow().page_border_color.clone(),
+                    self.session.document_state.borrow().page_border_color.clone(),
                 ),
                 0,
             )
         });
-        self.document_state.borrow_mut().page_border_color = Some(value);
+        self.session.document_state.borrow_mut().page_border_color = Some(value);
     }
 
     fn set_page_background(&self, value: IrColor) {
         self.record_document_state_undo(DocumentStateField::PageBackground, || {
             (
                 DocumentStateUndo::PageBackground(
-                    self.document_state.borrow().page_background.clone(),
+                    self.session.document_state.borrow().page_background.clone(),
                 ),
                 0,
             )
         });
-        self.document_state.borrow_mut().page_background = Some(value);
+        self.session.document_state.borrow_mut().page_background = Some(value);
     }
 
     fn publish_page_format_layer(&self, layer: IrPageFormatLayer) {
         self.record_document_state_undo(DocumentStateField::PageFormat, || {
-            let previous = self.document_state.borrow().page_format.clone();
+            let previous = self.session.document_state.borrow().page_format.clone();
             let copied_units = previous.layers.len();
             (DocumentStateUndo::PageFormat(previous), copied_units)
         });
-        self.document_state
+        self.session.document_state
             .borrow_mut()
             .page_format
             .layers
@@ -3495,21 +3497,21 @@ impl<'a> EvaluationContext<'a> {
     fn set_slides_configuration(&self, value: Option<IrSlidesConfiguration>) {
         self.record_document_state_undo(DocumentStateField::Slides, || {
             (
-                DocumentStateUndo::Slides(self.document_state.borrow().slides),
+                DocumentStateUndo::Slides(self.session.document_state.borrow().slides),
                 0,
             )
         });
-        self.document_state.borrow_mut().slides = value;
+        self.session.document_state.borrow_mut().slides = value;
     }
 
     fn append_document_author(&self, name: String) {
         self.record_document_state_undo(DocumentStateField::Authors, || {
             (
-                DocumentStateUndo::AuthorsLen(self.document_state.borrow().authors.len()),
+                DocumentStateUndo::AuthorsLen(self.session.document_state.borrow().authors.len()),
                 0,
             )
         });
-        self.document_state
+        self.session.document_state
             .borrow_mut()
             .authors
             .push(IrDocumentAuthor {
@@ -3526,7 +3528,7 @@ impl<'a> EvaluationContext<'a> {
                 field: DocumentStateField::Keywords,
             });
         let previous = {
-            let mut state = self.document_state.borrow_mut();
+            let mut state = self.session.document_state.borrow_mut();
             if first_write {
                 Some(std::mem::replace(&mut state.keywords, keywords))
             } else {
@@ -3536,10 +3538,10 @@ impl<'a> EvaluationContext<'a> {
         };
         if let Some(previous) = previous {
             #[cfg(test)]
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .record_document_state_copy_work(0);
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::DocumentState {
                     field: DocumentStateField::Keywords,
@@ -3551,25 +3553,25 @@ impl<'a> EvaluationContext<'a> {
     fn set_document_theme(&self, theme: IrDocumentTheme) {
         self.record_document_state_undo(DocumentStateField::Theme, || {
             (
-                DocumentStateUndo::Theme(self.document_state.borrow().theme.clone()),
+                DocumentStateUndo::Theme(self.session.document_state.borrow().theme.clone()),
                 0,
             )
         });
-        self.document_state.borrow_mut().theme = Some(theme);
+        self.session.document_state.borrow_mut().theme = Some(theme);
     }
 
     fn set_document_locale(&self, locale: arkst_ir::IrDocumentLocale) {
         self.record_document_state_undo(DocumentStateField::Locale, || {
             (
-                DocumentStateUndo::Locale(self.document_state.borrow().locale.clone()),
+                DocumentStateUndo::Locale(self.session.document_state.borrow().locale.clone()),
                 0,
             )
         });
-        self.document_state.borrow_mut().locale = Some(locale);
+        self.session.document_state.borrow_mut().locale = Some(locale);
     }
 
     fn localization_table_undo_contains(&self, name: &str) -> bool {
-        self.transaction
+        self.session.transaction
             .borrow()
             .savepoints
             .last()
@@ -3587,7 +3589,7 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn record_localization_table_undo(&self, name: String, previous: Option<LocalizationTable>) {
-        let mut transaction = self.transaction.borrow_mut();
+        let mut transaction = self.session.transaction.borrow_mut();
         let Some(savepoint) = transaction.savepoints.last_mut() else {
             return;
         };
@@ -3637,7 +3639,7 @@ impl<'a> EvaluationContext<'a> {
                 field: DocumentStateField::LocalizationTables,
             });
         if first_write {
-            self.transaction
+            self.session.transaction
                 .borrow_mut()
                 .push(InvocationUndo::DocumentState {
                     field: DocumentStateField::LocalizationTables,
@@ -3646,7 +3648,7 @@ impl<'a> EvaluationContext<'a> {
         }
         let capture_table = !self.localization_table_undo_contains(&name);
         let previous = {
-            let mut state = self.document_state.borrow_mut();
+            let mut state = self.session.document_state.borrow_mut();
             if capture_table {
                 let previous = state.localization_tables.remove(&name);
                 let mut candidate = Some(candidate);
@@ -3686,21 +3688,21 @@ impl<'a> EvaluationContext<'a> {
     fn set_caption_position(&self, caption_position: IrCaptionPositionInfo) {
         self.record_document_state_undo(DocumentStateField::CaptionPosition, || {
             (
-                DocumentStateUndo::CaptionPosition(self.document_state.borrow().caption_position),
+                DocumentStateUndo::CaptionPosition(self.session.document_state.borrow().caption_position),
                 0,
             )
         });
-        self.document_state.borrow_mut().caption_position = caption_position;
+        self.session.document_state.borrow_mut().caption_position = caption_position;
     }
 
     fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
         self.record_document_state_undo(DocumentStateField::Authors, || {
             (
-                DocumentStateUndo::AuthorsLen(self.document_state.borrow().authors.len()),
+                DocumentStateUndo::AuthorsLen(self.session.document_state.borrow().authors.len()),
                 0,
             )
         });
-        let mut state = self.document_state.borrow_mut();
+        let mut state = self.session.document_state.borrow_mut();
         state
             .authors
             .try_reserve(authors.len())
@@ -4171,7 +4173,7 @@ impl Evaluator {
             IrDocument {
                 nodes,
                 metadata: arkst_ir::IrMetadata {
-                    document_state: context.document_state_snapshot(),
+                    document_state: context.session.document_state_snapshot(),
                     ..metadata
                 },
             },
@@ -4468,7 +4470,7 @@ impl Evaluator {
             IrDocument {
                 nodes,
                 metadata: arkst_ir::IrMetadata {
-                    document_state: context.document_state_snapshot(),
+                    document_state: context.session.document_state_snapshot(),
                     ..document.metadata.clone()
                 },
             },
@@ -8815,7 +8817,7 @@ impl Evaluator {
                 Err(outcome) => return outcome,
             };
 
-        if title.is_none() && context.document_state.borrow().locale.is_some() {
+        if title.is_none() && context.session.document_state.borrow().locale.is_some() {
             diagnostics.push(box_argument_error(
                 "`.box` automatic localized titles are not yet implemented",
                 *span,
@@ -9047,7 +9049,7 @@ impl Evaluator {
         first_origin: Option<ValueOrigin>,
         implicit_argument: Option<&RuntimeValue>,
     ) -> LegacyCallOutcome {
-        if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+        if context.session.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
             diagnostics.push(speaker_note_argument_error(
                 "`.speakernote` is only valid for slides documents",
                 *span,
@@ -9191,7 +9193,7 @@ impl Evaluator {
         first_origin: Option<ValueOrigin>,
         implicit_argument: Option<&RuntimeValue>,
     ) -> LegacyCallOutcome {
-        if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+        if context.session.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
             diagnostics.push(fragment_argument_error(
                 "`.fragment` is only valid for slides documents",
                 *span,
@@ -9701,7 +9703,7 @@ impl Evaluator {
         let Some(binding_plan) = binding_plan else {
             return LegacyCallOutcome::Failed;
         };
-        if context.document_state.borrow().document_type == arkst_ir::IrDocumentType::Plain {
+        if context.session.document_state.borrow().document_type == arkst_ir::IrDocumentType::Plain {
             diagnostics.push(document_state_conversion_error(
                 "`.lastheading` is not available for plain documents".to_string(),
                 *span,
@@ -10972,7 +10974,7 @@ impl Evaluator {
                 return LegacyCallOutcome::Failed;
             }
         };
-        let document_type = context.document_state.borrow().document_type;
+        let document_type = context.session.document_state.borrow().document_type;
         let layer = match crate::numbering::layer_from_dictionary(&dictionary, merge, document_type)
         {
             Ok(layer) => layer,
@@ -11112,7 +11114,7 @@ impl Evaluator {
                 ));
                 return LegacyCallOutcome::Failed;
             };
-            let locale = context.document_state.borrow().locale.clone();
+            let locale = context.session.document_state.borrow().locale.clone();
             let Some(locale) = locale else {
                 diagnostics.push(localization_error(
                     "`.localize` requires a document locale selected by `.doclang`",
@@ -11120,7 +11122,7 @@ impl Evaluator {
                 ));
                 return LegacyCallOutcome::Failed;
             };
-            let state = context.document_state.borrow();
+            let state = context.session.document_state.borrow();
             let Some(table) = state.localization_tables.get(table_name) else {
                 diagnostics.push(localization_error(
                     format!("Could not find localization table `{table_name}`"),
@@ -11570,7 +11572,7 @@ impl Evaluator {
         } else {
             None
         };
-        let document_type = context.document_state.borrow().document_type;
+        let document_type = context.session.document_state.borrow().document_type;
         let page_size = page_size_format
             .flatten()
             .map(|format| IrPageSizeSelection {
@@ -12223,7 +12225,7 @@ impl Evaluator {
         }
 
         if name == "nonumbering" {
-            let document_type = context.document_state.borrow().document_type;
+            let document_type = context.session.document_state.borrow().document_type;
             context.publish_numbering_layer(IrNumberingLayer {
                 merge: false,
                 document_type,
@@ -12303,7 +12305,7 @@ impl Evaluator {
         }
 
         if name == "slides" {
-            if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+            if context.session.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
                 diagnostics.push(document_state_conversion_error(
                     "`.slides` is only valid for slides documents".to_string(),
                     *span,
@@ -12512,7 +12514,7 @@ impl Evaluator {
         }
 
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
-            return LegacyCallOutcome::Value(context.document_state_value(name));
+            return LegacyCallOutcome::Value(context.session.document_state_value(name));
         }
         let Some(binding_plan) = binding_plan else {
             return LegacyCallOutcome::Failed;
@@ -12751,7 +12753,7 @@ impl Evaluator {
         first_origin: Option<ValueOrigin>,
     ) -> LegacyCallOutcome {
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
-            return LegacyCallOutcome::Value(context.document_state_value("doclang"));
+            return LegacyCallOutcome::Value(context.session.document_state_value("doclang"));
         }
         let Some(binding_plan) = binding_plan else {
             return LegacyCallOutcome::Failed;
@@ -12814,7 +12816,7 @@ impl Evaluator {
         // Upstream's nullable String parameter receives `.none` as null, and
         // the shared modify-or-echo helper therefore takes its getter path.
         if argument.is_none() {
-            return LegacyCallOutcome::Value(context.document_state_value("doclang"));
+            return LegacyCallOutcome::Value(context.session.document_state_value("doclang"));
         }
 
         let identifier = match builtins::scalar_string_conversion(&argument) {
@@ -13037,7 +13039,7 @@ impl Evaluator {
         first_origin: Option<ValueOrigin>,
     ) -> LegacyCallOutcome {
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
-            return LegacyCallOutcome::Value(context.document_state_value("dockeywords"));
+            return LegacyCallOutcome::Value(context.session.document_state_value("dockeywords"));
         }
         let Some(binding_plan) = binding_plan else {
             return LegacyCallOutcome::Failed;
@@ -13245,7 +13247,7 @@ impl Evaluator {
         // `.captionposition` mutation is preserved by the outer commit. The
         // invocation checkpoint in the central call boundary is the rollback
         // target for any later conversion failure.
-        let mut candidate = context.document_state.borrow().caption_position;
+        let mut candidate = context.session.document_state.borrow().caption_position;
         for (parameter, location) in [
             (CaptionPositionParameter::Default, bindings.default),
             (CaptionPositionParameter::Figures, bindings.figures),
@@ -29221,6 +29223,21 @@ mod tests {
         SourceSpan::new(SourceId(1), start, end)
     }
 
+    #[test]
+    fn g2_context_frames_share_one_eval_session_per_compilation() {
+        let root = EvaluationContext::new();
+        let child = root.child();
+        let independent = EvaluationContext::new();
+
+        assert!(Rc::ptr_eq(&root.session, &child.session));
+        assert!(!Rc::ptr_eq(&root.session, &independent.session));
+        assert_ne!(root.scope_key(), child.scope_key());
+
+        root.session.document_state.borrow_mut().name = "shared".to_string();
+        assert_eq!(child.session.document_state.borrow().name, "shared");
+        assert!(independent.session.document_state.borrow().name.is_empty());
+    }
+
     fn frontend_invocation_block(
         name: &str,
         chain: Vec<FrontendCallSegment>,
@@ -38368,7 +38385,7 @@ mod tests {
         );
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "multiply",
@@ -38387,7 +38404,7 @@ mod tests {
         assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
         assert!(diagnostics[0].message.contains("invalid text"));
         assert!(diagnostics[0].message.contains("Number"));
-        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(context.session.document_state_snapshot(), before);
 
         diagnostics.clear();
         let wrong_domain = named_arg_at(
@@ -38527,7 +38544,7 @@ mod tests {
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
         context.replace_document_keywords(vec!["before".to_string()]);
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "dockeywords",
@@ -38548,7 +38565,7 @@ mod tests {
         assert!(diagnostics[0]
             .message
             .contains("unsupported value category"));
-        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(context.session.document_state_snapshot(), before);
     }
 
     #[test]
@@ -38664,7 +38681,7 @@ mod tests {
         };
         evaluator.evaluate_node(&declaration, &mut diagnostics, &mut context);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "otherwise",
@@ -38685,7 +38702,7 @@ mod tests {
                 if matches!(nodes.as_slice(), [IrNode::FunctionCall { name, .. }] if name == "mutate_then_unresolved")
         ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(context.session.document_state_snapshot(), before);
     }
 
     #[test]
@@ -38805,7 +38822,7 @@ mod tests {
         };
         assert_eq!(values.len(), elements.len());
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+        assert_eq!(context.session.transaction.borrow().pending_entry_count(), 0);
         checkpoint.commit(&context);
         context.end_invocation();
     }
@@ -38866,7 +38883,7 @@ mod tests {
         }
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(context.extension_target_count(), 2);
-        assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+        assert_eq!(context.session.transaction.borrow().pending_entry_count(), 0);
     }
 
     #[test]
@@ -38909,7 +38926,7 @@ mod tests {
                 assert!(matches!(outcome, CallOutcome::NoValue));
             }
             assert_eq!(context.extension_target_count(), 2);
-            assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+            assert_eq!(context.session.transaction.borrow().pending_entry_count(), 0);
         }
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -38945,7 +38962,7 @@ mod tests {
 
         context.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
-        let copy_work_before = context.transaction.borrow().document_state_copy_work();
+        let copy_work_before = context.session.transaction.borrow().document_state_copy_work();
         let outcome = evaluator.map_callable_values(
             &elements,
             &callable,
@@ -38966,11 +38983,11 @@ mod tests {
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(context.document_authors_snapshot().len(), elements.len());
         assert_eq!(
-            context.transaction.borrow().document_state_copy_work() - copy_work_before,
+            context.session.transaction.borrow().document_state_copy_work() - copy_work_before,
             0,
             "author appends must journal only the pre-append length"
         );
-        assert_eq!(context.transaction.borrow().pending_entry_count(), 1);
+        assert_eq!(context.session.transaction.borrow().pending_entry_count(), 1);
         checkpoint.commit(&context);
         context.end_invocation();
     }
@@ -39010,7 +39027,7 @@ mod tests {
             span(20, 30),
             None,
         );
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "takes_one",
@@ -39025,7 +39042,7 @@ mod tests {
 
         assert!(matches!(outcome, CallOutcome::Failed));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(context.session.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39046,7 +39063,7 @@ mod tests {
             span(30, 40),
             None,
         );
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
         let body = vec![
             IrNode::FunctionCall {
                 name: "docname".to_string(),
@@ -39074,7 +39091,7 @@ mod tests {
 
         assert!(matches!(outcome, CallOutcome::Failed));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(context.session.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39092,7 +39109,7 @@ mod tests {
             span(30, 40),
             None,
         );
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
         let body = vec![
             IrNode::FunctionCall {
                 name: "docname".to_string(),
@@ -39124,7 +39141,7 @@ mod tests {
         };
         assert_paragraph_text(&nodes, "7");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_ne!(context.document_state_snapshot(), before);
+        assert_ne!(context.session.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39140,7 +39157,7 @@ mod tests {
             "caption_value".to_string(),
             IrValue::Enum(IrEnumValue::CaptionPosition(IrCaptionPosition::Top)),
         );
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "captionposition",
@@ -39163,7 +39180,7 @@ mod tests {
         assert!(diagnostics[0].message.contains("invalid text"));
         assert_eq!(diagnostics[0].primary, Some(candidate_span));
         assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
-        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(context.session.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39182,7 +39199,7 @@ mod tests {
                 unit: IrSizeUnit::Px,
             }),
         );
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "container",
@@ -39212,7 +39229,7 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert!(diagnostics[0].message.contains("invalid text"));
         assert_eq!(diagnostics[0].primary, Some(candidate_span));
-        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(context.session.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39222,7 +39239,7 @@ mod tests {
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
         context.set_document_state_value("docname", "before".to_string());
-        let before = context.document_state_snapshot();
+        let before = context.session.document_state_snapshot();
         let body = vec![
             IrNode::FunctionCall {
                 name: "docname".to_string(),
@@ -39259,7 +39276,7 @@ mod tests {
 
         assert!(matches!(outcome, CallOutcome::Failed));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(context.document_state_snapshot(), before);
+        assert_eq!(context.session.document_state_snapshot(), before);
     }
 
     #[test]
