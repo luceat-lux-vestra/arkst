@@ -3148,6 +3148,7 @@ impl<'a> EvaluationContext<'a> {
         let mut forwarded_variable_owners = BTreeSet::new();
         caller_context.collect_variable_owners(&mut forwarded_variable_owners);
         let journal_floor = caller_context
+            .session
             .transaction
             .borrow()
             .current_savepoint_index();
@@ -3522,6 +3523,7 @@ impl<'a> EvaluationContext<'a> {
 
     fn replace_document_keywords(&self, keywords: Vec<String>) {
         let first_write = self
+            .session
             .transaction
             .borrow_mut()
             .first_write(UndoKey::DocumentState {
@@ -3624,6 +3626,7 @@ impl<'a> EvaluationContext<'a> {
     ) -> bool {
         if !merge
             && self
+                .session
                 .document_state
                 .borrow()
                 .localization_tables
@@ -3633,6 +3636,7 @@ impl<'a> EvaluationContext<'a> {
         }
 
         let first_write = self
+            .session
             .transaction
             .borrow_mut()
             .first_write(UndoKey::DocumentState {
@@ -4173,7 +4177,7 @@ impl Evaluator {
             IrDocument {
                 nodes,
                 metadata: arkst_ir::IrMetadata {
-                    document_state: context.session.document_state_snapshot(),
+                    document_state: context.document_state_snapshot(),
                     ..metadata
                 },
             },
@@ -4470,7 +4474,7 @@ impl Evaluator {
             IrDocument {
                 nodes,
                 metadata: arkst_ir::IrMetadata {
-                    document_state: context.session.document_state_snapshot(),
+                    document_state: context.document_state_snapshot(),
                     ..document.metadata.clone()
                 },
             },
@@ -9011,6 +9015,7 @@ impl Evaluator {
         };
 
         let locale = context
+            .session
             .document_state
             .borrow()
             .locale
@@ -12514,7 +12519,7 @@ impl Evaluator {
         }
 
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
-            return LegacyCallOutcome::Value(context.session.document_state_value(name));
+            return LegacyCallOutcome::Value(context.document_state_value(name));
         }
         let Some(binding_plan) = binding_plan else {
             return LegacyCallOutcome::Failed;
@@ -12753,7 +12758,7 @@ impl Evaluator {
         first_origin: Option<ValueOrigin>,
     ) -> LegacyCallOutcome {
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
-            return LegacyCallOutcome::Value(context.session.document_state_value("doclang"));
+            return LegacyCallOutcome::Value(context.document_state_value("doclang"));
         }
         let Some(binding_plan) = binding_plan else {
             return LegacyCallOutcome::Failed;
@@ -12816,7 +12821,7 @@ impl Evaluator {
         // Upstream's nullable String parameter receives `.none` as null, and
         // the shared modify-or-echo helper therefore takes its getter path.
         if argument.is_none() {
-            return LegacyCallOutcome::Value(context.session.document_state_value("doclang"));
+            return LegacyCallOutcome::Value(context.document_state_value("doclang"));
         }
 
         let identifier = match builtins::scalar_string_conversion(&argument) {
@@ -13039,7 +13044,7 @@ impl Evaluator {
         first_origin: Option<ValueOrigin>,
     ) -> LegacyCallOutcome {
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
-            return LegacyCallOutcome::Value(context.session.document_state_value("dockeywords"));
+            return LegacyCallOutcome::Value(context.document_state_value("dockeywords"));
         }
         let Some(binding_plan) = binding_plan else {
             return LegacyCallOutcome::Failed;
@@ -38385,7 +38390,7 @@ mod tests {
         );
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "multiply",
@@ -38404,7 +38409,7 @@ mod tests {
         assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
         assert!(diagnostics[0].message.contains("invalid text"));
         assert!(diagnostics[0].message.contains("Number"));
-        assert_eq!(context.session.document_state_snapshot(), before);
+        assert_eq!(context.document_state_snapshot(), before);
 
         diagnostics.clear();
         let wrong_domain = named_arg_at(
@@ -38544,7 +38549,7 @@ mod tests {
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
         context.replace_document_keywords(vec!["before".to_string()]);
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "dockeywords",
@@ -38565,7 +38570,7 @@ mod tests {
         assert!(diagnostics[0]
             .message
             .contains("unsupported value category"));
-        assert_eq!(context.session.document_state_snapshot(), before);
+        assert_eq!(context.document_state_snapshot(), before);
     }
 
     #[test]
@@ -38681,7 +38686,7 @@ mod tests {
         };
         evaluator.evaluate_node(&declaration, &mut diagnostics, &mut context);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "otherwise",
@@ -38702,7 +38707,7 @@ mod tests {
                 if matches!(nodes.as_slice(), [IrNode::FunctionCall { name, .. }] if name == "mutate_then_unresolved")
         ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_eq!(context.session.document_state_snapshot(), before);
+        assert_eq!(context.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39027,7 +39032,7 @@ mod tests {
             span(20, 30),
             None,
         );
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "takes_one",
@@ -39042,7 +39047,7 @@ mod tests {
 
         assert!(matches!(outcome, CallOutcome::Failed));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(context.session.document_state_snapshot(), before);
+        assert_eq!(context.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39063,7 +39068,7 @@ mod tests {
             span(30, 40),
             None,
         );
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
         let body = vec![
             IrNode::FunctionCall {
                 name: "docname".to_string(),
@@ -39091,7 +39096,7 @@ mod tests {
 
         assert!(matches!(outcome, CallOutcome::Failed));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(context.session.document_state_snapshot(), before);
+        assert_eq!(context.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39109,7 +39114,7 @@ mod tests {
             span(30, 40),
             None,
         );
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
         let body = vec![
             IrNode::FunctionCall {
                 name: "docname".to_string(),
@@ -39141,7 +39146,7 @@ mod tests {
         };
         assert_paragraph_text(&nodes, "7");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_ne!(context.session.document_state_snapshot(), before);
+        assert_ne!(context.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39157,7 +39162,7 @@ mod tests {
             "caption_value".to_string(),
             IrValue::Enum(IrEnumValue::CaptionPosition(IrCaptionPosition::Top)),
         );
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "captionposition",
@@ -39180,7 +39185,7 @@ mod tests {
         assert!(diagnostics[0].message.contains("invalid text"));
         assert_eq!(diagnostics[0].primary, Some(candidate_span));
         assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
-        assert_eq!(context.session.document_state_snapshot(), before);
+        assert_eq!(context.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39199,7 +39204,7 @@ mod tests {
                 unit: IrSizeUnit::Px,
             }),
         );
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
 
         let outcome = evaluator.evaluate_call_value(
             "container",
@@ -39229,7 +39234,7 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert!(diagnostics[0].message.contains("invalid text"));
         assert_eq!(diagnostics[0].primary, Some(candidate_span));
-        assert_eq!(context.session.document_state_snapshot(), before);
+        assert_eq!(context.document_state_snapshot(), before);
     }
 
     #[test]
@@ -39239,7 +39244,7 @@ mod tests {
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
         context.set_document_state_value("docname", "before".to_string());
-        let before = context.session.document_state_snapshot();
+        let before = context.document_state_snapshot();
         let body = vec![
             IrNode::FunctionCall {
                 name: "docname".to_string(),
@@ -39276,7 +39281,7 @@ mod tests {
 
         assert!(matches!(outcome, CallOutcome::Failed));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(context.session.document_state_snapshot(), before);
+        assert_eq!(context.document_state_snapshot(), before);
     }
 
     #[test]
