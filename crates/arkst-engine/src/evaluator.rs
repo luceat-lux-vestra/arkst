@@ -1974,6 +1974,7 @@ struct EvalSession {
     invocation_depth: RefCell<usize>,
     transaction: RefCell<InvocationTransaction>,
     context_frames: RefCell<BTreeMap<ContextFrameId, Rc<RefCell<ContextFrame>>>>,
+    retained_definition_frames: RefCell<BTreeMap<ContextFrameId, Rc<RefCell<ContextFrame>>>>,
 }
 
 impl EvalSession {
@@ -1986,6 +1987,7 @@ impl EvalSession {
             invocation_depth: RefCell::new(0),
             transaction: RefCell::new(InvocationTransaction::default()),
             context_frames: RefCell::new(BTreeMap::new()),
+            retained_definition_frames: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -2136,6 +2138,9 @@ enum UndoKey {
         scope: ContextFrameId,
         extension: ExtensionId,
     },
+    RetainedDefinitionFrame {
+        frame: ContextFrameId,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2231,6 +2236,9 @@ enum InvocationUndo {
         journal_floor: Option<usize>,
         previous: Option<ExtensionOverlay>,
     },
+    RetainedDefinitionFrame {
+        frame: ContextFrameId,
+    },
 }
 
 impl InvocationUndo {
@@ -2260,12 +2268,15 @@ impl InvocationUndo {
                 scope: *scope,
                 extension: *extension,
             },
+            Self::RetainedDefinitionFrame { frame } => {
+                UndoKey::RetainedDefinitionFrame { frame: *frame }
+            }
         }
     }
 
     fn scope(&self) -> Option<ContextFrameId> {
         match self {
-            Self::DocumentState { .. } => None,
+            Self::DocumentState { .. } | Self::RetainedDefinitionFrame { .. } => None,
             Self::Variable { scope, .. }
             | Self::AssignedVariable { scope, .. }
             | Self::VariableOwner { scope, .. }
@@ -2277,7 +2288,7 @@ impl InvocationUndo {
 
     fn journal_floor(&self) -> Option<usize> {
         match self {
-            Self::DocumentState { .. } => None,
+            Self::DocumentState { .. } | Self::RetainedDefinitionFrame { .. } => None,
             Self::Variable { journal_floor, .. }
             | Self::AssignedVariable { journal_floor, .. }
             | Self::VariableOwner { journal_floor, .. }
@@ -2470,7 +2481,78 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn context_frame(&self, frame_id: ContextFrameId) -> Option<Rc<RefCell<ContextFrame>>> {
-        self.session.context_frames.borrow().get(&frame_id).cloned()
+        if let Some(frame) = self.session.context_frames.borrow().get(&frame_id).cloned() {
+            return Some(frame);
+        }
+        let retained_roots = self
+            .session
+            .retained_definition_frames
+            .borrow()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        retained_roots
+            .into_iter()
+            .find_map(|root| Self::find_frame_in_ancestry(&root, frame_id))
+    }
+
+    fn find_frame_in_ancestry(
+        frame: &Rc<RefCell<ContextFrame>>,
+        frame_id: ContextFrameId,
+    ) -> Option<Rc<RefCell<ContextFrame>>> {
+        let (key, parent) = {
+            let frame_state = frame.borrow();
+            (frame_state.key, frame_state.read_parent.clone())
+        };
+        if key == frame_id {
+            return Some(Rc::clone(frame));
+        }
+        parent.and_then(|parent| Self::find_frame_in_ancestry(&parent.frame, frame_id))
+    }
+
+    fn retain_definition_frame(&self, frame: Rc<RefCell<ContextFrame>>) -> bool {
+        let frame_id = frame.borrow().key;
+        if let Some(retained) = self
+            .session
+            .retained_definition_frames
+            .borrow()
+            .get(&frame_id)
+            .cloned()
+        {
+            return Rc::ptr_eq(&retained, &frame);
+        }
+        if !self
+            .context_frame(frame_id)
+            .is_some_and(|owned| Rc::ptr_eq(&owned, &frame))
+        {
+            return false;
+        }
+
+        let key = UndoKey::RetainedDefinitionFrame { frame: frame_id };
+        let mut transaction = self.session.transaction.borrow_mut();
+        if transaction.first_write(key) {
+            transaction.push(InvocationUndo::RetainedDefinitionFrame { frame: frame_id });
+        }
+        drop(transaction);
+        self.session
+            .retained_definition_frames
+            .borrow_mut()
+            .insert(frame_id, frame);
+        true
+    }
+
+    fn retain_escaped_definition_frames(&self, value: &RuntimeValue) {
+        value.visit_callable_definition_identities(&mut |identity| {
+            let Some(frame) = identity.upgrade::<RefCell<ContextFrame>>() else {
+                return;
+            };
+            let _ = self.retain_definition_frame(frame);
+        });
+    }
+
+    #[cfg(test)]
+    fn retained_definition_frame_count(&self) -> usize {
+        self.session.retained_definition_frames.borrow().len()
     }
 
     fn read_parent(frame: &Rc<RefCell<ContextFrame>>) -> Option<ContextFrameLink> {
@@ -3127,11 +3209,17 @@ impl<'a> EvaluationContext<'a> {
 
     fn restore_undo(&mut self, undo: InvocationUndo) -> bool {
         let Some(scope) = undo.scope() else {
-            if let InvocationUndo::DocumentState { previous, .. } = undo {
-                self.restore_document_state_undo(previous);
-                return true;
-            }
-            return false;
+            return match undo {
+                InvocationUndo::DocumentState { previous, .. } => {
+                    self.restore_document_state_undo(previous);
+                    true
+                }
+                InvocationUndo::RetainedDefinitionFrame { frame } => {
+                    self.session.retained_definition_frames.borrow_mut().remove(&frame);
+                    true
+                }
+                _ => false,
+            };
         };
         // Dropped callable-local frames are deliberately absent from the
         // registry. Live scopes are restored directly by stable identity
@@ -3190,6 +3278,9 @@ impl<'a> EvaluationContext<'a> {
                     frame.extension_targets.remove(&extension);
                 }
             },
+            InvocationUndo::RetainedDefinitionFrame { .. } => {
+                unreachable!("retained definition frame has no lexical scope")
+            }
         }
         true
     }
@@ -18624,7 +18715,12 @@ impl Evaluator {
                 && !outcome_requires_rollback(&outcome)
             {
                 for (name, value) in child.assigned_values() {
-                    caller_context.apply_callable_assignment(name, value);
+                    if caller_context.apply_callable_assignment(name, value.clone()) {
+                        child.retain_escaped_definition_frames(&value);
+                    }
+                }
+                if let CallOutcome::Value(value) = &outcome {
+                    child.retain_escaped_definition_frames(value);
                 }
             }
             outcome
@@ -37709,6 +37805,265 @@ mod tests {
                 .as_ref()
                 .is_some_and(|definition| definition.upgrade().is_some()),
             "snapshot hydration must preserve a nested runtime function's still-live definition identity"
+        );
+    }
+
+    #[test]
+    fn g2_successful_callable_result_retains_escaped_definition_frame() {
+        let evaluator = Evaluator::new();
+        let mut caller = EvaluationContext::new();
+        caller.runtime_authored_callables = true;
+
+        let escaped_ir = IrValue::Callable(IrCallable {
+            parameters: Some(Vec::new()),
+            body: vec![var_ref("definition_value")],
+            span: span(5, 15),
+            capture: None,
+        });
+        let factory = RuntimeCallable {
+            parameters: Some(Vec::new()),
+            body: vec![
+                var_declaration("definition_value", IrValue::String("before".into())),
+                var_declaration("escaped", escaped_ir),
+                var_reassignment("definition_value", IrValue::String("after".into())),
+                var_ref("escaped"),
+            ],
+            span: span(0, 20),
+            capture: None,
+            definition_identity: None,
+        };
+
+        let mut diagnostics = Vec::new();
+        let escaped = match evaluator.invoke_callable(
+            &factory,
+            Vec::new(),
+            IterationOptions {
+                span: span(0, 20),
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut caller,
+        ) {
+            CallOutcome::Value(value) => value,
+            outcome => panic!("factory must return an escaped callable, got {outcome:?}"),
+        };
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(caller.retained_definition_frame_count(), 1);
+
+        let escaped = escaped.as_callable().expect("escaped callable").clone();
+        assert!(
+            escaped
+                .definition_identity
+                .as_ref()
+                .is_some_and(RuntimeCallableDefinitionIdentity::is_live),
+            "successful result publication must keep the definition frame live"
+        );
+
+        let outcome = evaluator.invoke_callable(
+            &escaped,
+            Vec::new(),
+            IterationOptions {
+                span: span(20, 30),
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut caller,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            project_legacy_outcome(&outcome),
+            LegacyCallOutcome::Value(IrValue::String("after".into())),
+            "the escaped callable must use the retained live frame rather than its stale snapshot"
+        );
+    }
+
+    #[test]
+    fn g2_successful_outer_assignment_retains_escaped_definition_frame() {
+        let evaluator = Evaluator::new();
+        let mut caller = EvaluationContext::new();
+        caller.runtime_authored_callables = true;
+        caller.assign_value("sink".into(), IrValue::None);
+
+        let escaped_ir = IrValue::Callable(IrCallable {
+            parameters: Some(Vec::new()),
+            body: vec![var_ref("definition_value")],
+            span: span(5, 15),
+            capture: None,
+        });
+        let publisher = RuntimeCallable {
+            parameters: Some(Vec::new()),
+            body: vec![
+                var_declaration("definition_value", IrValue::String("before".into())),
+                var_reassignment("sink", escaped_ir),
+                var_reassignment("definition_value", IrValue::String("after".into())),
+            ],
+            span: span(0, 20),
+            capture: None,
+            definition_identity: None,
+        };
+
+        let mut diagnostics = Vec::new();
+        let outcome = evaluator.invoke_callable(
+            &publisher,
+            Vec::new(),
+            IterationOptions {
+                span: span(0, 20),
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut caller,
+        );
+        assert!(matches!(outcome, CallOutcome::NoValue));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(caller.retained_definition_frame_count(), 1);
+
+        let escaped = caller
+            .get("sink")
+            .and_then(|value| value.runtime_value().as_callable().cloned())
+            .expect("published caller value must be callable");
+        assert!(
+            escaped
+                .definition_identity
+                .as_ref()
+                .is_some_and(RuntimeCallableDefinitionIdentity::is_live),
+            "successful owner publication must retain the callable definition frame"
+        );
+        let outcome = evaluator.invoke_callable(
+            &escaped,
+            Vec::new(),
+            IterationOptions {
+                span: span(20, 30),
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut caller,
+        );
+        assert_eq!(
+            project_legacy_outcome(&outcome),
+            LegacyCallOutcome::Value(IrValue::String("after".into()))
+        );
+    }
+
+    #[test]
+    fn g2_nested_runtime_values_promote_callable_definition_frames_structurally() {
+        let evaluator = Evaluator::new();
+        let mut root = EvaluationContext::new();
+        root.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+
+        let callable = {
+            let mut definition = root.child();
+            definition.runtime_authored_callables = true;
+            let callable = evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition);
+            let nested = RuntimeValue::static_collection(vec![RuntimeValue::pair(
+                RuntimeValue::static_string("callable"),
+                RuntimeValue::static_callable(callable.clone()),
+                span(0, 1),
+                ValueOrigin::Static,
+            )]);
+            definition.retain_escaped_definition_frames(&nested);
+            callable
+        };
+
+        checkpoint.commit(&root);
+        root.end_invocation();
+        assert_eq!(root.retained_definition_frame_count(), 1);
+        assert!(
+            callable
+                .definition_identity
+                .as_ref()
+                .is_some_and(RuntimeCallableDefinitionIdentity::is_live),
+            "callables nested in runtime aggregates must promote their definition frame"
+        );
+    }
+
+    #[test]
+    fn g2_nested_rollback_removes_uncommitted_definition_frame_root() {
+        let evaluator = Evaluator::new();
+        let mut root = EvaluationContext::new();
+        root.begin_invocation();
+        let outer = InvocationCheckpoint::capture();
+        root.begin_invocation();
+        let inner = InvocationCheckpoint::capture();
+
+        let (callable, definition) = {
+            let mut definition = root.child();
+            definition.runtime_authored_callables = true;
+            let callable = evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition);
+            definition.retain_escaped_definition_frames(&RuntimeValue::static_callable(
+                callable.clone(),
+            ));
+            (callable, definition)
+        };
+        assert_eq!(root.retained_definition_frame_count(), 1);
+
+        inner.commit(&root);
+        root.end_invocation();
+        assert_eq!(root.retained_definition_frame_count(), 1);
+
+        outer.restore(&mut root);
+        root.end_invocation();
+        assert_eq!(
+            root.retained_definition_frame_count(),
+            0,
+            "outer rollback must remove roots introduced by a committed nested savepoint"
+        );
+        drop(definition);
+        assert!(
+            callable
+                .definition_identity
+                .as_ref()
+                .is_some_and(|identity| !identity.is_live()),
+            "rollback must not leave a hidden strong definition-frame owner"
+        );
+    }
+
+    #[test]
+    fn g2_non_escaping_runtime_callables_do_not_retain_transient_frames() {
+        let evaluator = Evaluator::new();
+        let root = EvaluationContext::new();
+
+        for _ in 0..64 {
+            let callable = {
+                let mut definition = root.child();
+                definition.runtime_authored_callables = true;
+                evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition)
+            };
+            assert!(
+                callable
+                    .definition_identity
+                    .as_ref()
+                    .is_some_and(|identity| !identity.is_live()),
+                "a non-escaping callable must not keep its transient definition frame alive"
+            );
+        }
+
+        assert_eq!(
+            root.retained_definition_frame_count(),
+            0,
+            "EvalSession must not become a retain-all frame arena"
+        );
+    }
+
+    #[test]
+    fn g2_escape_root_rejects_foreign_eval_session_frames() {
+        let evaluator = Evaluator::new();
+        let callable = {
+            let mut definition = EvaluationContext::new();
+            definition.runtime_authored_callables = true;
+            evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition)
+        };
+        let value = RuntimeValue::static_callable(callable.clone());
+        let foreign_session = EvaluationContext::new();
+
+        foreign_session.retain_escaped_definition_frames(&value);
+        assert_eq!(foreign_session.retained_definition_frame_count(), 0);
+        assert!(
+            callable
+                .definition_identity
+                .as_ref()
+                .is_some_and(|identity| !identity.is_live()),
+            "a foreign EvalSession must never adopt another compilation's definition frame"
         );
     }
 
