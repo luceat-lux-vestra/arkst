@@ -28534,9 +28534,20 @@ fn direct_variable_runtime_value(
     ) {
         return None;
     }
+    // Source spelling is owned by the actual declaration frame. Caller
+    // overlays and copied parent bindings are lookup-only, not new owners.
+    // Keep the runtime value, but never forward that one-shot source evidence.
+    let direct_owner = context.frame.borrow().variable_owners.contains(name);
     context
         .get(name)
         .map(|value| value.runtime_value().clone())
+        .map(|value| {
+            if direct_owner {
+                value
+            } else {
+                without_direct_markdown_source_evidence(value)
+            }
+        })
         .filter(|value| value.is_callable() || !value.provenance().is_materialized())
 }
 
@@ -37182,16 +37193,14 @@ mod tests {
             Some(IrValue::String("parent".into()))
         );
         assert_eq!(
-            child
-                .get_function("inherited")
-                .and_then(|binding| {
-                    binding.parameters.explicit().map(|parameters| {
-                        parameters
-                            .iter()
-                            .map(|parameter| parameter.name.clone())
-                            .collect::<Vec<_>>()
-                    })
-                }),
+            child.get_function("inherited").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
             Some(vec!["value".to_string()])
         );
         child.set_value("local".into(), IrValue::String("child".into()));
@@ -37203,16 +37212,14 @@ mod tests {
             Some(IrValue::String("child".into()))
         );
         assert_eq!(
-            child
-                .get_function("future")
-                .and_then(|binding| {
-                    binding.parameters.explicit().map(|parameters| {
-                        parameters
-                            .iter()
-                            .map(|parameter| parameter.name.clone())
-                            .collect::<Vec<_>>()
-                    })
-                }),
+            child.get_function("future").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
             Some(vec!["value".to_string()])
         );
         child.set_value("visible".into(), IrValue::String("shadowed".into()));
@@ -37226,29 +37233,25 @@ mod tests {
             Some(IrValue::String("parent".into()))
         );
         assert_eq!(
-            child
-                .get_function("inherited")
-                .and_then(|binding| {
-                    binding.parameters.explicit().map(|parameters| {
-                        parameters
-                            .iter()
-                            .map(|parameter| parameter.name.clone())
-                            .collect::<Vec<_>>()
-                    })
-                }),
+            child.get_function("inherited").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
             Some(vec!["shadowed".to_string()])
         );
         assert_eq!(
-            parent
-                .get_function("inherited")
-                .and_then(|binding| {
-                    binding.parameters.explicit().map(|parameters| {
-                        parameters
-                            .iter()
-                            .map(|parameter| parameter.name.clone())
-                            .collect::<Vec<_>>()
-                    })
-                }),
+            parent.get_function("inherited").and_then(|binding| {
+                binding.parameters.explicit().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect::<Vec<_>>()
+                })
+            }),
             Some(vec!["value".to_string()])
         );
     }
