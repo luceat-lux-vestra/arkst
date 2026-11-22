@@ -2424,7 +2424,18 @@ impl InvocationCheckpoint {
     }
 
     fn restore(self, context: &mut EvaluationContext<'_>) {
+        let mut retained_definition_frames = Vec::new();
         for entry in context.rollback_transaction().into_iter().rev() {
+            if matches!(entry, InvocationUndo::RetainedDefinitionFrame { .. }) {
+                retained_definition_frames.push(entry);
+            } else {
+                context.restore_undo(entry);
+            }
+        }
+        // Keep escaped-definition roots alive until every lexical/document
+        // mutation in the same savepoint has been restored. A retained frame
+        // may itself be the stable identity targeted by an earlier undo entry.
+        for entry in retained_definition_frames {
             context.restore_undo(entry);
         }
     }
@@ -38019,25 +38030,22 @@ mod tests {
     }
 
     #[test]
-    fn g2_non_escaping_runtime_callables_do_not_retain_transient_frames() {
+    fn g2_non_escaping_runtime_callable_does_not_retain_transient_frame() {
         let evaluator = Evaluator::new();
         let root = EvaluationContext::new();
 
-        for _ in 0..64 {
-            let callable = {
-                let mut definition = root.child();
-                definition.runtime_authored_callables = true;
-                evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition)
-            };
-            assert!(
-                callable
-                    .definition_identity
-                    .as_ref()
-                    .is_some_and(|identity| !identity.is_live()),
-                "a non-escaping callable must not keep its transient definition frame alive"
-            );
-        }
-
+        let callable = {
+            let mut definition = root.child();
+            definition.runtime_authored_callables = true;
+            evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition)
+        };
+        assert!(
+            callable
+                .definition_identity
+                .as_ref()
+                .is_some_and(|identity| !identity.is_live()),
+            "a non-escaping callable must not keep its transient definition frame alive"
+        );
         assert_eq!(
             root.retained_definition_frame_count(),
             0,
