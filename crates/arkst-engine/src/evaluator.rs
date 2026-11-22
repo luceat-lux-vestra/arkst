@@ -2397,7 +2397,7 @@ impl<'a> EvaluationContext<'a> {
     /// Creates a child scope with parent-visible bindings and isolated locals.
     #[allow(dead_code)]
     fn child(&self) -> Self {
-        self.child_with_journal_floor(self.journal_floor)
+        self.child_with_journal_floor(self.journal_floor())
     }
 
     /// Creates a scope whose local bindings cannot outlive this invocation.
@@ -2788,7 +2788,12 @@ impl<'a> EvaluationContext<'a> {
         let journal_floor = self.journal_floor();
         let key = UndoKey::ExtensionTarget { scope, extension };
         if self.session.transaction.borrow_mut().first_write(key) {
-            let previous = self.frame.borrow().extension_targets.get(&extension).cloned();
+            let previous = self
+                .frame
+                .borrow()
+                .extension_targets
+                .get(&extension)
+                .cloned();
             self.session
                 .transaction
                 .borrow_mut()
@@ -2817,7 +2822,12 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn remove_extension_target(&mut self, extension: ExtensionId) {
-        if self.frame.borrow().extension_targets.contains_key(&extension) {
+        if self
+            .frame
+            .borrow()
+            .extension_targets
+            .contains_key(&extension)
+        {
             self.record_extension_target_before_id(extension);
             self.frame.borrow_mut().extension_targets.remove(&extension);
         }
@@ -2970,7 +2980,10 @@ impl<'a> EvaluationContext<'a> {
             }
         }
         self.record_assigned_variable_before(&name);
-        self.frame.borrow_mut().assigned_variables.insert(name, value);
+        self.frame
+            .borrow_mut()
+            .assigned_variables
+            .insert(name, value);
     }
 
     fn assigned_values(&self) -> BTreeMap<String, RuntimeValue> {
@@ -3007,7 +3020,10 @@ impl<'a> EvaluationContext<'a> {
             return false;
         }
         self.record_assigned_variable_before(&name);
-        self.frame.borrow_mut().assigned_variables.insert(name, value);
+        self.frame
+            .borrow_mut()
+            .assigned_variables
+            .insert(name, value);
         true
     }
 
@@ -28519,11 +28535,9 @@ fn direct_variable_runtime_value(
         return None;
     }
     context
-        .variables
         .get(name)
-        .map(VariableValue::runtime_value)
+        .map(|value| value.runtime_value().clone())
         .filter(|value| value.is_callable() || !value.provenance().is_materialized())
-        .cloned()
 }
 
 fn direct_markdown_list_source_text(
