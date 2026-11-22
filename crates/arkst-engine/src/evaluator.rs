@@ -3237,10 +3237,6 @@ impl<'a> EvaluationContext<'a> {
         true
     }
 
-    fn has_forwarded_variable_owner(&self, name: &str) -> bool {
-        Self::has_forwarded_variable_owner_from_frame(&self.frame, name)
-    }
-
     fn collect_variable_owners(&self, owners: &mut BTreeSet<String>) {
         Self::collect_variable_owners_from_frame(&self.frame, owners);
     }
