@@ -171,6 +171,12 @@ impl DefinitionFrameRef {
             .upgrade()
             .map(|frame| RuntimeCallableDefinitionIdentity::new(&frame))
     }
+
+    fn from_runtime_identity(identity: &RuntimeCallableDefinitionIdentity) -> Option<Self> {
+        identity
+            .upgrade::<RefCell<ContextFrame>>()
+            .map(|frame| Self::new(&frame))
+    }
 }
 
 impl std::fmt::Debug for DefinitionFrameRef {
@@ -3411,7 +3417,11 @@ impl<'a> EvaluationContext<'a> {
                     parameters: LambdaParameters::from_ir(function.callable.parameters.clone()),
                     body: function.callable.body.clone(),
                     declaration_span: function.callable.span,
-                    definition_frame: None,
+                    definition_frame: function
+                        .callable
+                        .definition_identity
+                        .as_ref()
+                        .and_then(DefinitionFrameRef::from_runtime_identity),
                     capture: function.callable.capture.clone(),
                     extension: None,
                 }),
@@ -37687,6 +37697,18 @@ mod tests {
         assert!(
             captured.callable.definition_identity.is_some(),
             "nested runtime captures must preserve the live definition identity while the frame is live"
+        );
+
+        let restored = EvaluationContext::from_capture(&capture);
+        let restored = restored
+            .get_function("captured_fn")
+            .expect("snapshot hydration restores the captured function");
+        assert!(
+            restored
+                .definition_frame
+                .as_ref()
+                .is_some_and(|definition| definition.upgrade().is_some()),
+            "snapshot hydration must preserve a nested runtime function's still-live definition identity"
         );
     }
 
