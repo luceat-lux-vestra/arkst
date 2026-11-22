@@ -59,8 +59,9 @@ use crate::invocation_binder::{
     self, BindingPlan, BodyPolicy, BoundSlot, Candidate, ParameterMetadata,
 };
 use crate::value_conversion::{
-    self, RuntimeCallable, RuntimeCallableCapture, RuntimeCallableResourceContext,
-    RuntimeCapturedFunction, RuntimeCapturedVariable, RuntimeNamedArg, RuntimeValue, ScalarTarget,
+    self, RuntimeCallable, RuntimeCallableCapture, RuntimeCallableDefinitionIdentity,
+    RuntimeCallableResourceContext, RuntimeCapturedFunction, RuntimeCapturedVariable,
+    RuntimeNamedArg, RuntimeValue, ScalarTarget,
     ScalarValue, ValueOrigin, ValueProvenance,
 };
 use crate::{ast_to_ir, builtins};
@@ -164,6 +165,12 @@ impl DefinitionFrameRef {
             .upgrade()
             .map(|frame| ContextFrameLink::new(&frame))
     }
+
+    fn runtime_identity(&self) -> Option<RuntimeCallableDefinitionIdentity> {
+        self.frame
+            .upgrade()
+            .map(|frame| RuntimeCallableDefinitionIdentity::new(&frame))
+    }
 }
 
 impl std::fmt::Debug for DefinitionFrameRef {
@@ -201,6 +208,10 @@ impl FunctionBinding {
             body: self.body.clone(),
             span: self.declaration_span,
             capture: self.capture.clone(),
+            definition_identity: self
+                .definition_frame
+                .as_ref()
+                .and_then(DefinitionFrameRef::runtime_identity),
         }
     }
 }
@@ -2067,6 +2078,10 @@ struct EvaluationContext<'a> {
     current_source: Option<SourceId>,
     subdocument_root: Option<SourceId>,
     active_sources: Vec<SourceId>,
+    /// True only while evaluating parser-owned frontend input. Legacy executable
+    /// IR entry points keep this false so decoded callables cannot acquire a
+    /// live definition-frame identity merely by entering the evaluator.
+    runtime_authored_callables: bool,
     /// Parser mode provenance keyed by the source identity carried in IR spans.
     /// Shared across child scopes so source-backed callable bodies keep their
     /// defining parser mode even when invoked after an include returns.
@@ -2422,6 +2437,7 @@ impl<'a> EvaluationContext<'a> {
             current_source: None,
             subdocument_root: None,
             active_sources: Vec::new(),
+            runtime_authored_callables: false,
             session,
         }
     }
@@ -2715,6 +2731,7 @@ impl<'a> EvaluationContext<'a> {
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
+            runtime_authored_callables: self.runtime_authored_callables,
             session: Rc::clone(&self.session),
         }
     }
@@ -2816,6 +2833,11 @@ impl<'a> EvaluationContext<'a> {
 
     fn frame_id(&self) -> ContextFrameId {
         self.frame.borrow().key
+    }
+
+    fn runtime_callable_definition_identity(&self) -> Option<RuntimeCallableDefinitionIdentity> {
+        self.runtime_authored_callables
+            .then(|| RuntimeCallableDefinitionIdentity::new(&self.frame))
     }
 
     #[cfg(test)]
@@ -3477,6 +3499,7 @@ impl<'a> EvaluationContext<'a> {
             } else {
                 Vec::new()
             },
+            runtime_authored_callables: caller_context.runtime_authored_callables,
             session: Rc::clone(&caller_context.session),
         }
     }
@@ -4442,6 +4465,7 @@ impl Evaluator {
         lowering_diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> (IrDocument, Vec<Diagnostic>, Vec<Diagnostic>) {
+        context.runtime_authored_callables = true;
         let metadata = ast_to_ir::document_metadata(document, metadata_defaults);
         context.initialize_document_state(&metadata.document_state);
 
@@ -18370,6 +18394,7 @@ impl Evaluator {
             body: body.to_vec(),
             span,
             capture: Some(Box::new(context.capture_snapshot())),
+            definition_identity: context.runtime_callable_definition_identity(),
         }
     }
 
@@ -18380,6 +18405,9 @@ impl Evaluator {
     ) -> RuntimeCallable {
         if callable.capture.is_none() {
             callable.capture = Some(Box::new(context.capture_snapshot()));
+        }
+        if callable.definition_identity.is_none() {
+            callable.definition_identity = context.runtime_callable_definition_identity();
         }
         callable
     }
@@ -18455,7 +18483,11 @@ impl Evaluator {
             CallableInvocationLayers {
                 extension_invocation: None,
                 extension_context_mode,
-                definition_frame: None,
+                definition_frame: callable
+                    .definition_identity
+                    .as_ref()
+                    .and_then(|identity| identity.upgrade::<RefCell<ContextFrame>>())
+                    .map(|frame| ContextFrameLink::new(&frame)),
             },
         )
     }
@@ -38914,6 +38946,7 @@ mod tests {
                 body: Vec::new(),
                 span: span(0, 1),
                 capture: Some(Box::new(capture.clone())),
+                definition_identity: None,
             },
             &caller,
         );
@@ -38948,6 +38981,7 @@ mod tests {
             }],
             span: span(0, 20),
             capture: Some(Box::new(capture)),
+            definition_identity: None,
         };
         let original_capture = callable.capture.clone();
         let mut caller_context = EvaluationContext::new();
@@ -39395,6 +39429,7 @@ mod tests {
             body: vec![var_ref("value")],
             span,
             capture: None,
+            definition_identity: None,
         };
         let elements = (0..4096)
             .map(|value| RuntimeValue::static_value(IrValue::Number(value as f64)))
@@ -39562,6 +39597,7 @@ mod tests {
             ],
             span,
             capture: None,
+            definition_identity: None,
         };
         let elements = (0..4096)
             .map(|value| RuntimeValue::static_value(IrValue::Number(value as f64)))
