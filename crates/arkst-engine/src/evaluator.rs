@@ -61,8 +61,7 @@ use crate::invocation_binder::{
 use crate::value_conversion::{
     self, RuntimeCallable, RuntimeCallableCapture, RuntimeCallableDefinitionIdentity,
     RuntimeCallableResourceContext, RuntimeCapturedFunction, RuntimeCapturedVariable,
-    RuntimeNamedArg, RuntimeValue, ScalarTarget,
-    ScalarValue, ValueOrigin, ValueProvenance,
+    RuntimeNamedArg, RuntimeValue, ScalarTarget, ScalarValue, ValueOrigin, ValueProvenance,
 };
 use crate::{ast_to_ir, builtins};
 use crate::{
@@ -37648,7 +37647,8 @@ mod tests {
     }
 
     #[test]
-    fn g2_runtime_callable_projection_drops_definition_identity_and_legacy_ingress_stays_detached() {
+    fn g2_runtime_callable_projection_drops_definition_identity_and_legacy_ingress_stays_detached()
+    {
         let evaluator = Evaluator::new();
         let mut definition = EvaluationContext::new();
         definition.runtime_authored_callables = true;
