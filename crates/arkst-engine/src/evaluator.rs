@@ -160,7 +160,9 @@ impl DefinitionFrameRef {
     }
 
     fn upgrade(&self) -> Option<ContextFrameLink> {
-        self.frame.upgrade().map(|frame| ContextFrameLink::new(&frame))
+        self.frame
+            .upgrade()
+            .map(|frame| ContextFrameLink::new(&frame))
     }
 }
 
@@ -283,6 +285,12 @@ struct ExtensionInvocation {
 enum ExtensionContextMode {
     Inherit,
     Suppress,
+}
+
+struct CallableInvocationLayers {
+    extension_invocation: Option<Rc<ExtensionInvocation>>,
+    extension_context_mode: ExtensionContextMode,
+    definition_frame: Option<ContextFrameLink>,
 }
 
 /// The parameter mode of a callable body.
@@ -18444,47 +18452,11 @@ impl Evaluator {
             bound,
             diagnostics,
             caller_context,
-            None,
-            extension_context_mode,
-            None,
-        )
-    }
-
-    fn invoke_bound_callable(
-        &self,
-        callable: &RuntimeCallable,
-        bound: BoundLambdaArguments,
-        _options: IterationOptions,
-        diagnostics: &mut Vec<Diagnostic>,
-        caller_context: &mut EvaluationContext<'_>,
-    ) -> CallOutcome {
-        self.invoke_bound_callable_with_extension_mode(
-            callable,
-            bound,
-            diagnostics,
-            caller_context,
-            None,
-            ExtensionContextMode::Inherit,
-            None,
-        )
-    }
-
-    fn invoke_bound_callable_with_extension(
-        &self,
-        callable: &RuntimeCallable,
-        bound: BoundLambdaArguments,
-        diagnostics: &mut Vec<Diagnostic>,
-        caller_context: &mut EvaluationContext<'_>,
-        extension_invocation: Option<Rc<ExtensionInvocation>>,
-    ) -> CallOutcome {
-        self.invoke_bound_callable_with_extension_mode(
-            callable,
-            bound,
-            diagnostics,
-            caller_context,
-            extension_invocation,
-            ExtensionContextMode::Suppress,
-            None,
+            CallableInvocationLayers {
+                extension_invocation: None,
+                extension_context_mode,
+                definition_frame: None,
+            },
         )
     }
 
@@ -18502,12 +18474,14 @@ impl Evaluator {
             bound,
             diagnostics,
             caller_context,
-            None,
-            ExtensionContextMode::Inherit,
-            binding
-                .definition_frame
-                .as_ref()
-                .and_then(DefinitionFrameRef::upgrade),
+            CallableInvocationLayers {
+                extension_invocation: None,
+                extension_context_mode: ExtensionContextMode::Inherit,
+                definition_frame: binding
+                    .definition_frame
+                    .as_ref()
+                    .and_then(DefinitionFrameRef::upgrade),
+            },
         )
     }
 
@@ -18525,12 +18499,14 @@ impl Evaluator {
             bound,
             diagnostics,
             caller_context,
-            extension_invocation,
-            ExtensionContextMode::Suppress,
-            binding
-                .definition_frame
-                .as_ref()
-                .and_then(DefinitionFrameRef::upgrade),
+            CallableInvocationLayers {
+                extension_invocation,
+                extension_context_mode: ExtensionContextMode::Suppress,
+                definition_frame: binding
+                    .definition_frame
+                    .as_ref()
+                    .and_then(DefinitionFrameRef::upgrade),
+            },
         )
     }
 
@@ -18540,10 +18516,13 @@ impl Evaluator {
         bound: BoundLambdaArguments,
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
-        extension_invocation: Option<Rc<ExtensionInvocation>>,
-        extension_context_mode: ExtensionContextMode,
-        definition_frame: Option<ContextFrameLink>,
+        layers: CallableInvocationLayers,
     ) -> CallOutcome {
+        let CallableInvocationLayers {
+            extension_invocation,
+            extension_context_mode,
+            definition_frame,
+        } = layers;
         caller_context.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
         let outcome = {
