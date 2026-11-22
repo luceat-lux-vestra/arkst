@@ -4660,10 +4660,8 @@ impl Evaluator {
 
             match outcome {
                 CallOutcome::Value(value)
-                    if matches!(
-                        value.as_component(),
-                        Some(IrComponent::ExplicitError(_))
-                    ) && diagnostics.len() > before
+                    if matches!(value.as_component(), Some(IrComponent::ExplicitError(_)))
+                        && diagnostics.len() > before
                         && diagnostics[before..]
                             .iter()
                             .all(is_explicit_error_diagnostic) =>
@@ -4885,10 +4883,8 @@ impl Evaluator {
             );
             match outcome {
                 CallOutcome::Value(value)
-                    if matches!(
-                        value.as_component(),
-                        Some(IrComponent::ExplicitError(_))
-                    ) && diagnostics.len() > before
+                    if matches!(value.as_component(), Some(IrComponent::ExplicitError(_)))
+                        && diagnostics.len() > before
                         && diagnostics[before..]
                             .iter()
                             .all(is_explicit_error_diagnostic) =>
@@ -5401,11 +5397,8 @@ impl Evaluator {
                 CallOutcome::NoValue
             }
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(
-                    value.into_legacy_ir_value(),
-                    span,
-                    diagnostics,
-                ) {
+                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics)
+                {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5458,11 +5451,8 @@ impl Evaluator {
         match outcome {
             CallOutcome::Value(value) if value.is_unit() => CallOutcome::NoValue,
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(
-                    value.into_legacy_ir_value(),
-                    span,
-                    diagnostics,
-                ) {
+                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics)
+                {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5557,11 +5547,7 @@ impl Evaluator {
                 Vec::new()
             }
             CallOutcome::Value(value) => {
-                self.materialize_inline_value(
-                    Some(value.into_legacy_ir_value()),
-                    span,
-                    diagnostics,
-                )
+                self.materialize_inline_value(Some(value.into_legacy_ir_value()), span, diagnostics)
             }
             CallOutcome::NoValue => Vec::new(),
             CallOutcome::Failed => Vec::new(),
@@ -5792,11 +5778,8 @@ impl Evaluator {
         match outcome {
             CallOutcome::Value(value) if value.is_unit() => CallOutcome::NoValue,
             CallOutcome::Value(value) => {
-                match self.materialize_block_value(
-                    value.into_legacy_ir_value(),
-                    span,
-                    diagnostics,
-                ) {
+                match self.materialize_block_value(value.into_legacy_ir_value(), span, diagnostics)
+                {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
                     Err(outcome) => outcome,
                 }
@@ -5830,11 +5813,7 @@ impl Evaluator {
         ) {
             CallOutcome::Value(value) if value.is_unit() => Vec::new(),
             CallOutcome::Value(value) => {
-                self.materialize_inline_value(
-                    Some(value.into_legacy_ir_value()),
-                    span,
-                    diagnostics,
-                )
+                self.materialize_inline_value(Some(value.into_legacy_ir_value()), span, diagnostics)
             }
             CallOutcome::NoValue | CallOutcome::Failed | CallOutcome::Unresolved => Vec::new(),
         }
@@ -7234,13 +7213,13 @@ impl Evaluator {
                     return Err(LegacyCallOutcome::Failed);
                 }
             };
-            value.replace_semantic_value(self.resolve_target_value(
-                converted,
-                *span,
-                call_span,
-                diagnostics,
-                context,
-            )?);
+            let origin = value.origin;
+            let resolved =
+                self.resolve_runtime_target_value(converted, *span, diagnostics, context)?;
+            let Ok(nodes) = resolved.try_into_content_nodes() else {
+                unreachable!("InlineContent target must resolve to runtime Content");
+            };
+            *value = RuntimeValue::content(nodes, origin);
         }
         Ok(bound)
     }
@@ -7249,6 +7228,50 @@ impl Evaluator {
     /// call context. A source-backed raw call body is handled by its owning
     /// builtin before this function; this path is only for a dynamic value
     /// whose target conversion explicitly requests Markdown interpretation.
+    fn resolve_runtime_target_value(
+        &self,
+        converted: value_conversion::TargetValue,
+        argument_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<RuntimeValue, LegacyCallOutcome> {
+        converted.resolve_with(|target, text| {
+            if !matches!(
+                target,
+                value_conversion::RawMarkdownTarget::Inline
+                    | value_conversion::RawMarkdownTarget::Block
+            ) {
+                diagnostics.push(target_conversion_error_message(
+                    "dynamic target conversion",
+                    argument_span,
+                    "this target is not materialized by the current builtin boundary"
+                        .to_string(),
+                ));
+                return Err(LegacyCallOutcome::Failed);
+            }
+            let nodes =
+                self.parse_dynamic_markdown_content(&text, argument_span, target, diagnostics)?;
+            match target {
+                value_conversion::RawMarkdownTarget::Inline
+                | value_conversion::RawMarkdownTarget::Block => {
+                    let before = diagnostics.len();
+                    let nodes = self.evaluate_nodes(&nodes, diagnostics, context);
+                    if diagnostics.len() == before {
+                        Ok(RuntimeValue::static_content(nodes))
+                    } else {
+                        Err(LegacyCallOutcome::Failed)
+                    }
+                }
+                value_conversion::RawMarkdownTarget::Iterable
+                | value_conversion::RawMarkdownTarget::Dictionary
+                | value_conversion::RawMarkdownTarget::Callable => unreachable!(
+                    "unsupported raw target was rejected before dynamic Markdown parsing"
+                ),
+            }
+        })
+    }
+
+    /// Transitional adapter for legacy consumers that still require IrValue.
     fn resolve_target_value(
         &self,
         converted: value_conversion::TargetValue,
@@ -7257,41 +7280,7 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<IrValue, LegacyCallOutcome> {
-        converted
-            .resolve_with(|target, text| {
-                if !matches!(
-                    target,
-                    value_conversion::RawMarkdownTarget::Inline
-                        | value_conversion::RawMarkdownTarget::Block
-                ) {
-                    diagnostics.push(target_conversion_error_message(
-                        "dynamic target conversion",
-                        argument_span,
-                        "this target is not materialized by the current builtin boundary"
-                            .to_string(),
-                    ));
-                    return Err(LegacyCallOutcome::Failed);
-                }
-                let nodes =
-                    self.parse_dynamic_markdown_content(&text, argument_span, target, diagnostics)?;
-                match target {
-                    value_conversion::RawMarkdownTarget::Inline
-                    | value_conversion::RawMarkdownTarget::Block => {
-                        let before = diagnostics.len();
-                        let nodes = self.evaluate_nodes(&nodes, diagnostics, context);
-                        if diagnostics.len() == before {
-                            Ok(RuntimeValue::static_value(IrValue::Content(nodes)))
-                        } else {
-                            Err(LegacyCallOutcome::Failed)
-                        }
-                    }
-                    value_conversion::RawMarkdownTarget::Iterable
-                    | value_conversion::RawMarkdownTarget::Dictionary
-                    | value_conversion::RawMarkdownTarget::Callable => unreachable!(
-                        "unsupported raw target was rejected before dynamic Markdown parsing"
-                    ),
-                }
-            })
+        self.resolve_runtime_target_value(converted, argument_span, diagnostics, context)
             .map(RuntimeValue::into_legacy_ir_value)
     }
 
@@ -15407,9 +15396,9 @@ impl Evaluator {
                     Err(outcome) => return outcome,
                 };
                 let index = match collection_index(&index, length, span, diagnostics) {
-                        Ok(index) => index,
-                        Err(outcome) => return outcome,
-                    };
+                    Ok(index) => index,
+                    Err(outcome) => return outcome,
+                };
                 CallOutcome::Value(
                     index
                         .and_then(|index| elements.get(index).cloned())
@@ -15531,12 +15520,7 @@ impl Evaluator {
         let candidates = invocation_candidates(
             positional_args
                 .iter()
-                .map(|argument| {
-                    (
-                        argument.clone(),
-                        runtime_value_source_span(argument, span),
-                    )
-                })
+                .map(|argument| (argument.clone(), runtime_value_source_span(argument, span)))
                 .collect(),
             named_args.to_vec(),
         );
@@ -17810,14 +17794,11 @@ impl Evaluator {
                 },
                 None => element,
             };
-            let content = match value_into_content_nodes(
-                value.into_legacy_ir_value(),
-                *span,
-                diagnostics,
-            ) {
-                Ok(content) => content,
-                Err(outcome) => return outcome,
-            };
+            let content =
+                match value_into_content_nodes(value.into_legacy_ir_value(), *span, diagnostics) {
+                    Ok(content) => content,
+                    Err(outcome) => return outcome,
+                };
             append_join_content(&mut joined, content);
         }
         CallOutcome::Value(IrValue::Content(joined).into())
@@ -22796,22 +22777,18 @@ fn convert_sizes(
         if let Some(value) = argument.text_identity() {
             value.to_string()
         } else if let Some(nodes) = argument.as_content_nodes() {
-            sizes_plain_text(nodes).ok_or(
-                value_conversion::ConversionError::UnsupportedValue {
-                    target: value_conversion::ConversionTarget::Size,
-                },
-            )?
+            sizes_plain_text(nodes).ok_or(value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Size,
+            })?
         } else {
             return Err(value_conversion::ConversionError::UnsupportedValue {
                 target: value_conversion::ConversionTarget::Size,
             });
         }
     } else if let Some(nodes) = argument.as_content_nodes() {
-        sizes_plain_text(nodes).ok_or(
-            value_conversion::ConversionError::UnsupportedValue {
-                target: value_conversion::ConversionTarget::Size,
-            },
-        )?
+        sizes_plain_text(nodes).ok_or(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Size,
+        })?
     } else {
         return Err(value_conversion::ConversionError::UnsupportedValue {
             target: value_conversion::ConversionTarget::Size,
@@ -23676,7 +23653,9 @@ fn runtime_code_value_text(value: &RuntimeValue) -> Option<String> {
 fn runtime_code_callout_line(value: &RuntimeValue) -> Result<u32, String> {
     let parsed = if let Some(number) = value.as_number() {
         if !number.is_finite() || number.fract() != 0.0 {
-            return Err(format!("Callout keys must be integers, but got '{number}'."));
+            return Err(format!(
+                "Callout keys must be integers, but got '{number}'."
+            ));
         }
         if number < i64::MIN as f64 || number > i64::MAX as f64 {
             return Err(format!("Callout line number {number} is too large"));
@@ -24660,12 +24639,7 @@ fn collection_access_operand(
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| {
-                (
-                    argument.clone(),
-                    runtime_value_source_span(argument, span),
-                )
-            })
+            .map(|argument| (argument.clone(), runtime_value_source_span(argument, span)))
             .collect(),
         named_args.to_vec(),
     );
@@ -24713,12 +24687,7 @@ fn collection_affix_operands(
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| {
-                (
-                    argument.clone(),
-                    runtime_value_source_span(argument, span),
-                )
-            })
+            .map(|argument| (argument.clone(), runtime_value_source_span(argument, span)))
             .collect(),
         named_args.to_vec(),
     );
@@ -24829,12 +24798,7 @@ fn getat_operands(
     let candidates = invocation_candidates(
         positional_args
             .iter()
-            .map(|argument| {
-                (
-                    argument.clone(),
-                    runtime_value_source_span(argument, span),
-                )
-            })
+            .map(|argument| (argument.clone(), runtime_value_source_span(argument, span)))
             .collect(),
         named_args.to_vec(),
     );

@@ -801,10 +801,9 @@ impl RuntimeValue {
                 left.entries.len() == right.entries.len()
                     && left.entries.iter().all(|left_entry| {
                         right.entries.iter().any(|right_entry| {
-                            let (Some((left_key, left_value)), Some((right_key, right_value))) = (
-                                left_entry.as_pair_values(),
-                                right_entry.as_pair_values(),
-                            ) else {
+                            let (Some((left_key, left_value)), Some((right_key, right_value))) =
+                                (left_entry.as_pair_values(), right_entry.as_pair_values())
+                            else {
                                 return false;
                             };
                             left_key.collection_semantic_eq(right_key)
@@ -1044,9 +1043,9 @@ impl RuntimeValue {
             RuntimeValueKind::Size(value) => IrValue::Size(value.clone()),
             RuntimeValueKind::Color(value) => IrValue::Color(value.clone()),
             RuntimeValueKind::Enum(value) => IrValue::Enum(*value),
-            RuntimeValueKind::Pair(_) => IrValue::Pair(
-                self.to_legacy_ir_pair().expect("runtime pair invariant"),
-            ),
+            RuntimeValueKind::Pair(_) => {
+                IrValue::Pair(self.to_legacy_ir_pair().expect("runtime pair invariant"))
+            }
             RuntimeValueKind::Dictionary(value) => IrValue::Dictionary(IrDictionary {
                 entries: value
                     .entries
@@ -1063,9 +1062,9 @@ impl RuntimeValue {
             RuntimeValueKind::Component(value) => IrValue::Component(value.clone()),
             RuntimeValueKind::Callable(value) => IrValue::Callable(value.to_ir()),
             RuntimeValueKind::InlineBody(value) => IrValue::InlineBody(value.to_ir()),
-            RuntimeValueKind::Collection(elements) => IrValue::Collection(
-                elements.iter().map(Self::to_legacy_ir_value).collect(),
-            ),
+            RuntimeValueKind::Collection(elements) => {
+                IrValue::Collection(elements.iter().map(Self::to_legacy_ir_value).collect())
+            }
         }
     }
 
@@ -6716,14 +6715,13 @@ mod tests {
 
         assert!(first.collection_semantic_eq(&second));
         assert_eq!(first.source_span_or(second_span), first_span);
-        assert!(!RuntimeValue::new(
-            IrValue::String("same".into()),
-            ValueOrigin::Dynamic,
-        )
-        .collection_semantic_eq(&RuntimeValue::new(
-            IrValue::Identifier("same".into()),
-            ValueOrigin::Dynamic,
-        )));
+        assert!(
+            !RuntimeValue::new(IrValue::String("same".into()), ValueOrigin::Dynamic,)
+                .collection_semantic_eq(&RuntimeValue::new(
+                    IrValue::Identifier("same".into()),
+                    ValueOrigin::Dynamic,
+                ))
+        );
     }
 
     #[test]
