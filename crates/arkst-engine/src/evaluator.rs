@@ -2421,7 +2421,11 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn source_mode(&self, source_id: SourceId) -> Option<Mode> {
-        self.session.source_modes.borrow().get(&source_id.0).copied()
+        self.session
+            .source_modes
+            .borrow()
+            .get(&source_id.0)
+            .copied()
     }
 
     fn register_source_mode(&self, source_id: SourceId, mode: Mode) -> Result<(), Mode> {
@@ -2522,14 +2526,18 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn allocate_extension_id(&self) -> Option<ExtensionId> {
-        self.session.transaction.borrow_mut().allocate_extension_id()
+        self.session
+            .transaction
+            .borrow_mut()
+            .allocate_extension_id()
     }
 
     fn should_journal_scope_write(&self) -> bool {
         let Some(floor) = self.journal_floor else {
             return true;
         };
-        self.session.transaction
+        self.session
+            .transaction
             .borrow()
             .current_savepoint_index()
             .is_some_and(|current| current > floor)
@@ -2547,7 +2555,8 @@ impl<'a> EvaluationContext<'a> {
         };
         if self.session.transaction.borrow_mut().first_write(key) {
             let previous = self.variables.get(name).cloned();
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::Variable {
                     scope,
@@ -2570,7 +2579,8 @@ impl<'a> EvaluationContext<'a> {
         };
         if self.session.transaction.borrow_mut().first_write(key) {
             let previous = self.assigned_variables.get(name).cloned();
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::AssignedVariable {
                     scope,
@@ -2593,7 +2603,8 @@ impl<'a> EvaluationContext<'a> {
         };
         if self.session.transaction.borrow_mut().first_write(key) {
             let was_present = self.variable_owners.contains(name);
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::VariableOwner {
                     scope,
@@ -2616,7 +2627,8 @@ impl<'a> EvaluationContext<'a> {
         };
         if self.session.transaction.borrow_mut().first_write(key) {
             let previous = self.functions.get(name).cloned();
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::Function {
                     scope,
@@ -2635,7 +2647,8 @@ impl<'a> EvaluationContext<'a> {
         let journal_floor = self.journal_floor;
         let key = UndoKey::LibraryRegistry { scope };
         if self.session.transaction.borrow_mut().first_write(key) {
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::LibraryRegistry {
                     scope,
@@ -2747,7 +2760,8 @@ impl<'a> EvaluationContext<'a> {
         let key = UndoKey::ExtensionTarget { scope, extension };
         if self.session.transaction.borrow_mut().first_write(key) {
             let previous = self.extension_targets.get(&extension).cloned();
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::ExtensionTarget {
                     scope,
@@ -2878,12 +2892,14 @@ impl<'a> EvaluationContext<'a> {
         if self.session.transaction.borrow_mut().first_write(key) {
             let (previous, copied_units) = previous();
             #[cfg(test)]
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .record_document_state_copy_work(copied_units);
             #[cfg(not(test))]
             let _ = copied_units;
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::DocumentState { field, previous });
         }
@@ -3359,13 +3375,20 @@ impl<'a> EvaluationContext<'a> {
             let copied_units = previous.layers.len();
             (DocumentStateUndo::Font(previous), copied_units)
         });
-        self.session.document_state.borrow_mut().font.layers.push(layer);
+        self.session
+            .document_state
+            .borrow_mut()
+            .font
+            .layers
+            .push(layer);
     }
 
     fn merge_paragraph_style(&self, partial: IrParagraphStyleInfo) {
         self.record_document_state_undo(DocumentStateField::ParagraphStyle, || {
             (
-                DocumentStateUndo::ParagraphStyle(self.session.document_state.borrow().paragraph_style),
+                DocumentStateUndo::ParagraphStyle(
+                    self.session.document_state.borrow().paragraph_style,
+                ),
                 0,
             )
         });
@@ -3388,18 +3411,26 @@ impl<'a> EvaluationContext<'a> {
         self.record_document_state_undo(DocumentStateField::AutoPageBreakMaxDepth, || {
             (
                 DocumentStateUndo::AutoPageBreakMaxDepth(
-                    self.session.document_state.borrow().auto_page_break_max_depth,
+                    self.session
+                        .document_state
+                        .borrow()
+                        .auto_page_break_max_depth,
                 ),
                 0,
             )
         });
-        self.session.document_state.borrow_mut().auto_page_break_max_depth = value;
+        self.session
+            .document_state
+            .borrow_mut()
+            .auto_page_break_max_depth = value;
     }
 
     fn set_page_alignment(&self, value: Option<IrDocumentAlignment>) {
         self.record_document_state_undo(DocumentStateField::PageAlignment, || {
             (
-                DocumentStateUndo::PageAlignment(self.session.document_state.borrow().page_alignment),
+                DocumentStateUndo::PageAlignment(
+                    self.session.document_state.borrow().page_alignment,
+                ),
                 0,
             )
         });
@@ -3409,7 +3440,9 @@ impl<'a> EvaluationContext<'a> {
     fn set_page_geometry(&self, value: Option<IrPageGeometry>) {
         self.record_document_state_undo(DocumentStateField::PageGeometry, || {
             (
-                DocumentStateUndo::PageGeometry(self.session.document_state.borrow().page_geometry.clone()),
+                DocumentStateUndo::PageGeometry(
+                    self.session.document_state.borrow().page_geometry.clone(),
+                ),
                 0,
             )
         });
@@ -3439,7 +3472,9 @@ impl<'a> EvaluationContext<'a> {
     fn set_page_margin(&self, value: IrPageMargins) {
         self.record_document_state_undo(DocumentStateField::PageMargin, || {
             (
-                DocumentStateUndo::PageMargin(self.session.document_state.borrow().page_margin.clone()),
+                DocumentStateUndo::PageMargin(
+                    self.session.document_state.borrow().page_margin.clone(),
+                ),
                 0,
             )
         });
@@ -3450,7 +3485,11 @@ impl<'a> EvaluationContext<'a> {
         self.record_document_state_undo(DocumentStateField::PageBorderWidths, || {
             (
                 DocumentStateUndo::PageBorderWidths(
-                    self.session.document_state.borrow().page_border_widths.clone(),
+                    self.session
+                        .document_state
+                        .borrow()
+                        .page_border_widths
+                        .clone(),
                 ),
                 0,
             )
@@ -3462,7 +3501,11 @@ impl<'a> EvaluationContext<'a> {
         self.record_document_state_undo(DocumentStateField::PageBorderColor, || {
             (
                 DocumentStateUndo::PageBorderColor(
-                    self.session.document_state.borrow().page_border_color.clone(),
+                    self.session
+                        .document_state
+                        .borrow()
+                        .page_border_color
+                        .clone(),
                 ),
                 0,
             )
@@ -3488,7 +3531,8 @@ impl<'a> EvaluationContext<'a> {
             let copied_units = previous.layers.len();
             (DocumentStateUndo::PageFormat(previous), copied_units)
         });
-        self.session.document_state
+        self.session
+            .document_state
             .borrow_mut()
             .page_format
             .layers
@@ -3512,7 +3556,8 @@ impl<'a> EvaluationContext<'a> {
                 0,
             )
         });
-        self.session.document_state
+        self.session
+            .document_state
             .borrow_mut()
             .authors
             .push(IrDocumentAuthor {
@@ -3522,13 +3567,13 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn replace_document_keywords(&self, keywords: Vec<String>) {
-        let first_write = self
-            .session
-            .transaction
-            .borrow_mut()
-            .first_write(UndoKey::DocumentState {
-                field: DocumentStateField::Keywords,
-            });
+        let first_write =
+            self.session
+                .transaction
+                .borrow_mut()
+                .first_write(UndoKey::DocumentState {
+                    field: DocumentStateField::Keywords,
+                });
         let previous = {
             let mut state = self.session.document_state.borrow_mut();
             if first_write {
@@ -3540,10 +3585,12 @@ impl<'a> EvaluationContext<'a> {
         };
         if let Some(previous) = previous {
             #[cfg(test)]
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .record_document_state_copy_work(0);
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::DocumentState {
                     field: DocumentStateField::Keywords,
@@ -3573,7 +3620,8 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn localization_table_undo_contains(&self, name: &str) -> bool {
-        self.session.transaction
+        self.session
+            .transaction
             .borrow()
             .savepoints
             .last()
@@ -3635,15 +3683,16 @@ impl<'a> EvaluationContext<'a> {
             return false;
         }
 
-        let first_write = self
-            .session
-            .transaction
-            .borrow_mut()
-            .first_write(UndoKey::DocumentState {
-                field: DocumentStateField::LocalizationTables,
-            });
+        let first_write =
+            self.session
+                .transaction
+                .borrow_mut()
+                .first_write(UndoKey::DocumentState {
+                    field: DocumentStateField::LocalizationTables,
+                });
         if first_write {
-            self.session.transaction
+            self.session
+                .transaction
                 .borrow_mut()
                 .push(InvocationUndo::DocumentState {
                     field: DocumentStateField::LocalizationTables,
@@ -3692,7 +3741,9 @@ impl<'a> EvaluationContext<'a> {
     fn set_caption_position(&self, caption_position: IrCaptionPositionInfo) {
         self.record_document_state_undo(DocumentStateField::CaptionPosition, || {
             (
-                DocumentStateUndo::CaptionPosition(self.session.document_state.borrow().caption_position),
+                DocumentStateUndo::CaptionPosition(
+                    self.session.document_state.borrow().caption_position,
+                ),
                 0,
             )
         });
@@ -9054,7 +9105,8 @@ impl Evaluator {
         first_origin: Option<ValueOrigin>,
         implicit_argument: Option<&RuntimeValue>,
     ) -> LegacyCallOutcome {
-        if context.session.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+        if context.session.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides
+        {
             diagnostics.push(speaker_note_argument_error(
                 "`.speakernote` is only valid for slides documents",
                 *span,
@@ -9198,7 +9250,8 @@ impl Evaluator {
         first_origin: Option<ValueOrigin>,
         implicit_argument: Option<&RuntimeValue>,
     ) -> LegacyCallOutcome {
-        if context.session.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+        if context.session.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides
+        {
             diagnostics.push(fragment_argument_error(
                 "`.fragment` is only valid for slides documents",
                 *span,
@@ -9708,7 +9761,8 @@ impl Evaluator {
         let Some(binding_plan) = binding_plan else {
             return LegacyCallOutcome::Failed;
         };
-        if context.session.document_state.borrow().document_type == arkst_ir::IrDocumentType::Plain {
+        if context.session.document_state.borrow().document_type == arkst_ir::IrDocumentType::Plain
+        {
             diagnostics.push(document_state_conversion_error(
                 "`.lastheading` is not available for plain documents".to_string(),
                 *span,
@@ -12310,7 +12364,9 @@ impl Evaluator {
         }
 
         if name == "slides" {
-            if context.session.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+            if context.session.document_state.borrow().document_type
+                != arkst_ir::IrDocumentType::Slides
+            {
                 diagnostics.push(document_state_conversion_error(
                     "`.slides` is only valid for slides documents".to_string(),
                     *span,
@@ -38827,7 +38883,10 @@ mod tests {
         };
         assert_eq!(values.len(), elements.len());
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        assert_eq!(context.session.transaction.borrow().pending_entry_count(), 0);
+        assert_eq!(
+            context.session.transaction.borrow().pending_entry_count(),
+            0
+        );
         checkpoint.commit(&context);
         context.end_invocation();
     }
@@ -38888,7 +38947,10 @@ mod tests {
         }
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(context.extension_target_count(), 2);
-        assert_eq!(context.session.transaction.borrow().pending_entry_count(), 0);
+        assert_eq!(
+            context.session.transaction.borrow().pending_entry_count(),
+            0
+        );
     }
 
     #[test]
@@ -38931,7 +38993,10 @@ mod tests {
                 assert!(matches!(outcome, CallOutcome::NoValue));
             }
             assert_eq!(context.extension_target_count(), 2);
-            assert_eq!(context.session.transaction.borrow().pending_entry_count(), 0);
+            assert_eq!(
+                context.session.transaction.borrow().pending_entry_count(),
+                0
+            );
         }
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -38967,7 +39032,11 @@ mod tests {
 
         context.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
-        let copy_work_before = context.session.transaction.borrow().document_state_copy_work();
+        let copy_work_before = context
+            .session
+            .transaction
+            .borrow()
+            .document_state_copy_work();
         let outcome = evaluator.map_callable_values(
             &elements,
             &callable,
@@ -38988,11 +39057,19 @@ mod tests {
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(context.document_authors_snapshot().len(), elements.len());
         assert_eq!(
-            context.session.transaction.borrow().document_state_copy_work() - copy_work_before,
+            context
+                .session
+                .transaction
+                .borrow()
+                .document_state_copy_work()
+                - copy_work_before,
             0,
             "author appends must journal only the pre-append length"
         );
-        assert_eq!(context.session.transaction.borrow().pending_entry_count(), 1);
+        assert_eq!(
+            context.session.transaction.borrow().pending_entry_count(),
+            1
+        );
         checkpoint.commit(&context);
         context.end_invocation();
     }
