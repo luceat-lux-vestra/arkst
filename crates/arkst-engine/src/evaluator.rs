@@ -1908,7 +1908,7 @@ struct EvalSession {
     runtime: RefCell<EvaluationRuntime>,
     invocation_depth: RefCell<usize>,
     transaction: RefCell<InvocationTransaction>,
-    context_frames: RefCell<BTreeMap<usize, Rc<RefCell<ContextFrame>>>>,
+    context_frames: RefCell<BTreeMap<ContextFrameId, Rc<RefCell<ContextFrame>>>>,
 }
 
 impl EvalSession {
@@ -1943,9 +1943,12 @@ impl Drop for EvaluationDepthGuard {
 /// This first G2-B slice moves every mutation-bearing lexical binding behind a
 /// stable frame identity registered in the compilation session. The existing
 /// parent snapshot tree remains deliberately intact until the next G2-B slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ContextFrameId(usize);
+
 #[derive(Clone)]
 struct ContextFrame {
-    key: usize,
+    key: ContextFrameId,
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, Rc<FunctionBinding>>,
     extension_targets: BTreeMap<ExtensionId, ExtensionOverlay>,
@@ -1959,7 +1962,7 @@ struct ContextFrame {
 }
 
 impl ContextFrame {
-    fn new(key: usize, journal_floor: Option<usize>) -> Self {
+    fn new(key: ContextFrameId, journal_floor: Option<usize>) -> Self {
         Self {
             key,
             variables: BTreeMap::new(),
@@ -2004,7 +2007,7 @@ struct EvaluationContext<'a> {
 #[derive(Default)]
 struct InvocationTransaction {
     savepoints: Vec<InvocationSavepoint>,
-    next_scope_key: usize,
+    next_frame_id: usize,
     next_extension_id: u64,
     #[cfg(test)]
     document_state_copy_work: usize,
@@ -2022,26 +2025,26 @@ enum UndoKey {
         field: DocumentStateField,
     },
     Variable {
-        scope: usize,
+        scope: ContextFrameId,
         name: String,
     },
     AssignedVariable {
-        scope: usize,
+        scope: ContextFrameId,
         name: String,
     },
     VariableOwner {
-        scope: usize,
+        scope: ContextFrameId,
         name: String,
     },
     Function {
-        scope: usize,
+        scope: ContextFrameId,
         name: String,
     },
     LibraryRegistry {
-        scope: usize,
+        scope: ContextFrameId,
     },
     ExtensionTarget {
-        scope: usize,
+        scope: ContextFrameId,
         extension: ExtensionId,
     },
 }
@@ -2105,36 +2108,36 @@ enum InvocationUndo {
         previous: DocumentStateUndo,
     },
     Variable {
-        scope: usize,
+        scope: ContextFrameId,
         name: String,
         journal_floor: Option<usize>,
         previous: Option<VariableValue>,
     },
     AssignedVariable {
-        scope: usize,
+        scope: ContextFrameId,
         name: String,
         journal_floor: Option<usize>,
         previous: Option<RuntimeValue>,
     },
     VariableOwner {
-        scope: usize,
+        scope: ContextFrameId,
         name: String,
         journal_floor: Option<usize>,
         was_present: bool,
     },
     Function {
-        scope: usize,
+        scope: ContextFrameId,
         name: String,
         journal_floor: Option<usize>,
         previous: Option<Rc<FunctionBinding>>,
     },
     LibraryRegistry {
-        scope: usize,
+        scope: ContextFrameId,
         journal_floor: Option<usize>,
         previous_len: usize,
     },
     ExtensionTarget {
-        scope: usize,
+        scope: ContextFrameId,
         extension: ExtensionId,
         journal_floor: Option<usize>,
         previous: Option<ExtensionOverlay>,
@@ -2171,7 +2174,7 @@ impl InvocationUndo {
         }
     }
 
-    fn scope(&self) -> Option<usize> {
+    fn scope(&self) -> Option<ContextFrameId> {
         match self {
             Self::DocumentState { .. } => None,
             Self::Variable { scope, .. }
@@ -2201,10 +2204,10 @@ impl InvocationUndo {
 }
 
 impl InvocationTransaction {
-    fn allocate_scope_key(&mut self) -> usize {
-        let key = self.next_scope_key;
-        self.next_scope_key += 1;
-        key
+    fn allocate_frame_id(&mut self) -> ContextFrameId {
+        let id = ContextFrameId(self.next_frame_id);
+        self.next_frame_id += 1;
+        id
     }
 
     fn allocate_extension_id(&mut self) -> Option<ExtensionId> {
@@ -2372,7 +2375,7 @@ impl<'a> EvaluationContext<'a> {
         session: &Rc<EvalSession>,
         journal_floor: Option<usize>,
     ) -> Rc<RefCell<ContextFrame>> {
-        let key = session.transaction.borrow_mut().allocate_scope_key();
+        let key = session.transaction.borrow_mut().allocate_frame_id();
         Self::register_context_frame(session, ContextFrame::new(key, journal_floor))
     }
 
@@ -2380,14 +2383,14 @@ impl<'a> EvaluationContext<'a> {
         session: &Rc<EvalSession>,
         source: &ContextFrame,
     ) -> Rc<RefCell<ContextFrame>> {
-        let key = session.transaction.borrow_mut().allocate_scope_key();
+        let key = session.transaction.borrow_mut().allocate_frame_id();
         let mut frame = source.clone();
         frame.key = key;
         Self::register_context_frame(session, frame)
     }
 
-    fn context_frame(&self, scope: usize) -> Option<Rc<RefCell<ContextFrame>>> {
-        self.session.context_frames.borrow().get(&scope).cloned()
+    fn context_frame(&self, frame_id: ContextFrameId) -> Option<Rc<RefCell<ContextFrame>>> {
+        self.session.context_frames.borrow().get(&frame_id).cloned()
     }
 
     fn journal_floor(&self) -> Option<usize> {
@@ -2540,7 +2543,7 @@ impl<'a> EvaluationContext<'a> {
         }
     }
 
-    fn scope_key(&self) -> usize {
+    fn frame_id(&self) -> ContextFrameId {
         self.frame.borrow().key
     }
 
@@ -2571,7 +2574,7 @@ impl<'a> EvaluationContext<'a> {
         if !self.should_journal_scope_write() {
             return;
         }
-        let scope = self.scope_key();
+        let scope = self.frame_id();
         let journal_floor = self.journal_floor();
         let key = UndoKey::Variable {
             scope,
@@ -2595,7 +2598,7 @@ impl<'a> EvaluationContext<'a> {
         if !self.should_journal_scope_write() {
             return;
         }
-        let scope = self.scope_key();
+        let scope = self.frame_id();
         let journal_floor = self.journal_floor();
         let key = UndoKey::AssignedVariable {
             scope,
@@ -2619,7 +2622,7 @@ impl<'a> EvaluationContext<'a> {
         if !self.should_journal_scope_write() {
             return;
         }
-        let scope = self.scope_key();
+        let scope = self.frame_id();
         let journal_floor = self.journal_floor();
         let key = UndoKey::VariableOwner {
             scope,
@@ -2643,7 +2646,7 @@ impl<'a> EvaluationContext<'a> {
         if !self.should_journal_scope_write() {
             return;
         }
-        let scope = self.scope_key();
+        let scope = self.frame_id();
         let journal_floor = self.journal_floor();
         let key = UndoKey::Function {
             scope,
@@ -2667,7 +2670,7 @@ impl<'a> EvaluationContext<'a> {
         if !self.should_journal_scope_write() {
             return;
         }
-        let scope = self.scope_key();
+        let scope = self.frame_id();
         let journal_floor = self.journal_floor();
         let key = UndoKey::LibraryRegistry { scope };
         if self.session.transaction.borrow_mut().first_write(key) {
@@ -2784,7 +2787,7 @@ impl<'a> EvaluationContext<'a> {
         if !self.should_journal_scope_write() {
             return;
         }
-        let scope = self.scope_key();
+        let scope = self.frame_id();
         let journal_floor = self.journal_floor();
         let key = UndoKey::ExtensionTarget { scope, extension };
         if self.session.transaction.borrow_mut().first_write(key) {
@@ -3906,7 +3909,7 @@ impl<'a> EvaluationContext<'a> {
 
 impl Drop for EvaluationContext<'_> {
     fn drop(&mut self) {
-        let scope = self.scope_key();
+        let scope = self.frame_id();
         self.session.context_frames.borrow_mut().remove(&scope);
     }
 }
@@ -29373,7 +29376,7 @@ mod tests {
 
         assert!(Rc::ptr_eq(&root.session, &child.session));
         assert!(!Rc::ptr_eq(&root.session, &independent.session));
-        assert_ne!(root.scope_key(), child.scope_key());
+        assert_ne!(root.frame_id(), child.frame_id());
 
         root.session.document_state.borrow_mut().name = "shared".to_string();
         assert_eq!(child.session.document_state.borrow().name, "shared");
@@ -29383,26 +29386,26 @@ mod tests {
     #[test]
     fn g2_context_frame_registry_addresses_live_scopes_without_cross_compile_aliasing() {
         let root = EvaluationContext::new();
-        let root_scope = root.scope_key();
+        let root_frame_id = root.frame_id();
         let registered_root = root
-            .context_frame(root_scope)
+            .context_frame(root_frame_id)
             .expect("root frame is registered in its session");
         assert!(Rc::ptr_eq(&registered_root, &root.frame));
 
         let independent = EvaluationContext::new();
-        let independent_scope = independent.scope_key();
+        let independent_frame_id = independent.frame_id();
         let registered_independent = independent
-            .context_frame(independent_scope)
+            .context_frame(independent_frame_id)
             .expect("independent frame is registered in its own session");
         assert!(Rc::ptr_eq(&registered_independent, &independent.frame));
         assert!(!Rc::ptr_eq(&registered_root, &registered_independent));
 
         let child = root.child();
-        let child_scope = child.scope_key();
-        assert!(child.context_frame(child_scope).is_some());
+        let child_frame_id = child.frame_id();
+        assert!(child.context_frame(child_frame_id).is_some());
         drop(child);
         assert!(
-            root.context_frame(child_scope).is_none(),
+            root.context_frame(child_frame_id).is_none(),
             "session registry must release dropped frames"
         );
     }
