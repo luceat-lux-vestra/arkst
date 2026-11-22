@@ -948,23 +948,6 @@ fn node_contains_explicit_error(node: &IrNode) -> bool {
     }
 }
 
-fn value_contains_explicit_error(value: &IrValue) -> bool {
-    match value {
-        IrValue::Component(component) => component_contains_explicit_error(component),
-        IrValue::Content(nodes) => nodes.iter().any(node_contains_explicit_error),
-        IrValue::Collection(values) => values.iter().any(value_contains_explicit_error),
-        IrValue::Pair(pair) => {
-            value_contains_explicit_error(&pair.first)
-                || value_contains_explicit_error(&pair.second)
-        }
-        IrValue::Dictionary(dictionary) => dictionary.entries.iter().any(|pair| {
-            value_contains_explicit_error(&pair.first)
-                || value_contains_explicit_error(&pair.second)
-        }),
-        _ => false,
-    }
-}
-
 fn runtime_value_contains_explicit_error(value: &RuntimeValue) -> bool {
     if let Some(component) = value.as_component() {
         return component_contains_explicit_error(component);
@@ -7244,8 +7227,7 @@ impl Evaluator {
                 diagnostics.push(target_conversion_error_message(
                     "dynamic target conversion",
                     argument_span,
-                    "this target is not materialized by the current builtin boundary"
-                        .to_string(),
+                    "this target is not materialized by the current builtin boundary".to_string(),
                 ));
                 return Err(LegacyCallOutcome::Failed);
             }
@@ -23733,85 +23715,6 @@ fn parse_runtime_code_callouts(
         .collect())
 }
 
-fn parse_code_callouts(value: &IrValue, span: SourceSpan) -> Result<Vec<IrCodeCallout>, String> {
-    let mut entries = BTreeMap::<u32, String>::new();
-    match value {
-        IrValue::Dictionary(dictionary) => {
-            for pair in &dictionary.entries {
-                let line = code_callout_line(&pair.first)?;
-                let description = code_value_text(&pair.second).ok_or_else(|| {
-                    "`.code` callout descriptions must be displayable values".to_string()
-                })?;
-                entries.insert(line, description);
-            }
-        }
-        IrValue::Content(_) | IrValue::String(_) | IrValue::Identifier(_) => {
-            let raw = code_value_text(value)
-                .ok_or_else(|| "`.code` `callouts` must be a map".to_string())?;
-            for line in raw.lines() {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let Some(item) = trimmed.strip_prefix("- ") else {
-                    return Err(
-                        "`.code` `callouts` must use map entries such as `- 1: description`"
-                            .to_string(),
-                    );
-                };
-                let Some((key, description)) = item.split_once(':') else {
-                    return Err("`.code` `callouts` entry is missing `:`".to_string());
-                };
-                let key = key.trim();
-                let parsed = key
-                    .parse::<i64>()
-                    .map_err(|_| format!("Callout keys must be integers, but got '{key}'."))?;
-                if parsed <= 0 {
-                    return Err(format!(
-                        "Callout line numbers must be positive, but got {parsed}."
-                    ));
-                }
-                let parsed = u32::try_from(parsed)
-                    .map_err(|_| format!("Callout line number {parsed} is too large"))?;
-                entries.insert(
-                    parsed,
-                    normalize_code_callout_description(description.trim(), span),
-                );
-            }
-        }
-        _ => return Err("`.code` `callouts` must be a map".to_string()),
-    }
-    Ok(entries
-        .into_iter()
-        .map(|(line, description)| IrCodeCallout { line, description })
-        .collect())
-}
-
-fn code_callout_line(value: &IrValue) -> Result<u32, String> {
-    let parsed = match value {
-        IrValue::Number(value) if value.is_finite() && value.fract() == 0.0 => {
-            if *value < i64::MIN as f64 || *value > i64::MAX as f64 {
-                return Err(format!("Callout line number {value} is too large"));
-            }
-            *value as i64
-        }
-        IrValue::String(value) | IrValue::Identifier(value) => value
-            .parse::<i64>()
-            .map_err(|_| format!("Callout keys must be integers, but got '{value}'."))?,
-        other => {
-            return Err(format!(
-                "Callout keys must be integers, but got '{other:?}'."
-            ));
-        }
-    };
-    if parsed <= 0 {
-        return Err(format!(
-            "Callout line numbers must be positive, but got {parsed}."
-        ));
-    }
-    u32::try_from(parsed).map_err(|_| format!("Callout line number {parsed} is too large"))
-}
-
 fn normalize_code_callout_description(description: &str, span: SourceSpan) -> String {
     let parsed = arkst_markdown::parse_inline_with_mode(description, Mode::Quarkdown);
     if !parsed.diagnostics.is_empty() {
@@ -24970,46 +24873,6 @@ fn collection_average(
 /// whose upstream wrappers compare their contained values. Content keeps its
 /// structural IR equality, which retains the source-backed identity of rich
 /// nodes while allowing plain Markdown list text to be represented as String.
-fn collection_values_equal(left: &IrValue, right: &IrValue) -> bool {
-    match (left, right) {
-        (IrValue::String(left), IrValue::String(right))
-        | (IrValue::Identifier(left), IrValue::Identifier(right)) => left == right,
-        (IrValue::Number(left), IrValue::Number(right)) => {
-            (left.is_nan() && right.is_nan()) || left.total_cmp(right) == Ordering::Equal
-        }
-        (IrValue::Boolean(left), IrValue::Boolean(right)) => left == right,
-        (IrValue::Unit, IrValue::Unit) => true,
-        (IrValue::None, IrValue::None) => true,
-        (IrValue::Range(left), IrValue::Range(right)) => {
-            left.start == right.start && left.end == right.end
-        }
-        (IrValue::Collection(left), IrValue::Collection(right)) => {
-            left.len() == right.len()
-                && left
-                    .iter()
-                    .zip(right)
-                    .all(|(left, right)| collection_values_equal(left, right))
-        }
-        (IrValue::Pair(left), IrValue::Pair(right)) => {
-            collection_values_equal(&left.first, &right.first)
-                && collection_values_equal(&left.second, &right.second)
-        }
-        (IrValue::Dictionary(left), IrValue::Dictionary(right)) => {
-            left.entries.len() == right.entries.len()
-                && left.entries.iter().all(|left_entry| {
-                    right.entries.iter().any(|right_entry| {
-                        collection_values_equal(&left_entry.first, &right_entry.first)
-                            && collection_values_equal(&left_entry.second, &right_entry.second)
-                    })
-                })
-        }
-        (IrValue::Content(left), IrValue::Content(right)) => left == right,
-        (IrValue::Callable(left), IrValue::Callable(right)) => left == right,
-        (IrValue::InlineBody(left), IrValue::InlineBody(right)) => left == right,
-        _ => false,
-    }
-}
-
 fn runtime_collection_values_equal(left: &RuntimeValue, right: &RuntimeValue) -> bool {
     left.collection_semantic_eq(right)
 }
@@ -34574,9 +34437,11 @@ mod tests {
         let evaluator = Evaluator::new();
         let operation_span = span(0, 80);
 
-        assert!(collection_values_equal(&IrValue::Unit, &IrValue::Unit));
-        assert!(!collection_values_equal(&IrValue::Unit, &IrValue::None));
-        assert!(!collection_values_equal(&IrValue::None, &IrValue::Unit));
+        let unit = RuntimeValue::from(IrValue::Unit);
+        let none = RuntimeValue::from(IrValue::None);
+        assert!(runtime_collection_values_equal(&unit, &unit));
+        assert!(!runtime_collection_values_equal(&unit, &none));
+        assert!(!runtime_collection_values_equal(&none, &unit));
 
         let unit_input = IrValue::Collection(vec![IrValue::Unit, IrValue::Unit, IrValue::None]);
         let mut unit_diagnostics = Vec::new();
