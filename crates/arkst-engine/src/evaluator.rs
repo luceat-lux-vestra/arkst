@@ -141,12 +141,53 @@ impl VariableValue {
     }
 }
 
+/// Non-owning definition-frame identity stored by a function binding.
+///
+/// The binding itself lives inside the frame's function map, so retaining the
+/// frame strongly here would form a cycle. Invocation upgrades this weak link
+/// while the lexical definition frame is live; the existing capture snapshot
+/// remains a transitional fallback for legacy/wire materialization.
+#[derive(Clone)]
+struct DefinitionFrameRef {
+    frame: Weak<RefCell<ContextFrame>>,
+}
+
+impl DefinitionFrameRef {
+    fn new(frame: &Rc<RefCell<ContextFrame>>) -> Self {
+        Self {
+            frame: Rc::downgrade(frame),
+        }
+    }
+
+    fn upgrade(&self) -> Option<ContextFrameLink> {
+        self.frame.upgrade().map(|frame| ContextFrameLink::new(&frame))
+    }
+}
+
+impl std::fmt::Debug for DefinitionFrameRef {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DefinitionFrameRef")
+            .field("live", &(self.frame.strong_count() > 0))
+            .finish()
+    }
+}
+
+impl PartialEq for DefinitionFrameRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.frame.ptr_eq(&other.frame)
+    }
+}
+
+impl Eq for DefinitionFrameRef {}
+
 /// A source-backed callable definition stored in an evaluator scope.
 #[derive(Debug, Clone, PartialEq)]
 struct FunctionBinding {
     parameters: LambdaParameters,
     body: Vec<IrNode>,
     declaration_span: SourceSpan,
+    definition_frame: Option<DefinitionFrameRef>,
     capture: Option<Box<RuntimeCallableCapture>>,
     extension: Option<Rc<FunctionExtension>>,
 }
@@ -3253,6 +3294,7 @@ impl<'a> EvaluationContext<'a> {
             parameters,
             body,
             declaration_span,
+            definition_frame: Some(DefinitionFrameRef::new(&self.frame)),
             capture,
             extension: None,
         });
@@ -3339,6 +3381,7 @@ impl<'a> EvaluationContext<'a> {
                     parameters: LambdaParameters::from_ir(function.callable.parameters.clone()),
                     body: function.callable.body.clone(),
                     declaration_span: function.callable.span,
+                    definition_frame: None,
                     capture: function.callable.capture.clone(),
                     extension: None,
                 }),
@@ -3349,11 +3392,20 @@ impl<'a> EvaluationContext<'a> {
     }
 
     /// Composes a callable's definition environment with the bindings visible
-    /// at its call site. The definition context remains the parent layer, so
-    /// caller-visible variables/functions supplement it without replacing the
-    /// lexical capture or becoming part of that capture.
+    /// at its call site. The definition frame remains the parent lookup layer,
+    /// so caller-visible variables/functions supplement it without replacing
+    /// definition identity or becoming part of that definition.
     fn with_caller_overlay(
         definition_context: Self,
+        caller_context: &Self,
+        resource_context: Option<RuntimeCallableResourceContext>,
+    ) -> Self {
+        let definition_frame = ContextFrameLink::new(&definition_context.frame);
+        Self::with_caller_overlay_frame(definition_frame, caller_context, resource_context)
+    }
+
+    fn with_caller_overlay_frame(
+        definition_frame: ContextFrameLink,
         caller_context: &Self,
         resource_context: Option<RuntimeCallableResourceContext>,
     ) -> Self {
@@ -3376,7 +3428,7 @@ impl<'a> EvaluationContext<'a> {
         let frame = Self::new_context_frame(
             &caller_context.session,
             journal_floor,
-            Some(ContextFrameLink::new(&definition_context.frame)),
+            Some(definition_frame),
         );
         {
             let mut frame_state = frame.borrow_mut();
@@ -18394,6 +18446,7 @@ impl Evaluator {
             caller_context,
             None,
             extension_context_mode,
+            None,
         )
     }
 
@@ -18412,6 +18465,7 @@ impl Evaluator {
             caller_context,
             None,
             ExtensionContextMode::Inherit,
+            None,
         )
     }
 
@@ -18430,6 +18484,53 @@ impl Evaluator {
             caller_context,
             extension_invocation,
             ExtensionContextMode::Suppress,
+            None,
+        )
+    }
+
+    fn invoke_bound_function_binding(
+        &self,
+        binding: &FunctionBinding,
+        bound: BoundLambdaArguments,
+        _options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let callable = binding.as_callable();
+        self.invoke_bound_callable_with_extension_mode(
+            &callable,
+            bound,
+            diagnostics,
+            caller_context,
+            None,
+            ExtensionContextMode::Inherit,
+            binding
+                .definition_frame
+                .as_ref()
+                .and_then(DefinitionFrameRef::upgrade),
+        )
+    }
+
+    fn invoke_bound_function_binding_with_extension(
+        &self,
+        binding: &FunctionBinding,
+        bound: BoundLambdaArguments,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+        extension_invocation: Option<Rc<ExtensionInvocation>>,
+    ) -> CallOutcome {
+        let callable = binding.as_callable();
+        self.invoke_bound_callable_with_extension_mode(
+            &callable,
+            bound,
+            diagnostics,
+            caller_context,
+            extension_invocation,
+            ExtensionContextMode::Suppress,
+            binding
+                .definition_frame
+                .as_ref()
+                .and_then(DefinitionFrameRef::upgrade),
         )
     }
 
@@ -18441,6 +18542,7 @@ impl Evaluator {
         caller_context: &mut EvaluationContext<'_>,
         extension_invocation: Option<Rc<ExtensionInvocation>>,
         extension_context_mode: ExtensionContextMode,
+        definition_frame: Option<ContextFrameLink>,
     ) -> CallOutcome {
         caller_context.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
@@ -18449,21 +18551,33 @@ impl Evaluator {
                 .capture
                 .as_deref()
                 .and_then(|capture| capture.resource_context);
-            let definition_context = callable
-                .capture
-                .as_deref()
-                .map(EvaluationContext::from_capture)
-                .unwrap_or_else(EvaluationContext::new);
-            // Preserve the definition snapshot as the lexical base, then add
-            // only caller-visible lookup bindings. Invocation parameters are
-            // installed in the child below, after both layers, so they have
-            // highest precedence. Document state is shared separately by the
-            // overlay.
-            let invocation_base = EvaluationContext::with_caller_overlay(
-                definition_context,
-                caller_context,
-                resource_context,
-            );
+            let invocation_base = if let Some(definition_frame) = definition_frame {
+                // Ordinary source-defined bindings retain their lexical frame
+                // identity and therefore observe the live definition scope.
+                EvaluationContext::with_caller_overlay_frame(
+                    definition_frame,
+                    caller_context,
+                    resource_context,
+                )
+            } else {
+                // Legacy/wire callables still hydrate the snapshot capture.
+                // G2-C follow-up work removes this copied environment only
+                // after runtime-authored callable projection is separated from
+                // decoded legacy ingress.
+                let definition_context = callable
+                    .capture
+                    .as_deref()
+                    .map(EvaluationContext::from_capture)
+                    .unwrap_or_else(EvaluationContext::new);
+                EvaluationContext::with_caller_overlay(
+                    definition_context,
+                    caller_context,
+                    resource_context,
+                )
+            };
+            // Caller-visible lookup bindings overlay the definition layer.
+            // Invocation parameters are installed last in the child below and
+            // therefore keep highest precedence.
             let mut child = invocation_base.child();
             child.extension_invocation =
                 extension_invocation.or_else(|| match extension_context_mode {
@@ -19115,9 +19229,8 @@ impl Evaluator {
                 }
             }
         };
-        let callable = binding.as_callable();
-        self.invoke_bound_callable(
-            &callable,
+        self.invoke_bound_function_binding(
+            binding,
             bound,
             IterationOptions {
                 span,
@@ -19209,9 +19322,8 @@ impl Evaluator {
             }
         };
 
-        let callable = binding.as_callable();
-        self.invoke_bound_callable(
-            &callable,
+        self.invoke_bound_function_binding(
+            binding,
             bound,
             IterationOptions {
                 span: *span,
@@ -19453,6 +19565,7 @@ impl Evaluator {
             parameters: wrapper_parameters,
             body: body_nodes.to_vec(),
             declaration_span: *span,
+            definition_frame: Some(DefinitionFrameRef::new(&context.frame)),
             capture: Some(Box::new(context.capture_snapshot())),
             extension: Some(Rc::clone(&extension)),
         });
@@ -19744,13 +19857,12 @@ impl Evaluator {
             }
         }
 
-        let callable = binding.as_callable();
         let bound = match binding.parameters {
             LambdaParameters::Explicit(_) => BoundLambdaArguments::Explicit(values),
             LambdaParameters::Implicit => BoundLambdaArguments::Implicit(values),
         };
-        self.invoke_bound_callable_with_extension(
-            &callable,
+        self.invoke_bound_function_binding_with_extension(
+            binding,
             bound,
             diagnostics,
             context,
@@ -19963,9 +20075,8 @@ impl Evaluator {
                         CallOutcome::Unresolved => return CallOutcome::Unresolved,
                     }
                 }
-                let callable = binding.as_callable();
-                self.invoke_bound_callable(
-                    &callable,
+                self.invoke_bound_function_binding(
+                    binding,
                     BoundLambdaArguments::Implicit(values),
                     IterationOptions {
                         span,
@@ -20046,9 +20157,8 @@ impl Evaluator {
                         BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None.into(),
                     })
                     .collect::<Vec<_>>();
-                let callable = binding.as_callable();
-                self.invoke_bound_callable(
-                    &callable,
+                self.invoke_bound_function_binding(
+                    binding,
                     BoundLambdaArguments::Explicit(values),
                     IterationOptions {
                         span,
@@ -37360,6 +37470,69 @@ mod tests {
                 })
             }),
             Some(vec!["value".to_string()])
+        );
+    }
+
+    #[test]
+    fn g2_source_function_invocation_prefers_live_definition_frame_over_snapshot() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.assign_value("definition_value".into(), IrValue::String("before".into()));
+
+        let capture = Some(Box::new(context.capture_snapshot()));
+        context.set_function_binding(
+            "read_definition".into(),
+            LambdaParameters::Explicit(Vec::new()),
+            vec![var_ref("definition_value")],
+            span(0, 10),
+            capture,
+        );
+
+        context.assign_value("definition_value".into(), IrValue::String("after".into()));
+        let outcome = evaluator.evaluate_call_value(
+            "read_definition",
+            &[],
+            &[],
+            None,
+            None,
+            &span(20, 30),
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            project_legacy_outcome(&outcome),
+            LegacyCallOutcome::Value(IrValue::String("after".into())),
+            "ordinary source-defined invocation must resolve through the live definition frame"
+        );
+    }
+
+    #[test]
+    fn g2_definition_frame_ref_is_weak_and_does_not_retain_its_owner_frame() {
+        let binding = {
+            let mut context = EvaluationContext::new();
+            context.set_function_binding(
+                "f".into(),
+                LambdaParameters::Explicit(Vec::new()),
+                Vec::new(),
+                span(0, 1),
+                Some(Box::new(context.capture_snapshot())),
+            );
+            context.get_function("f").expect("binding is installed")
+        };
+
+        assert!(
+            binding
+                .definition_frame
+                .as_ref()
+                .is_some_and(|definition| definition.upgrade().is_none()),
+            "a binding retained outside its scope must not keep the definition frame alive"
+        );
+        assert!(
+            binding.capture.is_some(),
+            "the transitional snapshot remains available as a legacy fallback in G2-C1"
         );
     }
 
