@@ -19740,13 +19740,23 @@ impl Evaluator {
             super_target,
             body_policy,
         });
+        let (definition_frame, definition_resource_context, capture) =
+            if context.runtime_authored_callables {
+                (
+                    Some(DefinitionFrameRef::new(&context.frame)),
+                    context.runtime_callable_resource_context(),
+                    None,
+                )
+            } else {
+                (None, None, Some(Box::new(context.capture_snapshot())))
+            };
         let wrapper = Rc::new(FunctionBinding {
             parameters: wrapper_parameters,
             body: body_nodes.to_vec(),
             declaration_span: *span,
-            definition_frame: None,
-            definition_resource_context: None,
-            capture: Some(Box::new(context.capture_snapshot())),
+            definition_frame,
+            definition_resource_context,
+            capture,
             extension: Some(Rc::clone(&extension)),
         });
 
@@ -37654,6 +37664,126 @@ mod tests {
                 })
             }),
             Some(vec!["value".to_string()])
+        );
+    }
+
+    #[test]
+    fn g2_runtime_authored_extension_wrapper_uses_live_definition_frame_without_snapshot() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut definition = EvaluationContext::new();
+        definition.runtime_authored_callables = true;
+        definition.assign_value("definition_value".into(), IrValue::String("before".into()));
+        definition.set_function_binding(
+            "target".into(),
+            LambdaParameters::Explicit(Vec::new()),
+            vec![var_ref("definition_value")],
+            span(0, 10),
+            None,
+        );
+
+        let extension_body = vec![var_ref("definition_value")];
+        let outcome = evaluator.evaluate_call_value(
+            "extend",
+            &[IrValue::Identifier("target".into())],
+            &[],
+            Some(CallBody::Block(&extension_body)),
+            None,
+            &span(10, 30),
+            &mut diagnostics,
+            &mut definition,
+        );
+        assert!(matches!(outcome, CallOutcome::NoValue));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let wrapper = definition
+            .get_function("target")
+            .expect("runtime-authored extension wrapper is installed");
+        assert!(wrapper.extension.is_some());
+        assert!(
+            wrapper.capture.is_none(),
+            "runtime-authored extension wrappers must not copy their lexical environment"
+        );
+        assert!(
+            wrapper
+                .definition_frame
+                .as_ref()
+                .is_some_and(|frame| frame.upgrade().is_some()),
+            "runtime-authored extension wrapper must carry a live weak definition-frame identity"
+        );
+        assert_eq!(
+            definition.retained_definition_frame_count(),
+            0,
+            "lexically installed extensions must not be promoted into C3A escape roots"
+        );
+
+        definition.assign_value("definition_value".into(), IrValue::String("after".into()));
+
+        let mut caller = EvaluationContext::new();
+        caller.runtime_authored_callables = true;
+        let outcome = evaluator.evaluate_extension_call(
+            &wrapper,
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            &span(30, 40),
+            &mut diagnostics,
+            &mut caller,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            project_legacy_outcome(&outcome),
+            LegacyCallOutcome::Value(IrValue::String("after".into())),
+            "extension invocation must observe the live definition frame rather than a declaration-time snapshot"
+        );
+    }
+
+    #[test]
+    fn g2_legacy_extension_wrapper_keeps_detached_snapshot_boundary() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.assign_value("definition_value".into(), IrValue::String("before".into()));
+        context.set_function_binding(
+            "target".into(),
+            LambdaParameters::Explicit(Vec::new()),
+            vec![var_ref("definition_value")],
+            span(0, 10),
+            None,
+        );
+
+        let extension_body = vec![var_ref("definition_value")];
+        let outcome = evaluator.evaluate_call_value(
+            "extend",
+            &[IrValue::Identifier("target".into())],
+            &[],
+            Some(CallBody::Block(&extension_body)),
+            None,
+            &span(10, 30),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::NoValue));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let wrapper = context
+            .get_function("target")
+            .expect("legacy extension wrapper is installed");
+        assert!(wrapper.extension.is_some());
+        assert!(
+            wrapper.definition_frame.is_none(),
+            "legacy/direct-IR extension wrappers must stay detached from the caller's runtime definition frame"
+        );
+        assert!(
+            wrapper.definition_resource_context.is_none(),
+            "legacy/direct-IR extension wrappers must not acquire direct runtime resource identity"
+        );
+        assert!(
+            wrapper.capture.is_some(),
+            "legacy/direct-IR extension wrappers keep the transitional copied capture boundary"
         );
     }
 
