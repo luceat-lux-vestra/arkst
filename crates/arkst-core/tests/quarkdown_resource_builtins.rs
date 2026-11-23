@@ -234,6 +234,38 @@ fn nested_include_reuses_function_lambda_and_resource_context() {
 }
 
 #[test]
+fn included_extension_keeps_its_definition_resource_base_after_include_returns() {
+    let project = project(
+        "docs/main.qd",
+        &[
+            (
+                "docs/main.qd",
+                ".function {render}\n    name:\n    base .name\n\n.include {partials/extension.qd}\n.render {world}\n",
+            ),
+            (
+                "docs/partials/extension.qd",
+                ".extend {render}\n    name:\n    .read {data/prefix.txt}\n    .super\n",
+            ),
+        ],
+        &[
+            ("docs/data/prefix.txt", b"caller"),
+            ("docs/partials/data/prefix.txt", b"definition"),
+        ],
+    );
+    let result = compile_project(&project);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        paragraph_text(&result),
+        "definition\nbase world",
+        "the extension body must resolve resources from its definition source, not the later caller source"
+    );
+}
+
+#[test]
 fn nested_include_callback_failure_keeps_child_source_and_atomic_output() {
     let child = ".ifpresent {hello} {@lambda value: .sum {true} {2}}\n";
     let project = project(
