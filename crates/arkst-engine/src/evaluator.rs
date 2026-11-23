@@ -8,10 +8,11 @@
 //! `::` call chains.
 //!
 //! Normal compilation advances the #719 direct-AST migration by consuming
-//! top-level user-function declarations, selected ordinary non-chained block
-//! calls, top-level block call chains, and non-chained top-level `.let` /
-//! `.foreach` / `.repeat` / `.extend` calls directly from frontend syntax while retaining the
-//! established IR evaluator machinery and transitional callable-body lowering.
+//! top-level user-function declarations and every non-chained block invocation
+//! through one parser-owned frontend boundary. Source-defined calls retain
+//! unevaluated AST candidates through binding; other owners convert only the
+//! selected call inputs into transitional runtime adapters inside the central
+//! dispatcher. Chains and callable bodies remain bounded migration debt.
 //! Legacy IR entry points remain supported.
 //!
 //! A `FunctionCall` / `DirectiveCall` named `if` or
@@ -93,7 +94,8 @@ use arkst_markdown::{
     ast::{
         Block as FrontendBlock, CallArgument as FrontendCallArgument,
         CallSegment as FrontendCallSegment, Document as FrontendDocument,
-        LambdaHeader as FrontendLambdaHeader, Value as FrontendValue,
+        LambdaHeader as FrontendLambdaHeader, RawBody as FrontendRawBody,
+        Value as FrontendValue,
     },
     Mode,
 };
@@ -414,6 +416,7 @@ struct FrontendInvocation<'a> {
     arguments: &'a [FrontendCallArgument],
     chain: &'a [FrontendCallSegment],
     body: Option<&'a [FrontendBlock]>,
+    raw_body: Option<&'a FrontendRawBody>,
     lambda_header: Option<&'a FrontendLambdaHeader>,
     span: &'a ByteSpan,
 }
@@ -434,6 +437,7 @@ impl<'a> FrontendInvocation<'a> {
             arguments,
             chain,
             body,
+            raw_body,
             lambda_header,
             span,
             ..
@@ -449,6 +453,7 @@ impl<'a> FrontendInvocation<'a> {
             arguments: arguments.as_slice(),
             chain: chain.as_slice(),
             body: body.as_deref(),
+            raw_body: raw_body.as_ref(),
             lambda_header: lambda_header.as_ref(),
             span,
         })
@@ -473,14 +478,6 @@ impl<'a> FrontendInvocation<'a> {
     /// source-defined callable owns the invocation.
     fn can_defer_source_defined_arguments(self, context: &EvaluationContext<'_>) -> bool {
         can_defer_source_defined_name(self.name, context)
-    }
-
-    /// Phase 3A/3B/3C direct calls may defer parser-owned arguments/bodies
-    /// until source-defined binding selects them.
-    fn can_defer_phase3a_arguments(self, context: &EvaluationContext<'_>) -> bool {
-        self.chain.is_empty()
-            && self.lambda_header.is_none()
-            && self.can_defer_source_defined_arguments(context)
     }
 
     /// Shared conservative chain-head ownership gate. Semantic dispatch still
@@ -576,6 +573,20 @@ struct FrontendStructuralCall {
     positional_args: Vec<IrValue>,
     named_args: Vec<IrNamedArg>,
     ordered_args: Vec<IrCallArgument>,
+}
+
+/// Transitional per-field adapter for a frontend call whose semantic owner has
+/// selected the legacy runtime argument/body representation.
+///
+/// This is intentionally not an executable call IR: it carries no callee name,
+/// dispatch identity, or node wrapper. The central dispatcher decides ownership
+/// first; only then may the selected owner request these bounded value/body
+/// projections while G3/G4 retire the remaining adapters.
+struct LoweredFrontendCallInput {
+    positional_args: Vec<IrValue>,
+    named_args: Vec<IrNamedArg>,
+    ordered_args: Vec<IrCallArgument>,
+    body: Option<Vec<IrNode>>,
 }
 
 /// Evaluator-owned unevaluated input for an explicit callable slot.
@@ -928,6 +939,15 @@ fn ir_chain_recovery_span(
             .any(|segment| regular_builtin_binds_raw_final_body(&segment.name)))
     .then(|| ir_invocation_recovery_span(span, raw_body))
     .flatten()
+}
+
+fn frontend_direct_recovery_span(
+    invocation: FrontendInvocation<'_>,
+    source_id: SourceId,
+) -> Option<SourceSpan> {
+    regular_builtin_binds_raw_final_body(invocation.name)
+        .then(|| frontend_invocation_recovery_span(invocation, source_id))
+        .flatten()
 }
 
 fn frontend_chain_recovery_span(
@@ -4700,68 +4720,38 @@ impl Evaluator {
                 }
             }
             FrontendInvocationRoute::DirectCall => {
-                if invocation.can_defer_phase3a_arguments(context) {
-                    let structural = frontend_structural_call(invocation.arguments, source_id);
-                    let call_span = frontend_source_span(invocation.span, source_id);
-                    let diagnostics_before = evaluation_diagnostics.len();
-                    let outcome = self.evaluate_frontend_block_call(
-                        invocation.name,
-                        &structural.ordered_args,
-                        &structural.positional_args,
-                        &structural.named_args,
-                        &call_span,
-                        FrontendCallInput {
-                            arguments: invocation.arguments,
-                            body: invocation.body,
-                            source_id,
-                            source_mode,
-                            evaluated_previous: None,
-                        },
-                        evaluation_diagnostics,
-                        context,
-                    );
-                    if !matches!(outcome, CallOutcome::Unresolved) {
-                        return Some(materialize_document_invocation_outcome(
-                            outcome,
-                            None,
-                            diagnostics_before,
-                            evaluation_diagnostics,
-                            context,
-                        ));
-                    }
-                }
-
-                match ast_to_ir::lower_top_level_direct_call(
-                    invocation.block,
-                    source_id,
-                    lowering_diagnostics,
-                    source_mode,
-                ) {
-                    ast_to_ir::TopLevelCallLowering::NotSelected => None,
-                    ast_to_ir::TopLevelCallLowering::Invalid => Some(Vec::new()),
-                    ast_to_ir::TopLevelCallLowering::Call(call) => {
-                        let diagnostics_before = evaluation_diagnostics.len();
-                        let outcome = self.evaluate_block_call(
-                            &call.name,
-                            Some(call.ordered_args.as_slice()),
-                            &call.positional_args,
-                            &call.named_args,
-                            call.lambda_parameters.as_deref(),
-                            call.body.as_deref(),
-                            call.raw_body.as_ref(),
-                            &call.span,
-                            evaluation_diagnostics,
-                            context,
-                        );
-                        Some(materialize_document_invocation_outcome(
-                            outcome,
-                            ir_direct_recovery_span(&call.name, call.span, call.raw_body.as_ref()),
-                            diagnostics_before,
-                            evaluation_diagnostics,
-                            context,
-                        ))
-                    }
-                }
+                let structural = frontend_structural_call(invocation.arguments, source_id);
+                let call_span = frontend_source_span(invocation.span, source_id);
+                let raw_body = invocation.raw_body.map(frontend_raw_body_for_runtime);
+                let lambda_parameters = invocation
+                    .lambda_header
+                    .map(|header| frontend_lambda_parameters_for_runtime(header, source_id));
+                let diagnostics_before = evaluation_diagnostics.len();
+                let outcome = self.evaluate_frontend_block_call(
+                    invocation.name,
+                    &structural.ordered_args,
+                    &structural.positional_args,
+                    &structural.named_args,
+                    raw_body.as_ref(),
+                    lambda_parameters.as_deref(),
+                    &call_span,
+                    FrontendCallInput {
+                        arguments: invocation.arguments,
+                        body: invocation.body,
+                        source_id,
+                        source_mode,
+                        evaluated_previous: None,
+                    },
+                    evaluation_diagnostics,
+                    context,
+                );
+                Some(materialize_document_invocation_outcome(
+                    outcome,
+                    frontend_direct_recovery_span(invocation, source_id),
+                    diagnostics_before,
+                    evaluation_diagnostics,
+                    context,
+                ))
             }
             FrontendInvocationRoute::Chain => {
                 let terminal_block_body = invocation.can_defer_phase3f_chain_head(context)
@@ -4892,6 +4882,8 @@ impl Evaluator {
             &structural.ordered_args,
             &structural.positional_args,
             &structural.named_args,
+            None,
+            None,
             &head_span,
             FrontendCallInput {
                 arguments: invocation.arguments,
@@ -5885,9 +5877,10 @@ impl Evaluator {
         }
     }
 
-    /// Evaluates a Phase 3A frontend call while its argument values are still
-    /// parser-owned. Unresolved outcomes are returned to the frontend boundary
-    /// instead of preserving structural placeholders.
+    /// Evaluates one parser-owned top-level direct call through the shared
+    /// semantic dispatcher. Source-defined owners keep AST candidates through
+    /// binding; other owners request a bounded per-field runtime projection
+    /// inside `evaluate_call_value_with_input`.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_frontend_block_call(
         &self,
@@ -5895,6 +5888,8 @@ impl Evaluator {
         ordered_args: &[IrCallArgument],
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
+        raw_body: Option<&IrRawBody>,
+        lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         frontend: FrontendCallInput<'_>,
         diagnostics: &mut Vec<Diagnostic>,
@@ -5905,6 +5900,8 @@ impl Evaluator {
             ordered_args,
             positional_args,
             named_args,
+            raw_body,
+            lambda_parameters,
             span,
             frontend,
             diagnostics,
@@ -5921,7 +5918,28 @@ impl Evaluator {
             }
             CallOutcome::NoValue => CallOutcome::NoValue,
             CallOutcome::Failed => CallOutcome::Failed,
-            CallOutcome::Unresolved => CallOutcome::Unresolved,
+            CallOutcome::Unresolved => {
+                let Some(lowered) =
+                    lower_frontend_call_input_for_runtime(frontend, diagnostics)
+                else {
+                    return CallOutcome::Failed;
+                };
+                match self.preserve_block_call(
+                    name,
+                    Some(lowered.ordered_args.as_slice()),
+                    &lowered.positional_args,
+                    &lowered.named_args,
+                    lambda_parameters,
+                    lowered.body.as_deref(),
+                    raw_body,
+                    span,
+                    diagnostics,
+                    context,
+                ) {
+                    Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes).into()),
+                    Err(outcome) => outcome,
+                }
+            }
         }
     }
 
@@ -6383,6 +6401,8 @@ impl Evaluator {
         ordered_args: &[IrCallArgument],
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
+        raw_body: Option<&IrRawBody>,
+        lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         frontend: FrontendCallInput<'_>,
         diagnostics: &mut Vec<Diagnostic>,
@@ -6393,8 +6413,8 @@ impl Evaluator {
             positional_args,
             named_args,
             None,
-            None,
-            None,
+            raw_body,
+            lambda_parameters,
             span,
             diagnostics,
             context,
@@ -6422,6 +6442,37 @@ impl Evaluator {
         implicit_argument: Option<RuntimeValue>,
         frontend: Option<FrontendCallInput<'_>>,
     ) -> CallOutcome {
+        if let Some(frontend) = frontend {
+            let source_defined_frontend_owner = lambda_parameters.is_none()
+                && context
+                    .get_function(name)
+                    .is_some_and(|binding| binding.extension.is_none())
+                && can_defer_source_defined_name(name, context);
+
+            if !source_defined_frontend_owner {
+                let Some(lowered) =
+                    lower_frontend_call_input_for_runtime(frontend, diagnostics)
+                else {
+                    return CallOutcome::Failed;
+                };
+                return self.evaluate_call_value_with_input(
+                    name,
+                    &lowered.positional_args,
+                    &lowered.named_args,
+                    lowered.body.as_deref().map(CallBody::Block),
+                    raw_body,
+                    lambda_parameters,
+                    span,
+                    diagnostics,
+                    context,
+                    first_origin,
+                    Some(lowered.ordered_args.as_slice()),
+                    implicit_argument,
+                    None,
+                );
+            }
+        }
+
         let _depth = match context.enter_evaluation_depth(*span, diagnostics) {
             Ok(depth) => depth,
             Err(outcome) => return outcome,
@@ -26904,6 +26955,26 @@ fn frontend_source_span(span: &ByteSpan, source_id: SourceId) -> SourceSpan {
     SourceSpan::new(source_id, span.start, span.end)
 }
 
+fn frontend_lambda_parameters_for_runtime(
+    header: &FrontendLambdaHeader,
+    source_id: SourceId,
+) -> Vec<IrParameter> {
+    header
+        .parameters
+        .iter()
+        .map(|parameter| IrParameter {
+            name: parameter.name.clone(),
+            name_span: frontend_source_span(&parameter.name_span, source_id),
+            span: frontend_source_span(&parameter.span, source_id),
+            optional: parameter.optional,
+        })
+        .collect()
+}
+
+fn frontend_raw_body_for_runtime(raw_body: &FrontendRawBody) -> IrRawBody {
+    IrRawBody::new(raw_body.source.clone(), raw_body.span)
+}
+
 fn frontend_structural_call(
     arguments: &[FrontendCallArgument],
     source_id: SourceId,
@@ -26942,6 +27013,72 @@ fn frontend_structural_call(
         named_args,
         ordered_args,
     }
+}
+
+fn lower_frontend_call_input_for_runtime(
+    frontend: FrontendCallInput<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<LoweredFrontendCallInput> {
+    let mut positional_args = Vec::new();
+    let mut named_args = Vec::new();
+    let mut ordered_args = Vec::with_capacity(frontend.arguments.len());
+
+    for argument in frontend.arguments {
+        match argument {
+            FrontendCallArgument::Positional { value, span } => {
+                let value = ast_to_ir::lower_frontend_value_for_runtime(
+                    value,
+                    frontend.source_id,
+                    diagnostics,
+                    frontend.source_mode,
+                )?;
+                let index = positional_args.len();
+                positional_args.push(value);
+                ordered_args.push(IrCallArgument::Positional {
+                    index,
+                    span: frontend_source_span(span, frontend.source_id),
+                });
+            }
+            FrontendCallArgument::Named(argument) => {
+                let value = ast_to_ir::lower_frontend_value_for_runtime(
+                    &argument.value,
+                    frontend.source_id,
+                    diagnostics,
+                    frontend.source_mode,
+                )?;
+                let index = named_args.len();
+                let name_span = frontend_source_span(&argument.name_span, frontend.source_id);
+                let span = frontend_source_span(&argument.span, frontend.source_id);
+                named_args.push(IrNamedArg {
+                    name: argument.name.clone(),
+                    name_span,
+                    value,
+                    span,
+                });
+                ordered_args.push(IrCallArgument::Named {
+                    index,
+                    name_span,
+                    span,
+                });
+            }
+        }
+    }
+
+    let body = frontend.body.map(|nodes| {
+        ast_to_ir::lower_frontend_block_body_for_runtime(
+            nodes,
+            frontend.source_id,
+            diagnostics,
+            frontend.source_mode,
+        )
+    });
+
+    Some(LoweredFrontendCallInput {
+        positional_args,
+        named_args,
+        ordered_args,
+        body,
+    })
 }
 
 fn frontend_argument_candidates<'a>(
@@ -29893,10 +30030,6 @@ mod tests {
                 FrontendInvocationRoute::DirectCall,
                 "{name}"
             );
-            assert!(
-                !invocation.can_defer_phase3a_arguments(&context),
-                "{name} must keep lambda-header arguments on transitional direct lowering"
-            );
         }
 
         let chain = frontend_invocation_block(
@@ -29915,11 +30048,6 @@ mod tests {
             chain_invocation.can_defer_phase3e_chain_head(&context),
             "bodyless ordinary chain heads may reuse frontend candidates"
         );
-        assert!(
-            !chain_invocation.can_defer_phase3a_arguments(&context),
-            "chain heads remain outside the direct-call Phase 3A gate"
-        );
-
         let direct_with_lambda = frontend_invocation_block(
             "ordinary",
             Vec::new(),
@@ -29934,6 +30062,163 @@ mod tests {
                 .route(),
             FrontendInvocationRoute::DirectCall
         );
+    }
+
+    #[test]
+    fn g3_direct_native_and_raw_body_calls_use_universal_frontend_ingress() {
+        let evaluator = Evaluator::new();
+        for (source, expected) in [
+            (".sum {1} {2}\n", "3"),
+            (".sum {1}\n    2\n", "3"),
+        ] {
+            let document = arkst_markdown::parse_qd(source);
+            let invocation =
+                FrontendInvocation::from_block(&document.nodes[0]).expect("direct invocation");
+            let mut evaluation_diagnostics = Vec::new();
+            let mut lowering_diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let nodes = evaluator
+                .evaluate_frontend_invocation(
+                    invocation,
+                    SourceId(1),
+                    Mode::Quarkdown,
+                    &mut evaluation_diagnostics,
+                    &mut lowering_diagnostics,
+                    &mut context,
+                )
+                .expect("direct invocation is owned by the frontend boundary");
+
+            assert!(
+                evaluation_diagnostics.is_empty(),
+                "{source:?}: {evaluation_diagnostics:?}"
+            );
+            assert!(
+                lowering_diagnostics.is_empty(),
+                "{source:?}: {lowering_diagnostics:?}"
+            );
+            assert!(matches!(
+                nodes.as_slice(),
+                [IrNode::Paragraph { content, .. }]
+                    if matches!(
+                        content.as_slice(),
+                        [IrInline::Text { content, .. }] if content == expected
+                    )
+            ));
+        }
+    }
+
+    #[test]
+    fn g3_direct_control_and_variable_owners_keep_lazy_and_writeback_semantics() {
+        let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
+        context.runtime_authored_callables = true;
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+
+        for source in [
+            ".var {state} {before}\n",
+            ".if {false}\n    .state {wrong}\n",
+            ".state {after}\n",
+        ] {
+            let document = arkst_markdown::parse_qd(source);
+            let invocation =
+                FrontendInvocation::from_block(&document.nodes[0]).expect("direct invocation");
+            let nodes = evaluator
+                .evaluate_frontend_invocation(
+                    invocation,
+                    SourceId(1),
+                    Mode::Quarkdown,
+                    &mut evaluation_diagnostics,
+                    &mut lowering_diagnostics,
+                    &mut context,
+                )
+                .expect("direct invocation");
+            assert!(nodes.is_empty(), "{source:?}: {nodes:?}");
+        }
+
+        let document = arkst_markdown::parse_qd(".state\n");
+        let invocation =
+            FrontendInvocation::from_block(&document.nodes[0]).expect("variable reference");
+        let nodes = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(1),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut context,
+            )
+            .expect("variable reference");
+        assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+        assert!(matches!(
+            nodes.as_slice(),
+            [IrNode::Paragraph { content, .. }]
+                if matches!(
+                    content.as_slice(),
+                    [IrInline::Text { content, .. }] if content == "after"
+                )
+        ));
+    }
+
+    #[test]
+    fn g3_direct_extension_super_and_unresolved_preservation_share_frontend_route() {
+        let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
+        context.runtime_authored_callables = true;
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+
+        let source = concat!(
+            ".function {greet}\n",
+            "    name:\n",
+            "    base .name\n",
+            "\n",
+            ".extend {greet}\n",
+            "    name:\n",
+            "    wrapped .super\n",
+            "\n",
+            ".greet {world}\n",
+        );
+        let document = arkst_markdown::parse_qd(source);
+        let mut output = Vec::new();
+        for block in &document.nodes {
+            let invocation = FrontendInvocation::from_block(block).expect("directive invocation");
+            output.extend(
+                evaluator
+                    .evaluate_frontend_invocation(
+                        invocation,
+                        SourceId(1),
+                        Mode::Quarkdown,
+                        &mut evaluation_diagnostics,
+                        &mut lowering_diagnostics,
+                        &mut context,
+                    )
+                    .expect("frontend-owned invocation"),
+            );
+        }
+        assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+        assert!(!output.is_empty());
+        assert!(!ir_nodes_contain_evaluator_executable_state(&output));
+
+        let unresolved = arkst_markdown::parse_qd(".unknown {first} key:{second}\n");
+        let invocation =
+            FrontendInvocation::from_block(&unresolved.nodes[0]).expect("unresolved direct call");
+        let nodes = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(2),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut context,
+            )
+            .expect("unresolved direct call stays structurally preserved");
+        assert!(matches!(
+            nodes.as_slice(),
+            [IrNode::FunctionCall { name, .. }] if name == "unknown"
+        ));
     }
 
     #[test]
