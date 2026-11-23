@@ -6047,13 +6047,11 @@ impl Evaluator {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn preflight_binding(
+    fn preflight_binding_candidates(
         &self,
         parameters: &[ParameterMetadata<'_>],
-        ordered_args: Option<&[IrCallArgument]>,
-        positional_args: &[IrValue],
-        named_args: &[IrNamedArg],
-        body: Option<CallBody<'_>>,
+        candidates: &[Candidate<()>],
+        body: Option<&Candidate<()>>,
         body_policy: BodyPolicy,
         span: SourceSpan,
         diagnostic_code: &str,
@@ -6062,9 +6060,7 @@ impl Evaluator {
         user_function: bool,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<BindingPlan, ()> {
-        let candidates = structural_candidates(ordered_args, positional_args, named_args, span);
-        let body = body.map(|body| body_candidate_shape(body, span));
-        match invocation_binder::plan(parameters, &candidates, body.as_ref(), body_policy, span) {
+        match invocation_binder::plan(parameters, candidates, body, body_policy, span) {
             Ok(plan) => Ok(plan),
             Err(mut error) => {
                 if let Some(name) = native_name {
@@ -6124,6 +6120,135 @@ impl Evaluator {
                 Err(())
             }
         }
+    }
+
+
+    fn preflight_binding(
+        &self,
+        parameters: &[ParameterMetadata<'_>],
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        body_policy: BodyPolicy,
+        span: SourceSpan,
+        diagnostic_code: &str,
+        native_name: Option<&str>,
+        lambda_body_span: Option<SourceSpan>,
+        user_function: bool,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<BindingPlan, ()> {
+        let candidates = structural_candidates(ordered_args, positional_args, named_args, span);
+        let body = body.map(|body| body_candidate_shape(body, span));
+        self.preflight_binding_candidates(
+            parameters,
+            &candidates,
+            body.as_ref(),
+            body_policy,
+            span,
+            diagnostic_code,
+            native_name,
+            lambda_body_span,
+            user_function,
+            diagnostics,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn preflight_frontend_native_binding(
+        &self,
+        name: &str,
+        frontend: FrontendCallInput<'_>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: SourceSpan,
+        context: &EvaluationContext<'_>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Option<BindingPlan>, ()> {
+        let positional_count = frontend
+            .arguments
+            .iter()
+            .filter(|argument| matches!(argument, FrontendCallArgument::Positional { .. }))
+            .count();
+        let named_count = frontend.arguments.len().saturating_sub(positional_count);
+        let has_body = frontend.body.is_some();
+
+        if context.contains(name)
+            && named_count == 0
+            && !has_body
+            && matches!(positional_count, 0 | 1)
+        {
+            return Ok(None);
+        }
+
+        let state_shadowed = matches!(
+            name,
+            "captionposition"
+                | "numbering"
+                | "nonumbering"
+                | "font"
+                | "paragraphstyle"
+                | "docauthor"
+                | "docauthors"
+                | "dockeywords"
+                | "doclang"
+                | "theme"
+                | "autopagebreak"
+                | "noautopagebreak"
+                | "slides"
+        ) && context.get_function(name).is_some();
+        if context.get_function(name).is_some() && !is_document_state(name) {
+            return Ok(None);
+        }
+        if state_shadowed {
+            return Ok(None);
+        }
+
+        let candidates = frontend_argument_candidates(frontend);
+        let candidate_shapes = candidate_shapes(&candidates);
+        let body_candidate = frontend_body_candidate(frontend, span);
+        let body_shape = body_candidate.as_ref().map(candidate_shape);
+
+        if let Some(builtin) = builtins::lookup(name) {
+            let parameters = builtins::binding_parameters(builtin);
+            return self
+                .preflight_binding_candidates(
+                    &parameters,
+                    &candidate_shapes,
+                    body_shape.as_ref(),
+                    builtin.body_policy.binder_policy(),
+                    span,
+                    "E3001",
+                    Some(name),
+                    lambda_body_span(name, lambda_parameters),
+                    false,
+                    diagnostics,
+                )
+                .map(Some);
+        }
+
+        let Some((parameters, body_policy)) = native_binding_parameters(name) else {
+            return Ok(None);
+        };
+        let diagnostic_code = if name == "var" {
+            "E3002"
+        } else if is_document_state(name) || matches!(name, "let" | "br" | "html" | "markdown") {
+            "E3003"
+        } else {
+            "E3001"
+        };
+        self.preflight_binding_candidates(
+            &parameters,
+            &candidate_shapes,
+            body_shape.as_ref(),
+            body_policy,
+            span,
+            diagnostic_code,
+            Some(name),
+            lambda_body_span(name, lambda_parameters),
+            false,
+            diagnostics,
+        )
+        .map(Some)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -6450,6 +6575,19 @@ impl Evaluator {
                 && can_defer_source_defined_name(name, context);
 
             if !source_defined_frontend_owner {
+                if self
+                    .preflight_frontend_native_binding(
+                        name,
+                        frontend,
+                        lambda_parameters,
+                        *span,
+                        context,
+                        diagnostics,
+                    )
+                    .is_err()
+                {
+                    return CallOutcome::Failed;
+                }
                 let Some(lowered) =
                     lower_frontend_call_input_for_runtime(frontend, diagnostics)
                 else {
@@ -30219,6 +30357,65 @@ mod tests {
             nodes.as_slice(),
             [IrNode::FunctionCall { name, .. }] if name == "unknown"
         ));
+    }
+
+    #[test]
+    fn g3_direct_native_shape_rejects_before_frontend_value_lowering() {
+        let block = FrontendBlock::DirectiveCall {
+            name: "sum".to_string(),
+            name_span: arkst_source::ByteSpan::new(0, 3),
+            head_span: arkst_source::ByteSpan::new(0, 24),
+            arguments: vec![
+                FrontendCallArgument::Named(arkst_markdown::ast::NamedArg {
+                    name: "a".to_string(),
+                    name_span: arkst_source::ByteSpan::new(5, 6),
+                    value: FrontendValue::Number(1.0),
+                    value_span: arkst_source::ByteSpan::new(8, 9),
+                    span: arkst_source::ByteSpan::new(5, 10),
+                }),
+                FrontendCallArgument::Positional {
+                    value: FrontendValue::Content(vec![
+                        arkst_markdown::ast::Inline::Unsupported {
+                            kind: "must-not-lower".to_string(),
+                            span: arkst_source::ByteSpan::new(12, 24),
+                        },
+                    ]),
+                    span: arkst_source::ByteSpan::new(12, 24),
+                },
+            ],
+            chain: Vec::new(),
+            body: None,
+            raw_body: None,
+            lambda_header: None,
+            span: arkst_source::ByteSpan::new(0, 24),
+        };
+        let invocation = FrontendInvocation::from_block(&block).expect("direct invocation");
+        let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+
+        let nodes = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(30),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut context,
+            )
+            .expect("direct frontend route");
+
+        assert!(nodes.is_empty());
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+        assert_eq!(evaluation_diagnostics.len(), 1, "{evaluation_diagnostics:?}");
+        assert_eq!(evaluation_diagnostics[0].code, "E3003");
+        assert!(
+            evaluation_diagnostics[0]
+                .message
+                .contains("positional argument after named argument"),
+            "{evaluation_diagnostics:?}"
+        );
     }
 
     #[test]
