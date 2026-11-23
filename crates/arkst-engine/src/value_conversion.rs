@@ -363,9 +363,7 @@ impl RuntimeCallable {
         }
         if let Some(capture) = self.capture.as_deref() {
             for variable in &capture.variables {
-                variable
-                    .value
-                    .visit_callable_definition_identities(visit);
+                variable.value.visit_callable_definition_identities(visit);
             }
             for function in &capture.functions {
                 function.callable.visit_definition_identities(visit);

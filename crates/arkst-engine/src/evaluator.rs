@@ -3245,7 +3245,10 @@ impl<'a> EvaluationContext<'a> {
                     true
                 }
                 InvocationUndo::RetainedDefinitionFrame { frame } => {
-                    self.session.retained_definition_frames.borrow_mut().remove(&frame);
+                    self.session
+                        .retained_definition_frames
+                        .borrow_mut()
+                        .remove(&frame);
                     true
                 }
                 _ => false,
@@ -37977,7 +37980,7 @@ mod tests {
     #[test]
     fn g2_nested_runtime_values_promote_callable_definition_frames_structurally() {
         let evaluator = Evaluator::new();
-        let mut root = EvaluationContext::new();
+        let root = EvaluationContext::new();
         root.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
 
@@ -38020,9 +38023,8 @@ mod tests {
             let mut definition = root.child();
             definition.runtime_authored_callables = true;
             let callable = evaluator.make_callable(Some(&[]), &[], span(0, 1), &definition);
-            definition.retain_escaped_definition_frames(&RuntimeValue::static_callable(
-                callable.clone(),
-            ));
+            definition
+                .retain_escaped_definition_frames(&RuntimeValue::static_callable(callable.clone()));
             (callable, definition)
         };
         assert_eq!(root.retained_definition_frame_count(), 1);
