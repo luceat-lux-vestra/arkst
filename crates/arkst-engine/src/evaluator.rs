@@ -591,7 +591,7 @@ struct LoweredFrontendCallInput {
 
 /// Evaluator-owned unevaluated input for an explicit callable slot.
 ///
-/// Normal Phase 3A calls retain parser-owned frontend values through binding.
+/// Frontend-owned source calls retain parser-owned values through binding.
 /// Legacy/direct-IR callers keep the transitional `Expression(&IrValue)`
 /// adapter. Bodies remain distinct candidates so structural binding can accept
 /// or reject them without executing their contents.
@@ -7003,16 +7003,16 @@ impl Evaluator {
             if let Some(frontend) = frontend {
                 // Extension bindings still require evaluate_extension_call() to
                 // install the active super target and preserve extension-chain
-                // semantics. Phase 3A therefore falls back to the transitional
-                // IR-backed direct-call path until extension invocation itself is migrated.
+                // semantics. Universal direct-call ingress projects extension
+                // inputs per-field before this branch; retained chain adapters may
+                // still reach this fail-closed frontend path.
                 if binding.extension.is_some() {
                     return CallOutcome::Unresolved;
                 }
-                // Phase 3A/3B moved explicit arguments and block bodies onto
-                // evaluator-owned frontend candidates. Phase 3C extends that
-                // same boundary to headerless source-defined callables; the
-                // binding itself still owns whether parameters are explicit or
-                // implicit, so frontend selection does not become a dispatcher.
+                // Ordinary source-defined calls keep explicit arguments and
+                // block bodies as evaluator-owned frontend candidates. The
+                // binding itself still owns explicit-vs-implicit parameter mode;
+                // frontend routing never becomes the semantic dispatcher.
                 return self.evaluate_user_function_with_frontend_candidates(
                     &binding,
                     frontend,
@@ -30219,6 +30219,90 @@ mod tests {
             nodes.as_slice(),
             [IrNode::FunctionCall { name, .. }] if name == "unknown"
         ));
+    }
+
+    #[test]
+    fn g3_direct_contextual_lambda_owners_share_universal_frontend_ingress() {
+        let evaluator = Evaluator::new();
+
+        for source in [
+            ".let {Quarkdown}\n    name:\n    .uppercase {.name}\n",
+            ".foreach {2..4}\n    number:\n    .number\n",
+            ".repeat {3}\n    number:\n    .number\n",
+        ] {
+            let document = arkst_markdown::parse_qd(source);
+            let invocation =
+                FrontendInvocation::from_block(&document.nodes[0]).expect("direct invocation");
+            assert_eq!(invocation.route(), FrontendInvocationRoute::DirectCall);
+
+            let mut context = EvaluationContext::new();
+            context.runtime_authored_callables = true;
+            let mut evaluation_diagnostics = Vec::new();
+            let mut lowering_diagnostics = Vec::new();
+            let nodes = evaluator
+                .evaluate_frontend_invocation(
+                    invocation,
+                    SourceId(31),
+                    Mode::Quarkdown,
+                    &mut evaluation_diagnostics,
+                    &mut lowering_diagnostics,
+                    &mut context,
+                )
+                .expect("contextual lambda call is owned by direct frontend ingress");
+
+            assert!(
+                evaluation_diagnostics.is_empty(),
+                "{source:?}: {evaluation_diagnostics:?}"
+            );
+            assert!(
+                lowering_diagnostics.is_empty(),
+                "{source:?}: {lowering_diagnostics:?}"
+            );
+            assert!(!nodes.is_empty(), "{source:?}");
+            assert!(
+                !ir_nodes_contain_evaluator_executable_state(&nodes),
+                "{source:?}: {nodes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn g3_direct_failed_raw_body_keeps_diagnostic_and_recovery_boundary() {
+        let source = ".sum {1}\n    invalid\n";
+        let document = arkst_markdown::parse_qd(source);
+        let invocation =
+            FrontendInvocation::from_block(&document.nodes[0]).expect("direct invocation");
+        let expected_recovery = SourceSpan::new(SourceId(752), 0, source.len() - 1);
+        assert_eq!(
+            frontend_direct_recovery_span(invocation, SourceId(752)),
+            Some(expected_recovery)
+        );
+
+        let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
+        let mut evaluation_diagnostics = Vec::new();
+        let mut lowering_diagnostics = Vec::new();
+        let nodes = evaluator
+            .evaluate_frontend_invocation(
+                invocation,
+                SourceId(752),
+                Mode::Quarkdown,
+                &mut evaluation_diagnostics,
+                &mut lowering_diagnostics,
+                &mut context,
+            )
+            .expect("failed native call remains owned by direct frontend ingress");
+
+        assert!(nodes.is_empty(), "{nodes:?}");
+        assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
+        assert_eq!(evaluation_diagnostics.len(), 1, "{evaluation_diagnostics:?}");
+        assert_eq!(evaluation_diagnostics[0].code, "E3001");
+        assert!(
+            evaluation_diagnostics[0]
+                .message
+                .contains("numeric arguments"),
+            "{evaluation_diagnostics:?}"
+        );
     }
 
     #[test]
