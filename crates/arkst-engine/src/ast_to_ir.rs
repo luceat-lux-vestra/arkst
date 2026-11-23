@@ -150,12 +150,6 @@ impl LoweredTopLevelCall {
     }
 }
 
-pub(crate) enum TopLevelCallLowering {
-    NotSelected,
-    Invalid,
-    Call(Box<LoweredTopLevelCall>),
-}
-
 pub(crate) struct LoweredTopLevelChain {
     pub(crate) head: IrCallSegment,
     pub(crate) chain: Vec<IrCallSegment>,
@@ -232,54 +226,6 @@ pub(crate) fn lower_top_level_function_declaration(
     }
 }
 
-/// Lower one evaluator-selected non-chained top-level block invocation through
-/// the shared transitional call payload.
-///
-/// The evaluator-owned `FrontendInvocation` boundary owns migration selection.
-/// This helper intentionally performs no builtin/source-defined dispatch and no
-/// contextual-directive classification; those semantics remain in the evaluator
-/// call dispatcher. It only converts an already-selected direct block call to
-/// the established transitional argument/body representation.
-pub(crate) fn lower_top_level_direct_call(
-    block: &Block,
-    source_id: SourceId,
-    diagnostics: &mut Vec<Diagnostic>,
-    source_mode: Mode,
-) -> TopLevelCallLowering {
-    let Block::DirectiveCall {
-        name,
-        arguments,
-        chain,
-        body,
-        raw_body,
-        lambda_header,
-        span,
-        ..
-    } = block
-    else {
-        return TopLevelCallLowering::NotSelected;
-    };
-
-    if name == "function" || !chain.is_empty() {
-        return TopLevelCallLowering::NotSelected;
-    }
-
-    match lower_simple_block_call(
-        name,
-        arguments,
-        body.as_deref(),
-        raw_body.as_ref(),
-        lambda_header.as_ref(),
-        span,
-        source_id,
-        diagnostics,
-        source_mode,
-    ) {
-        Some(call) => TopLevelCallLowering::Call(Box::new(call)),
-        None => TopLevelCallLowering::Invalid,
-    }
-}
-
 /// Recognize and lower one top-level block call chain without constructing the
 /// executable document-node carrier used by the legacy AST -> IR path.
 pub(crate) fn lower_top_level_chain(
@@ -328,9 +274,9 @@ pub(crate) fn lower_top_level_chain(
 
 /// Lower one frontend block through the established compatibility IR bridge.
 ///
-/// The evaluator-owned `FrontendInvocation` boundary decides whether a block
-/// invocation can use the shared direct bridge first. This fallback remains for
-/// non-invocation blocks and explicitly unmigrated invocation shapes.
+/// Top-level directive invocations are owned by the evaluator's frontend
+/// boundary. This fallback remains for non-invocation blocks; nested invocation
+/// conversion stays a separate G4 migration boundary.
 pub(crate) fn lower_top_level_block(
     block: &Block,
     source_id: SourceId,
@@ -1573,78 +1519,6 @@ mod tests {
             declaration.body.as_slice(),
             [IrNode::Paragraph { .. }]
         ));
-    }
-
-    #[test]
-    fn top_level_direct_call_bridge_matches_legacy_shapes() {
-        for (source, expected_name) in [
-            (".unknown {first} key:{둘}\n", "unknown"),
-            (
-                ".let {Quarkdown}\n    name:\n    .uppercase {.name}\n",
-                "let",
-            ),
-            (".foreach {2..4}\n    number:\n    .number\n", "foreach"),
-            (".repeat {3}\n    number:\n    .number\n", "repeat"),
-            (
-                ".extend {greet} where:{name: .name}\n    name:\n    extended .name\n",
-                "extend",
-            ),
-        ] {
-            let document = arkst_markdown::parse_qd(source);
-            let mut direct_diagnostics = Vec::new();
-            let lowering = lower_top_level_direct_call(
-                &document.nodes[0],
-                source_id(),
-                &mut direct_diagnostics,
-                Mode::Quarkdown,
-            );
-
-            assert!(
-                direct_diagnostics.is_empty(),
-                "{source:?}: {direct_diagnostics:?}"
-            );
-            let TopLevelCallLowering::Call(call) = lowering else {
-                panic!("expected shared direct top-level call payload for {source:?}")
-            };
-            assert_eq!(call.name, expected_name, "{source:?}");
-
-            let direct_node = (*call).into_ir_node();
-            let mut legacy_diagnostics = Vec::new();
-            let legacy_node = lower_top_level_block(
-                &document.nodes[0],
-                source_id(),
-                &mut legacy_diagnostics,
-                Mode::Quarkdown,
-            )
-            .expect("legacy lowering");
-            assert!(
-                legacy_diagnostics.is_empty(),
-                "{source:?}: {legacy_diagnostics:?}"
-            );
-            assert_eq!(direct_node, legacy_node, "{source:?}");
-        }
-    }
-
-    #[test]
-    fn top_level_direct_call_bridge_rejects_function_declarations_and_chains() {
-        for source in [
-            ".function {greet}\n    name:\n    Hello .name\n",
-            ".range {1} {3}::size\n",
-        ] {
-            let document = arkst_markdown::parse_qd(source);
-            let mut diagnostics = Vec::new();
-            let lowering = lower_top_level_direct_call(
-                &document.nodes[0],
-                source_id(),
-                &mut diagnostics,
-                Mode::Quarkdown,
-            );
-            assert!(
-                matches!(lowering, TopLevelCallLowering::NotSelected),
-                "{source:?}"
-            );
-            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
-        }
     }
 
     #[test]
