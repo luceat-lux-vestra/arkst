@@ -338,6 +338,7 @@ pub(crate) struct RuntimeCallable {
     pub(crate) body: Vec<IrNode>,
     pub(crate) span: SourceSpan,
     pub(crate) capture: Option<Box<RuntimeCallableCapture>>,
+    pub(crate) definition_resource_context: Option<RuntimeCallableResourceContext>,
     pub(crate) definition_identity: Option<RuntimeCallableDefinitionIdentity>,
 }
 
@@ -350,6 +351,7 @@ impl RuntimeCallable {
             capture: value
                 .capture
                 .map(|capture| Box::new(RuntimeCallableCapture::from_ir(*capture))),
+            definition_resource_context: None,
             definition_identity: None,
         }
     }
@@ -435,6 +437,7 @@ impl RuntimeInlineBody {
             body: self.body,
             span: self.span,
             capture: None,
+            definition_resource_context: None,
             definition_identity: None,
         }
     }
@@ -4465,6 +4468,7 @@ mod tests {
                 functions: Vec::new(),
                 resource_context: None,
             })),
+            definition_resource_context: None,
             definition_identity: None,
         };
         let runtime = RuntimeValue::callable(callable, ValueOrigin::Static);
