@@ -94,8 +94,7 @@ use arkst_markdown::{
     ast::{
         Block as FrontendBlock, CallArgument as FrontendCallArgument,
         CallSegment as FrontendCallSegment, Document as FrontendDocument,
-        LambdaHeader as FrontendLambdaHeader, RawBody as FrontendRawBody,
-        Value as FrontendValue,
+        LambdaHeader as FrontendLambdaHeader, RawBody as FrontendRawBody, Value as FrontendValue,
     },
     Mode,
 };
@@ -5919,8 +5918,7 @@ impl Evaluator {
             CallOutcome::NoValue => CallOutcome::NoValue,
             CallOutcome::Failed => CallOutcome::Failed,
             CallOutcome::Unresolved => {
-                let Some(lowered) =
-                    lower_frontend_call_input_for_runtime(frontend, diagnostics)
+                let Some(lowered) = lower_frontend_call_input_for_runtime(frontend, diagnostics)
                 else {
                     return CallOutcome::Failed;
                 };
@@ -6122,7 +6120,7 @@ impl Evaluator {
         }
     }
 
-
+    #[allow(clippy::too_many_arguments)]
     fn preflight_binding(
         &self,
         parameters: &[ParameterMetadata<'_>],
@@ -6588,8 +6586,7 @@ impl Evaluator {
                 {
                     return CallOutcome::Failed;
                 }
-                let Some(lowered) =
-                    lower_frontend_call_input_for_runtime(frontend, diagnostics)
+                let Some(lowered) = lower_frontend_call_input_for_runtime(frontend, diagnostics)
                 else {
                     return CallOutcome::Failed;
                 };
@@ -30205,10 +30202,7 @@ mod tests {
     #[test]
     fn g3_direct_native_and_raw_body_calls_use_universal_frontend_ingress() {
         let evaluator = Evaluator::new();
-        for (source, expected) in [
-            (".sum {1} {2}\n", "3"),
-            (".sum {1}\n    2\n", "3"),
-        ] {
+        for (source, expected) in [(".sum {1} {2}\n", "3"), (".sum {1}\n    2\n", "3")] {
             let document = arkst_markdown::parse_qd(source);
             let invocation =
                 FrontendInvocation::from_block(&document.nodes[0]).expect("direct invocation");
@@ -30287,7 +30281,10 @@ mod tests {
                 &mut context,
             )
             .expect("variable reference");
-        assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+        assert!(
+            evaluation_diagnostics.is_empty(),
+            "{evaluation_diagnostics:?}"
+        );
         assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
         assert!(matches!(
             nodes.as_slice(),
@@ -30335,7 +30332,10 @@ mod tests {
                     .expect("frontend-owned invocation"),
             );
         }
-        assert!(evaluation_diagnostics.is_empty(), "{evaluation_diagnostics:?}");
+        assert!(
+            evaluation_diagnostics.is_empty(),
+            "{evaluation_diagnostics:?}"
+        );
         assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
         assert!(!output.is_empty());
         assert!(!ir_nodes_contain_evaluator_executable_state(&output));
@@ -30374,12 +30374,10 @@ mod tests {
                     span: arkst_source::ByteSpan::new(5, 10),
                 }),
                 FrontendCallArgument::Positional {
-                    value: FrontendValue::Content(vec![
-                        arkst_markdown::ast::Inline::Unsupported {
-                            kind: "must-not-lower".to_string(),
-                            span: arkst_source::ByteSpan::new(12, 24),
-                        },
-                    ]),
+                    value: FrontendValue::Content(vec![arkst_markdown::ast::Inline::Unsupported {
+                        kind: "must-not-lower".to_string(),
+                        span: arkst_source::ByteSpan::new(12, 24),
+                    }]),
                     span: arkst_source::ByteSpan::new(12, 24),
                 },
             ],
@@ -30408,7 +30406,11 @@ mod tests {
 
         assert!(nodes.is_empty());
         assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
-        assert_eq!(evaluation_diagnostics.len(), 1, "{evaluation_diagnostics:?}");
+        assert_eq!(
+            evaluation_diagnostics.len(),
+            1,
+            "{evaluation_diagnostics:?}"
+        );
         assert_eq!(evaluation_diagnostics[0].code, "E3003");
         assert!(
             evaluation_diagnostics[0]
@@ -30492,7 +30494,11 @@ mod tests {
 
         assert!(nodes.is_empty(), "{nodes:?}");
         assert!(lowering_diagnostics.is_empty(), "{lowering_diagnostics:?}");
-        assert_eq!(evaluation_diagnostics.len(), 1, "{evaluation_diagnostics:?}");
+        assert_eq!(
+            evaluation_diagnostics.len(),
+            1,
+            "{evaluation_diagnostics:?}"
+        );
         assert_eq!(evaluation_diagnostics[0].code, "E3001");
         assert!(
             evaluation_diagnostics[0]
