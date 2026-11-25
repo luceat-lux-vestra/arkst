@@ -234,7 +234,7 @@ def check_supply_chain_authority(root: Path = ROOT) -> list[Finding]:
 
     component_required = [
         "workflow_call:",
-        "runs-on: ubuntu-24.04-arm",
+        "runs-on: ubuntu-26.04-arm",
         "uses: ./.github/actions/cargo-deny-prebuilt",
         "arguments: --all-features",
         "force_failure",
