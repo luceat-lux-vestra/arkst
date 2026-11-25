@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[2]
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 ACTION_LINE = re.compile(r"^\s*uses:\s*github/codeql-action/(?P<action>init|analyze)@(?P<sha>[0-9a-f]{40})(?:\s+#.*)?\s*$")
+RUNNER_LINE = re.compile(r"    runs-on: ubuntu-([0-9]+)\.([0-9]+)-arm\Z")
 SIMPLE_STATUSES = frozenset({"added","modified","removed"})
 MOVE_STATUSES = frozenset({"renamed","copied"})
 RELEVANT_PATHS = frozenset({
@@ -32,15 +33,27 @@ def flatten_pages(value:object)->list[dict]:
    rows.append(row)
  return rows
 def validate_codeql_pin_only_patch(row:dict)->None:
- if row.get("status")!="modified": reject("direct codeql.yml change is supported only as an in-place pin replacement")
+ if row.get("status")!="modified": reject("direct codeql.yml change must be an in-place immutable pin or ARM64 runner replacement")
  patch=row.get("patch")
  if not isinstance(patch,str) or not patch.strip(): reject("direct codeql.yml change lacks a complete reviewable patch")
- changed=[]
- for raw in patch.splitlines():
-  if not raw or raw.startswith(("+++","---","@@")) or raw[0] not in "+-": continue
+ lines=patch.splitlines(); changed=[]; runner_count=0; i=0
+ while i<len(lines):
+  raw=lines[i]
+  if not raw or raw.startswith(("+++","---","@@")) or raw[0] not in "+-":
+   i+=1; continue
+  if raw.startswith("-") and i+1<len(lines) and lines[i+1].startswith("+"):
+   old_runner=RUNNER_LINE.fullmatch(raw[1:])
+   new_runner=RUNNER_LINE.fullmatch(lines[i+1][1:])
+   if old_runner and new_runner:
+    if runner_count or tuple(map(int,new_runner.groups()))<=tuple(map(int,old_runner.groups())):
+     reject("ARM64 runner migration must be one forward version replacement")
+    runner_count+=1; i+=2; continue
   m=ACTION_LINE.fullmatch(raw[1:])
-  if m is None: reject("direct codeql.yml mutation is not an immutable init/analyze pin-only change")
-  changed.append((raw[0],m.group("action"),m.group("sha")))
+  if m is None: reject("direct codeql.yml mutation is not an immutable init/analyze pin or forward ARM64 runner change")
+  changed.append((raw[0],m.group("action"),m.group("sha"))); i+=1
+ if not changed:
+  if runner_count!=1: reject("direct codeql.yml patch contains no supported change")
+  return
  if len(changed)!=4: reject("direct codeql.yml pin-only change must replace init and analyze exactly once")
  old={a:s for sign,a,s in changed if sign=="-"}; new={a:s for sign,a,s in changed if sign=="+"}
  if set(old)!={"init","analyze"} or set(new)!={"init","analyze"}: reject("direct codeql.yml pin-only change must cover both init and analyze")
@@ -124,6 +137,13 @@ def self_test(root:Path=ROOT)->None:
  old="a"*40; new="b"*40
  patch="@@ -1,2 +1,2 @@\n"+f"-        uses: github/codeql-action/init@{old}\n"+f"+        uses: github/codeql-action/init@{new}\n"+f"-        uses: github/codeql-action/analyze@{old}\n"+f"+        uses: github/codeql-action/analyze@{new}\n"
  assert classify(pr(1),[[{"status":"modified","filename":".github/workflows/codeql.yml","patch":patch}]],repo=repo,base=base,head=head,head_repo=repo)
+ runner_patch="@@ -1 +1 @@\n-    runs-on: ubuntu-24.04-arm\n+    runs-on: ubuntu-26.04-arm\n"
+ for allowed in (runner_patch,runner_patch+patch):
+  assert classify(pr(1),[[{"status":"modified","filename":".github/workflows/codeql.yml","patch":allowed}]],repo=repo,base=base,head=head,head_repo=repo)
+ for invalid in (runner_patch.replace("ubuntu-26.04-arm","ubuntu-latest"),runner_patch.replace("ubuntu-26.04-arm","ubuntu-26.04"),runner_patch.replace("ubuntu-26.04-arm","ubuntu-22.04-arm"),runner_patch.replace("+    runs-on:","+      runs-on:"),runner_patch+runner_patch,runner_patch+"@@ -3 +3 @@\n-      contents: read\n+      contents: write\n",runner_patch.replace("+    runs-on: ubuntu-26.04-arm\n","")):
+  try: classify(pr(1),[[{"status":"modified","filename":".github/workflows/codeql.yml","patch":invalid}]],repo=repo,base=base,head=head,head_repo=repo)
+  except ValueError: pass
+  else: raise AssertionError("unsupported ARM64 migration accepted")
  bad=[(pr(2),[[{"status":"modified","filename":".github/workflows/ci.yml"}]]),(pr(1),[[{"status":"mystery","filename":".github/workflows/ci.yml"}]]),(pr(1),[[{"status":"modified","filename":"../ci.yml"}]]),(pr(2),[[{"status":"modified","filename":".github/workflows/ci.yml"},{"status":"modified","filename":".github/workflows/ci.yml"}]])]
  for meta,pages in bad:
   try: classify(meta,pages,repo=repo,base=base,head=head,head_repo=repo)
