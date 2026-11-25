@@ -1,0 +1,5 @@
+# Current GA Ubuntu ARM64 image is not yet in actionlint's built-in table.
+# Remove this single compatibility label once upstream supports it.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04-arm

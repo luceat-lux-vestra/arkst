@@ -37,7 +37,7 @@ jobs:
       # Must not bleed into macOS/Windows cache-key input environment.
       CARGO_INCREMENTAL: "0"
     name: ubuntu-final-sccache-producer
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 35
     steps:
       - name: Check out protected main
@@ -77,6 +77,7 @@ jobs:
               rustc -Vv
               printf 'runner_os=%s\n' "$RUNNER_OS"
               printf 'runner_arch=%s\n' "$RUNNER_ARCH"
+              printf 'runner_release_sha256=%s\n' "$(sha256sum /etc/os-release | awk '{print $1}')"
               printf 'rustflags=%s\n' "$RUSTFLAGS"
               printf 'cargo_incremental=%s\n' "$CARGO_INCREMENTAL"
               printf 'cargo_term_color=%s\n' "$CARGO_TERM_COLOR"

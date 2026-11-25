@@ -30,6 +30,18 @@ The verifier and its adversarial self-tests run in the authoritative `fmt` compo
 
 Historical Markdown substrate PoCs deliberately remain research evidence. In particular, the recorded `markdown-it 0.6.1 -> mdurl 0.3.1 -> idna 0.3.0` advisory is not reclassified as safe and is not placed on an advisory allow-list. The manifests preserve complete exact direct-version research recipes while generated lockfiles remain uncommitted, matching the authority recorded in `docs/research/markdown-substrate-final-feasibility.md`.
 
+## Lifecycle ownership (EG-DEP-001)
+
+The root production Cargo workspace and immutable GitHub Actions use native Dependabot. Actionlint is a separate native Go tool module built on the official stable Go channel; zizmor follows the official immutable Action's bundled verified CLI. No additional updater service, write credential, or generic binary/hash scanner is required.
+
+The repository-local lifecycle registry records current GA ARM64 runner ownership as ordinary reviewed migration (`UPDATE_PR`), not a freeze. The ARM cache producer and consumer include the same OS release identity so a new distribution does not inherit an old cache family. The maintained matrix retains macOS and Windows coverage and the required Merge Gate components.
+
+All six independent research Cargo roots have exact path-specific ownership. Four historical Markdown/Rushdown experiments and the dependency-free subprocess comparison are bounded evidence freezes (review by 2027-02-22). The directly runnable in-process Typst recipe is an ordinary paired review with production Typst updates, preserving the existing shared security patch and advisory/source checks. Independent native updates that introduce research lockfiles or alter historical experimental subjects are incompatible with the existing containment contract. The root production dependency update path is unchanged.
+
+### Temporary local-reference syntax compatibility
+
+The official GitHub `$/` self-repository syntax is preferred once the maintained actionlint release supports it. actionlint 1.7.12 rejects that syntax ([upstream #711](https://github.com/rhysd/actionlint/issues/711), [#760](https://github.com/rhysd/actionlint/issues/760)); the bundled current zizmor reports the old local reference syntax as `self-repository`. Retain exactly the eight existing local references in CI and the security audit/caller with line-scoped `self-repository` ignores, not a global suppression. Their existing checkout, path ownership, workflow permission and graph validation remain mandatory. Revisit by 2027-02-22 or immediately when a released actionlint supports the official syntax; then migrate all eight together and remove the inline ignores. No other zizmor finding is excluded.
+
 ## Diff-scoped dependency review
 
 `.github/workflows/ci.yml` job `dependency_review` produces the `dependency-review` authoritative merge component. Its authority is diff-scoped admission: reject newly introduced vulnerable dependencies and GitHub Actions references represented by GitHub's dependency graph.

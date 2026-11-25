@@ -111,7 +111,7 @@ def validate(producer: str, consumer: str) -> None:
     require(consumer, name, "PR restore-only cache")
     section = consumer.split(name, 1)[1].split("      - name:", 1)[0]
     require(section, RUST_CACHE, "same pinned PR Rust cache action")
-    require(section, "matrix.os != 'ubuntu-24.04-arm'", "non-Linux matrix guard")
+    require(section, "matrix.os != 'ubuntu-26.04-arm'", "non-Linux matrix guard")
     require(section, "save-if: false", "PR cannot create per-merge-ref cache")
     if "save-if: true" in section:
         raise ValueError("PR Rust cache must not be writable")

@@ -33,3 +33,13 @@ updates:
     labels:
       - "dependencies"
       - "area:ci"
+  - package-ecosystem: "gomod"
+    directory: "/.github/tools/actionlint"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "area:ci"

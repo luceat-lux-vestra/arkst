@@ -267,7 +267,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04-arm, macos-latest, windows-latest]
+        os: [ubuntu-26.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 """
         policy_text = """
@@ -283,10 +283,10 @@ skip = ["docs/**"]
 workflow = ".github/workflows/ci.yml"
 job = "test"
 classification = "required"
-contexts = ["test (ubuntu-24.04-arm)", "test (macos-latest)", "test (windows-latest)"]
+contexts = ["test (ubuntu-26.04-arm)", "test (macos-latest)", "test (windows-latest)"]
 always_present = true
 matrix_axis = "os"
-matrix_values = ["ubuntu-24.04-arm", "macos-latest", "windows-latest"]
+matrix_values = ["ubuntu-26.04-arm", "macos-latest", "windows-latest"]
 rationale = "fixture"
 """
         tmp, root, policy = self.make_repo(workflow, policy_text)
@@ -296,7 +296,7 @@ rationale = "fixture"
             policy,
             ruleset(
                 [
-                    "test (ubuntu-24.04-arm)",
+                    "test (ubuntu-26.04-arm)",
                     "test (macos-latest)",
                     "test (windows-latest)",
                 ]

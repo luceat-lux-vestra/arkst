@@ -1,0 +1,223 @@
+{
+  "schema": "arkst/dependency-update-policy/v1",
+  "policy": "EG-DEP-001",
+  "owner": "luceat-lux-vestra/arkst#837",
+  "reviewed_at": "2026-11-26",
+  "entries": [
+    {
+      "id": "github-hosted-arm64",
+      "source": ".github/workflows/ci.yml",
+      "source_paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/docs.yml",
+        ".github/workflows/hardening-drift-audit.yml",
+        ".github/workflows/issue-labeler.yml",
+        ".github/workflows/pr-labeler.yml",
+        ".github/workflows/release-codeql-preflight.yml",
+        ".github/workflows/sccache-main-producer.yml",
+        ".github/workflows/security-audit.yml",
+        ".github/workflows/security.yml",
+        ".github/workflows/upstream-quarkdown.yml"
+      ],
+      "strategy": "UPDATE_PR",
+      "authority": "https://github.com/actions/runner-images",
+      "mechanism": "Current GA explicit ARM64 label; existing central audit and ordinary reviewed migration for provider gaps.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "All workflow conditions, matrix contexts, strict merge gate and cache producer/consumer identity; no x64 fallback.",
+      "provenance": {
+        "label": "ubuntu-26.04-arm"
+      }
+    },
+    {
+      "id": "rust-stable",
+      "source": "rust-toolchain.toml",
+      "source_paths": [
+        "rust-toolchain.toml"
+      ],
+      "strategy": "CHANNEL",
+      "authority": "https://rustup.rs/",
+      "mechanism": "Native stable Rust channel.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "Locked workspace and CI stable compile.",
+      "provenance": {
+        "selector": "stable"
+      }
+    },
+    {
+      "id": "actionlint-module",
+      "source": ".github/tools/actionlint/go.mod",
+      "source_paths": [
+        ".github/tools/actionlint/go.mod",
+        ".github/workflows/ci.yml",
+        ".github/dependabot.yml"
+      ],
+      "strategy": "DEPENDABOT",
+      "authority": "https://proxy.golang.org/",
+      "mechanism": "Native Go module, official setup-go stable channel.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "Compile and run actionlint on real workflows; module build provenance.",
+      "provenance": {
+        "ecosystem": "gomod",
+        "directory": "/.github/tools/actionlint"
+      }
+    },
+    {
+      "id": "zizmor-action",
+      "source": ".github/workflows/ci.yml",
+      "source_paths": [
+        ".github/workflows/ci.yml",
+        ".github/dependabot.yml"
+      ],
+      "strategy": "DEPENDABOT",
+      "authority": "https://github.com/zizmorcore/zizmor-action/releases",
+      "mechanism": "Official immutable Action supplies bundled verified CLI; root Actions Dependabot.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "Strict collection, nonempty scan, existing scoped config and permissions.",
+      "provenance": {
+        "ecosystem": "github-actions",
+        "directory": "/"
+      }
+    },
+    {
+      "id": "research-markdown-final-feasibility",
+      "source": "tools/spikes/markdown-final-feasibility/Cargo.toml",
+      "source_paths": [
+        "tools/spikes/markdown-final-feasibility/Cargo.toml",
+        "docs/research/markdown-substrate-final-feasibility.md",
+        "tools/ci/verify_cargo_graph_ownership.py"
+      ],
+      "strategy": "REVIEWED_FREEZE",
+      "authority": "docs/research/markdown-substrate-final-feasibility.md",
+      "mechanism": "Retain isolated historical research recipe; no production dependency or committed research lockfile.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "Existing research containment, exact direct-version/immutable-revision checks; advisory evidence is not waived.",
+      "provenance": {
+        "ecosystem": "cargo",
+        "directory": "/tools/spikes/markdown-final-feasibility"
+      },
+      "revisit": {
+        "review_by": "2027-02-22",
+        "rationale": "Exact versions identify the historical experiment; silently changing its subject invalidates the evidence.",
+        "evidence": "docs/research/markdown-substrate-final-feasibility.md",
+        "trigger": "New approved experiment, change to recipe or security exposure, or removal when evidence is no longer required."
+      }
+    },
+    {
+      "id": "research-markdown-maintained-substrate-check",
+      "source": "tools/spikes/markdown-maintained-substrate-check/Cargo.toml",
+      "source_paths": [
+        "tools/spikes/markdown-maintained-substrate-check/Cargo.toml",
+        "docs/research/markdown-maintained-substrate-check.md",
+        "tools/ci/verify_cargo_graph_ownership.py"
+      ],
+      "strategy": "REVIEWED_FREEZE",
+      "authority": "docs/research/markdown-maintained-substrate-check.md",
+      "mechanism": "Retain isolated historical research recipe; no production dependency or committed research lockfile.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "Existing research containment, exact direct-version/immutable-revision checks; advisory evidence is not waived.",
+      "provenance": {
+        "ecosystem": "cargo",
+        "directory": "/tools/spikes/markdown-maintained-substrate-check"
+      },
+      "revisit": {
+        "review_by": "2027-02-22",
+        "rationale": "Exact versions identify the historical experiment; silently changing its subject invalidates the evidence.",
+        "evidence": "docs/research/markdown-maintained-substrate-check.md",
+        "trigger": "New approved experiment, change to recipe or security exposure, or removal when evidence is no longer required."
+      }
+    },
+    {
+      "id": "research-markdown-substrate",
+      "source": "tools/spikes/markdown-substrate/Cargo.toml",
+      "source_paths": [
+        "tools/spikes/markdown-substrate/Cargo.toml",
+        "docs/research/markdown-parser-substrate-spike.md",
+        "tools/ci/verify_cargo_graph_ownership.py"
+      ],
+      "strategy": "REVIEWED_FREEZE",
+      "authority": "docs/research/markdown-parser-substrate-spike.md",
+      "mechanism": "Retain isolated historical research recipe; no production dependency or committed research lockfile.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "Existing research containment, exact direct-version/immutable-revision checks; advisory evidence is not waived.",
+      "provenance": {
+        "ecosystem": "cargo",
+        "directory": "/tools/spikes/markdown-substrate"
+      },
+      "revisit": {
+        "review_by": "2027-02-22",
+        "rationale": "Exact versions identify the historical experiment; silently changing its subject invalidates the evidence.",
+        "evidence": "docs/research/markdown-parser-substrate-spike.md",
+        "trigger": "New approved experiment, change to recipe or security exposure, or removal when evidence is no longer required."
+      }
+    },
+    {
+      "id": "research-rushdown-safety-gate",
+      "source": "tools/spikes/rushdown-safety-gate/Cargo.toml",
+      "source_paths": [
+        "tools/spikes/rushdown-safety-gate/Cargo.toml",
+        "docs/research/rushdown-safety-gate.md",
+        "tools/ci/verify_cargo_graph_ownership.py"
+      ],
+      "strategy": "REVIEWED_FREEZE",
+      "authority": "docs/research/rushdown-safety-gate.md",
+      "mechanism": "Retain isolated historical research recipe; no production dependency or committed research lockfile.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "Existing research containment, exact direct-version/immutable-revision checks; advisory evidence is not waived.",
+      "provenance": {
+        "ecosystem": "cargo",
+        "directory": "/tools/spikes/rushdown-safety-gate"
+      },
+      "revisit": {
+        "review_by": "2027-02-22",
+        "rationale": "Exact versions identify the historical experiment; silently changing its subject invalidates the evidence.",
+        "evidence": "docs/research/rushdown-safety-gate.md",
+        "trigger": "New approved experiment, change to recipe or security exposure, or removal when evidence is no longer required."
+      }
+    },
+    {
+      "id": "research-typst-subprocess",
+      "source": "tools/spikes/typst-subprocess/Cargo.toml",
+      "source_paths": [
+        "tools/spikes/typst-subprocess/Cargo.toml",
+        "docs/research/typst-backend-spike.md",
+        "tools/ci/verify_cargo_graph_ownership.py"
+      ],
+      "strategy": "REVIEWED_FREEZE",
+      "authority": "docs/research/typst-backend-spike.md",
+      "mechanism": "Retain isolated historical research recipe; no production dependency or committed research lockfile.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "Existing research containment, exact direct-version/immutable-revision checks; advisory evidence is not waived.",
+      "provenance": {
+        "ecosystem": "cargo",
+        "directory": "/tools/spikes/typst-subprocess"
+      },
+      "revisit": {
+        "review_by": "2027-02-22",
+        "rationale": "Historical comparison recipe has no external dependencies; retain isolation and review if any dependency is introduced.",
+        "evidence": "docs/research/typst-backend-spike.md",
+        "trigger": "New approved experiment, change to recipe or security exposure, or removal when evidence is no longer required."
+      }
+    },
+    {
+      "id": "research-typst-in-process",
+      "source": "tools/spikes/typst-in-process/Cargo.toml",
+      "source_paths": [
+        "tools/spikes/typst-in-process/Cargo.toml",
+        "Cargo.toml",
+        "tools/spikes/typst-in-process/README.md",
+        "tools/ci/verify_cargo_graph_ownership.py",
+        "docs/engineering/SUPPLY_CHAIN.md"
+      ],
+      "strategy": "UPDATE_PR",
+      "authority": "https://crates.io/crates/typst",
+      "mechanism": "Ordinary paired review with native production Typst updates; preserve exact research direct pins and identical citationberg security patch. Independent updater-generated research lockfiles conflict with existing containment.",
+      "owner": "luceat-lux-vestra/arkst#837",
+      "validation": "PR and scheduled cargo-deny advisory/source checks plus research containment; #203 security patch removal coordinated with production.",
+      "provenance": {
+        "ecosystem": "cargo",
+        "directory": "/tools/spikes/typst-in-process"
+      }
+    }
+  ]
+}

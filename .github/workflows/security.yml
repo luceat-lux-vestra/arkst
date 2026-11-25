@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   audit:
-    uses: ./.github/workflows/security-audit.yml
+    uses: ./.github/workflows/security-audit.yml # zizmor: ignore[self-repository]
     with:
       force_failure: ${{ github.event_name == 'workflow_dispatch' && inputs.force_failure }}
 
@@ -32,7 +32,7 @@ jobs:
       ${{ always() &&
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
       needs.audit.result == 'failure' }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     permissions:
       contents: read

@@ -51,7 +51,7 @@ def good_main_ruleset():
     contexts = [
         "fmt",
         "clippy",
-        "test (ubuntu-24.04-arm)",
+        "test (ubuntu-26.04-arm)",
         "test (macos-latest)",
         "test (windows-latest)",
         "docs",
@@ -229,7 +229,7 @@ class StaticAuthorityTests(unittest.TestCase):
         )
         component = root / ".github" / "workflows" / "security-audit.yml"
         component.write_text(
-            "workflow_call:\nruns-on: ubuntu-24.04-arm\n"
+            "workflow_call:\nruns-on: ubuntu-26.04-arm\n"
             "uses: ./.github/actions/cargo-deny-prebuilt\narguments: --all-features\n"
             "force_failure\n",
             encoding="utf-8",
@@ -258,7 +258,7 @@ class StaticAuthorityTests(unittest.TestCase):
         )
         component = root / ".github" / "workflows" / "security-audit.yml"
         component.write_text(
-            "workflow_call:\nruns-on: ubuntu-24.04-arm\n"
+            "workflow_call:\nruns-on: ubuntu-26.04-arm\n"
             "uses: ./.github/actions/cargo-deny-prebuilt\narguments: --all-features\n"
             "force_failure\n",
             encoding="utf-8",
@@ -288,7 +288,7 @@ class StaticAuthorityTests(unittest.TestCase):
         )
         component = root / ".github" / "workflows" / "security-audit.yml"
         component.write_text(
-            "workflow_call:\nruns-on: ubuntu-24.04-arm\n"
+            "workflow_call:\nruns-on: ubuntu-26.04-arm\n"
             "uses: ./.github/actions/cargo-deny-prebuilt\narguments: --all-features\n"
             "force_failure\nissues: write\n",
             encoding="utf-8",
